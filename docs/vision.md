@@ -17,7 +17,12 @@ A desktop **asset studio** for preparing D&D sessions. It produces high-quality,
 
 ## What it replaces
 
-> TODO (kickoff): the current workflow (the provider's web UI, a separate image editor, loose folders, and prompt docs kept elsewhere?).
+There's no established tool workflow to carry over (#10). Today's material is:
+- a written prompt helper kept in the owner's campaign notes,
+- a handful of reference images,
+- one-off generations in a general-purpose chat assistant.
+
+Pocket Forge turns that into **repeatable production**. The prompt helper becomes art recipes, the loose references become role-tagged reference images, and one-off generations become iterative, recoverable edits.
 
 ## Principles
 
