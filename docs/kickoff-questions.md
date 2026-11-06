@@ -1,16 +1,16 @@
 # Kickoff questions
 
 The owner answers these before any spec is written. Each has a **pick** we keep unless the owner overrides it. Answers move into the vision, tiers, ADRs or decisions log, and the question is then marked done.
-Each question is tagged by what it blocks: **V** (vision/tiers), **S** (spikes/ADRs), **M** (milestone scope).
+Questions marked ✅ are answered, ⏳ are in progress. Each question is tagged by what it blocks: **V** (vision/tiers), **S** (spikes/ADRs), **M** (milestone scope).
 
 ## A. Product and audience
 
 | ID | Question | Options (pick in **bold**) | Blocks |
 |---|---|---|---|
-| KQ-01 | Who is it for? | **A. You first, but installable by any DM with their own Scenario account** / B. strictly personal / C. a polished product for others from the start | V (onboarding, key handling, installer, docs) |
+| KQ-01 ✅ | Who is it for? **Answered: built for the owner. Others are welcome, but they don't drive the design (#8).** | **A. You first, but installable by any DM with their own Scenario account** / B. strictly personal / C. a polished product for others from the start | V (onboarding, key handling, installer, docs) |
 | KQ-02 | Licence? Pintura is commercial and can't ship in an open-source build without a per-app licence key. | **A. MIT or Apache-2.0 and drop Pintura** / B. a copyleft licence (AGPL) / C. source-available, keep Pintura | S |
-| KQ-03 | Is any LLM inside the app (prompt drafting from recipes, critique of results)? | **A. None in the MVP. Prompts are assembled from the recipe and visible** / B. optional assistant later (tier B) | V, S |
-| KQ-04 | "Scenario via MCP": MCP is built for LLM agents. Should the app call Scenario directly (REST) and keep MCP for agent-driven automation, or speak MCP itself? | **A. Decide in `spike/scenario-api`. My default is a REST adapter in Rust** / B. MCP client in-app regardless | S |
+| KQ-03 ✅ | **Answered: no AI in the app (#9).** Is any LLM inside the app (prompt drafting from recipes, critique of results)? | **A. None in the MVP. Prompts are assembled from the recipe and visible** / B. optional assistant later (tier B) | V, S |
+| KQ-04 ⏳ | **In progress: `spike/scenario-api` analysis first.** "Scenario via MCP": MCP is built for LLM agents. Should the app call Scenario directly (REST) and keep MCP for agent-driven automation, or speak MCP itself? | **A. Decide in `spike/scenario-api`. My default is a REST adapter in Rust** / B. MCP client in-app regardless | S |
 | KQ-05 | Where do Scenario credentials live? | **A. OS credential store (Windows Credential Manager, later macOS Keychain)** / B. a config file | S |
 | KQ-06 | Spend control: does Scenario give a cost estimate before a job, and do you want a cap? | **A. Show estimate + per-session cap, with confirmation above a threshold** / B. show the cost after the job only | M |
 | KQ-07 | What does your workflow look like today, and what hurts most? This decides what "replaces" means and which tier-A items rise. | free answer | V |

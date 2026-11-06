@@ -12,7 +12,8 @@ A desktop **asset studio** for preparing D&D sessions. It produces high-quality,
 
 ## Users
 
-> TODO (kickoff): KQ-01. Is it the owner only, or any DM who installs it with their own Scenario account?
+- **The owner**, a DM preparing their own sessions, is the only design target (#8).
+- Others may install it with their own provider account. That's welcome, but it doesn't drive any decisions.
 
 ## What it replaces
 
@@ -27,6 +28,7 @@ A desktop **asset studio** for preparing D&D sessions. It produces high-quality,
 - **Reference roles stay distinct.** A style reference never dictates layout or replaces a character's identity.
 - **Honest controls.** The app shows only the controls the selected model actually supports.
 - **Visible cost.** Generation cost and job status are always shown. Retries are bounded and under the user's control.
+- **No AI beyond the provider.** The app assembles and shows prompts and never writes them for you (#9).
 - **No browser, no server to manage.** It is an installed app. Its UI may use web technology inside the app window.
 
 ## Non-goals (proposed, owner to confirm)
@@ -35,6 +37,7 @@ A desktop **asset studio** for preparing D&D sessions. It produces high-quality,
 - It is not a general-purpose image editor. It has a focused, practical toolset.
 - No hosted service, accounts or cloud sync of its own. Sync comes from the folder the user picks.
 - No multi-user collaboration.
+- No in-app AI assistant (prompt drafting, critique) (#9).
 
 ## Success criteria
 

@@ -11,5 +11,7 @@ Append-only. Cite decisions as `#N`. Changing a decision takes a new row that su
 | 5 | The library is ordinary local folders, including cloud-synced ones. | The user owns plain files | Owner, kickoff |
 | 6 | Scenario is the generation provider for now. | Selected by owner | Owner, kickoff |
 | 7 | Specs before code. One orchestrator, with fresh worker agents per task in their own worktrees. Merge only on green CI. | Proven agent workflow | Owner, kickoff; [process.md](process.md) |
+| 8 | Built for the owner's own use. Others may install it, but their needs don't drive the design. | Personal tool; no polish for other users | Owner, KQ-01 |
+| 9 | No AI/LLM features in the app. The only AI is the generation provider. Prompts are assembled from recipes and edited by the user. | Owner preference; control and predictability | Owner, KQ-03 |
 
 The tech stack (Tauri, Rust, a TS web UI, the canvas library, Scenario via MCP) is **provisional**. It is not logged until the stack ADRs are accepted.
