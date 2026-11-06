@@ -28,7 +28,7 @@ Pocket Forge turns that into **repeatable production**. The prompt helper become
 
 - **Quality comes from controlled iteration.** Preserve approved details, compare alternatives, reuse successful recipes, and review art at its intended display size.
 - **Any image is editable immediately**, wherever it was made.
-- **The user owns plain files.** The library is ordinary local folders, including cloud-synced ones.
+- **The user owns plain files.** The library is a user-configured folder, typically cloud-synced. Each asset project is plain folders and files (#13). It must stay fast with a very large number of images.
 - **Nothing accepted is lost.** Originals and previously accepted versions stay recoverable.
 - **Reference roles stay distinct.** A style reference never dictates layout or replaces a character's identity.
 - **Honest controls.** The app shows only the controls the selected model actually supports.
@@ -43,6 +43,7 @@ Pocket Forge turns that into **repeatable production**. The prompt helper become
 - No hosted service, accounts or cloud sync of its own. Sync comes from the folder the user picks.
 - No multi-user collaboration.
 - No in-app AI assistant (prompt drafting, critique) (#9).
+- No integration with external notes or vault tools (#12).
 
 ## Success criteria
 

@@ -15,5 +15,7 @@ Append-only. Cite decisions as `#N`. Changing a decision takes a new row that su
 | 9 | No AI/LLM features in the app. The only AI is the generation provider. Prompts are assembled from recipes and edited by the user. | Owner preference; control and predictability | Owner, KQ-03 |
 | 10 | No existing tool workflow to carry over. The starting material is a prompt-helper doc, reference images and ad-hoc chat-based generation. Art recipes are seeded from that by hand. | Nothing to stay compatible with | Owner, KQ-07 |
 | 11 | Size targets: battlemaps of 5–10k px per side typical, up to about 16k; 70–140 px per grid square. | Sets the canvas, tiling and export budgets | Owner, KQ-20 |
+| 12 | No integration with external notes or vault tools. Pocket Forge starts with a fresh, standalone library. | Keep scope tight; no import paths to maintain | Owner, KQ-18 |
+| 13 | The user configures the library folder (expected to be cloud-synced, e.g. OneDrive). Asset projects are plain folders and files, never single-file packages or databases. Expect a very large number of images. | Sync-friendly, recoverable with normal file tools, scales to large libraries | Owner, KQ-10 |
 
 The tech stack (Tauri, Rust, a TS web UI, the canvas library, Scenario via MCP) is **provisional**. It is not logged until the stack ADRs are accepted.

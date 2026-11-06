@@ -10,7 +10,7 @@ Questions marked ✅ are answered, ⏳ are in progress. Each question is tagged 
 | KQ-01 ✅ | Who is it for? **Answered: built for the owner. Others are welcome, but they don't drive the design (#8).** | **A. You first, but installable by any DM with their own Scenario account** / B. strictly personal / C. a polished product for others from the start | V (onboarding, key handling, installer, docs) |
 | KQ-02 | Licence? Pintura is commercial and can't ship in an open-source build without a per-app licence key. | **A. MIT or Apache-2.0 and drop Pintura** / B. a copyleft licence (AGPL) / C. source-available, keep Pintura | S |
 | KQ-03 ✅ | **Answered: no AI in the app (#9).** Is any LLM inside the app (prompt drafting from recipes, critique of results)? | **A. None in the MVP. Prompts are assembled from the recipe and visible** / B. optional assistant later (tier B) | V, S |
-| KQ-04 ⏳ | **In progress: `spike/scenario-api` analysis first.** "Scenario via MCP": MCP is built for LLM agents. Should the app call Scenario directly (REST) and keep MCP for agent-driven automation, or speak MCP itself? | **A. Decide in `spike/scenario-api`. My default is a REST adapter in Rust** / B. MCP client in-app regardless | S |
+| KQ-04 ⏳ | **In progress: `spike/scenario-api` compares REST, MCP and the `@scenario-labs/sdk` JS SDK.** "Scenario via MCP": MCP is built for LLM agents. Should the app call Scenario directly (REST) and keep MCP for agent-driven automation, or speak MCP itself? | **A. Decide in `spike/scenario-api`. My default is a REST adapter in Rust** / B. MCP client in-app regardless | S |
 | KQ-05 | Where do Scenario credentials live? | **A. OS credential store (Windows Credential Manager, later macOS Keychain)** / B. a config file | S |
 | KQ-06 | Spend control: does Scenario give a cost estimate before a job, and do you want a cap? | **A. Show estimate + per-session cap, with confirmation above a threshold** / B. show the cost after the job only | M |
 | KQ-07 ✅ | **Answered: no existing tool workflow. Today there's a prompt-helper doc in the owner's campaign vault, some reference images, and ChatGPT image generation (#10).** What does your workflow look like today, and what hurts most? This decides what "replaces" means and which tier-A items rise. | free answer | V |
@@ -19,7 +19,7 @@ Questions marked ✅ are answered, ⏳ are in progress. Each question is tagged 
 
 | ID | Question | Options (pick in **bold**) | Blocks |
 |---|---|---|---|
-| KQ-10 | Asset project on disk? | **A. A sidecar folder per asset (`<name>.pforge/`: JSON manifest + image blobs), with the original untouched next to it** / B. a single package file (zip) / C. a central database | S |
+| KQ-10 ✅ | **Answered: plain folders and files per asset. No single-file packages or databases (#13).** Asset project on disk? | **A. A sidecar folder per asset (`<name>.pforge/`: JSON manifest + image blobs), with the original untouched next to it** / B. a single package file (zip) / C. a central database | S |
 | KQ-11 | Opening a plain PNG: where does its project go? | **A. Next to the image, created on first edit** / B. a separate projects folder that links to the image | S |
 | KQ-12 | Library index (thumbnails, search): synced or local? SQLite on OneDrive risks corruption. | **A. A local, rebuildable cache outside the synced folder. Tags and collections live in synced files** / B. everything in synced files | S |
 | KQ-13 | Multi-machine use through OneDrive: is it in scope? | **A. Yes, one machine at a time. Detect OneDrive conflict copies and warn** / B. single machine only | S |
@@ -27,7 +27,7 @@ Questions marked ✅ are answered, ⏳ are in progress. Each question is tagged 
 | KQ-15 | What is kept from generation? | **A. Accepted revisions + starred candidates forever. Others are purged after N days (user-visible)** / B. keep everything | S |
 | KQ-16 | Is undo history persisted across sessions? | **A. No. The revision history covers it; undo is per session** / B. yes | M |
 | KQ-17 | Every generation records model id, seed and all parameters for reproduction? | **A. Yes, always** / B. only on accept | S |
-| KQ-18 | Campaign subjects (NPCs, locations): defined in this app, or imported from a tool you already use (Obsidian, World Anvil, Foundry…)? | **A. A simple list in the library for now** / B. integrate with your tool | V |
+| KQ-18 ✅ | **Answered: no vault integration; a fresh, standalone library (#12).** Campaign subjects (NPCs, locations): defined in this app, or imported from a tool you already use (Obsidian, World Anvil, Foundry…)? | **A. A simple list in the library for now** / B. integrate with your tool | V |
 
 ## C. Images, editing and export
 
