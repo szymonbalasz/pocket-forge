@@ -23,7 +23,7 @@ Give each sub-agent only what its task needs. Don't paste these docs into briefs
 
 **At each merge**
 1. The worker rebases on `main`, resolving only its own files, and pushes.
-2. Watch the PR's CI in the background. Merge only when it is green (merge commit).
+2. Watch the branch's CI run in the background. When it's green, run `git merge --no-ff <branch>` on `main` and push (#28).
 3. Follow-up commit: number the accepted ADRs, and update the spec index, the glossary and the decisions log.
 4. Tell active builders to rebase. End the merged task's agents and remove its worktree.
 5. If `main` goes red, fix it first.

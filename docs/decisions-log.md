@@ -26,5 +26,13 @@ Append-only. Cite decisions as `#N`. Changing a decision takes a new row that su
 | 20 | Local-first provider use: uploads are automatic and invisible. The local asset project is the source of truth, and provider-side assets are a disposable cache that is re-uploaded when missing. The user never manages provider profile state. | Work locally; don't depend on provider state | Owner, OQ-PRV-03 |
 | 21 | ADR 0001's remaining picks are accepted as written (OQ-PRV-02, 04–10), including the `reqwest` HTTP client dependency and the glossary term "Cost". | Implementation details | Owner |
 | 22 | Canvas and Rust-imaging spikes approved. Throwaway dependencies are allowed on spike branches only; the spikes trial React + TS + Vite and pnpm. | De-risk the provisional stack before ADRs | Owner |
+| 23 | Spend guardrails: every job shows its free pre-flight cost estimate. There is a per-session spend cap, plus an extra confirmation for any single job above a user-set threshold. | Visible, bounded cost | Owner, KQ-06 |
+| 24 | The export target is the owner's own custom VTT, not a third-party VTT. | Owner controls the import side | Owner, KQ-21 |
+| 25 | Animated output is required: **animated WebP**, and possibly GIF. The source of the motion and the tier are still open (KQ-39). | Animated tokens and map elements | Owner |
+| 26 | Export is plain image files, with no metadata sidecar. The owner sets the grid size in their VTT, whose size limits are generous. The app exports at a user-chosen px per square. | Simple; the VTT owns grid config | Owner, KQ-29 |
+| 27 | Animation covers every asset type eventually (tokens, map elements, whole maps, item art). It comes after the first milestone, **tokens first**. Motion source still open (KQ-39). | Static loop first; animation is the next big step | Owner, KQ-39 |
+| 28 | Merging is local: branches are pushed and CI runs on every branch push. The orchestrator merges with `--no-ff` once the branch is green. No PRs required, no branch protection: a single maintainer using common sense. | Simple single-maintainer flow | Owner, KQ-37 |
+| 29 | Feature tiers accepted as proposed. | Owner review | Owner |
+| 30 | Refines #11: **most maps are smaller**, around 30×40 cells, which is about 2100×2800 to 4200×5600 px at 70–140 px per cell. Optimise for that; 16k remains the supported upper bound. | Typical vs worst case | Owner |
 
 The tech stack (Tauri, Rust, a TS web UI and the canvas library) is **provisional**. It is not logged until the stack ADRs are accepted.
