@@ -5,7 +5,7 @@
 | Task | Agent | Worktree / branch | State | Blockers |
 |---|---|---|---|---|
 | Kickoff Q&A | orchestrator | `main` | done | — |
-| Spec: asset-project | spec-prj | `spec/asset-project` | working | — |
+| Spec: asset-project | — | merged | in-review | gate |
 | Spec: editor-canvas | — | merged | in-review | gate |
 | Spec: region-edit | — | merged | in-review | gate |
 | Spec: provider | — | merged | in-review | gate |
