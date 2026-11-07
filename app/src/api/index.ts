@@ -101,8 +101,12 @@ export const api = {
   },
   recent: { list: () => call('recent_list', {}) },
   editor: {
-    imageOpen: (projectId: string, imageId: string) =>
-      call('edt_image_open', { project_id: projectId, image_id: imageId }),
+    imageOpen: (projectId: string, imageId: string, maxSide?: number) =>
+      call('edt_image_open', {
+        project_id: projectId,
+        image_id: imageId,
+        ...(maxSide === undefined ? {} : { max_side: maxSide }),
+      }),
     tilesOpen: (projectId: string, imageId: string, rebuild = false) =>
       call('edt_tiles_open', {
         project_id: projectId,

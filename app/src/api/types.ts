@@ -195,7 +195,7 @@ export interface Commands {
   project_save_revision: [{ label?: string }, RevisionEntry];
   project_list_revisions: [Record<string, never>, RevisionEntry[]];
   recent_list: [Record<string, never>, RecentEntry[]];
-  edt_image_open: [{ project_id: string; image_id: string }, ImageOpen];
+  edt_image_open: [{ project_id: string; image_id: string; max_side?: number }, ImageOpen];
   provider_status: [Record<string, never>, ProviderStatus];
   edt_tiles_open: [{ project_id: string; image_id: string; rebuild?: boolean }, TilesDescriptor];
   export_get_settings: [Record<string, never>, ExportSettings];

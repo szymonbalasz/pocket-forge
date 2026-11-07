@@ -15,6 +15,9 @@ import { actions } from './actions';
 import { useTestHook } from './hook';
 import { dispatchShortcut, isTextTarget, type ShortcutMap } from './shortcuts';
 import { editorStore, useEditor } from './store';
+import { editorBridge } from './bridge';
+import { CompareDivider } from './CompareDivider';
+import { CompareLayer } from './CompareLayer';
 import { PatchLayers } from './PatchLayers';
 import { useMaskTools } from './useMaskTools';
 import { konvaSink, TileManager, type TileStats } from './TileManager';
@@ -67,6 +70,9 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   const patchesLayerRef = useRef<Konva.Layer>(null);
   const patchesRef = useRef<PatchLayers | null>(null);
   const maskLayerRef = useRef<Konva.Layer>(null);
+  const compareLayerRef = useRef<Konva.Layer>(null);
+  const compareRef = useRef<CompareLayer | null>(null);
+  const [compareError, setCompareError] = useState<string | null>(null);
   const [stack, setStack] = useState<ManifestLayer[]>(project.layers);
   const [layerError, setLayerError] = useState<string | null>(null);
   const [desc, setDesc] = useState<TilesDescriptor | null>(null);
@@ -75,6 +81,7 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   const [spaceHeld, setSpaceHeld] = useState(false);
   const drag = useRef<Drag | null>(null);
   const { view, viewport, dpr, tool, image, maskVisible } = useEditor((s) => s);
+  const { compare, compareMode, split, flipBefore } = useEditor((s) => s);
   const tools = useMaskTools({ project, maskLayer: maskLayerRef, container: containerRef });
 
   useElementSize(containerRef);
@@ -157,6 +164,22 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
     () => () => {
       patchesRef.current?.destroy();
       patchesRef.current = null;
+    },
+    [],
+  );
+
+  // FR-EDT-24: compare follows the store (set by the picker selection or RGN).
+  useEffect(() => {
+    const layer = compareLayerRef.current;
+    if (!layer) return;
+    compareRef.current ??= new CompareLayer(layer, setCompareError);
+    compareRef.current.update(compare, compareMode, split, flipBefore);
+  }, [compare, compareMode, split, flipBefore, viewport.w]);
+  useEffect(
+    () => () => {
+      compareRef.current?.destroy();
+      compareRef.current = null;
+      editorBridge.setCandidates(null);
     },
     [],
   );
@@ -257,8 +280,16 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
       'Shift+[': () => actions.hardness(-1),
       'Shift+]': () => actions.hardness(1),
       M: () => actions.toggleMask(),
+      C: () =>
+        editorStore.set((s) => ({ compareMode: s.compareMode === 'split' ? 'flip' : 'split' })),
     };
     const down = (e: KeyboardEvent) => {
+      // FR-EDT-24 flip: "before" while the backslash key is held.
+      if (e.code === 'Backslash' && !isTextTarget(e.target)) {
+        e.preventDefault();
+        if (!editorStore.get().flipBefore) editorStore.set({ flipBefore: true });
+        return;
+      }
       if (e.key === ' ' && !isTextTarget(e.target)) {
         e.preventDefault();
         setSpaceHeld(true);
@@ -268,6 +299,7 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
     };
     const up = (e: KeyboardEvent) => {
       if (e.key === ' ') setSpaceHeld(false);
+      if (e.code === 'Backslash') editorStore.set({ flipBefore: false });
     };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
@@ -321,6 +353,23 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
       stack: () => stack.map((l) => l.id),
       ...tools.testExtras(),
       setView: (v: { scale: number; tx: number; ty: number }) => editorStore.set({ view: v }),
+      compareClip: () => compareRef.current?.clip() ?? null,
+      compareLoaded: () => compareRef.current?.loaded() ?? false,
+      /** Shows mocked candidates; handler calls are recorded in window.__pfPickerEvents. */
+      setCandidates: (cands: Parameters<typeof editorBridge.setCandidates>[0]) => {
+        const w = window as unknown as { __pfPickerEvents: [string, ...unknown[]][] };
+        w.__pfPickerEvents = [];
+        const rec =
+          (name: string) =>
+          (...a: unknown[]) =>
+            w.__pfPickerEvents.push([name, ...a]);
+        editorBridge.setCandidates(cands, {
+          onSelect: rec('select'),
+          onAccept: rec('accept'),
+          onStar: rec('star'),
+          onDiscard: rec('discard'),
+        });
+      },
     }),
   });
 
@@ -366,9 +415,18 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
               visible={maskVisible}
               imageSmoothingEnabled={false}
             />
+            <Layer ref={compareLayerRef} name="compare" listening={false} />
           </Stage>
         )}
         {tools.overlay}
+        {compare && compareMode === 'split' && (
+          <CompareDivider view={view} src={compare} split={split} container={containerRef} />
+        )}
+        {compareError && (
+          <div className="banner banner-error editor-banner" data-testid="edt-compare-error">
+            The candidate could not be shown: {compareError}
+          </div>
+        )}
         {!loaded && !buildError && (
           <div className="editor-spinner" data-testid="edt-loading" aria-label="Loading" />
         )}

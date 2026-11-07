@@ -31,6 +31,39 @@ export interface UndoSummary {
   error: string | null;
 }
 
+/** What compare shows (R16): an image key's URL over `rect` in image px. */
+export interface CompareSource {
+  url: string;
+  rect: Rect;
+}
+
+export type CompareMode = 'split' | 'flip';
+
+/** A candidate as the picker shows it (R10 UI statuses, R19). */
+export interface PickerCandidate {
+  id: string;
+  index: number;
+  status: 'pending' | 'ready' | 'invalid';
+  starred: boolean;
+  /** Thumbnail URL (`edt_image_open` with `max_side` 256, FR-EDT-32); none while pending. */
+  thumbUrl?: string | null;
+  /** RGN's baked preview, shown by compare while this candidate is selected (R16). */
+  preview?: CompareSource | null;
+}
+
+export interface PickerHandlers {
+  onSelect?: (id: string) => void;
+  onAccept?: (id: string) => void;
+  onStar?: (id: string, starred: boolean) => void;
+  onDiscard?: (id: string) => void;
+}
+
+export interface PickerState {
+  candidates: PickerCandidate[];
+  selectedId: string | null;
+  handlers: PickerHandlers;
+}
+
 export interface EditorState {
   view: View;
   viewport: Size;
@@ -46,6 +79,13 @@ export interface EditorState {
   pxPerSquare: { source: number | null; target: number | null };
   region: RegionState | null;
   undo: UndoSummary;
+  compare: CompareSource | null;
+  compareMode: CompareMode;
+  /** Split divider position across the compare rect, 0–1 (FR-EDT-24, default 50 %). */
+  split: number;
+  /** `\` held in flip mode: show "before". */
+  flipBefore: boolean;
+  picker: PickerState | null;
 }
 
 const initial: EditorState = {
@@ -60,6 +100,11 @@ const initial: EditorState = {
   pxPerSquare: { source: null, target: null },
   region: null,
   undo: { depth: 0, redo: 0, label: null, busy: false, error: null },
+  compare: null,
+  compareMode: 'split',
+  split: 0.5,
+  flipBefore: false,
+  picker: null,
 };
 
 let state: EditorState = initial;
