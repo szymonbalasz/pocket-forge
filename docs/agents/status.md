@@ -1,6 +1,6 @@
 # Status (scratch board, overwritten as things change)
 
-**Phase:** 1b: foundation specs + AGENTS §9 draft ([seams](seams-phase1b.md)).
+**Phase:** 1b gate: waiting on the owner ([gate-phase1b.md](gate-phase1b.md), [rulings](rulings-phase1b.md)).
 
 | Task | Agent | Worktree / branch | State | Blockers |
 |---|---|---|---|---|
