@@ -2,7 +2,7 @@
 
 > Spike `spike/scenario-video`. Public sources only, checked 2026-11-07. No credentials were used and no credits were spent.
 > This extends the [Scenario API research](scenario-api.md) and [ADR 0001](../architecture/adr/0001-provider-integration.md) (#14). Every claim links to a source in [Sources](#sources). Anything not confirmed is marked `unverified`.
-> Animation is **not in [feature-tiers.md](../feature-tiers.md)** today. This doc only informs that decision (OQ-ANI-01).
+> Animation is tier A, after the first milestone, tokens first (#27). The remaining OQ-ANI items are decided when the animated-tokens spec is written.
 
 ## Summary
 
@@ -135,7 +135,7 @@ There are also 30 Scenario utility models, plus the Pixelcut and Academia models
 
 | ID | Question | Options (pick in **bold**) | Tradeoff |
 |---|---|---|---|
-| OQ-ANI-01 | Is animation in tier S? (It's not in [feature-tiers.md](../feature-tiers.md) today.) | **A. No, tier A or later. Design later. This spike is input only.** / B. add it to S | A protects milestone 1. B adds a pipeline, an encoder and alpha handling to the MVP. |
+| OQ-ANI-01 ✅ | Is animation in tier S? **Answered: no. Tier A, tokens first (#27).** | **A. No, tier A or later. Design later. This spike is input only.** / B. add it to S | A protects milestone 1. B adds a pipeline, an encoder and alpha handling to the MVP. |
 | OQ-ANI-02 | Where does motion come from? | A. provider clip only / B. in-app layers only / **C. both: provider clips composited as looped layers** | C matches regions and patch layers and works at map size. It's the most work. |
 | OQ-ANI-03 | How does the app get frames to encode? | **A. Provider frame extraction + `webp-animation` (libwebp, BSD)** / B. WebCodecs in the webview / C. bundled LGPL FFmpeg | A has no codec and an MIT-safe stack, but costs an extra job. C is heavy and has LGPL/patent obligations. |
 | OQ-ANI-04 | Alpha for animated tokens? | **A. Video background removal job (Pixelcut), with static token + effect layers as the fallback** / B. chroma key in the app / C. per-frame background removal | A is one job with temporal consistency claimed. B is free but has fringes. C costs × frames. |
@@ -145,7 +145,7 @@ There are also 30 Scenario utility models, plus the Pixelcut and Academia models
 | OQ-ANI-08 | Verify the `unverified` items with a real key? (This spends credits, so it's the owner's call.) | **A. The owner runs ~3 dry runs + 2 small real jobs (cinemagraph, Pixelcut → frames). Record the responses as fixtures.** / B. stay docs-only | A settles cost, alpha and loop quality for a few CU. B leaves the design guessing. |
 | OQ-ANI-09 | Audio on video models? | **A. Always send `generateAudio: false`. Never offer audio.** / B. expose it | A avoids hidden cost. B has no use for VTT assets. |
 
-Blocking for any build: **OQ-ANI-01, 02, 08.**
+Blocking for the animation build: **OQ-ANI-02, 08.**
 
 ## Sources
 
