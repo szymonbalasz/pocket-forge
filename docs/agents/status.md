@@ -6,11 +6,11 @@
 |---|---|---|---|---|
 | Specs: asset-project, editor-canvas, region-edit, provider, export | — | merged | complete (#41) | — |
 | Skeleton | — | merged | done (walkthrough passed) | — |
-| Provider slices 2–4 | `provider` | `build/provider` | in progress | — |
-| Editor-canvas slices 1–4, 6 + UI foundation | `editor-canvas` | `build/editor-canvas` | in progress | — |
-| Export slices 1–2 | `export` | `build/export` | in progress | — |
-| Spec revision: folder model (#44) | `folder-model` | `spec/folder-model` | in progress | — |
-| Asset-project build | — | — | waiting | folder-model revision |
+| Provider slices 2–4 | — | merged | done (walkthrough after RGN UI) | slice 5 needs the owner |
+| Editor-canvas slices 1–4, 6 + UI foundation | `walk-edt` (tester) | merged | walkthrough running | slice 5 waits for PRJ store |
+| Export slices 1–2 | — | merged | done | slices 3–5 wait for PRJ store |
+| Spec revision: folder model (#44) | — | merged | in-review | owner re-mark + 6 picks |
+| Asset-project core + UI builds | — | — | ready | owner approval |
 | Region-edit build | — | — | waiting | export slice 1, PRJ store API |
 
 ## Pending owner decisions
