@@ -2,14 +2,14 @@
 feature: export
 prefix: EXP
 owner: rev-export
-status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [asset-project]
 ---
 
 # Flattened export
 
 ## 1. Summary
-Export flattens an asset project's **current** layer stack (the original plus its visible patch layers, R6) into one plain image file for the owner's own VTT (#24, #26). This is MVP scenario step 7. Rust is the only compositor (KQ-25). It flattens at source resolution in 512-row strips (ADR 0004), can resample to a chosen target px per square, and writes PNG, JPEG or WebP atomically into `<library-root>/Exports/`. The same `compose_rect` function feeds region extraction (FR-RGN-04) and the golden-image tests.
+Export flattens an asset project's **current** layer stack (the original plus its visible patch layers, R6) into one plain image file for the owner's own VTT (#24, #26). This is MVP scenario step 7. Rust is the only compositor (KQ-25). It flattens at source resolution in 512-row strips (ADR 0004), can resample to a chosen target px per square, and writes PNG, JPEG or WebP atomically into the project's own `exports/` folder (#44). The same `compose_rect` function feeds region extraction (FR-RGN-04) and the golden-image tests.
 
 ## 2. Scope
 Tier S ([feature-tiers](../feature-tiers.md)): *Flattened export at full resolution* and *Export at a chosen px per square, plain image files (#26)*. It also provides the flatten seam ([seams](../agents/seams-phase1b.md)) and the two px-per-square values behind EDT's display size (FR-EDT-04).
@@ -27,7 +27,7 @@ Tier S ([feature-tiers](../feature-tiers.md)): *Flattened export at full resolut
 ## 5. User stories
 - As a DM preparing a session, I export my edited map and the kitchen patch blends in with no seam.
 - My map is 30×40 cells at 140 px per square and my VTT wants 70, so I enter the grid and target and get a 2100×2800 file.
-- I re-export after a tweak, and the file in my VTT folder is replaced under the same name once I confirm.
+- I re-export after a tweak, and the file in the project's `exports/` folder is replaced under the same name once I confirm.
 - A 16k export takes a while: I see progress and can cancel it, and nothing broken is left behind.
 
 ## 6. Functional requirements
@@ -45,9 +45,9 @@ Tier S ([feature-tiers](../feature-tiers.md)): *Flattened export at full resolut
 | FR-EXP-10 | Formats: **PNG** `Compression::Fast` (OQ-IMG-03) · **JPEG** q90 · **WebP** lossy q90 via libwebp (OQ-EXP-06). No metadata: PNG has only IHDR/IDAT/IEND, JPEG only JFIF APP0, WebP no EXIF/ICCP/XMP chunks. No sidecar (#26). |
 | FR-EXP-11 | WebP is offered only when both output sides are ≤ 16383. Otherwise the plan lists it as unavailable with that reason (OQ-IMG-04). |
 | FR-EXP-12 | If lossy WebP fails with a partition overflow, the export retries once as lossless WebP. The result reports `fallback: lossless` and the UI shows a notice (OQ-IMG-04). |
-| FR-EXP-13 | Destination: `<library-root>/Exports/<original's folder relative to its root>/` on the original's root (OQ-EXP-01). Missing folders are created. |
-| FR-EXP-14 | File name: `<original stem>_<target>px.<ext>` with a target, else `<original stem>.<ext>`; extensions `.png`, `.jpg`, `.webp` (OQ-EXP-02). |
-| FR-EXP-15 | If the destination exists, `export_start` fails with `exists{bytes, mtime}` unless `replace: true` (OQ-EXP-03). Nothing else is ever overwritten or deleted, except this spec's own stale temp files (FR-EXP-17). |
+| FR-EXP-13 | (#44) Destination: the project folder's `exports/`, created if missing. Exports of different projects never collide. |
+| FR-EXP-14 | (#44) File name: `<project name>_<target>px.<ext>` with a target, else `<project name>.<ext>`; extensions `.png`, `.jpg`, `.webp`. The project name is the folder name (FR-PRJ-44), so it is already file-safe. A renamed project exports under its new name; older exports keep theirs. |
+| FR-EXP-15 | If the destination exists, `export_start` fails with `exists{bytes, mtime}` unless `replace: true` (OQ-EXP-03). Nothing else is ever overwritten or deleted, except this spec's own stale temp files (FR-EXP-17). Other files in `exports/` (the user's own, sync conflict copies) are left alone (FR-PRJ-47). |
 | FR-EXP-16 | The write goes to `.<name>.pf-tmp-<ulid>` in the destination folder, is flushed, then renamed over the final name. A cancel, failure or crash never leaves a partial file under the final name, and an existing file stays intact until the rename. |
 | FR-EXP-17 | Before writing, temp files matching `.*.pf-tmp-*` older than 1 h in the destination folder are deleted. |
 | FR-EXP-18 | A locked destination (sharing violation) is retried with backoff for up to 3 s, then fails with `locked`; the temp file is removed. |
@@ -64,8 +64,8 @@ Tier S ([feature-tiers](../feature-tiers.md)): *Flattened export at full resolut
 | FR-EXP-29 | In a **read-only** project (FR-PRJ-41) the panel and `export_plan` work, but `export_start` fails fast with `read_only` and writes nothing (R12). |
 
 ## 7. UI/UX notes
-- **Export panel** (`Ctrl+E`): grid mode toggle (`exp-panel-grid-mode`: px per square / cells), `exp-panel-grid-source` or `exp-panel-grid-cols` + `exp-panel-grid-rows`, `exp-panel-target-ppsq`, format radios (`exp-panel-format-{png,jpeg,webp}`; an unavailable one is disabled with its reason as a tooltip), and a plan line (`exp-panel-plan`): "4200×5600 → 2100×2800 · 0.5× · `Exports/dungeons/crypt_70px.png`". Warnings sit under it.
-- **Exists:** the button (`exp-panel-start`) reads **Replace**, with "Replaces crypt_70px.png (12.3 MB, 2 days ago)". No modal.
+- **Export section** of the right panel, under Generate, collapsible ([ui-guidelines](../architecture/ui-guidelines.md); `Ctrl+E` expands and focuses it): grid mode toggle (`exp-panel-grid-mode`: px per square / cells), `exp-panel-grid-source` or `exp-panel-grid-cols` + `exp-panel-grid-rows`, `exp-panel-target-ppsq`, format radios (`exp-panel-format-{png,jpeg,webp}`; an unavailable one is disabled with its reason as a tooltip), and a plan line (`exp-panel-plan`): "4200×5600 → 2100×2800 · 0.5× · `exports/Crypt_70px.png`". Warnings sit under it.
+- **Exists:** the button (`exp-panel-start`) reads **Replace**, with "Replaces Crypt_70px.png (12.3 MB, 2 days ago)". No modal.
 - **Loading:** Start disabled, "Loading original…" (FR-EXP-28). **Read-only:** Start disabled with the reason. **Running:** a progress bar with the phase and Cancel (`exp-panel-cancel`); the canvas stays usable.
 - **Done:** a toast with path, size and copy-path (`exp-toast-copy`). The WebP lossless fallback and an unsaved `last` record (§11) add a notice.
 - **Error:** the code's message plus Retry (`exp-panel-retry`). `locked`: "The file is in use (VTT or sync?)". **Empty** (no project): panel disabled. **Offline / provider unavailable:** no effect (no network calls). **Closing during an export:** the inline bar asks "Cancel the export and close?" (OQ-EXP-09).
@@ -75,7 +75,7 @@ Field shapes live in [manifest-schema §4.10](../architecture/manifest-schema.md
 
 | Data | Where | Written by | Recoverable? |
 |---|---|---|---|
-| Export file | `<library-root>/Exports/<rel dir>/<name>` (synced, #13) | `export_start`, temp → rename | Derived. Reproducible when the stack at `last.revision_id` hashes to `last.layers_hash`, with the same settings and `compose_version`. A replaced export isn't kept. |
+| Export file | `<project folder>/exports/<name>` (synced, #13, #44) | `export_start`, temp → rename | Derived. Reproducible when the stack at `last.revision_id` hashes to `last.layers_hash`, with the same settings and `compose_version`. A replaced export isn't kept. |
 | Temp file | same folder, `.<name>.pf-tmp-<ulid>` | `export_start` | Deleted on success, cancel or failure; stale ones by FR-EXP-17 |
 | Manifest `export` (`grid`, `target_px_per_square`, `format`, `last`) | asset project, via PRJ | settings by the debounced draft save (R30) and at `export_start` (`put_export`); `last` after the rename | Yes, as manifest state |
 | Settings typed since the last draft save | memory (session) | `export_set_settings` | Only the last < 2 s of typing is lost in a crash (R30) |
@@ -123,7 +123,7 @@ Release build on the owner's desktop. Typical = 4200×5600 (#30). Memory is extr
 | Progress interval · cancel acknowledgement | ≤ 500 ms · ≤ 1 s | ≤ 500 ms · ≤ 3 s |
 
 ## 13. Test plan
-- **Unit (Rust, `pf-imaging`, `fr_exp_NN_*`):** size and scale maths and limits (06–08, 11); naming and the relative-path mirror (13, 14); integer-placement detection (03); PNG/JPEG/WebP chunk lists hold no metadata (10); settings validation table.
+- **Unit (Rust, `pf-imaging`, `fr_exp_NN_*`):** size and scale maths and limits (06–08, 11); destination and naming from the project name (13, 14); integer-placement detection (03); PNG/JPEG/WebP chunk lists hold no metadata (10); settings validation table.
 - **Golden (Rust, OQ-IMG-07):** decoded pixels exact on Windows, ±1 elsewhere; strip height 512 and `COMPOSE_VERSION` pinned. Cases: (a) no layers = original; (b) 3 baked patches from **fake provider** candidates at fixed seeds; (c) one affine layer (scale 1.3, rotation 15°, opacity 0.8); (d) Lanczos3 140 → 70 px per square. Lossless PNGs at 1024×1280 (< 1 MB each), regenerated only with `PF_UPDATE_GOLDENS=1` and reviewed in the diff.
 - **Property (Rust):** `compose_rect(r)` = crop of the flatten for 200 random rects (04). Strip heights 512 / 256 / full are equal for integer layers. Alpha-0 pixels equal the original. JPEG and WebP decode within PSNR ≥ 40 dB of the PNG export.
 - **Integration (Rust, `pf-core`):** PRJ's fault seam fails before and after the rename → no partial final file, old file intact (16). Locked k times then free (18). Encoder seam returns partition overflow → lossless (12). Cancel mid-strip and mid-WebP (20). `busy`, `exists`/`replace`, `layer_unreadable`, `out_of_memory` (allocator seam). `export_set_settings` leaves `commit.seq` unchanged until the draft save (fake clock, ≥ 2 s) commits once; `export_start` commits; reopen without an export is field-identical (25, R30). `last.layers_hash` equals the schema hash of the snapshot and `last.path` is project-relative (27). Before `DecodedOriginal` is ready → `original_unavailable` (28). Read-only → `read_only`, nothing written (29). Accept, then restore the parent (R3), then export = golden (a). Seam fixture with fake `offset(12)` accepted → FR-RGN-32 metric passes on the exported PNG (R25). A 16384² generated export streams within 400 MiB extra peak (§12).
@@ -144,7 +144,7 @@ Release build on the owner's desktop. Typical = 4200×5600 (#30). Memory is extr
 ## 15. Open questions
 None open.
 
-**Resolved:** OQ-EXP-01 ✅ A, `Exports/` mirror (#40) · OQ-EXP-02 ✅ A, `<stem>_<target>px` (#40) · OQ-EXP-03 ✅ A, inline Replace (#40) · OQ-EXP-04 ✅ A, per asset project, manifest `export` (#40, R6) · OQ-EXP-05 ✅ A, ≤ 4× (#40) · OQ-EXP-06 ✅ A, q90 (#40) · OQ-EXP-07 ✅ A, measure in slice 2 (#40) · OQ-EXP-08 ✅ A, EXP supplies reference and tolerance, EDT reads back (#40) · OQ-EXP-09 ✅ A, snapshot at start (#40) · OQ-EXP-10 ✅ Px per square in the glossary (R27) · OQ-EXP-11 ✅ B, settings persist through PRJ's debounced draft save (R30).
+**Resolved:** OQ-EXP-01 ✅ superseded by #44: the project's `exports/` · OQ-EXP-02 ✅ A, `<name>_<target>px` (#40), with the project name instead of the original's stem (#44) · OQ-EXP-03 ✅ A, inline Replace (#40) · OQ-EXP-04 ✅ A, per asset project, manifest `export` (#40, R6) · OQ-EXP-05 ✅ A, ≤ 4× (#40) · OQ-EXP-06 ✅ A, q90 (#40) · OQ-EXP-07 ✅ A, measure in slice 2 (#40) · OQ-EXP-08 ✅ A, EXP supplies reference and tolerance, EDT reads back (#40) · OQ-EXP-09 ✅ A, snapshot at start (#40) · OQ-EXP-10 ✅ Px per square in the glossary (R27) · OQ-EXP-11 ✅ B, settings persist through PRJ's debounced draft save (R30).
 
 **Answers to other specs:** OQ-EDT-01 ✅ both values required (R6). OQ-RGN-02 ✅ RGN calls `compose_rect` on the outer rect of the current stack (FR-RGN-04), delivered in slice 1.
 
@@ -153,12 +153,12 @@ Test agent; `PF_DATA_DIR` and `PF_LIBRARY_DIR` in `.pf-dev/`; fake provider.
 
 | # | Step | Expected |
 |---|---|---|
-| 1 | Open the generated 4200×5600 map, then `Ctrl+E` | Plan "4200×5600 · Full resolution"; target disabled; EDT's display size disabled |
-| 2 | Export PNG | `Exports/<rel>/<stem>.png` exists and decodes pixel-equal to the original |
+| 1 | Create a Maps project `Crypt` from the generated 4200×5600 map, open it, then `Ctrl+E` | Plan "4200×5600 · Full resolution"; target disabled; EDT's display size disabled |
+| 2 | Export PNG | `Maps/Crypt/exports/Crypt.png` exists and decodes pixel-equal to the original |
 | 3 | Mask, fake job, accept a patch; export PNG again | "Replaces …" shown; after Replace the file differs from the original only inside the patch rect |
 | 4 | Undo the accept (`Ctrl+Z`); export PNG with Replace | The file decodes pixel-equal to the original again (R3) |
 | 5 | Open RGN's seam fixture; mask, fake job `offset(12)`, accept; export PNG | FR-RGN-32 metric on the exported file: edge step ≤ 0.5 levels/px, residual ≤ 0.1 (R25) |
-| 6 | Back on the map: cells 30×40, target 70 | Plan 2100×2800, name `<stem>_70px.png`; `Ctrl+2` in EDT now shows 50 % |
+| 6 | Back on the map: cells 30×40, target 70 | Plan 2100×2800, name `Crypt_70px.png`; `Ctrl+2` in EDT now shows 50 % |
 | 7 | Choose WebP, export | Progress moves; the file decodes at 2100×2800 |
 | 8 | Open the 16384² map; choose WebP | WebP disabled: "WebP max 16383 px" |
 | 9 | Export it as JPEG and cancel at ~30 % | No final file, no temp file; any previous export intact |

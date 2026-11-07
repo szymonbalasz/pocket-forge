@@ -2,7 +2,7 @@
 feature: editor-canvas
 prefix: EDT
 owner: rev-editor-canvas
-status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [asset-project, export]
 ---
 
@@ -67,8 +67,8 @@ Tier S ([feature-tiers](../feature-tiers.md)): *Zoom, pan, view at intended disp
 | FR-EDT-32 | `edt_image_open` with `max_side` returns a downscaled copy (Lanczos3, aspect kept) under its own key. The picker uses `max_side` = 256 for thumbnails. |
 
 ## 7. UI/UX notes
-- **Layout:** the canvas fills the editor area. A left toolbar has pan, region, brush, eraser, size, hardness, fill, clear, undo, redo and mask visibility. A bottom bar has the zoom readout, the presets and `edt-mask-status`. The picker is a strip above the bottom bar while candidates exist.
-- **States:** *empty* (no asset project open): "Open an image" · *loading*: a spinner until the one-tile level exists, then progressive sharpening · *job running*: the picker shows pending slots, and the canvas stays usable · *read-only*: FR-EDT-29 · *error*: the tile badge (FR-EDT-12), or a banner if the build fails · *offline / provider unavailable*: no effect, the canvas never calls the provider.
+- **Layout** (slots per [ui-guidelines](../architecture/ui-guidelines.md); EDT owns the toolbar, canvas, status bar and picker): the canvas fills the centre between the left project panel (PRJ) and the right panel (RGN, EXP). The vertical **toolbar** on the canvas's left edge has pan, region, brush, eraser, size, hardness, fill, clear, undo, redo and mask visibility. The **status bar** under the bottom strip has the zoom readout, the presets and `edt-mask-status`, plus the segments other features register (PRJ save state, RGN job state). The **picker** sits in the bottom strip, inside RGN's iteration tracker, showing the selected iteration's candidates (FR-RGN-40).
+- **States:** *empty*: not shown; with no asset project open the home grid (PRJ) fills the centre · *loading*: a spinner until the one-tile level exists, then progressive sharpening · *job running*: the picker shows pending slots, and the canvas stays usable · *read-only*: FR-EDT-29 · *error*: the tile badge (FR-EDT-12), or a banner if the build fails · *offline / provider unavailable*: no effect, the canvas never calls the provider.
 - **Test ids (R21):** `edt-toolbar-{pan,region,brush,eraser,size,hardness,fill,clear,undo,redo,mask}`, `edt-view-{zoom,fit,actual,display}`, `edt-canvas-stage`, `edt-region-box`, `edt-region-handle` (+ `data-handle`), `edt-mask-status`, `edt-tiles-error`, `edt-compare-{divider,mode}`, `edt-picker-{item,star,accept,discard}`. Picker items carry `data-record-id` = candidate id. RGN defines no candidate button ids of its own.
 
 ## 8. Data and file effects
@@ -77,7 +77,7 @@ Field shapes live in [manifest-schema.md](../architecture/manifest-schema.md) (P
 | Data | Where | Written by | Recoverable? |
 |---|---|---|---|
 | Tile pyramid ([Appendix B](#appendix-b-pyramid-format)) | Local cache `<data-dir>/cache/tiles/v<builder>/<key>/` (R5) | `edt_tiles_open` builder | Rebuildable, safe to delete any time |
-| Mask: 8-bit grey PNG, one write-once file per submit | Asset project `masks/` (PRJ layout) | `edt_mask_submit` via PRJ `put_mask` (atomic) | Yes. Jobs and revisions reference them (KQ-17) |
+| Mask: 8-bit grey PNG, one write-once file per submit | Asset project `.pforge/masks/` (PRJ layout) | `edt_mask_submit` via PRJ `put_mask` (atomic) | Yes. Jobs and revisions reference them (KQ-17) |
 | Transient images, decoded tiles | Memory | FR-EDT-31, FR-EDT-11 | Rebuilt on demand |
 | Undo history, view, brush settings | UI memory | n/a | Lost on close by design (KQ-16, OQ-EDT-11) |
 
@@ -134,7 +134,7 @@ Reference: the spike rig (iGPU, 1600×900) at DPR 1 and 1.5, measured by a non-g
 - **Tauri smoke (Windows):** open the generated typical fixture through the real scheme; the one-tile level appears and `/t/` responses are 200.
 - **Fixtures (generated, KQ-22, no real art):** `fixtures/gen` battlemap (grid, rooms, noise) at 2048×2560 (committed if < 1 MB), 4200×5600 and 16384² (on demand). A coordinate-probe image (R/G encode x, y). Mask patterns (disc, ramp, checker). Candidates from the fake provider.
 - **App walkthrough** (test agent; `PF_DATA_DIR` and `PF_LIBRARY_DIR` set inside the worktree; generated 4200×5600 map):
-  1. Open it. → Fit within 1.5 s, and the image sharpens.
+  1. Create a Maps project from it and open it. → Fit within 1.5 s, and the image sharpens.
   2. Wheel-zoom on a door to 800 %. → The door stays under the cursor; pixels are crisp at 100 % and 150 % Windows scaling.
   3. `Ctrl+1`, then `Ctrl+2`. → 1:1 device px, then display size (or disabled with a tooltip if EXP values aren't set).
   4. `R`, drag, move and resize a region; paint a soft stroke, erase part, undo twice. → Inner rect and dashed margin follow; each undo reverses exactly; after 2 s idle the status shows saved.
