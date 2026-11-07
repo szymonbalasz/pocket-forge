@@ -36,11 +36,11 @@ Tier S ([feature-tiers](../feature-tiers.md)): localised edit of a masked region
 | FR-RGN-01 | `rgn_region_fit` takes the `{inner}` rect from EDT's region tool (`onRegionChange`, FR-EDT-27, R18), snaps it to integer image px and clamps it to the image. Below 16×16 → `region_too_small`; fully outside → `out_of_bounds`. EDT draws only the validated result. |
 | FR-RGN-02 | Context margin: default 128 px, 0–512 (#40). Outer rect = region + context margin, clamped to the image (may be asymmetric). An outer side > 4096 → `region_too_large` (OQ-CNV-04). |
 | FR-RGN-03 | Mask (R1): EDT's region-sized mask is padded with 0 to the outer rect, then resampled by the fit scale (box filter), then validated: 8-bit, exactly the sent size, ≥ 1 px > 0. Else `mask_invalid(size\|depth\|empty)`. Context pixels are always 0. |
-| FR-RGN-04 | Region pixels = `compose_rect(current layer stack, outer rect)` (FR-EXP-01, #40) on PRJ's decoded original. With no patch layers they equal a crop of the original bit for bit. Until it is ready → `original_unavailable` (R11). |
+| FR-RGN-04 | Region pixels = `compose_rect(current layer stack, outer rect)` (FR-EXP-01, #40) on PRJ's decoded original. With no patch layers they equal a crop of the original bit for bit. Picking the region tool calls `project_prefetch_original`; until the original is ready → `original_unavailable` (R11). |
 | FR-RGN-05 | Fit with `input_px{min,max,multiple_of}` (R20): if a side > `max`, downscale with Lanczos3 by `max ÷ longest side` and round each sent side down to `multiple_of`. Otherwise grow the context margin on sides with room until each side is ≥ `min` and a multiple of `multiple_of`; with no room, resample to the nearest valid size. The panel shows "sent unresampled" or "patch N.N× softer" (outer ÷ sent, 1 decimal). Recomputed on every region, margin or model change. |
 | FR-RGN-06 | Before any provider call, RGN checks the sent px and encoded bytes against the capabilities and fails with `input_too_large(field, limit)` (R20). PRV's `invalid_request` is the backstop. |
 | FR-RGN-07 | The model picker lists `provider_list_models` (masked-edit capable; PRV already drops models with a required unknown input or a required extra image slot, FR-PRV-10/11/25). Offline → the cached list, marked stale. |
-| FR-RGN-08 | Controls (#37) are rendered from `provider_get_capabilities` per [Appendix A](#appendix-a-capability-driven-controls): each `controls[]` entry of a known type maps to one control with its range, step, allowed values and default. No control outside the capabilities is ever shown. The capability `warnings[]` (e.g. an omitted unknown type) are listed in the panel warning. |
+| FR-RGN-08 | Controls (#37) are rendered from `provider_get_capabilities` per [Appendix A](#appendix-a-capability-driven-controls): each `controls[]` entry of a known type maps to one control with its range, step, allowed values and default. The source, mask and prompt are bound by `role`, never by input name (R28). No control outside the capabilities is ever shown. The capability `warnings[]` (e.g. an omitted unknown type) are listed in the panel warning. |
 | FR-RGN-09 | The prompt input is the final prompt: sent byte for byte with nothing added (#9) and recorded on the job. If `prompt_required`, submit is disabled while it is empty. |
 | FR-RGN-10 | If the capabilities have `seed: true`, the seed is "random" or pinned. The seed actually used is recorded on the job (KQ-17). |
 | FR-RGN-11 | The last model and control values are kept per asset project in the **draft**. A new region starts with an empty prompt. A remembered value the current capabilities reject resets to the default, with a notice. |
@@ -60,7 +60,7 @@ Tier S ([feature-tiers](../feature-tiers.md)): localised edit of a masked region
 | FR-RGN-25 | For the selected candidate Rust bakes a preview (resize to the outer rect, colour match, feather, alpha) and registers it with `register_transient_image` (FR-EDT-31); `rgn_candidate_preview` returns `{key, rect}` (R16). EDT's compare toggles before/after. Picker thumbnails use `edt_image_open` with `max_side` 256 (FR-EDT-32). |
 | FR-RGN-26 | Blend controls: feather 0–256 px, default 48 (0 = the painted edge only); colour match default on (KQ-23). If < 1 % of the outer rect is unmasked, colour match is skipped with a notice. |
 | FR-RGN-27 | Accept is one PRJ commit (R4): the baked RGBA patch (cropped to alpha > 0) as a new patch layer (scale 1, rotation 0, opacity 1, visible) with its job, candidate, feather and colour match; candidate statuses (FR-RGN-28); the job `closed`; a revision with reason `accept` and label = the first 40 chars of the prompt. The original's hash is unchanged. Flatten outside the mask equals the pre-accept flatten. |
-| FR-RGN-28 | Statuses (R10): star toggles `starred` (kept forever). Discard → `discarded`, file to the **trash**. On accept or dismiss, the other candidates: starred → `dismissed` (kept), unstarred → `trashed`. A job ends on accept, dismiss or the next submit in its project (`resolved_at` set). One that ends with nothing accepted or starred also trashes its region and mask PNGs (R9). Accepted jobs keep them forever. |
+| FR-RGN-28 | Statuses (R10): star toggles `starred` (kept forever). Discard → `discarded`, file to the **trash**. On accept or dismiss, the other `new` candidates → `dismissed`; unstarred ones go to the trash (`trash_id` set), starred ones stay ([schema §4.7](../architecture/manifest-schema.md#47-candidate-manifest-candidates)). A job ends on accept, dismiss or the next submit in its project (`resolved_at` set). One that ends with nothing accepted or starred also trashes its region and mask PNGs (R9). Accepted jobs keep them forever. |
 | FR-RGN-29 | Re-tune (#40) re-bakes from the untouched candidate into a **new** layer id and file, replacing the layer in the stack, plus a revision with reason `retune` (R3). The old file stays referenced by its revision. |
 | FR-RGN-30 | Accept and re-tune each push one entry onto EDT's undo stack (FR-EDT-23): undo = `project_restore_revision(parent)` (reason `restore`), redo = restore the later revision (R3). Candidate and job records are unchanged. Undo never deletes a file. |
 | FR-RGN-31 | Every capability here is a `pf-core` command (§9) that works without the UI, with inputs validated at the boundary. A failed command leaves the asset project unchanged. |
@@ -80,7 +80,7 @@ Tier S ([feature-tiers](../feature-tiers.md)): localised edit of a masked region
 
 ## 8. Data and file effects
 PRJ owns storage, names and the atomic commit; fields are defined once in [manifest-schema](../architecture/manifest-schema.md). RGN needs:
-- **Job** (R2): `jobs/<id>/job.json` + `region.png` + `mask.png` as sent. The job file is authoritative. RGN needs `fit`, `region{inner,outer,margin}`, the draft mask id, final prompt, sent control values, seed requested/used, capability snapshot, estimate, actual cost, state with timestamps, `resolved_at`, error, and PRV's opaque `provider{}` (it holds the job handle; no top-level handle field, OQ-PRV-22). Recoverable: yes, the source of truth.
+- **Job** (R2): `jobs/<id>/job.json` + `region.png` + `mask.png` as sent. The job file is authoritative. RGN needs `fit`, `region{inner,outer,margin}`, the draft mask id, final prompt, sent control values, `seed{requested, returned}`, capability snapshot, estimate, actual cost, state with timestamps, `resolved_at`, error, and PRV's opaque `provider{}` (it holds the job handle; no top-level handle field, OQ-PRV-22). Recoverable: yes, the source of truth.
 - **Candidate** (R10): `candidates/<id>.<ext sniffed>`, untouched; `index`, `provider_meta`, status, `starred`. Kept when accepted or starred, else trashed (FR-RGN-28) and purged after 30 days (#18).
 - **Patch layer:** write-once RGBA PNG plus its placement (ADR 0003), source job + candidate, feather and colour match (with the fitted gain/offset). Re-bakeable from the candidate.
 - **Revision:** reasons `accept`, `retune`, `restore` (R24), optional `label`. Display labels `r<seq>`.
@@ -91,7 +91,7 @@ PRJ owns storage, names and the atomic commit; fields are defined once in [manif
 |---|---|---|
 | `rgn_region_fit` | project, inner, margin, model → `{inner, outer, margin, sent_w, sent_h, scale}` | `region_too_small`, `out_of_bounds`, `region_too_large`, `unknown_model` |
 | `rgn_controls_evaluate` | model id, control values → per control `{visible, allowed, required, error?}` | `unknown_model` |
-| `rgn_job_estimate` | draft `{region, mask_id, model, prompt, controls, seed}` → `{estimate_id, cost\|unknown, spend, cap, needs[threshold\|unknown_cost\|set_cap]}` | `mask_invalid`, `invalid_control`, `input_too_large`, `original_unavailable`, every normalised PRV error |
+| `rgn_job_estimate` | draft `{region, mask_id, model_id, final_prompt, controls, seed}` → `{estimate_id, cost\|unknown, spend, cap, needs[threshold\|unknown_cost\|set_cap]}` | `mask_invalid`, `invalid_control`, `input_too_large`, `original_unavailable`, every normalised PRV error |
 | `rgn_job_submit` | draft, estimate_id, confirmations → job id | `estimate_stale`, `over_spend_cap`, `confirmation_missing`, `job_active`, the estimate's errors |
 | `rgn_job_cancel` | job id → `canceled\|not_cancellable` | `not_found`, `offline` |
 | `rgn_job_retry_draft` | job id → a pre-filled draft | `not_found`, `source_missing` |
@@ -102,7 +102,7 @@ PRJ owns storage, names and the atomic commit; fields are defined once in [manif
 | `rgn_patch_retune` | layer id, blend → `{layer_id, revision_id}` | `source_missing`, `original_unavailable` |
 | `rgn_spend_get` / `_set` | — / `{cap, threshold}` → `{spend, cap, threshold}` | `invalid_value` |
 
-- **Uses:** `provider_list_models`, `provider_get_capabilities` (PRV); PRJ store calls `record_job`, `update_job`, `add_candidates`, `discard_candidate`, `accept_candidate`, `replace_patch_layer`, `settings_get/put`, `project_restore_revision` (undo); EDT's `register_transient_image` (FR-EDT-31). Resume is a job-runner call made by `project_open`, not a command.
+- **Uses:** `provider_list_models`, `provider_get_capabilities` (PRV); PRJ store calls `read_project`, `decoded_original`, `record_job`, `update_job`, `add_candidates`, `set_star`, `discard_candidate`, `accept_candidate`, `resolve_job`, `replace_patch_layer`, `settings_get/put`; PRJ commands `project_prefetch_original` (R11) and `project_restore_revision` (undo); EDT's `register_transient_image` (FR-EDT-31). Resume is a job-runner call made by `project_open`, not a command.
 - **Events:** `rgn:job-state {job_id, state, progress, cost, error?}` · `rgn:candidate-ready {job_id, candidate_id, status}` · `rgn:spend {spend, cap}`.
 
 ## 10. Provider interaction
@@ -160,25 +160,24 @@ All blocking questions are closed; answered ones are in [Appendix C](#appendix-c
 | ID | Question | Options (pick in **bold**) | Blocking? | Affects |
 |---|---|---|---|---|
 | OQ-RGN-13 | After undoing an accept, can another candidate of that job be accepted? | **A. Not in the MVP: undo restores layers only, the job stays `closed`; use Retry or restore the candidate from the trash later (tier A)** / B. undo reopens the job — A keeps `closed` terminal (R2). B saves credits but adds a reverse transition. | No | PRJ |
-| OQ-RGN-14 | Cross-spec ([provider](provider.md)): `controls[]` holds every input (FR-PRV-10), but nothing marks which control is the source image, the mask, the prompt or the candidate count; only the overlay knows their names. | **A. PRV adds `role: source\|mask\|prompt\|count\|null` to each control** / B. PRV leaves source, mask and prompt out of `controls[]` — A keeps one list and count's range; B is simpler for RGN but splits the shape. | No (slice 2) | PRV |
 
 ## Appendix A: capability-driven controls
-Rendered from PRV's generic `controls[]` (FR-PRV-10, PRV Appendix C); the role of a control comes from OQ-RGN-14.
+Rendered from PRV's generic `controls[]` (FR-PRV-10, PRV Appendix C). Each control carries PRV's `role` (R28); RGN binds the source, mask and prompt by role, never by input name.
 
-| Control type (role) | UI control | Notes |
+| Control type (`role`) | UI control | Notes |
 |---|---|---|
-| `image` (source), `mask` (mask) | none | filled with the region and mask PNGs; never shown |
-| `string` (prompt) | Prompt textarea | FR-RGN-09 |
-| `seed` | Random / pinned number | FR-RGN-10 |
+| `image` (`source`), `mask` (`mask`) | none | filled with the region and mask PNGs; never shown |
+| `string` (`prompt`) | Prompt textarea | FR-RGN-09 |
+| `seed` (`seed`) | Random / pinned number | FR-RGN-10 |
 | `int` / `float` with min and max | slider + number field | step snapping |
 | `int` / `float` missing a bound | number field | the known bound enforced |
 | `enum` | select | the effective allowed values from `evaluate` |
 | `bool` | toggle | — |
-| `string` (no role) | single-line text field | sent as typed |
-| extra image (`slots[]`) | none | not sent in tier S; a required slot → PRV doesn't offer the model |
+| `string` (`other`) | single-line text field | sent as typed |
+| extra image (`slots[]`, `reference`) | none | not sent in tier S; a required slot → PRV doesn't offer the model |
 | unknown type | none (PRV omits it) | named in the panel warning |
 
-Defaults prefill every control. `rules[]` act through `evaluate` (FR-RGN-33): `hidden` hides and drops a control, `allowed` narrows its choices, `required` marks it. Changing a `cost_affecting` control re-estimates (FR-RGN-12).
+Numeric rows also cover `candidate_count`. Defaults prefill every control. `rules[]` act through `evaluate` (FR-RGN-33): `hidden` hides and drops a control, `allowed` narrows its choices, `required` marks it. Changing a `cost_affecting` control re-estimates (FR-RGN-12).
 
 ## Appendix B: job states
 Terminal: `failed`, `canceled`, `lost`, `closed` (R2). `fetched` waits for accept or dismiss; the next submit dismisses it. Dismissing a terminal job only sets `resolved_at` (FR-RGN-28). Every transition is committed.
@@ -187,7 +186,7 @@ Terminal: `failed`, `canceled`, `lost`, `closed` (R2). `fetched` waits for accep
 stateDiagram-v2
   [*] --> requested: record committed
   requested --> submitted: handle committed
-  requested --> failed: rejected before accept
+  requested --> failed: submit error
   requested --> lost: submit timeout, or crash before handle
   submitted --> queued
   submitted --> running
@@ -231,3 +230,4 @@ stateDiagram-v2
 | OQ-RGN-10 | Crash before the handle is saved | ✅ `lost` + possible-charge notice (#40) |
 | OQ-RGN-11 | Input constraints beyond max px | ✅ PRV exposes `input_px`; RGN fits to it (R20) |
 | OQ-RGN-12 | Glossary terms | ✅ Added (R27) |
+| OQ-RGN-14 | Which control is the source, mask, prompt or candidate count | ✅ PRV's `role` field; RGN binds by role (R28) |

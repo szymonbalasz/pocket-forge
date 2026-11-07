@@ -94,13 +94,14 @@
 `id`, `file` (`masks/<id>.png`), `rect` (the region, inner), `created_at`.
 
 ### 4.5 Draft
-`final_prompt`, `model_id`, `controls{}` (keyed by capability control id, #37), `seed` (int \| null), `region` (`{inner, margin}` \| null), `mask_id` (latest mask, R7) \| null, `updated_at`.
+`final_prompt`, `model_id`, `controls{}` (keyed by capability control `name`, #37), `seed` (int \| null), `region` (`{inner, margin}` \| null), `mask_id` (latest mask, R7) \| null, `updated_at`.
 
 ### 4.6 Job (`jobs/<id>/job.json`)
 | Field | Type | Notes |
 |---|---|---|
 | `schema_version`, `id`, `created_at`, `updated_at` | | |
 | `state`, `state_times{}` | enum, `{<state>: time}` | written on **every** transition (R2) |
+| `resolved_at` | time \| null | set when the job is resolved: accept, dismiss or the next submit ([region-edit](../specs/region-edit.md) FR-RGN-28) |
 | `operation`, `model_id` | string | `edit_masked` |
 | `capability_snapshot` | object | KQ-17 |
 | `final_prompt`, `controls{}`, `candidate_count` | | as submitted |
@@ -109,8 +110,8 @@
 | `fit` | `{sent_w, sent_h, scale}` | |
 | `mask_id` | ULID | the draft mask the job was built from |
 | `inputs` | `{region: "region.png", mask: "mask.png"}` | as sent (R2) |
-| `estimate`, `cost` | `{value \| unknown, unit}` | |
-| `provider` | object | **opaque**; shape in [provider](../specs/provider.md) Appendix B (incl. the job handle, OQ-PRV-22 A). Persisted verbatim on every transition |
+| `estimate`, `cost` | `{amount \| unknown, unit}` | PRV's generic `Cost` |
+| `provider` | object | **opaque**; shape in [provider](../specs/provider.md) Appendix B (incl. the job handle, OQ-PRV-22 pick A). Persisted verbatim on every transition |
 | `candidate_ids[]` | ULID | in provider order |
 | `error` | `{code, hint}` \| null | normalised (ADR 0001) |
 
@@ -119,7 +120,7 @@ stateDiagram-v2
   [*] --> requested: record_job (no handle)
   requested --> submitted: handle saved
   requested --> failed: submit error
-  requested --> lost: crash before handle saved (found on open)
+  requested --> lost: submit timeout, or crash before handle saved (found on open)
   submitted --> queued
   submitted --> running
   submitted --> failed
@@ -140,7 +141,7 @@ stateDiagram-v2
   unknown --> canceled: reconnect
   succeeded --> fetched: candidates stored
   succeeded --> failed: all candidates invalid
-  fetched --> closed: accept or dismiss
+  fetched --> closed: accept, dismiss or next submit
   failed --> [*]
   canceled --> [*]
   lost --> [*]
@@ -177,7 +178,7 @@ Terminal = `failed | canceled | lost | closed`. Handle rule: `requested` has no 
 | `format` | `png\|jpeg\|webp` | |
 | `last` | object \| null | `{at, revision_id, layers_hash, path, format, width, height, bytes, fallback, strip_h, compose_version}` |
 
-- Written only at `export_start` (R6). `last.path` is relative to the project folder (e.g. `../../Exports/dungeons/crypt.png`).
+- `grid`, `target_px_per_square` and `format` are written by PRJ's debounced draft save (R30) and at `export_start` (R6); `last` only after a successful export. `last.path` is relative to the project folder (e.g. `../../Exports/dungeons/crypt.png`).
 - `layers_hash` = SHA-256 of the canonical JSON (declared field order, no whitespace) of `layers[]` at export time.
 
 ## 5. `settings.json` (R8)

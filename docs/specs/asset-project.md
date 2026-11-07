@@ -45,9 +45,9 @@ Library browsing, thumbnails, search, tags (tier A) · several machines editing 
 | FR-PRJ-16 | A missing original opens with "Original missing" and **Relink**, which accepts a file only if its hash matches. |
 | FR-PRJ-17 | A cloud-only original (fs-attributes seam: `is_cloud_only`, `hydrate`, R13) is hydrated on open ("Downloading from cloud"). Offline → `not_available_offline`, nothing written. No other file is ever hydrated (#19, KQ-14). |
 | FR-PRJ-18 | Every mutating command commits before it returns success: new write-once files, then the manifest, each temp → flush → rename. The manifest rename is the commit point ([schema §3](../architecture/manifest-schema.md#3-write-rules)). |
-| FR-PRJ-19 | The draft is saved by `project_put_draft` ≥ 2 s after the last change and on close (#40). `put_mask` (from `edt_mask_submit`: stroke-end debounce ≥ 2 s, and on submit) writes the mask and points the draft at it in one commit. Masks no draft, job or revision references go to the trash at the next commit (R7). |
+| FR-PRJ-19 | The draft is saved by `project_put_draft` ≥ 2 s after the last draft or export-settings change and on close (#40). The same commit writes EXP's unsaved export settings into manifest `export` (R30). `put_mask` (from `edt_mask_submit`, FR-EDT-28) writes the mask and points the draft at it in one commit. Masks no draft, job or revision references go to the trash at the next commit (R7). |
 | FR-PRJ-20 | After a kill at any step of a commit, reopen shows exactly the state before or after it. On open, temp files are deleted, roll-forward steps run, and files referenced by no manifest field, revision or job file go to the trash. |
-| FR-PRJ-21 | A locked file is retried with backoff for ≤ 3 s, then `project:save-failed{locked}` fires, state stays in memory and is retried every 10 s, and closing with unsaved state asks first. |
+| FR-PRJ-21 | A locked file is retried with backoff for ≤ 3 s, then `project:save-failed{reason: locked}` fires, state stays in memory and is retried every 10 s, and closing with unsaved state asks first. |
 | FR-PRJ-22 | Save → close → reopen is pixel-identical for the original, layers and masks, and field-identical for prompts, settings, jobs, candidates and revisions. |
 | FR-PRJ-23 | A **revision** is a write-once snapshot of the layer stack plus the draft. Reasons: `create` (`r0`), `accept`, `save` (Ctrl+S, only if changed since the head), `restore`, `retune`, `conflict` (R24). Restore writes a new revision with the restored layers and draft. Optional `label`; `r<seq>` is a display label. None is ever deleted. |
 | FR-PRJ-24 | If `manifest.json` is missing or unreadable, open rebuilds it from the newest revision and the revision and job files, and reports `project:recovered`. |
@@ -94,15 +94,15 @@ Full tree and field tables: [manifest-schema](../architecture/manifest-schema.md
 | `import_clipboard_image` | image bytes → library path | `unsupported`, `too_large` |
 | `project_open` | image or `.pforge` path → snapshot + `warnings[]` (read-only reason, conflict, recovered, resumable, lost) | `not_found`, `not_available_offline`, `corrupt`, `outside_library` (UI calls `import_paths` first) |
 | `project_close` | — → ok | `unsaved` |
-| `project_put_draft` | draft → `seq` | `read_only`, `locked`, `conflict` |
-| `project_list_revisions` / `project_save_revision` / `project_restore_revision` | — / label? / `rev_id` → `[{id, seq, at, reason, label}]` / revision | `unchanged`, `unknown_id`, `read_only` |
+| `project_put_draft` | draft (+ EXP's unsaved export settings, R30) → `seq` | `read_only`, `locked`, `conflict` |
+| `project_list_revisions` / `project_save_revision` / `project_restore_revision` | — / label? / `rev_id` → `[{id, seq, created_at, reason, label}]` / revision | `unchanged`, `unknown_id`, `read_only` |
 | `project_trash_list` / `project_trash_restore` | — / item id → items / ok | `unknown_id`, `read_only` |
 | `project_disk_usage` / `project_relink_original` | — / path → bytes per category + next purge date / ok | — / `hash_mismatch` |
 | `project_prefetch_original` | — → ok (decode starts) | `corrupt`, `not_available_offline` |
 | `project_conflict_get` / `project_resolve_conflict` | — / `keep: this \| other` → both versions / revision | `no_conflict`, `files_missing` |
 | `recent_list` | — → `[{path, name, opened_at}]` | — |
 
-- **Store API** (Rust, one commit each, `read_only`/`locked`/`conflict` as above, R4): `read_project` (current layer stack, R6), `record_job`, `update_job`, `add_candidates`, `put_mask`, `accept_candidate`, `set_star`, `discard_candidate`, `resolve_job`, `replace_patch_layer` (re-tune), `put_export`, `settings_get` / `settings_put(section)`, `decoded_original`, `resolve_image(image_id)` (original, layer or candidate → file, for EDT). User-facing job and candidate commands are RGN's (`rgn_*`).
+- **Store API** (Rust, one commit each, `read_only`/`locked`/`conflict` as above, R4): `read_project` (current layer stack, R6), `record_job`, `update_job`, `add_candidates`, `put_mask`, `accept_candidate`, `set_star`, `discard_candidate`, `resolve_job`, `replace_patch_layer` (re-tune), `put_export` (export settings + `last`), `settings_get` / `settings_put(section)`, `decoded_original`, `resolve_image(image_id)` (original, layer or candidate → file, for EDT). User-facing job and candidate commands are RGN's (`rgn_*`).
 - **Events:** `import:progress{done, total}`, `import:done`, `project:committed{seq}`, `project:save-failed{reason, retrying}`, `project:conflict`, `project:recovered`, `project:original-ready`, `trash:purged{count, bytes}` (R21).
 
 ## 10. Provider interaction
@@ -125,8 +125,9 @@ N/A: no provider calls. PRJ persists the job record ADR 0001 requires (KQ-17) an
 | A commit (manifest ≤ 200 KB, local SSD) | < 50 ms | same |
 | Patch layer PNG write (≤ 4096², fast compression) | < 300 ms | same |
 | Import copy + hash | ≈ disk speed, < 1 s | < 5 s |
-| `DecodedOriginal` decode (background) / memory; PRJ other memory < 20 MB | < 0.5 s / ≤ 70 MiB | < 4 s / 768 MiB |
-| Whole app, region job running (EDT UI 704 + core 256 MiB, decoded original, RGN 400 MiB) | < 1.5 GiB | ≤ 2.1 GiB |
+| `DecodedOriginal` decode (background) / memory; PRJ other memory < 20 MiB | < 0.5 s / ≤ 70 MiB | < 4 s / 768 MiB |
+| Whole app, region job running (EDT UI 704 + core transient 256 MiB, decoded original, RGN 400 MiB, PRJ 20 MiB) | < 1.5 GiB | ≤ 2.1 GiB |
+| Whole app, export running (EDT UI 704 + core transient 256 MiB, decoded original, EXP stream 400 MiB / rescale 1.6 GiB, PRJ 20 MiB) | < 1.5 GiB | ≤ 2.1 GiB / ≤ 3.3 GiB |
 
 ## 13. Test plan
 - **Unit (`pf-core`, `fr_prj_NN_*`):** manifest round-trip + field order; each migration from a v0 fixture; conflict-copy matcher; collision suffixes; purge date math (fake clock); import validation; settings corrupt → defaults.
@@ -150,9 +151,8 @@ N/A: no provider calls. PRJ persists the job record ADR 0001 requires (KQ-17) an
 |---|---|---|---|---|
 | OQ-PRJ-10 | A conflict copy of a `job.json` | **A. The copy with the later state (diagram order) wins; the other goes to the trash** / B. Follows the user's keep choice. A never drops a job handle or paid candidates; B is stricter to #39 but can lose candidate refs to the trash. | No | RGN |
 | OQ-PRJ-11 | How the conflict view draws each version ([editor-canvas](editor-canvas.md)) | **A. EDT's canvas draws a given layer stack read-only (not only the manifest's)** / B. Text only (time, layer count, revision label). A lets the user see what they keep; B needs nothing from EDT. | No (slice 6; B is the fallback) | EDT |
-| OQ-PRJ-12 | Glossary: add **Head revision** (the revision the current state descends from), **Import destination** and **Spool** (`<data-dir>/pending/`, R12)? | **A. Add all three** / B. Keep them as implementation words. A matches how the specs already use them. | No | glossary |
 
-**Resolved:** OQ-PRJ-01 ✅ A, `<file>.pforge/` (#40) · OQ-PRJ-02 ✅ A, `Imported/` (#40) · OQ-PRJ-03 ✅ A, first commit (#40) · OQ-PRJ-04 ✅ A, commit every change, draft after 2 s idle (#40) · OQ-PRJ-05 ✅ A, `sha2` (#38) · OQ-PRJ-06 ✅ restore the parent revision (R3, FR-PRJ-43) · OQ-PRJ-07 ✅ A, PRJ minimal revision list, recent list, relink (#40) · OQ-PRJ-08 ✅ added to the glossary (R27) · OQ-PRJ-09 ✅ EDT owns the tile cache, 2 GiB (R5) · OQ-EDT-14 (asks PRJ): compatible with EDT's pick A, a restore brings back the revision's draft and EDT re-submits the live mask.
+**Resolved:** OQ-PRJ-01 ✅ A, `<file>.pforge/` (#40) · OQ-PRJ-02 ✅ A, `Imported/` (#40) · OQ-PRJ-03 ✅ A, first commit (#40) · OQ-PRJ-04 ✅ A, commit every change, draft after 2 s idle (#40) · OQ-PRJ-05 ✅ A, `sha2` (#38) · OQ-PRJ-06 ✅ restore the parent revision (R3, FR-PRJ-43) · OQ-PRJ-07 ✅ A, PRJ minimal revision list, recent list, relink (#40) · OQ-PRJ-08 ✅ added to the glossary (R27) · OQ-PRJ-09 ✅ EDT owns the tile cache, 2 GiB (R5) · OQ-PRJ-12 ✅ A, Head revision, Import destination and Spool added (R29) · OQ-EDT-14 (asks PRJ): compatible with EDT's pick A, a restore brings back the revision's draft and EDT re-submits the live mask.
 
 ## Appendix A: walkthrough
 `PF_DATA_DIR` + `PF_LIBRARY_DIR` in `.pf-dev/`, fake provider.

@@ -63,7 +63,7 @@ Tier S ([feature-tiers](../feature-tiers.md)): *Zoom, pan, view at intended disp
 | FR-EDT-28 | Draft mask (R7): `edt_mask_submit` runs ≥ 2 s after the last stroke end, before job submit, and on close. It is skipped when the mask hasn't changed since the last successful submit. `edt-mask-status` shows saved / saving / unsaved (reason). |
 | FR-EDT-29 | Read-only project (R12): view, region tool, painting and undo work. No mask submit is attempted, a direct call fails fast with `read_only`, and the status says "Read-only: mask not saved". |
 | FR-EDT-30 | Single-key and bracket shortcuts are ignored while a text input, textarea or contenteditable has focus (R23). |
-| FR-EDT-31 | Transient images (R16): a core fn registers an in-memory image for the open project and returns a key served at `/i/<key>`. At most 4 per project (≤ 256 MiB); a fifth unregisters the oldest. All are unregistered on close. |
+| FR-EDT-31 | Transient images (R16): a core fn registers an in-memory image for the open project and returns a key served at `/i/<key>.<ext>` ([Appendix A](#appendix-a-pf-tiles-uri-scheme)). At most 4 per project (≤ 256 MiB); a fifth unregisters the oldest. All are unregistered on close. |
 | FR-EDT-32 | `edt_image_open` with `max_side` returns a downscaled copy (Lanczos3, aspect kept) under its own key. The picker uses `max_side` = 256 for thumbnails. |
 
 ## 7. UI/UX notes
@@ -111,7 +111,7 @@ N/A. The canvas never calls the provider. Candidates and previews reach it as im
 | Offline / provider error or timeout | No effect on the canvas (§10). Read-only: FR-EDT-29. |
 | Very large image | Up to 16384 per side with tiles; larger → `too_large` with a message. No full-image canvas anywhere (ADR 0003). |
 | Corrupt or unsupported input | Build fails → `edt:tiles-failed` → banner; the app keeps running. A corrupt cached tile → retry, then Rebuild. A corrupt mask → `corrupt`, and the mask canvas starts empty with a warning. |
-| Undo across the feature boundary | Submitted masks are immutable; undo changes only the live mask canvas. Accept and re-tune undo through revisions (FR-EDT-23). After a restore, the live mask canvas is kept (OQ-EDT-14). |
+| Undo across the feature boundary | Submitted masks are immutable; undo changes only the live mask canvas. Accept and re-tune undo through revisions (FR-EDT-23). After a restore, the live mask canvas is kept (OQ-EDT-14, pick A). |
 | GPU reset / context loss | The mask canvas is CPU-backed (`willReadFrequently`), so it can't lose content. Tiles redraw from the LRU. |
 
 ## 12. Performance budget
