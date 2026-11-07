@@ -26,7 +26,9 @@
 | Visible job status and cost; user-controlled retry | S | S |
 | Image layers: move, scale, rotate, opacity, visibility | A | A |
 | Cropping | A | A |
-| Library: thumbnails, previews, search | A | A |
+| Sections for Maps, Tokens, Items; project-as-folder layout; home grid with project thumbnails; iteration tracker (#44, #45) | — | **S** |
+| Library: previews, search | A | A |
+| Parts: reusable cut-outs placed on other projects (#45) | — | A |
 | Art recipes (style text, references, constraints, output, settings) | A | A |
 | Reference images with roles (style / structure / identity) | A | A |
 | Prompt preview and editing of the final submitted prompt | S? | S |

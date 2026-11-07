@@ -1,0 +1,50 @@
+# UI guidelines
+
+> Owner decisions #44–#46. Every UI builder follows this. Change it through the orchestrator.
+
+## Look
+- Neutral dark grey, Photoshop-like. Nothing competes with the art. Colour only for state (accent, warning, error).
+- Radix primitives (`radix-ui`) for dialogs, menus, selects, sliders, tooltips, toggles and scroll areas. Our own CSS; no Tailwind, no other component kit.
+- Icons: inline SVG components in `app/src/shell/icons.tsx` (no icon package).
+- Font: `system-ui`, 13 px base, 11 px for meta text. Tabular numbers for sizes, costs and zoom.
+
+## Tokens (`app/src/shell/theme.css`, CSS variables only, no hard-coded colours in features)
+| Token | Value | Use |
+|---|---|---|
+| `--pf-bg-0` | `#1b1b1b` | canvas surround |
+| `--pf-bg-1` | `#232323` | app, rails |
+| `--pf-bg-2` | `#2b2b2b` | panels |
+| `--pf-bg-3` | `#353535` | inputs, hover |
+| `--pf-border` | `#3d3d3d` | dividers |
+| `--pf-text` | `#e4e4e4` | text |
+| `--pf-text-dim` | `#9a9a9a` | meta |
+| `--pf-accent` | `#4a90e2` | selection, primary button, focus ring |
+| `--pf-warn` | `#e0a030` | cost and threshold warnings |
+| `--pf-danger` | `#e05050` | errors, destructive |
+| `--pf-ok` | `#4caf6a` | succeeded |
+| `--pf-radius` | `4px` | |
+| `--pf-space-1..4` | `4/8/12/16px` | |
+
+## Layout
+```
+┌────┬─────────────┬──────────────────────────────┬──────────────┐
+│rail│ left panel  │ toolbar │ canvas             │ right panel  │
+│    │ (project)   │         │                    │ (generate,   │
+│    │             ├─────────┴────────────────────┤  export)     │
+│    │             │ bottom: picker / iterations   │              │
+│    │             │ status bar: zoom, mask, job   │              │
+└────┴─────────────┴──────────────────────────────┴──────────────┘
+```
+- **Section rail** (56 px): Maps, Tokens, Items, then Settings at the bottom. Owner: asset-project (PRJ).
+- **Home** (no project open): a grid of project cards for the selected section (thumbnail of the working image, name, iteration count, last edited) and **+ New**. Owner: PRJ.
+- **Left panel** (240–360 px, resizable): the project's folders (Working, References, Structure, Parts, Results). Owner: PRJ.
+- **Canvas, toolbar, status bar, candidate picker:** editor-canvas (EDT).
+- **Right panel** (300–380 px): Generate (region-edit, RGN), then Export (EXP), as collapsible sections.
+- **Iteration tracker:** the bottom strip lists iterations (`results/NNN`). Owner: RGN, using EDT's picker for the selected iteration.
+- Slots live in `app/src/shell/Layout.tsx`; features register into a slot through the feature registry. A feature never renders into another feature's slot.
+
+## Behaviour
+- Keyboard first: every tool has a shortcut (see each spec). Shortcuts are ignored while a text field has focus (R23).
+- Focus ring is always visible (`--pf-accent`). Every dialog has Esc to close and a default focus.
+- Long operations show progress in the status bar, never a blocking modal, except the spend confirm dialog.
+- `data-testid` per AGENTS §9.

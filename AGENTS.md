@@ -39,7 +39,7 @@ Start with [docs/vision.md](docs/vision.md), [docs/feature-tiers.md](docs/featur
 
 ## §4 Git, worktrees and agents
 
-- **One task = one worktree = one agent = one branch.** Run at most about 4 agents at once, test agents included.
+- **One task = one worktree = one agent = one branch.** Run at most 6 agents at once (about 4 builders plus up to 2 test agents, #47).
 - Branch names: `spec/<feature>`, `build/<feature>`, `fix/<slug>`, `spike/<topic>`, `docs/<slug>`.
 - **With herdr** (`HERDR_ENV=1`): create worktrees with
   `herdr worktree create --workspace "$HERDR_WORKSPACE_ID" --branch <branch> --base main --no-focus`.
