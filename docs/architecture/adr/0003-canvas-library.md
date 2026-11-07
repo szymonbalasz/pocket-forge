@@ -1,6 +1,6 @@
 # ADR 0003: Canvas library and rendering architecture
 
-> Status: **accepted** 2026-11-07 (#33): option A, with all OQ-CNV picks as written. Input: KQ-32, the [canvas research](../../research/canvas-library.md), the [spike prototype](../../../spikes/canvas/README.md), #3, #11, #16, #19, KQ-25, KQ-30, [ADR 0001](0001-provider-integration.md).
+> Status: **accepted** 2026-11-07 (#33): option A, with all OQ-CNV picks as written. Input: KQ-32, the [canvas research](../../research/canvas-library.md), the spike prototype (`spikes/canvas/`, deleted with the skeleton; in git history at commit 3fb4228), #3, #11, #16, #19, KQ-25, KQ-30, [ADR 0001](0001-provider-integration.md).
 > The stack is fixed by [ADR 0002](0002-desktop-stack.md).
 
 ## Context
