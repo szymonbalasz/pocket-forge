@@ -17,7 +17,7 @@ Tier S ([feature-tiers](../feature-tiers.md)): *Flattened export at full resolut
 ## 3. Goals
 - The exported patch passes the FR-RGN-32 seam metric on the exported file (MVP step 7, #35, R25).
 - Deterministic: the same layer stack, settings and build give the same decoded pixels (OQ-IMG-07).
-- A typical map (#30) exports to PNG in ≤ 2 s. A 16k export never blocks the UI and can be cancelled.
+- A typical map (#30) exports to PNG in ≤ 2 s. A 16k export never blocks the UI and can be canceled.
 - An export is never half-written under its final name. It never touches the original, and in the asset project it writes only the `export` record.
 
 ## 4. Non-goals
@@ -52,7 +52,7 @@ Tier S ([feature-tiers](../feature-tiers.md)): *Flattened export at full resolut
 | FR-EXP-17 | Before writing, temp files matching `.*.pf-tmp-*` older than 1 h in the destination folder are deleted. |
 | FR-EXP-18 | A locked destination (sharing violation) is retried with backoff for up to 3 s, then fails with `locked`; the temp file is removed. |
 | FR-EXP-19 | An export runs in the background and emits `export:progress` at least every 500 ms with a phase (`compose`, `resize`, `encode`, `write`) and a fraction. WebP progress comes from libwebp's progress hook. |
-| FR-EXP-20 | `export_cancel` stops the export within 1 s (3 s for a 16k resize), removes the temp file and emits `export:cancelled`. Strips check for cancel between strips; libwebp aborts through its progress hook. |
+| FR-EXP-20 | `export_cancel` stops the export within 1 s (3 s for a 16k resize), removes the temp file and emits `export:canceled`. Strips check for cancel between strips; libwebp aborts through its progress hook. |
 | FR-EXP-21 | One export per asset project at a time; a second start returns `busy`. The export uses the layer stack snapshot taken at start, and editing continues meanwhile (OQ-EXP-09). |
 | FR-EXP-22 | A missing or undecodable layer file fails the export with `layer_unreadable{layer_id}`. No partial or layer-skipping output is ever written. |
 | FR-EXP-23 | Big buffers are reserved fallibly (`try_reserve`). An allocation failure returns `out_of_memory` and the app keeps running. |
@@ -92,7 +92,7 @@ Field shapes live in [manifest-schema §4.10](../architecture/manifest-schema.md
 | `export_start` | settings, `replace` → `export_id` | the above + `exists`, `busy`, `original_unavailable`, `too_large{format, limit}`, PRJ's `read_only` / `locked` / `conflict` from the settings commit (R12; nothing is written) |
 | `export_cancel` | `export_id` → ok | `unknown_id` (already finished) |
 
-- **Events** (R21): `export:progress{export_id, phase, fraction}` · `export:done{export_id, path, width, height, bytes, format, fallback, record_saved}` · `export:failed{export_id, code, detail}` (`layer_unreadable`, `locked`, `disk_full`, `out_of_memory`, `encode_failed`) · `export:cancelled{export_id}` · `export:settings-changed{source, target}`.
+- **Events** (R21): `export:progress{export_id, phase, fraction}` · `export:done{export_id, path, width, height, bytes, format, fallback, record_saved}` · `export:failed{export_id, code, detail}` (`layer_unreadable`, `locked`, `disk_full`, `out_of_memory`, `encode_failed`) · `export:canceled{export_id}` · `export:settings-changed{source, target}`.
 - **Library API** (`pf-imaging`): `compose_rect(stack, rect) -> Rgb8`, `flatten_strips(stack, strip_h, sink)`, `encode_{png,jpeg}_stream`, `encode_webp(buf, progress, cancel)`, `resize_lanczos3`. `pf-core` maps the manifest to a `LayerStack`.
 
 ## 10. Provider interaction

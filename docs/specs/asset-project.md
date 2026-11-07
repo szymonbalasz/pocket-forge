@@ -90,7 +90,7 @@ Full tree and field tables: [manifest-schema](../architecture/manifest-schema.md
 | Command | Input → result | Errors |
 |---|---|---|
 | `library_get_config` / `library_set_roots` | — / `roots[]`, `import_dest` → config | FR-PRJ-01 field errors |
-| `import_paths` / `import_cancel` | `paths[]` → per item `imported` \| `already_in_library` \| `skipped(reason)` | `library_unavailable`, `cancelled` (partial results) |
+| `import_paths` / `import_cancel` | `paths[]` → per item `imported` \| `already_in_library` \| `skipped(reason)` | `library_unavailable`, `canceled` (partial results) |
 | `import_clipboard_image` | image bytes → library path | `unsupported`, `too_large` |
 | `project_open` | image or `.pforge` path → snapshot + `warnings[]` (read-only reason, conflict, recovered, resumable, lost) | `not_found`, `not_available_offline`, `corrupt`, `outside_library` (UI calls `import_paths` first) |
 | `project_close` | — → ok | `unsaved` |

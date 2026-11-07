@@ -152,7 +152,7 @@ Closed questions (✅) are in [Appendix E](#appendix-e-closed-open-questions).
 
 | ID | Question | Options (pick in **bold**) | Blocking? | Affects |
 |---|---|---|---|---|
-| OQ-PRV-22 | Where the job handle lives | **A. Inside `provider{}`; RGN asks `has_handle()`** / B. a top-level job field mirrored by PRV — A keeps one source of truth; B lets PRJ index it without PRV | No | [asset-project](asset-project.md) (manifest-schema) |
+| OQ-PRV-22 ✅ | Where the job handle lives. **Answered (R31): inside `provider{}`; job state alone tells whether a handle exists; no `has_handle()`.** / B. a top-level job field mirrored by PRV — A keeps one source of truth; B lets PRJ index it without PRV | No | [asset-project](asset-project.md) (manifest-schema) |
 
 ## Appendix A: recording format
 `{format_version, provider, model, case, recorded_on, source: recorded|synthetic, exchanges: [{request: {method, path, query, body}, response: {status, headers (subset), body}}]}`. Ids become `<team-id>`/`<asset-N>`, URLs become `fake://asset/N`, and image bytes become `{"fixture": "<name>.png"}`.

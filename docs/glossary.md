@@ -22,6 +22,9 @@
 | **Balance** | The provider credit remaining on the user's account, if the provider reports it. |
 | **Job handle** | The provider's id for a submitted job, used to poll and fetch it. |
 | **Estimate** | The provider's pre-flight cost for a job, fetched without running it. |
+| **Session spend** | The provider cost accumulated in the current app session, checked against the spend cap. |
+| **Job runner** | The core component that drives a job through its states (submit, poll, fetch) and persists each transition. |
+| **Capability snapshot** | A copy of the model capabilities used for a job, stored on the job record for reproducibility (KQ-17). |
 | **Spend cap** | The user-set limit on cost per session, plus a per-job confirmation threshold (#23). |
 | **Candidate** | One image a job returns, waiting to be compared, picked or discarded. |
 | **Revision** | A saved state of an asset project (on accept, explicit save, restore, re-tune or conflict resolution). Revisions form a recoverable history. |
@@ -33,6 +36,7 @@
 | **Spool** | Per-machine holding area for writes that can't reach the library yet (e.g. during a sync conflict); replayed afterwards. |
 | **Trash** | Per-project holding area for discarded items; emptied after 30 days (#18). |
 | **Conflict copy** | A duplicate file created by a sync service when two machines changed the same file. |
+| **Read-only** | An asset project that can be viewed (and masks painted) but not changed, e.g. when it was written by a newer app version. |
 | **Local cache** | Per-machine, rebuildable data outside the library (tiles, index). Losing it loses no project data. |
 | **Reference image** | An image supplied to a job with a **reference role**. |
 | **Reference role** | What a reference image may influence: *style*, *structure* or *identity*. |
