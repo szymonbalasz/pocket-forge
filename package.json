@@ -1,0 +1,19 @@
+{
+  "name": "pocket-forge",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.18.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "test": "corepack pnpm --filter ./app test",
+    "e2e": "corepack pnpm --filter ./app e2e",
+    "env:init": "node scripts/env-init.mjs",
+    "dev": "node scripts/dev.mjs",
+    "tauri:smoke": "node scripts/tauri-smoke.mjs",
+    "fixtures": "node fixtures/gen/gen-fixtures.mjs",
+    "check:crates": "node scripts/check-crate-deps.mjs"
+  }
+}
