@@ -54,6 +54,7 @@ impl Core {
     pub fn new(ctx: Context) -> CoreResult<Self> {
         let (settings, settings_warnings) = settings::load_or_init(&ctx)?;
         crate::library::prepare_override(&ctx)?;
+        ctx.provider.set_account(settings.provider.account());
         Ok(Core {
             ctx,
             state: Mutex::new(State {

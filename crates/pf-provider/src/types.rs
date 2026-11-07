@@ -158,6 +158,13 @@ pub struct Slot {
     pub required: bool,
 }
 
+/// `list_models` plus whether it came from the local cache while offline (FR-PRV-25).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModelList {
+    pub models: Vec<ModelSummary>,
+    pub stale: bool,
+}
+
 /// Normalised model capabilities (Appendix C).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Capabilities {

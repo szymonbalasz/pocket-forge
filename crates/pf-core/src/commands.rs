@@ -429,30 +429,12 @@ impl Command for EdtImageOpen {
 
 // ---------------------------------------------------------------- provider
 
-/// Skeleton version of PRV's `provider_status` (credentials and connectivity are PRV slice 2).
-pub struct ProviderStatus;
-
-#[derive(Debug, Serialize)]
-pub struct ProviderStatusOutput {
-    pub mode: pf_provider::ProviderMode,
-    pub configured: bool,
-    pub connectivity: &'static str,
-}
-
-impl Command for ProviderStatus {
-    const NAME: &'static str = "provider_status";
-    type Input = NoInput;
-    type Output = ProviderStatusOutput;
-
-    fn run(core: &Core, _: NoInput) -> CoreResult<ProviderStatusOutput> {
-        let fake = matches!(core.ctx.provider, pf_provider::AnyProvider::Fake(_));
-        Ok(ProviderStatusOutput {
-            mode: core.ctx.provider.mode(),
-            configured: fake,
-            connectivity: if fake { "ok" } else { "unknown" },
-        })
-    }
-}
+/// Provider commands live in their own module (provider spec §9).
+pub use crate::provider_commands::{
+    ProviderBalance, ProviderCredentialsClear, ProviderCredentialsSet, ProviderFakeSetCase,
+    ProviderGetCapabilities, ProviderListModels, ProviderSettingsGet, ProviderSettingsSet,
+    ProviderStatus, ProviderTestConnection,
+};
 
 // ---------------------------------------------------------------- registry (append-only)
 
@@ -482,6 +464,15 @@ registry![
     RecentList,
     EdtImageOpen,
     ProviderStatus,
+    ProviderCredentialsSet,
+    ProviderCredentialsClear,
+    ProviderTestConnection,
+    ProviderSettingsGet,
+    ProviderSettingsSet,
+    ProviderListModels,
+    ProviderGetCapabilities,
+    ProviderBalance,
+    ProviderFakeSetCase,
 ];
 
 #[cfg(test)]

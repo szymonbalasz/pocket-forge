@@ -67,6 +67,8 @@ struct FakeState {
 #[derive(Debug, Default)]
 pub struct FakeProvider {
     state: Mutex<FakeState>,
+    /// Last known connectivity (updated by `AnyProvider`'s dispatch).
+    pub connectivity: crate::ConnectivityCell,
 }
 
 /// The three fake models, one per mask convention (FR-PRV-03).

@@ -1,0 +1,82 @@
+/* Provider chip and settings (provider spec §7). Colours only for state. */
+
+/* The status bar lays its slot items out in a row so the chip sits at the right end.
+   For the shell owner: move this into the shell layout (Layout.tsx) and drop it here. */
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.statusbar > .status {
+  flex: 1;
+}
+
+.prv-chip {
+  font-size: 11px;
+  border-radius: 10px;
+  padding: 1px 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.prv-chip-offline,
+.prv-chip-not_configured {
+  color: var(--warning);
+}
+
+.prv-chip-auth_error {
+  color: var(--error);
+}
+
+.prv-settings {
+  position: fixed;
+  right: 16px;
+  bottom: 48px;
+  width: 340px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 12px;
+  z-index: 20;
+}
+
+.prv-settings-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.prv-field {
+  display: block;
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.prv-field input {
+  margin-top: 4px;
+}
+
+.prv-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.prv-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border: 2px solid var(--muted);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: prv-spin 0.8s linear infinite;
+}
+
+@keyframes prv-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

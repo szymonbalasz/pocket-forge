@@ -45,6 +45,15 @@ tauri_commands! {
     recent_list => c::RecentList,
     edt_image_open => c::EdtImageOpen,
     provider_status => c::ProviderStatus,
+    provider_credentials_set => c::ProviderCredentialsSet,
+    provider_credentials_clear => c::ProviderCredentialsClear,
+    provider_test_connection => c::ProviderTestConnection,
+    provider_settings_get => c::ProviderSettingsGet,
+    provider_settings_set => c::ProviderSettingsSet,
+    provider_list_models => c::ProviderListModels,
+    provider_get_capabilities => c::ProviderGetCapabilities,
+    provider_balance => c::ProviderBalance,
+    provider_fake_set_case => c::ProviderFakeSetCase,
 }
 
 #[cfg(test)]
