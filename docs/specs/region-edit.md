@@ -1,8 +1,8 @@
 ---
 feature: region-edit
 prefix: RGN
-owner: unclaimed
-status: unclaimed   # unclaimed → claimed → draft → in-review → complete (owner only)
+owner: spec-region-edit
+status: claimed   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [asset-project, editor-canvas, provider]
 ---
 
