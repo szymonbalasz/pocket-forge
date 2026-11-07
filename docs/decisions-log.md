@@ -33,5 +33,6 @@ Append-only. Cite decisions as `#N`. Changing a decision takes a new row that su
 | 27 | Animation covers every asset type eventually (tokens, map elements, whole maps, item art). It comes after the first milestone, **tokens first**. Motion source still open (KQ-39). | Static loop first; animation is the next big step | Owner, KQ-39 |
 | 28 | Merging is local: branches are pushed and CI runs on every branch push. The orchestrator merges with `--no-ff` once the branch is green. No PRs required, no branch protection: a single maintainer using common sense. | Simple single-maintainer flow | Owner, KQ-37 |
 | 29 | Feature tiers accepted as proposed. | Owner review | Owner |
+| 30 | Refines #11: **most maps are smaller**, around 30×40 cells, which is about 2100×2800 to 4200×5600 px at 70–140 px per cell. Optimise for that; 16k remains the supported upper bound. | Typical vs worst case | Owner |
 
 The tech stack (Tauri, Rust, a TS web UI and the canvas library) is **provisional**. It is not logged until the stack ADRs are accepted.
