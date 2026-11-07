@@ -2,7 +2,7 @@
 feature: asset-project
 prefix: PRJ
 owner: rev-asset-project
-status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: []
 ---
 
@@ -102,7 +102,7 @@ Full tree and field tables: [manifest-schema](../architecture/manifest-schema.md
 | `project_conflict_get` / `project_resolve_conflict` | — / `keep: this \| other` → both versions / revision | `no_conflict`, `files_missing` |
 | `recent_list` | — → `[{path, name, opened_at}]` | — |
 
-- **Store API** (Rust, one commit each, `read_only`/`locked`/`conflict` as above, R4): `read_project` (current layer stack, R6), `record_job`, `update_job`, `add_candidates`, `put_mask`, `accept_candidate`, `set_star`, `discard_candidate`, `resolve_job`, `replace_patch_layer` (re-tune), `put_export` (export settings + `last`), `settings_get` / `settings_put(section)`, `decoded_original`, `resolve_image(image_id)` (original, layer or candidate → file, for EDT). User-facing job and candidate commands are RGN's (`rgn_*`).
+- **Store API** (Rust, one commit each, `read_only`/`locked`/`conflict` as above, R4): `read_project` (current layer stack, R6), `record_job`, `update_job`, `add_candidates`, `put_mask`, `accept_candidate` (also restores a trashed candidate file in the same commit for a re-pick, FR-RGN-36), `set_star`, `discard_candidate`, `resolve_job`, `replace_patch_layer` (re-tune), `put_export` (export settings + `last`), `settings_get` / `settings_put(section)`, `decoded_original`, `resolve_image(image_id)` (original, layer or candidate → file, for EDT). User-facing job and candidate commands are RGN's (`rgn_*`).
 - **Events:** `import:progress{done, total}`, `import:done`, `project:committed{seq}`, `project:save-failed{reason, retrying}`, `project:conflict`, `project:recovered`, `project:original-ready`, `trash:purged{count, bytes}` (R21).
 
 ## 10. Provider interaction
@@ -147,12 +147,9 @@ N/A: no provider calls. PRJ persists the job record ADR 0001 requires (KQ-17) an
 | 6 | Conflicts: copy + seq detection, spool, conflict view, resolve, status bar | command registry (append) | 4 |
 
 ## 15. Open questions
-| ID | Question | Options (pick in **bold**) | Blocking? | Affects |
-|---|---|---|---|---|
-| OQ-PRJ-10 | A conflict copy of a `job.json` | **A. The copy with the later state (diagram order) wins; the other goes to the trash** / B. Follows the user's keep choice. A never drops a job handle or paid candidates; B is stricter to #39 but can lose candidate refs to the trash. | No | RGN |
-| OQ-PRJ-11 | How the conflict view draws each version ([editor-canvas](editor-canvas.md)) | **A. EDT's canvas draws a given layer stack read-only (not only the manifest's)** / B. Text only (time, layer count, revision label). A lets the user see what they keep; B needs nothing from EDT. | No (slice 6; B is the fallback) | EDT |
+None open.
 
-**Resolved:** OQ-PRJ-01 ✅ A, `<file>.pforge/` (#40) · OQ-PRJ-02 ✅ A, `Imported/` (#40) · OQ-PRJ-03 ✅ A, first commit (#40) · OQ-PRJ-04 ✅ A, commit every change, draft after 2 s idle (#40) · OQ-PRJ-05 ✅ A, `sha2` (#38) · OQ-PRJ-06 ✅ restore the parent revision (R3, FR-PRJ-43) · OQ-PRJ-07 ✅ A, PRJ minimal revision list, recent list, relink (#40) · OQ-PRJ-08 ✅ added to the glossary (R27) · OQ-PRJ-09 ✅ EDT owns the tile cache, 2 GiB (R5) · OQ-PRJ-12 ✅ A, Head revision, Import destination and Spool added (R29) · OQ-EDT-14 (asks PRJ): compatible with EDT's pick A, a restore brings back the revision's draft and EDT re-submits the live mask.
+**Resolved:** OQ-PRJ-01 ✅ A, `<file>.pforge/` (#40) · OQ-PRJ-02 ✅ A, `Imported/` (#40) · OQ-PRJ-03 ✅ A, first commit (#40) · OQ-PRJ-04 ✅ A, commit every change, draft after 2 s idle (#40) · OQ-PRJ-05 ✅ A, `sha2` (#38) · OQ-PRJ-06 ✅ restore the parent revision (R3, FR-PRJ-43) · OQ-PRJ-07 ✅ A, PRJ minimal revision list, recent list, relink (#40) · OQ-PRJ-08 ✅ added to the glossary (R27) · OQ-PRJ-09 ✅ EDT owns the tile cache, 2 GiB (R5) · OQ-PRJ-12 ✅ A, Head revision, Import destination and Spool added (R29) · OQ-PRJ-10 ✅ A, the `job.json` copy with the later state wins (#41) · OQ-PRJ-11 ✅ A, EDT draws a given layer stack read-only (#41) · OQ-EDT-14 ✅ A, a restore brings back the revision's draft and EDT re-submits the live mask (#41).
 
 ## Appendix A: walkthrough
 `PF_DATA_DIR` + `PF_LIBRARY_DIR` in `.pf-dev/`, fake provider.

@@ -2,7 +2,7 @@
 feature: region-edit
 prefix: RGN
 owner: rev-region-edit
-status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [asset-project, editor-canvas, provider, export]
 ---
 
@@ -63,6 +63,7 @@ Tier S ([feature-tiers](../feature-tiers.md)): localised edit of a masked region
 | FR-RGN-28 | Statuses (R10): star toggles `starred` (kept forever). Discard → `discarded`, file to the **trash**. On accept or dismiss, the other `new` candidates → `dismissed`; unstarred ones go to the trash (`trash_id` set), starred ones stay ([schema §4.7](../architecture/manifest-schema.md#47-candidate-manifest-candidates)). A job ends on accept, dismiss or the next submit in its project (`resolved_at` set). One that ends with nothing accepted or starred also trashes its region and mask PNGs (R9). Accepted jobs keep them forever. |
 | FR-RGN-29 | Re-tune (#40) re-bakes from the untouched candidate into a **new** layer id and file, replacing the layer in the stack, plus a revision with reason `retune` (R3). The old file stays referenced by its revision. |
 | FR-RGN-30 | Accept and re-tune each push one entry onto EDT's undo stack (FR-EDT-23): undo = `project_restore_revision(parent)` (reason `restore`), redo = restore the later revision (R3). Candidate and job records are unchanged. Undo never deletes a file. |
+| FR-RGN-36 | **Re-pick** (#41, R32): when the project's most recent job is `closed` with an accept and the current layer stack holds no layer from it (e.g. after undo of that accept), the picker shows its candidates again. Accepting one works as FR-RGN-27 (new layer, `accept` revision); a trashed candidate file is restored from the trash in the same commit. The job stays `closed` and earlier `accepted` candidates keep their status. Not available once a newer job exists or after the trash purge (`repick_unavailable`). No provider call, no spend. |
 | FR-RGN-31 | Every capability here is a `pf-core` command (§9) that works without the UI, with inputs validated at the boundary. A failed command leaves the asset project unchanged. |
 | FR-RGN-32 | No visible seam: with the fake case `offset(12)` on the seam fixture, after the bake the mean edge step across the mask boundary is ≤ 0.5 levels/px and the residual offset ≤ 0.1 levels (ADR 0004 measured 0.28 and 0.03). |
 | FR-RGN-33 | Rules (#37): on every control change the panel calls `rgn_controls_evaluate`, which runs PRV's pure `Capabilities::evaluate` (FR-PRV-30). Hidden controls are neither shown nor sent; a value outside the effective allowed set resets to the default with a notice; required controls are marked and submit is disabled, naming them. Estimate and submit re-evaluate at the boundary: `invalid_control(name, reason)`. |
@@ -97,7 +98,7 @@ PRJ owns storage, names and the atomic commit; fields are defined once in [manif
 | `rgn_job_retry_draft` | job id → a pre-filled draft | `not_found`, `source_missing` |
 | `rgn_job_dismiss` | job id → trashed count | `job_active`, `not_found` |
 | `rgn_candidate_preview` | job, candidate, blend → `{key, rect}` | `invalid_candidate`, `original_unavailable` |
-| `rgn_candidate_accept` | job, candidate, blend → `{layer_id, revision_id}` | `invalid_candidate`, `original_unavailable` |
+| `rgn_candidate_accept` | job, candidate, blend → `{layer_id, revision_id}` (also a re-pick, FR-RGN-36) | `invalid_candidate`, `original_unavailable`, `repick_unavailable` |
 | `rgn_candidate_star` / `_discard` | job, candidate, flag → ok | `not_found` |
 | `rgn_patch_retune` | layer id, blend → `{layer_id, revision_id}` | `source_missing`, `original_unavailable` |
 | `rgn_spend_get` / `_set` | — / `{cap, threshold}` → `{spend, cap, threshold}` | `invalid_value` |
@@ -130,7 +131,7 @@ PRJ owns storage, names and the atomic commit; fields are defined once in [manif
 ## 13. Test plan
 - **Rust unit** (`fr_rgn_NN_*`): clamping and caps (01, 02); mask pad → resample → validate (03); fit with `input_px` (05); byte pre-check (06); required rules and boundary checks (33, 34); estimate hash (13); spend with cap, threshold, unknown and `lost` (14–16); every transition in Appendix B (17, 22, 23, 35); statuses and input retention (28); seam metric (32).
 - **Vitest** (`FR-RGN-NN …`): the panel renders exactly `fixtures/rgn/capabilities-all-types.json` (every type, `hidden`/`allowed`/`required` rules, a warning) (07, 08, 33); debounced estimate only on cost-affecting changes (12); confirm-dialog logic; fit label.
-- **Integration** (pf-core + **fake provider**, cases per R17): full loop to an accepted revision; reopen pixel-identical; original hash unchanged (27); resume after recreating the core context mid-`running` (22); `canceled`, `not_cancellable`, `failure`, `insufficient_balance`, `estimate_unknown`, `offline` → reconnect, `slow(n)`, `bad_candidate`, `aspect_mismatch(2)`; prompt received = typed (09); undo/redo of accept and re-tune (30); spool replay after a conflict (37); `read_only` (36). **Thin e2e** (Playwright, mocked commands, KQ-33): region → controls → prompt → estimate → confirm → progress → pick → accept; over-cap dialog; cancel.
+- **Integration** (pf-core + **fake provider**, cases per R17): full loop to an accepted revision; reopen pixel-identical; original hash unchanged (27); resume after recreating the core context mid-`running` (22); `canceled`, `not_cancellable`, `failure`, `insufficient_balance`, `estimate_unknown`, `offline` → reconnect, `slow(n)`, `bad_candidate`, `aspect_mismatch(2)`; prompt received = typed (09); undo/redo of accept and re-tune (30); undo accept → re-pick another candidate, incl. one from the trash, no provider call (36); spool replay after a conflict (37); `read_only` (36). **Thin e2e** (Playwright, mocked commands, KQ-33): region → controls → prompt → estimate → confirm → progress → pick → accept; over-cap dialog; cancel.
 - **Fixtures** (generated, KQ-22): a synthetic "rooms" battlemap 4200×5600 (16384² for perf, not committed), the seam fixture (texture noise; fake `offset(12)`), a fixture mask, the capabilities fixture above. No recordings: those are Scenario replay only (R17).
 - **Walkthrough** (dev build, fake provider, `PF_DATA_DIR=.pf-dev/data`, `PF_LIBRARY_DIR=.pf-dev/library`):
 
@@ -142,6 +143,7 @@ PRJ owns storage, names and the atomic commit; fields are defined once in [manif
 | 4 | Quit mid-`running`, reopen | The job resumes and finishes; candidates appear |
 | 5 | Before/after, star #2, feather 96, accept #1 | Patch in place, FR-RGN-32 metric passes; #2 starred; the rest in the trash; revision `r1` |
 | 6 | Undo, redo, re-tune feather to 32, close, reopen | `r2` restore, `r3` restore, `r4` retune; layer and blend values intact |
+| 6b | Undo the re-tune and the accept, pick #2, accept | `r5`, `r6` restores; no new estimate or spend; patch from #2; revision `r7` |
 | 7 | Retry with a new prompt | Pre-filled panel; a new estimate is required |
 
 ## 14. Build split
@@ -155,11 +157,7 @@ PRJ owns storage, names and the atomic commit; fields are defined once in [manif
 | 6 | Panel UI with Appendix A controls, job strip, confirm dialog (mocked commands, parallel to 2–5) | UI feature registry (append) | EDT region tool, mask hand-off, picker |
 
 ## 15. Open questions
-All blocking questions are closed; answered ones are in [Appendix C](#appendix-c-closed-open-questions).
-
-| ID | Question | Options (pick in **bold**) | Blocking? | Affects |
-|---|---|---|---|---|
-| OQ-RGN-13 | After undoing an accept, can another candidate of that job be accepted? | **A. Not in the MVP: undo restores layers only, the job stays `closed`; use Retry or restore the candidate from the trash later (tier A)** / B. undo reopens the job — A keeps `closed` terminal (R2). B saves credits but adds a reverse transition. | No | PRJ |
+None open; answered ones are in [Appendix C](#appendix-c-closed-open-questions).
 
 ## Appendix A: capability-driven controls
 Rendered from PRV's generic `controls[]` (FR-PRV-10, PRV Appendix C). Each control carries PRV's `role` (R28); RGN binds the source, mask and prompt by role, never by input name.
@@ -180,7 +178,7 @@ Rendered from PRV's generic `controls[]` (FR-PRV-10, PRV Appendix C). Each contr
 Numeric rows also cover `candidate_count`. Defaults prefill every control. `rules[]` act through `evaluate` (FR-RGN-33): `hidden` hides and drops a control, `allowed` narrows its choices, `required` marks it. Changing a `cost_affecting` control re-estimates (FR-RGN-12).
 
 ## Appendix B: job states
-Terminal: `failed`, `canceled`, `lost`, `closed` (R2). `fetched` waits for accept or dismiss; the next submit dismisses it. Dismissing a terminal job only sets `resolved_at` (FR-RGN-28). Every transition is committed.
+Terminal: `failed`, `canceled`, `lost`, `closed` (R2). `fetched` waits for accept or dismiss; the next submit dismisses it. A re-pick (FR-RGN-36) keeps a job `closed`; it is not a transition. Dismissing a terminal job only sets `resolved_at` (FR-RGN-28). Every transition is committed.
 
 ```mermaid
 stateDiagram-v2
@@ -230,4 +228,5 @@ stateDiagram-v2
 | OQ-RGN-10 | Crash before the handle is saved | ✅ `lost` + possible-charge notice (#40) |
 | OQ-RGN-11 | Input constraints beyond max px | ✅ PRV exposes `input_px`; RGN fits to it (R20) |
 | OQ-RGN-12 | Glossary terms | ✅ Added (R27) |
+| OQ-RGN-13 | Accept another candidate after undoing an accept | ✅ B as a re-pick that keeps `closed` terminal (#41, R32, FR-RGN-36) |
 | OQ-RGN-14 | Which control is the source, mask, prompt or candidate count | ✅ PRV's `role` field; RGN binds by role (R28) |

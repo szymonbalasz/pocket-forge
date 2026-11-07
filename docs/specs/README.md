@@ -4,8 +4,8 @@ Specs use [_template.md](_template.md) and are written just in time (see [proces
 
 | Spec | Prefix | Phase | Status |
 |---|---|---|---|
-| [asset-project](asset-project.md) | PRJ | 1b (milestone loop) | in-review |
-| [editor-canvas](editor-canvas.md) | EDT | 1b (milestone loop) | in-review |
-| [region-edit](region-edit.md) | RGN | 1b (milestone loop) | in-review |
-| [provider](provider.md) | PRV | 1b (milestone loop) | in-review |
-| [export](export.md) | EXP | 1b (milestone loop) | in-review |
+| [asset-project](asset-project.md) | PRJ | 1b (milestone loop) | complete |
+| [editor-canvas](editor-canvas.md) | EDT | 1b (milestone loop) | complete |
+| [region-edit](region-edit.md) | RGN | 1b (milestone loop) | complete |
+| [provider](provider.md) | PRV | 1b (milestone loop) | complete |
+| [export](export.md) | EXP | 1b (milestone loop) | complete |

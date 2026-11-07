@@ -1,29 +1,21 @@
 # Status (scratch board, overwritten as things change)
 
-**Phase:** 1b gate: waiting on the owner ([gate-phase1b.md](gate-phase1b.md), [rulings](rulings-phase1b.md)).
+**Phase:** 2, skeleton build. Specs for the milestone loop are complete (#41).
 
 | Task | Agent | Worktree / branch | State | Blockers |
 |---|---|---|---|---|
-| Kickoff Q&A | orchestrator | `main` | done | — |
-| Spec: asset-project | — | merged | in-review | gate |
-| Spec: editor-canvas | — | merged | in-review | gate |
-| Spec: region-edit | — | merged | in-review | gate |
-| Spec: provider | — | merged | in-review | gate |
-| Spec: export | — | merged | in-review | gate |
-| Canvas library spike | — | merged (PR #3) | done | ADR proposed; gate with imaging spike |
-| Rust imaging spike (+ animated WebP/GIF encoding) | — | merged (PR #4) | done | ADR proposed |
-| Scenario video/animation research | — | merged (PR #2) | done | OQ-ANI decided at the animation spec |
-| Scenario API spike | — | merged (PR #1) | done | ADR 0001 accepted |
+| Specs: asset-project, editor-canvas, region-edit, provider, export | — | merged | complete (#41) | — |
+| Skeleton (workspace, plumbing, project minimum, fake provider, harness, CI) | `skeleton` | `build/skeleton` | in progress | — |
 
 ## Pending owner decisions
 - OQ-IMG-12: file the image-webp bug upstream? (not urgent)
 - MCP endpoint order within tier A (#36)
 
 ## Integrator rulings (since last gate)
-- _none_
+- R32: re-pick keeps the job `closed` (OQ-RGN-13 = B, #41)
 
 ## Shared-file locks
-- _none_
+- Root `Cargo.toml`, `package.json`, `pnpm-workspace.yaml`, `tauri.conf.json`, `.github/workflows/*`: created by the skeleton builder (orchestrator-delegated)
 
 ## Reserved FR ranges
 - _none_

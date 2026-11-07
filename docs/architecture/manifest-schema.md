@@ -147,7 +147,7 @@ stateDiagram-v2
   lost --> [*]
   closed --> [*]
 ```
-Terminal = `failed | canceled | lost | closed`. Handle rule: `requested` has no handle; `submitted` and every state reached from it have one inside `provider{}`. PRJ never reads it. RGN's job runner drives the transitions (R14); PRJ persists them.
+Terminal = `failed | canceled | lost | closed`. A re-pick (RGN FR-RGN-36) accepts another candidate of a `closed` job without a transition. Handle rule: `requested` has no handle; `submitted` and every state reached from it have one inside `provider{}`. PRJ never reads it. RGN's job runner drives the transitions (R14); PRJ persists them.
 
 ### 4.7 Candidate (manifest `candidates[]`)
 | Field | Type | Notes |

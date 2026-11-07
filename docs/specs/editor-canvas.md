@@ -2,7 +2,7 @@
 feature: editor-canvas
 prefix: EDT
 owner: rev-editor-canvas
-status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [asset-project, export]
 ---
 
@@ -111,7 +111,7 @@ N/A. The canvas never calls the provider. Candidates and previews reach it as im
 | Offline / provider error or timeout | No effect on the canvas (§10). Read-only: FR-EDT-29. |
 | Very large image | Up to 16384 per side with tiles; larger → `too_large` with a message. No full-image canvas anywhere (ADR 0003). |
 | Corrupt or unsupported input | Build fails → `edt:tiles-failed` → banner; the app keeps running. A corrupt cached tile → retry, then Rebuild. A corrupt mask → `corrupt`, and the mask canvas starts empty with a warning. |
-| Undo across the feature boundary | Submitted masks are immutable; undo changes only the live mask canvas. Accept and re-tune undo through revisions (FR-EDT-23). After a restore, the live mask canvas is kept (OQ-EDT-14, pick A). |
+| Undo across the feature boundary | Submitted masks are immutable; undo changes only the live mask canvas. Accept and re-tune undo through revisions (FR-EDT-23). After a restore, the live mask canvas is kept (OQ-EDT-14 ✅ A, #41). |
 | GPU reset / context loss | The mask canvas is CPU-backed (`willReadFrequently`), so it can't lose content. Tiles redraw from the LRU. |
 
 ## 12. Performance budget
@@ -152,11 +152,9 @@ Reference: the spike rig (iGPU, 1600×900) at DPR 1 and 1.5, measured by a non-g
 | 6 | Compare + candidate picker (FR 24–25) | none | 3; RGN wiring after |
 
 ## 15. Open questions
-| ID | Question | Options (pick in **bold**) | Blocking? | Affects |
-|---|---|---|---|---|
-| OQ-EDT-14 | A restore (incl. undo of accept) brings back the revision's draft, whose mask may differ from the live mask canvas. Which wins? | **A. The live mask canvas: EDT re-submits it at once so the draft points at it** (no surprise jump; one extra commit) / B. reload the restored mask as one undo step (draft and canvas always agree, but the painted mask can vanish) | No | [asset-project](asset-project.md) |
+None open.
 
-**Resolved:** OQ-EDT-01 ✅ A, both values required (#40, R6) · OQ-EDT-02 ✅ A, 100 % = 1 device px (#40) · OQ-EDT-03 ✅ region first (R18 = OQ-RGN-01 A) · OQ-EDT-04 ✅ inner-rect mask, RGN pads (R1) · OQ-EDT-05 ✅ one shared stack, accept undone by revision restore (R3) · OQ-EDT-06 ✅ 256 MiB (#40) · OQ-EDT-07 ✅ write-once PNG via PRJ, draft debounce (#40, R7) · OQ-EDT-08 ✅ layer files write-once (#40, R3) · OQ-EDT-09 ✅ 2 GiB, EDT owns the cache (R5) · OQ-EDT-10 ✅ compare shows RGN's baked preview as `{key, rect}` (#40, R16) · OQ-EDT-11 ✅ view not persisted (#40, owner) · OQ-EDT-12 ✅ CPU-backed mask canvas (#40) · OQ-EDT-13 ✅ *Display size* added to the glossary (R27).
+**Resolved:** OQ-EDT-01 ✅ A, both values required (#40, R6) · OQ-EDT-02 ✅ A, 100 % = 1 device px (#40) · OQ-EDT-03 ✅ region first (R18 = OQ-RGN-01 A) · OQ-EDT-04 ✅ inner-rect mask, RGN pads (R1) · OQ-EDT-05 ✅ one shared stack, accept undone by revision restore (R3) · OQ-EDT-06 ✅ 256 MiB (#40) · OQ-EDT-07 ✅ write-once PNG via PRJ, draft debounce (#40, R7) · OQ-EDT-08 ✅ layer files write-once (#40, R3) · OQ-EDT-09 ✅ 2 GiB, EDT owns the cache (R5) · OQ-EDT-10 ✅ compare shows RGN's baked preview as `{key, rect}` (#40, R16) · OQ-EDT-11 ✅ view not persisted (#40, owner) · OQ-EDT-12 ✅ CPU-backed mask canvas (#40) · OQ-EDT-13 ✅ *Display size* added to the glossary (R27) · OQ-EDT-14 ✅ A, the live mask canvas wins and is re-submitted (#41).
 
 ## Appendix A: `pf-tiles` URI scheme
 - Host: `pf-tiles` (`http://pf-tiles.localhost/…` on Windows). The UI takes `base_url` / `url` from command results and never builds hosts itself, so Playwright mocks it with a static folder.

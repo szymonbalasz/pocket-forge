@@ -2,7 +2,7 @@
 feature: provider
 prefix: PRV
 owner: rev-provider
-status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [asset-project]
 ---
 
