@@ -2,7 +2,7 @@
 feature: region-edit
 prefix: RGN
 owner: rev-region-edit
-status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [asset-project, editor-canvas, provider, export]
 ---
 
@@ -50,17 +50,17 @@ Tier S ([feature-tiers](../feature-tiers.md)): localised edit of a masked region
 | FR-RGN-15 | An estimate above the per-job threshold needs a second explicit confirmation. An unknown cost always needs one (ADR 0001). |
 | FR-RGN-16 | No cap or threshold set → the first submit asks for both (#40). They are stored in PRJ's settings section `spend` (R8). |
 | FR-RGN-17 | Before the provider `submit`, the job record (state `requested`), the region PNG and the mask PNG as sent (after fit, before polarity conversion) are committed (R2). When submit returns, PRV's opaque `provider{}`, which holds the **job handle** (OQ-PRV-22), is committed with state `submitted`; the state alone tells whether a handle exists. `provider{}` is persisted verbatim on every later transition. At most one active job per asset project (#40): a second submit → `job_active`. |
-| FR-RGN-18 | The job strip shows state, progress %, elapsed time and cost (estimate, then actual). A "still running" notice appears when `long_running` is true (FR-PRV-19). Every transition emits `rgn:job-state`. |
+| FR-RGN-18 | The job strip (the active job's entry in the iteration tracker, FR-RGN-40) shows state, progress %, elapsed time and cost (estimate, then actual). A "still running" notice appears when `long_running` is true (FR-PRV-19). Every transition emits `rgn:job-state`. |
 | FR-RGN-19 | Cancel is offered in `submitted`, `queued` and `running`. On a provider ack → `canceled`. If not cancellable, the panel says so and the job continues. |
 | FR-RGN-20 | A failed job shows the normalised error and hint; `insufficient_balance` gets its own message. Nothing is ever resubmitted automatically. |
 | FR-RGN-21 | Retry pre-fills the panel from the job (region, margin, its draft mask, prompt, model, controls; a new random seed unless pinned), then estimate → confirm again. |
 | FR-RGN-22 | On project open the job runner resumes non-terminal jobs from their job files (the manifest index is rebuilt, R2): `submitted`, `queued`, `running`, `unknown` → poll; `succeeded` → fetch; `requested` → `lost`, with a possible-charge notice (#40). |
 | FR-RGN-23 | Submit outcome: a normalised error before the provider accepted the job → `failed`, no spend. A `timeout` on submit → `lost` with the same notice. Offline mid-job → `unknown`; on reconnect the next status decides the exit ([Appendix B](#appendix-b-job-states)). Never resubmitted. |
-| FR-RGN-24 | Each candidate is stored untouched as returned, with its index and provider metadata (R10). One that won't decode is `invalid`; the others stay usable. All invalid → `failed` with `unreadable_candidates`. Aspect differing from the sent one by > 1 % → a warning badge, resized to the outer rect (#40). |
+| FR-RGN-24 | Each candidate is stored untouched as returned, as `results/NNN <slug>/NN.<ext>` of its iteration (FR-RGN-39, #44), with its index and provider metadata (R10). One that won't decode is `invalid`; the others stay usable. All invalid → `failed` with `unreadable_candidates`. Aspect differing from the sent one by > 1 % → a warning badge, resized to the outer rect (#40). |
 | FR-RGN-25 | For the selected candidate Rust bakes a preview (resize to the outer rect, colour match, feather, alpha) and registers it with `register_transient_image` (FR-EDT-31); `rgn_candidate_preview` returns `{key, rect}` (R16). EDT's compare toggles before/after. Picker thumbnails use `edt_image_open` with `max_side` 256 (FR-EDT-32). |
 | FR-RGN-26 | Blend controls: feather 0–256 px, default 48 (0 = the painted edge only); colour match default on (KQ-23). If < 1 % of the outer rect is unmasked, colour match is skipped with a notice. |
 | FR-RGN-27 | Accept is one PRJ commit (R4): the baked RGBA patch (cropped to alpha > 0) as a new patch layer (scale 1, rotation 0, opacity 1, visible) with its job, candidate, feather and colour match; candidate statuses (FR-RGN-28); the job `closed`; a revision with reason `accept` and label = the first 40 chars of the prompt. The original's hash is unchanged. Flatten outside the mask equals the pre-accept flatten. |
-| FR-RGN-28 | Statuses (R10): star toggles `starred` (kept forever). Discard → `discarded`, file to the **trash**. On accept or dismiss, the other `new` candidates → `dismissed`; unstarred ones go to the trash (`trash_id` set), starred ones stay ([schema §4.7](../architecture/manifest-schema.md#47-candidate-manifest-candidates)). A job ends on accept, dismiss or the next submit in its project (`resolved_at` set). One that ends with nothing accepted or starred also trashes its region and mask PNGs (R9). Accepted jobs keep them forever. |
+| FR-RGN-28 | Statuses (R10): star toggles `starred` (kept forever). Discard → `discarded`, file to the **trash**. On accept or dismiss, the other `new` candidates → `dismissed`; unstarred ones go to the trash (`trash_id` set), starred ones stay ([schema §4.7](../architecture/manifest-schema.md#47-candidate-manifest-candidates)). A job ends on accept, dismiss or the next submit in its project (`resolved_at` set). One that ends with nothing accepted or starred also trashes its region and mask PNGs (R9). Accepted jobs keep them forever. A trashed result leaves `results/` for `.pforge/trash/`, and an iteration folder left empty is removed; star or restore puts the file back (FR-PRJ-31, OQ-RGN-16). |
 | FR-RGN-29 | Re-tune (#40) re-bakes from the untouched candidate into a **new** layer id and file, replacing the layer in the stack, plus a revision with reason `retune` (R3). The old file stays referenced by its revision. |
 | FR-RGN-30 | Accept and re-tune each push one entry onto EDT's undo stack (FR-EDT-23): undo = `project_restore_revision(parent)` (reason `restore`), redo = restore the later revision (R3). Candidate and job records are unchanged. Undo never deletes a file. |
 | FR-RGN-36 | **Re-pick** (#41, R32): when the project's most recent job is `closed` with an accept and the current layer stack holds no layer from it (e.g. after undo of that accept), the picker shows its candidates again. Accepting one works as FR-RGN-27 (new layer, `accept` revision); a trashed candidate file is restored from the trash in the same commit. The job stays `closed` and earlier `accepted` candidates keep their status. Not available once a newer job exists or after the trash purge (`repick_unavailable`). No provider call, no spend. |
@@ -69,20 +69,22 @@ Tier S ([feature-tiers](../feature-tiers.md)): localised edit of a masked region
 | FR-RGN-33 | Rules (#37): on every control change the panel calls `rgn_controls_evaluate`, which runs PRV's pure `Capabilities::evaluate` (FR-PRV-30). Hidden controls are neither shown nor sent; a value outside the effective allowed set resets to the default with a notice; required controls are marked and submit is disabled, naming them. Estimate and submit re-evaluate at the boundary: `invalid_control(name, reason)`. |
 | FR-RGN-34 | Sent values = visible controls that are required or changed by the user; untouched optional controls are omitted so the provider applies its default. The job records the sent values and the capability snapshot (KQ-17). |
 | FR-RGN-35 | The job runner owns the poll loop (R14): PRV `status` + `poll_delay`, a commit per transition, until the job is `fetched` or terminal, also after its project is closed while the app runs. Quitting the app stops it; FR-RGN-22 resumes it. |
-| FR-RGN-36 | Read-only project (R12): view, region and mask painting work; no estimates are requested; submit is disabled with the reason; accept, star, discard, dismiss and re-tune fail fast with `read_only`. |
 | FR-RGN-37 | Conflict or lock during a job (R12, #39): candidate bytes and job updates go to PRJ's pending-write spool and are replayed after resolution; polling continues. User writes fail with `conflict` / `locked` and work again once resolved. |
+| FR-RGN-38 | Read-only project (R12): view, region and mask painting work; no estimates are requested; submit is disabled with the reason; accept, star, discard, dismiss and re-tune fail fast with `read_only`. (Was a second FR-RGN-36; renumbered to remove the duplicate.) |
+| FR-RGN-39 | (#44) **Iteration** = a job that returned candidates; it gets one folder `results/NNN <slug>/` when its candidates are stored. `NNN` = 1 + the highest iteration number in the project, three digits (more when needed). `<slug>` = the final prompt lower-cased, every run of characters other than letters and digits turned into one space, trimmed, cut at a word boundary to ≤ 32 chars, then FR-PRJ-44 rules; empty → `edit`. A taken folder name (e.g. after a sync conflict) gets ` (2)`. Failed, canceled and lost jobs get no number and no folder. |
+| FR-RGN-40 | (#44, #45) The **iteration tracker** (bottom strip) lists the project's iterations newest first, plus the active job before it has candidates: `NNN`, slug, state, kept / returned count, cost, and a ✓ on the one with the accepted patch in the current stack. Selecting an iteration shows its non-trashed candidates in EDT's picker; the newest is selected by default. Older iterations allow compare, star and discard; accept follows FR-RGN-36 (`repick_unavailable` otherwise, OQ-RGN-15). |
 
 ## 7. UI/UX notes
-- **Region edit panel** (right side, `app/src/features/region-edit/`), top to bottom: Region (size, margin slider, fit label) · Model (picker, capability controls per Appendix A, capability warnings) · Prompt · Cost (estimate, session spend / cap, balance or "unknown", OQ-PRV-09) · Submit.
-- **Job strip:** state, progress, elapsed, cost, Cancel / Retry / Dismiss. **Candidates:** EDT's picker wired to `onSelect` (preview), `onAccept`, `onStar`, `onDiscard` (R19); blend controls under it.
+- Slots per [ui-guidelines](../architecture/ui-guidelines.md). **Generate** section of the right panel (`app/src/features/region-edit/`), top to bottom: Region (size, margin slider, fit label) · Model (picker, capability controls per Appendix A, capability warnings) · Prompt · Cost (estimate, session spend / cap, balance or "unknown", OQ-PRV-09) · Submit · blend controls (while a candidate is selected).
+- **Iteration tracker** (bottom strip, FR-RGN-40): one chip per iteration; the active job's chip is the job strip (state, progress, elapsed, cost, Cancel / Retry / Dismiss). Under it, EDT's picker shows the selected iteration's candidates, wired to `onSelect` (preview), `onAccept`, `onStar`, `onDiscard` (R19). The job state also gets a status bar segment.
 - **Confirm dialog:** estimate, spend after this job, cap, threshold or unknown-cost warning, and "N unstarred candidates of the previous job go to the trash" when that applies. Enter never confirms an over-threshold job.
-- **States:** *empty* "Drag a box to start a region edit" · *loading* spinner, submit disabled · *job running* strip active, submit disabled, view usable · *error* inline message + hint + Retry · *offline* models stale, no estimate, submit disabled · *provider unavailable* (`auth`) "Set up provider" opens PRV's credential screen · *read-only* FR-RGN-36.
-- Test ids: `rgn-panel-{margin,model,prompt,estimate,submit,warning}`, `rgn-control-input` (+ `data-record-id` = input name), `rgn-confirm-{ok,cap}`, `rgn-job-{cancel,retry,dismiss}`, `rgn-blend-{feather,colour}`. Candidate buttons are EDT's `edt-picker-*` (R19).
+- **States:** *empty* "Drag a box to start a region edit" · *loading* spinner, submit disabled · *job running* strip active, submit disabled, view usable · *error* inline message + hint + Retry · *offline* models stale, no estimate, submit disabled · *provider unavailable* (`auth`) "Set up provider" opens PRV's credential screen · *read-only* FR-RGN-38.
+- Test ids: `rgn-panel-{margin,model,prompt,estimate,submit,warning}`, `rgn-control-input` (+ `data-record-id` = input name), `rgn-confirm-{ok,cap}`, `rgn-job-{cancel,retry,dismiss}`, `rgn-blend-{feather,colour}`, `rgn-tracker-item` (+ `data-record-id` = job id). Candidate buttons are EDT's `edt-picker-*` (R19).
 
 ## 8. Data and file effects
 PRJ owns storage, names and the atomic commit; fields are defined once in [manifest-schema](../architecture/manifest-schema.md). RGN needs:
-- **Job** (R2): `jobs/<id>/job.json` + `region.png` + `mask.png` as sent. The job file is authoritative. RGN needs `fit`, `region{inner,outer,margin}`, the draft mask id, final prompt, sent control values, `seed{requested, returned}`, capability snapshot, estimate, actual cost, state with timestamps, `resolved_at`, error, and PRV's opaque `provider{}` (it holds the job handle; no top-level handle field, OQ-PRV-22). Recoverable: yes, the source of truth.
-- **Candidate** (R10): `candidates/<id>.<ext sniffed>`, untouched; `index`, `provider_meta`, status, `starred`. Kept when accepted or starred, else trashed (FR-RGN-28) and purged after 30 days (#18).
+- **Job** (R2): `.pforge/jobs/<id>/job.json` + `region.png` + `mask.png` as sent. The job file is authoritative. RGN needs `iteration{n, dir}` (FR-RGN-39), `fit`, `region{inner,outer,margin}`, the draft mask id, final prompt, sent control values, `seed{requested, returned}`, capability snapshot, estimate, actual cost, state with timestamps, `resolved_at`, error, and PRV's opaque `provider{}` (it holds the job handle; no top-level handle field, OQ-PRV-22). Recoverable: yes, the source of truth.
+- **Candidate** (R10): `results/NNN <slug>/NN.<ext sniffed>` (`NN` = index + 1), untouched, visible in Explorer; `index`, `provider_meta`, status, `starred`. Kept when accepted or starred, else trashed (FR-RGN-28) and purged after 30 days (#18).
 - **Patch layer:** write-once RGBA PNG plus its placement (ADR 0003), source job + candidate, feather and colour match (with the fitted gain/offset). Re-bakeable from the candidate.
 - **Revision:** reasons `accept`, `retune`, `restore` (R24), optional `label`. Display labels `r<seq>`.
 - **Settings:** `spend{cap, threshold}` in `<data-dir>/settings.json` (PRJ, R8), per machine. **Memory only:** session spend, previews (transient keys), the job runner; reset per session. The model cache is PRV's.
@@ -101,6 +103,7 @@ PRJ owns storage, names and the atomic commit; fields are defined once in [manif
 | `rgn_candidate_accept` | job, candidate, blend → `{layer_id, revision_id}` (also a re-pick, FR-RGN-36) | `invalid_candidate`, `original_unavailable`, `repick_unavailable` |
 | `rgn_candidate_star` / `_discard` | job, candidate, flag → ok | `not_found` |
 | `rgn_patch_retune` | layer id, blend → `{layer_id, revision_id}` | `source_missing`, `original_unavailable` |
+| `rgn_iterations_list` | — → `[{job_id, n, dir, slug, state, kept, returned, cost, accepted_in_stack}]` newest first | `no_project` |
 | `rgn_spend_get` / `_set` | — / `{cap, threshold}` → `{spend, cap, threshold}` | `invalid_value` |
 
 - **Uses:** `provider_list_models`, `provider_get_capabilities` (PRV); PRJ store calls `read_project`, `decoded_original`, `record_job`, `update_job`, `add_candidates`, `set_star`, `discard_candidate`, `accept_candidate`, `resolve_job`, `replace_patch_layer`, `settings_get/put`; PRJ commands `project_prefetch_original` (R11) and `project_restore_revision` (undo); EDT's `register_transient_image` (FR-EDT-31). Resume is a job-runner call made by `project_open`, not a command.
@@ -117,7 +120,7 @@ PRJ owns storage, names and the atomic commit; fields are defined once in [manif
 |---|---|
 | Crash mid-save | Accept is one commit: old or new state. The layer PNG is written first; an orphan goes to the trash on open (FR-PRJ-20). A crash before the handle is saved → `lost` + possible-charge notice (FR-RGN-22). |
 | Project or app closed mid-job | Polling continues while the app runs (FR-RGN-35); after an app restart it resumes on project open. |
-| Sync conflict / locked / read-only | FR-RGN-37, FR-RGN-36. Paid candidates are spooled, never dropped. |
+| Sync conflict / locked / read-only | FR-RGN-37, FR-RGN-38. Paid candidates are spooled, never dropped. |
 | Offline / provider error / timeout | §7 *offline*; mid-job FR-RGN-23. Errors show the normalised error + hint and offer Retry. A submit timeout → `lost`. |
 | Capabilities changed since the draft | Re-read on model pick; the snapshot is taken at submit; invalid remembered values reset (FR-RGN-11). |
 | Large image, image edge, odd candidate | 16k uses the decoded original, outer rect ≤ 4096². At an edge the margin is clamped and colour match fits on the context that exists. Corrupt or odd-sized candidates: FR-RGN-24. |
@@ -129,22 +132,23 @@ PRJ owns storage, names and the atomic commit; fields are defined once in [manif
 - Mask to accept: ≤ 8 clicks plus typing the prompt (the 5-minute goal).
 
 ## 13. Test plan
-- **Rust unit** (`fr_rgn_NN_*`): clamping and caps (01, 02); mask pad → resample → validate (03); fit with `input_px` (05); byte pre-check (06); required rules and boundary checks (33, 34); estimate hash (13); spend with cap, threshold, unknown and `lost` (14–16); every transition in Appendix B (17, 22, 23, 35); statuses and input retention (28); seam metric (32).
+- **Rust unit** (`fr_rgn_NN_*`): clamping and caps (01, 02); mask pad → resample → validate (03); fit with `input_px` (05); byte pre-check (06); required rules and boundary checks (33, 34); estimate hash (13); spend with cap, threshold, unknown and `lost` (14–16); every transition in Appendix B (17, 22, 23, 35); statuses, input retention and trashed results leaving `results/` (28); iteration numbering, slug and folder collisions (39); seam metric (32).
 - **Vitest** (`FR-RGN-NN …`): the panel renders exactly `fixtures/rgn/capabilities-all-types.json` (every type, `hidden`/`allowed`/`required` rules, a warning) (07, 08, 33); debounced estimate only on cost-affecting changes (12); confirm-dialog logic; fit label.
-- **Integration** (pf-core + **fake provider**, cases per R17): full loop to an accepted revision; reopen pixel-identical; original hash unchanged (27); resume after recreating the core context mid-`running` (22); `canceled`, `not_cancellable`, `failure`, `insufficient_balance`, `estimate_unknown`, `offline` → reconnect, `slow(n)`, `bad_candidate`, `aspect_mismatch(2)`; prompt received = typed (09); undo/redo of accept and re-tune (30); undo accept → re-pick another candidate, incl. one from the trash, no provider call (36); spool replay after a conflict (37); `read_only` (36). **Thin e2e** (Playwright, mocked commands, KQ-33): region → controls → prompt → estimate → confirm → progress → pick → accept; over-cap dialog; cancel.
+- **Integration** (pf-core + **fake provider**, cases per R17): full loop to an accepted revision; reopen pixel-identical; original hash unchanged (27); resume after recreating the core context mid-`running` (22); `canceled`, `not_cancellable`, `failure`, `insufficient_balance`, `estimate_unknown`, `offline` → reconnect, `slow(n)`, `bad_candidate`, `aspect_mismatch(2)`; prompt received = typed (09); undo/redo of accept and re-tune (30); undo accept → re-pick another candidate, incl. one from the trash, no provider call (36); spool replay after a conflict (37); `read_only` (38); a kill between candidate files and the manifest, then re-fetch into the same folder (39). Vitest: tracker ordering, selection and the ✓ marker (40). **Thin e2e** (Playwright, mocked commands, KQ-33): region → controls → prompt → estimate → confirm → progress → pick → accept; over-cap dialog; cancel.
 - **Fixtures** (generated, KQ-22): a synthetic "rooms" battlemap 4200×5600 (16384² for perf, not committed), the seam fixture (texture noise; fake `offset(12)`), a fixture mask, the capabilities fixture above. No recordings: those are Scenario replay only (R17).
 - **Walkthrough** (dev build, fake provider, `PF_DATA_DIR=.pf-dev/data`, `PF_LIBRARY_DIR=.pf-dev/library`):
 
 | # | Step | Expected |
 |---|---|---|
-| 1 | Open the rooms fixture, press `R`, drag a box around a room | Size, margin, "sent unresampled" |
+| 1 | Create a Maps project from the rooms fixture, open it, press `R`, drag a box around a room | Size, margin, "sent unresampled" |
 | 2 | Paint the floor, type a prompt, pick each fake model in turn | Controls match each fake model's capabilities, warnings shown; estimate in CU |
 | 3 | Set the cap below the estimate, submit | Over-cap dialog; raise the cap, confirm |
 | 4 | Quit mid-`running`, reopen | The job resumes and finishes; candidates appear |
-| 5 | Before/after, star #2, feather 96, accept #1 | Patch in place, FR-RGN-32 metric passes; #2 starred; the rest in the trash; revision `r1` |
+| 5 | Before/after, star #2, feather 96, accept #1 | Patch in place, FR-RGN-32 metric passes; #2 starred; `results/001 <slug>/` holds `01` and `02`, the rest in `.pforge/trash/`; tracker shows `001` ✓; revision `r1` |
 | 6 | Undo, redo, re-tune feather to 32, close, reopen | `r2` restore, `r3` restore, `r4` retune; layer and blend values intact |
 | 6b | Undo the re-tune and the accept, pick #2, accept | `r5`, `r6` restores; no new estimate or spend; patch from #2; revision `r7` |
 | 7 | Retry with a new prompt | Pre-filled panel; a new estimate is required |
+| 8 | Submit it, then select `001` in the tracker | `002 <new slug>/` appears; `001`'s kept candidates show; Accept on them → `repick_unavailable` |
 
 ## 14. Build split
 | # | Slice | Shared files (AGENTS §9) | Depends on |
@@ -152,12 +156,17 @@ PRJ owns storage, names and the atomic commit; fields are defined once in [manif
 | 1 | Region fit, mask pipeline, extraction | command registry (append) | skeleton, PRJ decoded original, EXP slice 1 |
 | 2 | Capability rules, estimate, spend guard | command registry (append), settings `spend` (via PRJ) | PRV fake + capabilities |
 | 3 | Job runner: submit, poll, cancel, resume, retry draft, spool | command registry (append), job fields (add only, via PRJ) | 2, PRJ store API |
-| 4 | Candidate fetch, preview bake, blend | candidate fields (add only) | 3, pf-imaging blend, EDT transient keys |
+| 4 | Candidate fetch into iteration folders, preview bake, blend | candidate fields (add only) | 3, pf-imaging blend, EDT transient keys |
 | 5 | Accept, statuses, dismiss, re-tune, undo entries | patch layer fields (add only) | 4, PRJ revisions + trash |
-| 6 | Panel UI with Appendix A controls, job strip, confirm dialog (mocked commands, parallel to 2–5) | UI feature registry (append) | EDT region tool, mask hand-off, picker |
+| 6 | Generate section with Appendix A controls, iteration tracker with job strip, confirm dialog (mocked commands, parallel to 2–5) | UI feature registry (append) | EDT region tool, mask hand-off, picker |
 
 ## 15. Open questions
-None open; answered ones are in [Appendix C](#appendix-c-closed-open-questions).
+| ID | Question | Options (tradeoff) | Blocking? |
+|---|---|---|---|
+| OQ-RGN-15 | The tracker shows older iterations. May the user accept a candidate from one? | **A. No, keep R32: older iterations are compare, star and discard only; no new semantics** / B. yes, any kept candidate: natural with the tracker, but reopens #41 and R32 | No |
+| OQ-RGN-16 | Does a trashed result leave `results/`? | **A. Yes, it moves to `.pforge/trash/`: `results/` shows only what was kept; same trash as everything else (#18)** / B. it stays until the 30-day purge: browsable rejects and fewer file moves, but `results/` fills with rejects | No (slice 5) |
+
+Answered ones are in [Appendix C](#appendix-c-closed-open-questions).
 
 ## Appendix A: capability-driven controls
 Rendered from PRV's generic `controls[]` (FR-PRV-10, PRV Appendix C). Each control carries PRV's `role` (R28); RGN binds the source, mask and prompt by role, never by input name.
