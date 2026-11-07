@@ -4,6 +4,5 @@ import { ProjectStatus } from './ProjectStatus';
 export const projectFeature: Feature = {
   id: 'project',
   prefix: 'prj',
-  slot: 'status',
-  Component: ProjectStatus,
+  slots: { status: ProjectStatus },
 };

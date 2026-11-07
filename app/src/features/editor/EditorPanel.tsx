@@ -1,5 +1,6 @@
 import { useProjectState } from '../../store/project';
 import { EditorStage } from './EditorStage';
+import './editor.css';
 
 /** The editor area: the empty state, or the open asset project's canvas. */
 export function EditorPanel() {

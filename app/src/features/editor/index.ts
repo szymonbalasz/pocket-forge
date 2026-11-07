@@ -4,6 +4,5 @@ import { EditorPanel } from './EditorPanel';
 export const editorFeature: Feature = {
   id: 'editor',
   prefix: 'edt',
-  slot: 'main',
-  Component: EditorPanel,
+  slots: { canvas: EditorPanel },
 };
