@@ -1,8 +1,8 @@
 ---
 feature: editor-canvas
 prefix: EDT
-owner: unclaimed
-status: unclaimed   # unclaimed → claimed → draft → in-review → complete (owner only)
+owner: spec-editor-canvas
+status: claimed   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [asset-project]
 ---
 
