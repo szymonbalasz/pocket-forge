@@ -100,8 +100,32 @@ jobs:
           path: app/playwright-report/
           retention-days: 7
 
+  # The app crate needs WebView2/Tauri, so it is linted and built on Windows. Split in two
+  # parallel jobs: clippy (check artifacts) and test + build + smoke (full artifacts) share nothing.
+  windows-clippy:
+    name: Windows app clippy
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-clippy
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Frontend build (tauri::generate_context! embeds it)
+        run: pnpm exec vite build
+        working-directory: app
+      - run: cargo clippy -p pocket-forge --all-targets --locked -- -D warnings
+
   windows:
-    name: Windows (app clippy + tests, Tauri build + smoke)
+    name: Windows app tests, Tauri build + smoke
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: windows-latest
     steps:
@@ -117,13 +141,9 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Frontend build (tauri::generate_context! embeds it)
-        run: pnpm exec vite build
-        working-directory: app
-      - run: cargo clippy -p pocket-forge --all-targets --locked -- -D warnings
-      - run: cargo test -p pocket-forge --locked
-      - name: Tauri build (debug, no installer)
+      - name: Tauri build (debug, no installer; builds the frontend first)
         run: pnpm exec tauri build --debug --no-bundle
         working-directory: app
       - name: Smoke (launch, UI reaches the core, exit)
         run: node scripts/tauri-smoke.mjs --no-build
+      - run: cargo test -p pocket-forge --locked
