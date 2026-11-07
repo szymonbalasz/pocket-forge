@@ -1,8 +1,8 @@
 ---
 feature: asset-project
 prefix: PRJ
-owner: unclaimed
-status: unclaimed   # unclaimed → claimed → draft → in-review → complete (owner only)
+owner: spec-asset-project
+status: claimed   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: []
 ---
 
