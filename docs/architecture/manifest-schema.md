@@ -181,6 +181,9 @@ Terminal = `failed | canceled | lost | closed`. A re-pick (RGN FR-RGN-36) accept
 - `grid`, `target_px_per_square` and `format` are written by PRJ's debounced draft save (R30) and at `export_start` (R6); `last` only after a successful export. `last.path` is relative to the project folder (e.g. `../../Exports/dungeons/crypt.png`).
 - `layers_hash` = SHA-256 of the canonical JSON (declared field order, no whitespace) of `layers[]` at export time.
 
+### 4.11 Revision file (`revisions/<id>.json`, write-once)
+`schema_version`, `id`, `seq` (`r<seq>`; `r0` = 0), `created_at`, `reason` (`create|accept|save|restore|retune|conflict`), `label` \| null, `parent` (ULID \| null: the revision it descends from; undo restores it, FR-PRJ-43), `layers[]` (§4.3, the stack at that point), `draft` (§4.5 \| null). The manifest's `revisions[]` row is `{id, seq, created_at, reason, label?}` of this file.
+
 ## 5. `settings.json` (R8)
 | Section | Fields | Owner of the meaning |
 |---|---|---|

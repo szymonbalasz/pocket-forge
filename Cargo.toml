@@ -1,0 +1,45 @@
+# Root Cargo workspace (AGENTS §9). Orchestrator-owned shared file.
+# Dependency direction: app → pf-core → pf-imaging, pf-provider (checked by scripts/check-crate-deps.mjs).
+[workspace]
+resolver = "3"
+members = ["crates/pf-core", "crates/pf-imaging", "crates/pf-provider", "app/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+# Approved dependencies only: #31, #32, #38, #42. Anything new needs the owner's OK (AGENTS §3.5).
+[workspace.dependencies]
+pf-core = { path = "crates/pf-core" }
+pf-imaging = { path = "crates/pf-imaging" }
+pf-provider = { path = "crates/pf-provider" }
+
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
+png = "0.18.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11.1"
+tauri = { version = "2.11.6", features = [] }
+tauri-build = { version = "2.6.3", features = [] }
+tempfile = "3"
+thiserror = "2.0.21"
+tokio = { version = "1.54.1", default-features = false }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+ulid = { version = "3.0.0", features = ["serde"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# CI runs clippy with `-D warnings`.
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+# Image decode, hashing and PNG encode are unusably slow at opt-level 0; dependencies get optimised in dev and test.
+[profile.dev.package."*"]
+opt-level = 2

@@ -1,9 +1,0 @@
-node_modules/
-dist/
-public/fixtures/
-results/raw/
-src-tauri/target/
-src-tauri/gen/
-test-results/
-results/logs/
-dist-size/

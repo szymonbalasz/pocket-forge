@@ -94,12 +94,12 @@ crates/pf-core/      domain: library, asset project, manifest, revisions, jobs; 
 crates/pf-imaging/   image ops (ADR 0004): decode, tile pyramid, region extract, blend, flatten, encode.
 crates/pf-provider/  adapter trait (ADR 0001), Scenario implementation, fake provider.
 app/src-tauri/       thin Tauri layer: command registration, URI scheme, window. No domain logic.
-app/src/             React UI. app/src/features/<feature>/ per spec; app/src/api/ is the only place that calls Tauri.
+app/src/             React UI. features/<feature>/ per spec; api/ is the only place that calls Tauri; shell/ holds the window layout and the feature registry.
 fixtures/            generators + small committed fixtures; provider recordings in fixtures/provider/<model>/<case>.json.
-spikes/              reference only; deleted when the skeleton lands.
+scripts/             dev and CI scripts: check, env:init, dev, tauri:smoke, hygiene, crate direction.
 ```
 
-- Dependencies point one way: `app → pf-core → pf-imaging, pf-provider`. The UI never imports another feature's internals. CI enforces this (cargo deny rules for the crates, an ESLint import rule for the UI).
+- Dependencies point one way: `app → pf-core → pf-imaging, pf-provider`. The UI never imports another feature's internals. CI enforces this (`scripts/check-crate-deps.mjs` over `cargo metadata` for the crates, an ESLint boundaries rule for the UI).
 - **Every capability is a core command** in `pf-core`. Inputs are validated at the command boundary. The Tauri layer and the future MCP endpoint (#36) only adapt commands.
 - **Injected seams:** IDs, clock, randomness and the provider come from a context object. Tests and fixtures use seeded or fake implementations.
 

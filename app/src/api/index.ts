@@ -1,0 +1,107 @@
+// The only module that talks to Tauri (AGENTS §9). Features call these typed wrappers; an
+// ESLint rule forbids `@tauri-apps/*` imports anywhere else. Playwright mocks the layer below
+// this one (window.__TAURI_INTERNALS__), so the wrapper itself is under test.
+import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
+
+import type { CommandName, Commands, CoreErrorShape, Events } from './types';
+
+export type * from './types';
+
+/** A failed core command, with its normalised code (`read_only`, `not_found`, …). */
+export class ApiError extends Error {
+  readonly code: string;
+  readonly field: string | undefined;
+  readonly detail: unknown;
+
+  constructor(shape: CoreErrorShape) {
+    super(shape.message);
+    this.name = 'ApiError';
+    this.code = shape.code;
+    this.field = shape.field;
+    this.detail = shape.detail;
+  }
+}
+
+function toApiError(e: unknown): ApiError {
+  if (e instanceof ApiError) return e;
+  if (e && typeof e === 'object' && 'code' in e && 'message' in e) {
+    return new ApiError(e as CoreErrorShape);
+  }
+  // Tauri rejects with a string when the command itself can't be called (e.g. bad args).
+  return new ApiError({ code: 'ipc', message: String(e) });
+}
+
+/** Runs a core command. Every command takes one `input` object. */
+export async function call<N extends CommandName>(
+  name: N,
+  input: Commands[N][0],
+): Promise<Commands[N][1]> {
+  try {
+    return await invoke<Commands[N][1]>(name, { input });
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+/** True inside the Tauri window (or a test that mocks it). */
+export function hasCore(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+/** Subscribes to a core event. Returns the unsubscribe function. */
+export function onEvent<E extends keyof Events>(
+  name: E,
+  handler: (payload: Events[E]) => void,
+): Promise<UnlistenFn> {
+  return listen<Events[E]>(name, (event) => handler(event.payload));
+}
+
+export type DropEvent = { type: 'over' } | { type: 'leave' } | { type: 'drop'; paths: string[] };
+
+/** Native file drag-and-drop on the window (paths, not File objects). */
+export function onFileDrop(handler: (event: DropEvent) => void): Promise<UnlistenFn> {
+  return getCurrentWebview().onDragDropEvent((event) => {
+    const p = event.payload;
+    if (p.type === 'drop') handler({ type: 'drop', paths: p.paths });
+    else if (p.type === 'leave') handler({ type: 'leave' });
+    else handler({ type: 'over' });
+  });
+}
+
+/** Tells the app the UI has rendered (ends the process in `tauri:smoke` runs). */
+export async function appReady(ok: boolean, detail: string): Promise<void> {
+  try {
+    await invoke('app_ready', { ok, detail });
+  } catch {
+    // Not fatal: only the smoke run depends on it.
+  }
+}
+
+/** Typed shortcuts for the commands, grouped by area. */
+export const api = {
+  appInfo: () => call('app_info', {}),
+  library: {
+    getConfig: () => call('library_get_config', {}),
+    setRoots: (roots: string[], importDest?: string | null) =>
+      call('library_set_roots', { roots, import_dest: importDest ?? null }),
+    importPaths: (paths: string[]) => call('import_paths', { paths }),
+  },
+  project: {
+    open: (path: string) => call('project_open', { path }),
+    close: () => call('project_close', {}),
+    get: () => call('project_get', {}),
+    putDraft: (draft: Commands['project_put_draft'][0]['draft']) =>
+      call('project_put_draft', { draft }),
+    saveRevision: (label?: string) =>
+      call('project_save_revision', label === undefined ? {} : { label }),
+    listRevisions: () => call('project_list_revisions', {}),
+  },
+  recent: { list: () => call('recent_list', {}) },
+  editor: {
+    imageOpen: (projectId: string, imageId: string) =>
+      call('edt_image_open', { project_id: projectId, image_id: imageId }),
+  },
+  provider: { status: () => call('provider_status', {}) },
+};

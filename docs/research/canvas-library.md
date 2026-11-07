@@ -1,6 +1,6 @@
 # Research: canvas library for large battlemaps (KQ-32)
 
-> Spike `spike/canvas-large-image`, measured 2026-11-07. Prototype and run steps: [spikes/canvas](../../spikes/canvas/README.md). Full numbers: [results/summary.md](../../spikes/canvas/results/summary.md).
+> Spike `spike/canvas-large-image`, measured 2026-11-07. Prototype, run steps and full numbers: `spikes/canvas/` (deleted when the skeleton landed; see commit 3fb4228 in git history).
 > Rig: Windows 11 laptop, Intel UHD iGPU (the default) and RTX 4080 Laptop dGPU, 240 Hz panel, on AC power. Edge 157 = WebView2 157 (same Chromium). Viewport 1600×900, DPR 1, vsync on.
 > Fixture: a procedural synthetic battlemap (grid at 100 px, rooms, flagstones, noise), 8192² (11.8 MB JPEG) and 16384² (53 MB JPEG), plus a 512 px tile pyramid. No real art.
 

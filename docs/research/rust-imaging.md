@@ -1,6 +1,6 @@
 # Research: Rust large-image processing
 
-> Spike `spike/rust-imaging` (#22). Input for [0004-large-image-strategy.md](../architecture/adr/0004-large-image-strategy.md). Measured 2026-11-07 with the throwaway crate in [spikes/imaging](../../spikes/imaging/README.md).
+> Spike `spike/rust-imaging` (#22). Input for [0004-large-image-strategy.md](../architecture/adr/0004-large-image-strategy.md). Measured 2026-11-07 with the throwaway crate in `spikes/imaging/` (deleted when the skeleton landed; see commit 3fb4228 in git history).
 > All images are procedurally generated. No real art was used.
 
 ## Recommendation
@@ -21,7 +21,7 @@
 ## Test machine and fixture
 
 - **Machine:** Windows 11, Intel 13th-gen HX laptop CPU, 24 cores / 32 threads, 64 GB RAM, NVMe SSD. Release builds with Rust 1.86 (`codegen-units = 16`, no LTO).
-- **Fixture:** a procedural dungeon map (rooms, 50 px flagstones, brick walls, barrels, rough ground, 100 px grid; [synth.rs](../../spikes/imaging/src/synth.rs)). It carries deliberate per-pixel noise, so **lossy encode times and sizes are pessimistic** compared with painted art.
+- **Fixture:** a procedural dungeon map (rooms, 50 px flagstones, brick walls, barrels, rough ground, 100 px grid; `spikes/imaging/src/synth.rs` in git history). It carries deliberate per-pixel noise, so **lossy encode times and sizes are pessimistic** compared with painted art.
 - **Fixture files:**
   - 8k: PNG 67 MiB, JPEG q90 16 MiB, WebP q90 9.2 MiB.
   - 16k: PNG 267 MiB, JPEG 64 MiB, WebP lossless 237 MiB (lossy failed, see [limits](#format-limits)).

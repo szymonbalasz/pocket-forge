@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Pocket Forge",
+  "version": "0.1.0",
+  "identifier": "dev.pocketforge.desktop",
+  "build": {
+    "devUrl": "http://localhost:5200",
+    "frontendDist": "../dist",
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "corepack pnpm build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Pocket Forge",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 800,
+        "minHeight": 560,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": { "active": false, "icon": ["icons/icon.ico"] }
+}

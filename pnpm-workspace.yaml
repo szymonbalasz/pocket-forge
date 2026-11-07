@@ -1,0 +1,3 @@
+# pnpm workspace (AGENTS §9). Orchestrator-owned shared file.
+packages:
+  - app
