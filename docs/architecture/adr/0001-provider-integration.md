@@ -1,6 +1,6 @@
-# Proposed ADR: Provider integration (Scenario)
+# ADR 0001: Provider integration (Scenario)
 
-> Status: **proposed**. The owner decides (AGENTS §3.2). Input: KQ-04, the [Scenario API research](../../research/scenario-api.md), #6, #9, #3.
+> Status: **accepted** 2026-11-07 (#14). Option A. Input: KQ-04, the [Scenario API research](../../research/scenario-api.md), #6, #9, #3.
 
 ## Context
 
@@ -18,13 +18,13 @@
 | C. TS SDK (webview or Node sidecar) | Use `@scenario-labs/sdk` from the UI or a bundled Node process | Typed, with retries, `wait()` and `uploadFile()` built in | Webview: the secret is in UI JavaScript (ToS §7.2) and CORS is unverified. Sidecar: a second runtime to ship, against the spirit of #3. 3 majors in 7 months. Its repo isn't public. Job and cost state end up split across TS and Rust. |
 | D. Hybrid (REST for jobs + MCP for model discovery) | Use MCP `model_schema_get` and `search`, and REST for everything else | Gets MCP's reshaped schema | Two auth paths and two failure modes for no gain, because REST `GET /models/{id}` returns the same data |
 
-**Pick: A.** MCP and the SDK stay outside the app. MCP remains fine for agent-driven exploration from a coding agent. The SDK source is a good reference for upload and polling behaviour.
+**Decision: A** (owner accepted). MCP and the SDK stay outside the app. MCP remains fine for agent-driven exploration from a coding agent. The SDK source is a good reference for upload and polling behaviour.
 
-## Decision sketch (if A is accepted)
+## Decision details
 
 - One `Provider` adapter interface in the core. Scenario is the first implementation, and a **fake provider** with recorded fixtures is the second (KQ-24, AGENTS §3.7).
 - **Model capabilities** are read from the provider (`GET /models/{id}`). They're normalised into a generic shape and **overlaid with a hand-maintained per-model table** for what isn't machine-readable: mask convention, and reference role → input name.
-- Inpainting is offered only for **allowlisted, fixture-tested models** (OQ-PRV-01).
+- Masked edits are offered for the models **Scenario's own guidance documents as supporting masked edits** (#15). Their mask convention is recorded in the overlay table from Scenario's docs, with a fixture test each.
 - Every job runs **estimate → confirm (per KQ-06) → submit → poll → fetch**. The final prompt, all inputs, the seed and the capability snapshot are recorded on the job (KQ-17).
 
 ## Provider-agnostic adapter interface (operations, not code)
@@ -82,7 +82,7 @@ stateDiagram-v2
 
 | ID | Question | Options (pick in **bold**) | Tradeoff |
 |---|---|---|---|
-| OQ-PRV-01 | Which models offer masked edits in milestone 1? | **A. An allowlist (start: GPT Image 2, Ideogram 4.5 Precise Edit) with a mask-convention overlay and a fixture each** / B. any model whose schema has a `mask` input | A is safe but needs manual upkeep. B risks silently inverted masks. |
+| OQ-PRV-01 ✅ | Which models offer masked edits in milestone 1? | **Answered (#15): follow Scenario's guidance on which models support masked edits.** The mask convention comes from Scenario's docs, with a fixture each. | — |
 | OQ-PRV-02 | Client: hand-written or generated from the OpenAPI spec? | **A. Hand-written for the ~12 routes used, with contract tests against recorded responses** / B. codegen | A is small and readable. B gains little because run bodies are `unknown`, and the spec is ~8 MB. |
 | OQ-PRV-03 | How does the app send images? | **A. Upload first (`/assets` < 4 MB, `/uploads` above), then reference asset ids** / B. inline data URLs in the run body | A allows retry without re-upload and records ids. B is one call but resends bytes on each retry. |
 | OQ-PRV-04 | Estimate before every job? | **A. Always (dry run is free; never set `ipDetection`)** / B. only above a threshold | A adds one round-trip. B can hide cost surprises. |

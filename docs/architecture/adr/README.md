@@ -9,8 +9,7 @@ Agents draft `proposed-<slug>.md`. The orchestrator numbers an ADR (`NNNN-<slug>
 | — | Frontend framework | planned | KQ-30 |
 | — | Canvas library | planned | `spike/canvas-large-image` |
 | — | Asset project format and library storage | planned | KQ-10 to KQ-15 |
-| — | Provider integration (Scenario: MCP vs REST) | planned | `spike/scenario-api`, KQ-04 |
+| [0001](0001-provider-integration.md) | Provider integration: REST adapter in the Rust core | **accepted** | [research](../../research/scenario-api.md), KQ-04 |
 | — | Large-image strategy (tiles, regions, patch blend, flatten) | planned | `spike/rust-imaging` |
 | — | Secrets (provider credentials) | planned | KQ-05 |
 | — | Test strategy and CI | planned | KQ-33 |
-| — | Licence | planned | KQ-02 |

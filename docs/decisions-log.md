@@ -17,5 +17,11 @@ Append-only. Cite decisions as `#N`. Changing a decision takes a new row that su
 | 11 | Size targets: battlemaps of 5–10k px per side typical, up to about 16k; 70–140 px per grid square. | Sets the canvas, tiling and export budgets | Owner, KQ-20 |
 | 12 | No integration with external notes or vault tools. Pocket Forge starts with a fresh, standalone library. | Keep scope tight; no import paths to maintain | Owner, KQ-18 |
 | 13 | The user configures the library folder (expected to be cloud-synced, e.g. OneDrive). Asset projects are plain folders and files, never single-file packages or databases. Expect a very large number of images. | Sync-friendly, recoverable with normal file tools, scales to large libraries | Owner, KQ-10 |
+| 14 | Provider integration: the app calls Scenario's REST API from the Rust core through a provider-agnostic adapter. MCP and the TS SDK are not used in the app. | Full coverage, stable, secret stays in the core, easy to fake in tests | Owner; [ADR 0001](architecture/adr/0001-provider-integration.md) |
+| 15 | Masked edits are offered for the models Scenario's guidance documents as supporting them. The per-model mask convention follows Scenario's docs. | Follow the provider's guidance, not our own allowlist | Owner, OQ-PRV-01 |
+| 16 | Originals outside the library are never modified. The app works only inside the configured library folder. Bringing images in (copying them into the library) must be as frictionless as possible. | Safety of originals, one synced home | Owner, KQ-11 |
+| 17 | Licence: MIT. Pintura is dropped (its licence key can't live in a public repo). | Open source; no commercial SDK | Owner, KQ-02 |
+| 18 | Retention: accepted revisions and starred candidates are kept forever. Unstarred candidates go to a project trash that is emptied after 30 days. Per-project disk usage is visible. | Bounded OneDrive growth without losing anything chosen | Owner, KQ-15 |
+| 19 | Library index (thumbnails, search) is a local, rebuildable cache outside the synced folder. Tags and collections live in synced files. The app never forces downloads of cloud-only files for thumbnails. | Avoid database corruption on sync; respect files-on-demand | Default accepted, KQ-12/KQ-14 |
 
-The tech stack (Tauri, Rust, a TS web UI, the canvas library, Scenario via MCP) is **provisional**. It is not logged until the stack ADRs are accepted.
+The tech stack (Tauri, Rust, a TS web UI and the canvas library) is **provisional**. It is not logged until the stack ADRs are accepted.

@@ -10,4 +10,4 @@ A desktop asset studio for preparing D&D sessions. It generates, refines, organi
 
 Planned platforms: Windows first, then macOS.
 
-> TODO (kickoff): licence (see [docs/kickoff-questions.md](docs/kickoff-questions.md), KQ-02).
+Licence: [MIT](LICENSE).
