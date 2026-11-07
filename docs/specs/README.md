@@ -1,6 +1,6 @@
 # Specs index
 
-Specs use [_template.md](_template.md) and are written just in time (see [process.md](../process.md)). The seams between this round's specs are in [seams-phase1b.md](../agents/seams-phase1b.md).
+Specs use [_template.md](_template.md) and are written just in time (see [process.md](../process.md)). The seams between this round's specs are in [seams-phase1b.md](../agents/seams-phase1b.md). Field tables live in [manifest-schema.md](../architecture/manifest-schema.md).
 
 | Spec | Prefix | Phase | Status |
 |---|---|---|---|

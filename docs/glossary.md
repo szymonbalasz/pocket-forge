@@ -18,6 +18,8 @@
 | **Region** | The rectangle the user selects for a localised edit (the *inner* rect). It is extracted at full resolution together with its **context margin**. |
 | **Context margin** | Pixels around a region that are sent to the provider for context but are never editable. Region + context margin = the outer rect. |
 | **Job** | One request to the provider, for example a generation or an edit. It has a status and a cost. |
+| **Provider asset ref** | The provider's id for an uploaded image. A disposable cache: re-uploaded from local files when missing (#20). |
+| **Balance** | The provider credit remaining on the user's account, if the provider reports it. |
 | **Job handle** | The provider's id for a submitted job, used to poll and fetch it. |
 | **Estimate** | The provider's pre-flight cost for a job, fetched without running it. |
 | **Spend cap** | The user-set limit on cost per session, plus a per-job confirmation threshold (#23). |
@@ -26,6 +28,9 @@
 | **Re-tune** | Changing a patch layer's feather or colour match after accept. It creates a new layer file and a revision. |
 | **Manifest** | The file in an asset project that records its current state (layers, masks, jobs, candidates, revisions). |
 | **Draft** | Unsubmitted work in an asset project (prompt, settings, mask), saved automatically after a short idle. |
+| **Head revision** | The most recent revision of an asset project. |
+| **Import destination** | The library folder that imported images are copied into (default `Imported/`). |
+| **Spool** | Per-machine holding area for writes that can't reach the library yet (e.g. during a sync conflict); replayed afterwards. |
 | **Trash** | Per-project holding area for discarded items; emptied after 30 days (#18). |
 | **Conflict copy** | A duplicate file created by a sync service when two machines changed the same file. |
 | **Local cache** | Per-machine, rebuildable data outside the library (tiles, index). Losing it loses no project data. |
