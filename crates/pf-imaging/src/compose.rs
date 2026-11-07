@@ -281,32 +281,67 @@ where
     E: From<ComposeError>,
     F: FnMut(Strip<'_>) -> Result<(), E>,
 {
-    if strip_h == 0 {
-        return Err(ComposeError::InvalidStripHeight.into());
+    let mut flattener = StripFlattener::new(stack, strip_h)?;
+    while let Some(strip) = flattener.next_strip()? {
+        sink(strip)?;
     }
-    let (width, height) = stack.dimensions();
-    let strip_rows = strip_h.min(height);
-    let mut buf = try_vec(width as usize * strip_rows as usize * 3)?;
-    let mut scratch = Scratch::default();
-    let mut y = 0;
-    while y < height {
-        let h = strip_rows.min(height - y);
+    Ok(())
+}
+
+/// A pull-based flatten: each [`next_strip`](Self::next_strip) composes the next strip of rows.
+/// Encoders that pull rows (JPEG) use this; [`flatten_strips`] is the push form.
+pub struct StripFlattener<'s> {
+    stack: &'s LayerStack,
+    strip_h: u32,
+    y: u32,
+    buf: Vec<u8>,
+    scratch: Scratch,
+}
+
+impl<'s> StripFlattener<'s> {
+    pub fn new(stack: &'s LayerStack, strip_h: u32) -> Result<Self, ComposeError> {
+        if strip_h == 0 {
+            return Err(ComposeError::InvalidStripHeight);
+        }
+        let (width, height) = stack.dimensions();
+        let buf = try_vec(width as usize * strip_h.min(height) as usize * 3)?;
+        Ok(StripFlattener {
+            stack,
+            strip_h,
+            y: 0,
+            buf,
+            scratch: Scratch::default(),
+        })
+    }
+
+    /// The flatten's size (the original's).
+    pub fn dimensions(&self) -> (u32, u32) {
+        self.stack.dimensions()
+    }
+
+    /// Composes and returns the next strip, or `None` after the last row.
+    pub fn next_strip(&mut self) -> Result<Option<Strip<'_>>, ComposeError> {
+        let (width, height) = self.stack.dimensions();
+        if self.y >= height {
+            return Ok(None);
+        }
+        let y = self.y;
+        let h = self.strip_h.min(height - y);
         let len = width as usize * h as usize * 3;
         compose_band(
-            stack,
+            self.stack,
             PixelRect::new(0, y, width, h),
-            &mut scratch,
-            &mut buf[..len],
+            &mut self.scratch,
+            &mut self.buf[..len],
         )?;
-        sink(Strip {
+        self.y += h;
+        Ok(Some(Strip {
             y,
             width,
             height: h,
-            rgb: &buf[..len],
-        })?;
-        y += h;
+            rgb: &self.buf[..len],
+        }))
     }
-    Ok(())
 }
 
 /// Flattens the whole stack into one RGB8 buffer, strip by strip (the WebP and rescale path,

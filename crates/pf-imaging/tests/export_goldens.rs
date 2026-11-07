@@ -7,12 +7,14 @@
 //! Inputs are generated: the base is `fixtures/images/grid-map-1024x1280.png` (fixtures/gen) and
 //! patches are synthetic RGBA (feathered disc). No personal art.
 
+use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use image::{RgbImage, RgbaImage};
 use pf_imaging::{
-    COMPOSE_VERSION, ComposeError, Layer, LayerStack, Placement, STRIP_H, flatten_full,
+    COMPOSE_VERSION, ComposeError, GridInput, Layer, LayerStack, Phase, Placement, STRIP_H,
+    StripFlattener, encode_jpeg, encode_webp, flatten_full, plan_size, resize_lanczos3,
 };
 
 fn fixtures() -> PathBuf {
@@ -126,4 +128,51 @@ fn fr_exp_03_golden_c_affine_layer() {
     // Far from the layer the original is untouched.
     assert_eq!(out.get_pixel(10, 10), base.get_pixel(10, 10));
     assert_eq!(out.get_pixel(1000, 1270), base.get_pixel(1000, 1270));
+}
+
+/// (d) Lanczos3 at 140 → 70 px per square: half size, sRGB (FR-EXP-08, FR-EXP-09).
+#[test]
+fn fr_exp_09_golden_d_lanczos3_140_to_70() {
+    let base = base();
+    let (w, h) = base.dimensions();
+    let size = plan_size(w, h, Some(GridInput::PxPerSquare(140.0)), Some(70)).expect("size");
+    assert_eq!((size.width, size.height, size.scale), (512, 640, 0.5));
+    let stack = LayerStack::new(base, &[]).expect("stack");
+    let out = resize_lanczos3(&flatten(&stack), size.width, size.height).expect("resize");
+    assert_golden("d-lanczos3-140-to-70", &out);
+}
+
+fn psnr(a: &RgbImage, b: &RgbImage) -> f64 {
+    let mse = a
+        .as_raw()
+        .iter()
+        .zip(b.as_raw())
+        .map(|(x, y)| (f64::from(*x) - f64::from(*y)).powi(2))
+        .sum::<f64>()
+        / a.as_raw().len() as f64;
+    10.0 * (255.0 * 255.0 / mse).log10()
+}
+
+/// JPEG and WebP decode within 40 dB of the lossless flatten on the generated map (§13).
+#[test]
+fn fr_exp_10_jpeg_and_webp_are_within_40_db_on_the_fixture_map() {
+    let stack = LayerStack::new(base(), &[]).expect("stack");
+    let reference = flatten(&stack);
+    let mut go = |_: Phase, _: f32| ControlFlow::Continue(());
+
+    let mut jpeg = Vec::new();
+    let mut rows = StripFlattener::new(&stack, STRIP_H).expect("rows");
+    encode_jpeg(&mut rows, &mut jpeg, Phase::Encode, &mut go).expect("jpeg");
+    let jpeg = image::load_from_memory(&jpeg)
+        .expect("decode jpeg")
+        .to_rgb8();
+    let db = psnr(&jpeg, &reference);
+    assert!(db >= 40.0, "JPEG PSNR {db:.1} dB");
+
+    let webp = encode_webp(&reference, &mut go).expect("webp");
+    let webp = image::load_from_memory(&webp.bytes)
+        .expect("decode webp")
+        .to_rgb8();
+    let db = psnr(&webp, &reference);
+    assert!(db >= 40.0, "WebP PSNR {db:.1} dB");
 }
