@@ -45,6 +45,7 @@
 | Change | Order (each file temp → rename) | Commit point | Rolled forward on open |
 |---|---|---|---|
 | Any manifest change | new write-once files → `manifest.json` | manifest rename | trash moves (§4.8) |
+| Mask submitted (`put_mask`) | mask PNG → manifest (mask record + `draft.mask_id`, one commit) | manifest rename | — |
 | Job created (`record_job`) | `region.png`, `mask.png` → `job.json` (`requested`) → manifest | `job.json` rename (the job exists); manifest adds the index row | — |
 | Job state change (`update_job`) | `job.json` only | `job.json` rename | — |
 | Candidates stored (`add_candidates`) | candidate files → manifest → `job.json` (`fetched`) | manifest rename | `succeeded` job whose candidates are in the manifest → `fetched` |
@@ -100,7 +101,7 @@
 |---|---|---|
 | `schema_version`, `id`, `created_at`, `updated_at` | | |
 | `state`, `state_times{}` | enum, `{<state>: time}` | written on **every** transition (R2) |
-| `operation`, `model_id`, `provider_id` | string | `edit_masked`; `scenario\|fake` |
+| `operation`, `model_id` | string | `edit_masked` |
 | `capability_snapshot` | object | KQ-17 |
 | `final_prompt`, `controls{}`, `candidate_count` | | as submitted |
 | `seed` | `{requested, returned}` | int \| null each |
@@ -109,8 +110,7 @@
 | `mask_id` | ULID | the draft mask the job was built from |
 | `inputs` | `{region: "region.png", mask: "mask.png"}` | as sent (R2) |
 | `estimate`, `cost` | `{value \| unknown, unit}` | |
-| `job_handle` | string \| null | null = not yet `submitted` |
-| `provider` | object | **opaque**, PRV owns the inner shape (asset refs, redacted request body; cache only, #20) |
+| `provider` | object | **opaque**; shape in [provider](../specs/provider.md) Appendix B (incl. the job handle, OQ-PRV-22 A). Persisted verbatim on every transition |
 | `candidate_ids[]` | ULID | in provider order |
 | `error` | `{code, hint}` \| null | normalised (ADR 0001) |
 
@@ -146,7 +146,7 @@ stateDiagram-v2
   lost --> [*]
   closed --> [*]
 ```
-Terminal = `failed | canceled | lost | closed`. RGN's job runner drives the transitions (R14); PRJ persists them.
+Terminal = `failed | canceled | lost | closed`. Handle rule: `requested` has no handle; `submitted` and every state reached from it have one inside `provider{}`. PRJ never reads it. RGN's job runner drives the transitions (R14); PRJ persists them.
 
 ### 4.7 Candidate (manifest `candidates[]`)
 | Field | Type | Notes |
