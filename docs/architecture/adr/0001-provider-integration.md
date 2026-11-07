@@ -77,14 +77,17 @@ stateDiagram-v2
 - **KQ-04:** answered by A. **KQ-05:** a key + secret pair fits the OS credential store, used only in the Rust core. **KQ-06:** a pre-flight estimate exists, so "estimate + cap + confirm" is feasible. **KQ-17:** feasible. Seeds are absent on some models. **KQ-24:** the fake provider replays recorded JSON. Binary fixtures must be generated or CC0.
 - A per-model overlay table becomes a maintained artifact with a fixture test per model.
 - No webhooks. The app polls.
+- **Local-first (#20):** the user never manages provider-side state. Uploads happen automatically. Provider asset ids are cached on the job record only. If one is missing or expired, the app re-uploads from local files. No feature depends on the provider keeping anything.
 
 ## Open questions
+
+OQ-PRV-02 and 04–10: picks accepted as written (#21).
 
 | ID | Question | Options (pick in **bold**) | Tradeoff |
 |---|---|---|---|
 | OQ-PRV-01 ✅ | Which models offer masked edits in milestone 1? | **Answered (#15): follow Scenario's guidance on which models support masked edits.** The mask convention comes from Scenario's docs, with a fixture each. | — |
 | OQ-PRV-02 | Client: hand-written or generated from the OpenAPI spec? | **A. Hand-written for the ~12 routes used, with contract tests against recorded responses** / B. codegen | A is small and readable. B gains little because run bodies are `unknown`, and the spec is ~8 MB. |
-| OQ-PRV-03 | How does the app send images? | **A. Upload first (`/assets` < 4 MB, `/uploads` above), then reference asset ids** / B. inline data URLs in the run body | A allows retry without re-upload and records ids. B is one call but resends bytes on each retry. |
+| OQ-PRV-03 ✅ | **Answered (#20): fully automated, invisible to the user. Upload-then-reference (A) is fine; the local project is the source of truth and provider assets are a disposable cache.** How does the app send images? | **A. Upload first (`/assets` < 4 MB, `/uploads` above), then reference asset ids** / B. inline data URLs in the run body | A allows retry without re-upload and records ids. B is one call but resends bytes on each retry. |
 | OQ-PRV-04 | Estimate before every job? | **A. Always (dry run is free; never set `ipDetection`)** / B. only above a threshold | A adds one round-trip. B can hide cost surprises. |
 | OQ-PRV-05 | Polling cadence and limit? | **A. 2 s, backing off to 10 s. A user-visible "still running" after 3 min. Never auto-resubmit.** / B. fixed 3 s, 120 s timeout (SDK default) | A suits slow models. B gives up on long jobs. |
 | OQ-PRV-06 | Uploaded regions on the provider side? | **A. Upload with `hide: true`, and don't auto-delete (tier S)** / B. delete after accept | A is simple. B is more private but needs delete handling and failure cases. |

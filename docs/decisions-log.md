@@ -23,5 +23,8 @@ Append-only. Cite decisions as `#N`. Changing a decision takes a new row that su
 | 17 | Licence: MIT. Pintura is dropped (its licence key can't live in a public repo). | Open source; no commercial SDK | Owner, KQ-02 |
 | 18 | Retention: accepted revisions and starred candidates are kept forever. Unstarred candidates go to a project trash that is emptied after 30 days. Per-project disk usage is visible. | Bounded OneDrive growth without losing anything chosen | Owner, KQ-15 |
 | 19 | Library index (thumbnails, search) is a local, rebuildable cache outside the synced folder. Tags and collections live in synced files. The app never forces downloads of cloud-only files for thumbnails. | Avoid database corruption on sync; respect files-on-demand | Default accepted, KQ-12/KQ-14 |
+| 20 | Local-first provider use: uploads are automatic and invisible. The local asset project is the source of truth, and provider-side assets are a disposable cache that is re-uploaded when missing. The user never manages provider profile state. | Work locally; don't depend on provider state | Owner, OQ-PRV-03 |
+| 21 | ADR 0001's remaining picks are accepted as written (OQ-PRV-02, 04–10), including the `reqwest` HTTP client dependency and the glossary term "Cost". | Implementation details | Owner |
+| 22 | Canvas and Rust-imaging spikes approved. Throwaway dependencies are allowed on spike branches only; the spikes trial React + TS + Vite and pnpm. | De-risk the provisional stack before ADRs | Owner |
 
 The tech stack (Tauri, Rust, a TS web UI and the canvas library) is **provisional**. It is not logged until the stack ADRs are accepted.

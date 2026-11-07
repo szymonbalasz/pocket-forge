@@ -26,4 +26,5 @@
 | **Final prompt** | The exact prompt text submitted to the provider. It is always visible and editable. |
 | **Provider** | The generation service. Currently Scenario. |
 | **Model capabilities** | The settings and inputs a provider model actually supports. They drive which controls are shown. |
+| **Cost** | The provider-reported charge for a job, in provider units (Scenario: Compute Units). |
 | **Export** | A flattened image, written for use in a VTT. |
