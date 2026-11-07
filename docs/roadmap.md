@@ -1,13 +1,10 @@
 # Roadmap
 
-> Status: **draft outline.** Phases are firmed up after kickoff answers and the stack spikes.
+> Status: **current.** Updated at each gate.
 
 ```mermaid
 graph LR
-  K[0 Kickoff] --> SP[1a Spikes]
-  K --> C[1b Conventions + foundation specs]
-  SP --> ADR[Stack ADRs accepted]
-  ADR --> C
+  K[0 Kickoff] --> SP[1a Spikes] --> ADR[Stack ADRs accepted] --> C[1b Conventions + foundation specs]
   C --> S[2 Skeleton]
   S --> M1[3 Milestone loop]
   M1 --> A[MVP acceptance]
@@ -15,18 +12,23 @@ graph LR
   P --> SR[Sprints: library, recipes, references, tokens, items...]
 ```
 
-| Phase | Content | Gate |
-|---|---|---|
-| 0 Kickoff | Answer the [kickoff questions](kickoff-questions.md), rank tiers, finish the vision | Owner signs off on the vision and tiers |
-| 1a Spikes | Throwaway proofs that de-risk the provisional stack (see below) | Owner accepts the stack ADRs |
-| 1b Conventions + foundation specs | AGENTS §9, specs for the project format, canvas/editor core, provider integration, region editing | Owner approves the specs |
-| 2 Skeleton | One builder: Tauri shell, UI shell, project load/save, fake provider, test harness, CI | Owner runs it |
-| 3 Milestone loop | The MVP scenario in [vision.md](vision.md) | Demo script |
+| Phase | Content | Gate | State |
+|---|---|---|---|
+| 0 Kickoff | Answer the [kickoff questions](kickoff-questions.md), rank tiers, finish the vision | Owner signs off on the vision and tiers | ✅ done |
+| 1a Spikes | Scenario API, video, canvas and imaging spikes → ADRs 0001–0004 | Owner accepts the stack ADRs | ✅ done |
+| 1b Conventions + foundation specs | AGENTS §9 draft. Specs: asset-project, editor-canvas, region-edit, provider, export ([seams](agents/seams-phase1b.md)) | Owner approves the specs and §9 | ⏳ now |
+| 2 Skeleton | One builder: workspace layout, Tauri shell, UI shell, core command plumbing, project load/save, fake provider, test harness, CI jobs. Deletes `spikes/` | Owner runs it | |
+| 3 Milestone loop | The MVP scenario in [vision.md](vision.md), built in parallel slices from the specs | Demo script | |
+| MVP acceptance | Full scenario end to end, plus a crash test (kill mid-save, reopen intact) and one manual real Scenario call | Owner playtest | |
+| Post-MVP sprints | Tier A in order: animated tokens, library, recipes, reference roles, MCP endpoint (#36), … | Per sprint | |
 
-## Spikes (proposed)
+## Spec dependencies (phase 1b)
 
-| Spike | Question it answers |
-|---|---|
-| `spike/scenario-api` | What does Scenario expose via MCP vs REST (models, capabilities, inpainting, uploads, cost, job polling)? Can a desktop app use the MCP server directly? |
-| `spike/canvas-large-image` | Can Konva or Fabric (or PixiJS) pan, zoom and mask a large battlemap smoothly in WebView2 using tiles? |
-| `spike/rust-imaging` | How fast does Rust tile, extract regions, feather-blend patches and flatten-export at target sizes? |
+```mermaid
+graph LR
+  PRJ[asset-project] --> EDT[editor-canvas]
+  PRJ --> RGN[region-edit]
+  PRV[provider] --> RGN
+  EDT --> RGN
+  PRJ --> EXP[export]
+```

@@ -31,3 +31,7 @@ desktop.ini
 .vscode/*
 !.vscode/extensions.json
 .idea/
+
+# Per-worktree dev/test data (AGENTS §9)
+.pf-dev/
+.env.local

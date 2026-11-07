@@ -85,4 +85,54 @@ Start with [docs/vision.md](docs/vision.md), [docs/feature-tiers.md](docs/featur
 
 ## §9 Build conventions
 
-> TODO (phase 1): to be drafted by the orchestrator once the stack ADRs are accepted. It will cover layout and import boundaries, per-worktree isolation (ports and data dirs), fixtures, test commands and naming (`FR-…` in test names), test IDs, lint/typecheck, the shared-files table, and "done" for a build task.
+> Status: **draft**, approved at the phase 1b gate. It builds on [ADR 0002](docs/architecture/adr/0002-desktop-stack.md). The skeleton builder creates everything listed here.
+
+**Layout and boundaries**
+
+```
+crates/pf-core/      domain: library, asset project, manifest, revisions, jobs; core commands. No Tauri dependency.
+crates/pf-imaging/   image ops (ADR 0004): decode, tile pyramid, region extract, blend, flatten, encode.
+crates/pf-provider/  adapter trait (ADR 0001), Scenario implementation, fake provider.
+app/src-tauri/       thin Tauri layer: command registration, URI scheme, window. No domain logic.
+app/src/             React UI. app/src/features/<feature>/ per spec; app/src/api/ is the only place that calls Tauri.
+fixtures/            generators + small committed fixtures; provider recordings in fixtures/provider/<model>/<case>.json.
+spikes/              reference only; deleted when the skeleton lands.
+```
+
+- Dependencies point one way: `app → pf-core → pf-imaging, pf-provider`. The UI never imports another feature's internals. CI enforces this (cargo deny rules for the crates, an ESLint import rule for the UI).
+- **Every capability is a core command** in `pf-core`. Inputs are validated at the command boundary. The Tauri layer and the future MCP endpoint (#36) only adapt commands.
+- **Injected seams:** IDs, clock, randomness and the provider come from a context object. Tests and fixtures use seeded or fake implementations.
+
+**Per-worktree isolation**
+
+- `PF_DATA_DIR` (app data and caches) and `PF_LIBRARY_DIR` (library folder) override the defaults. Dev and test runs always set them to a folder inside the worktree (`.pf-dev/`, which is gitignored).
+- Vite dev port = `5200 + 10 × slot`. `corepack pnpm env:init` claims a free slot and writes `.env.local`, and fails fast if the port is taken.
+- Never run against the real library or real credentials in tests. The fake provider is the default outside an explicit manual run.
+
+**Commands**
+
+| Command | Does |
+|---|---|
+| `corepack pnpm check` | typecheck + lint + Vitest + `cargo clippy` + targeted `cargo test` for changed crates |
+| `cargo test -p <crate>` | Rust tests for one crate |
+| `corepack pnpm test` | Vitest (UI units) |
+| `corepack pnpm e2e <spec>` | Playwright on the UI with mocked core commands (KQ-33) |
+| `corepack pnpm tauri:smoke` | Builds the app and runs the smoke tests (CI on `windows-latest`) |
+
+**Tests and fixtures**
+
+- Name tests after requirements: `#[test] fn fr_prj_03_reopen_is_pixel_identical()`, `test("FR-EDT-05 …")`.
+- Interactive elements get `data-testid="<prefix>-<area>-<element>"` (prefix lower case, e.g. `edt-toolbar-brush`). Repeated records add `data-record-id`.
+- Fixture images are **generated** by committed scripts (KQ-22). Commit only small ones (< 1 MB).
+- Golden images compare decoded pixels (OQ-IMG-07).
+
+**Shared files** (builders only *add lines* to append-only registries; anything else goes through the orchestrator)
+
+| File | Rule |
+|---|---|
+| Root `Cargo.toml`, `package.json`, `pnpm-workspace.yaml`, `rust-toolchain.toml`, `tauri.conf.json` | orchestrator only |
+| Command registry (`app/src-tauri/src/commands.rs`), UI route/feature registry | append-only |
+| Manifest schema (`pf-core`) | add fields only. Never rename or drop a field once real projects exist; add a new one and migrate on load. |
+| `.github/workflows/*`, `docs/glossary.md`, `docs/decisions-log.md`, ADRs | orchestrator only |
+
+**Done for a build task:** every FR in scope has a named test; `check` is green locally; the branch CI is green; the walkthrough has passed (run by a test agent); fixtures are added; one commit per slice.

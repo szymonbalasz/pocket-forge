@@ -1,17 +1,23 @@
 # Status (scratch board, overwritten as things change)
 
-**Phase:** 1a gate: waiting on the owner ([gate-phase1a.md](gate-phase1a.md)).
+**Phase:** 1b: foundation specs + AGENTS §9 draft ([seams](seams-phase1b.md)).
 
 | Task | Agent | Worktree / branch | State | Blockers |
 |---|---|---|---|---|
-| Kickoff Q&A | orchestrator | `main` | in progress | owner answers |
+| Kickoff Q&A | orchestrator | `main` | done | — |
+| Spec: asset-project | spec-prj | `spec/asset-project` | starting | — |
+| Spec: editor-canvas | spec-edt | `spec/editor-canvas` | starting | — |
+| Spec: region-edit | spec-rgn | `spec/region-edit` | starting | — |
+| Spec: provider | spec-prv | `spec/provider` | starting | — |
+| Spec: export | — | — | queued (5th slot) | — |
 | Canvas library spike | — | merged (PR #3) | done | ADR proposed; gate with imaging spike |
 | Rust imaging spike (+ animated WebP/GIF encoding) | — | merged (PR #4) | done | ADR proposed |
 | Scenario video/animation research | — | merged (PR #2) | done | OQ-ANI decided at the animation spec |
 | Scenario API spike | — | merged (PR #1) | done | ADR 0001 accepted |
 
 ## Pending owner decisions
-- [gate-phase1a.md](gate-phase1a.md): D1 stack, D2 dependencies, remaining picks, kickoff batch, success criteria.
+- OQ-IMG-12: file the image-webp bug upstream? (not urgent)
+- MCP endpoint order within tier A (#36)
 
 ## Integrator rulings (since last gate)
 - _none_
