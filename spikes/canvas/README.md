@@ -1,7 +1,7 @@
 # Canvas spike (throwaway)
 
 Prototype for KQ-32: Konva vs Fabric.js vs PixiJS on 8k/16k battlemaps, in Chromium (Edge = WebView2's engine) and a Tauri 2 window.
-Findings: [docs/research/canvas-library.md](../../docs/research/canvas-library.md). Proposal: [proposed-canvas-library.md](../../docs/architecture/adr/proposed-canvas-library.md).
+Findings: [docs/research/canvas-library.md](../../docs/research/canvas-library.md). Proposal: [0003-canvas-library.md](../../docs/architecture/adr/0003-canvas-library.md).
 **Not production code.** Dependencies here live on the spike branch only (#22).
 
 ## Layout

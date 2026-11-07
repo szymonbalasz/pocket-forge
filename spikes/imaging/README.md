@@ -1,7 +1,7 @@
 # Spike: Rust large-image processing (throwaway)
 
 Benchmark crate for `spike/rust-imaging` (#22). **Not production code.** It is a standalone cargo crate, not part of any workspace.
-Findings: [docs/research/rust-imaging.md](../../docs/research/rust-imaging.md). Proposal: [proposed-large-image-strategy.md](../../docs/architecture/adr/proposed-large-image-strategy.md).
+Findings: [docs/research/rust-imaging.md](../../docs/research/rust-imaging.md). Proposal: [0004-large-image-strategy.md](../../docs/architecture/adr/0004-large-image-strategy.md).
 
 ## What it does
 

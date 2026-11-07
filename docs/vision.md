@@ -1,6 +1,6 @@
 # Vision
 
-> Status: **draft**, under owner review during kickoff. Open items are tracked in [kickoff-questions.md](kickoff-questions.md).
+> Status: **accepted** at the phase 1a gate (2026-11-07). Change it only with the owner's OK.
 
 ## Positioning
 
@@ -36,7 +36,7 @@ Pocket Forge turns that into **repeatable production**. The prompt helper become
 - **No AI beyond the provider.** The app assembles and shows prompts and never writes them for you (#9).
 - **No browser, no server to manage.** It is an installed app. Its UI may use web technology inside the app window.
 
-## Non-goals (proposed, owner to confirm)
+## Non-goals
 
 - It is not a virtual tabletop. It exports *to* VTTs.
 - It is not a general-purpose image editor. It has a focused, practical toolset.
@@ -47,7 +47,12 @@ Pocket Forge turns that into **repeatable production**. The prompt helper become
 
 ## Success criteria
 
-> TODO (kickoff): measurable signs that it works (e.g. a battlemap room edit takes N minutes, no visible seams at 100% zoom, the library opens in under N s with N assets).
+Accepted at the phase 1a gate (#35):
+
+- **No visible seam** at 100% zoom after an accepted patch.
+- **A typical map** (#30) opens and is usable in **under 2 s**; a 16k map in under 5 s.
+- **Mask to accepted patch** takes under **5 minutes** of the owner's time, excluding generation time.
+- **Save and reopen is pixel-identical**: layers, masks, prompts, settings and history.
 
 ## MVP scenario: the first milestone loop (draft)
 
@@ -61,4 +66,4 @@ This scenario is the acceptance test and the regression fixture.
 6. Save, close and reopen the **asset project**. → The layers, mask, prompt, settings and revision history are all intact.
 7. Export a flattened image for the VTT. → The patch blends without visible seams, at the original resolution.
 
-> TODO (kickoff): KQ-20 to KQ-24 refine this scope (map sizes, export targets, which steps may use a fake provider).
+Scope notes: typical maps are ~30×40 cells (#30). Export is plain image files at a chosen px per square (#26). CI uses the fake provider, and acceptance includes one manual real call (KQ-24).

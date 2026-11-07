@@ -1,6 +1,6 @@
 # Research: Rust large-image processing
 
-> Spike `spike/rust-imaging` (#22). Input for [proposed-large-image-strategy.md](../architecture/adr/proposed-large-image-strategy.md). Measured 2026-11-07 with the throwaway crate in [spikes/imaging](../../spikes/imaging/README.md).
+> Spike `spike/rust-imaging` (#22). Input for [0004-large-image-strategy.md](../architecture/adr/0004-large-image-strategy.md). Measured 2026-11-07 with the throwaway crate in [spikes/imaging](../../spikes/imaging/README.md).
 > All images are procedurally generated. No real art was used.
 
 ## Recommendation
@@ -10,7 +10,7 @@
 - **Typical maps are easy.** At ~4200×5600 (#30, ≈ 1/11 of 16k), every step below scales about linearly: decode ≈ 0.2 s, pyramid ≈ 0.3 s, flatten + PNG export ≈ 1.2 s, ≈ 70 MiB per decoded copy. The 16k numbers are the stress case.
 - **Crates:** `image` (decode), `png` (row-streaming decode and encode), `jpeg-encoder` (row-pull encode), `fast_image_resize`, `tiny-skia` (layer compose), `rayon`. Add `libwebp-sys` 0.14 (lossy and animated WebP) and `gif` + `color_quant` (GIF).
 - **Memory:** a 16k original costs 768 MiB as RGB8. Hold at most one decoded copy. Import a PNG by streaming its rows (peak **279 MiB** for a 16k pyramid). Export in strips: **388 MiB** peak at 16k, against 1155 MiB for one full-size buffer.
-- **Tiles:** 512 px, matching the [canvas proposal](../architecture/adr/proposed-canvas-library.md).
+- **Tiles:** 512 px, matching the [canvas proposal](../architecture/adr/0003-canvas-library.md).
   - JPEG: a 16k pyramid (1365 tiles) is written in **1.1 s** after decode and takes 67 MiB.
   - Lossless WebP for the 1:1 level (OQ-CNV-01) raises the cache to ≈ 270 MiB at 16k (≈ 25 MiB typical) and costs ≈ 0.2 s more.
   - Lossy WebP tiles are half the size of JPEG but take 3× the encode time and 2× the decode time.

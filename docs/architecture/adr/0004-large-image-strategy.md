@@ -1,7 +1,7 @@
-# Proposed ADR: Large-image strategy (tile pyramid, regions, patch blend, flatten, export)
+# ADR 0004: Large-image strategy (tile pyramid, regions, patch blend, flatten, export)
 
-> Status: **proposed** (spike `spike/rust-imaging`, #22). The owner accepts or rejects it. Evidence: [research/rust-imaging.md](../../research/rust-imaging.md).
-> Input: #11 and #30 (typically ~2100×2800 to 4200×5600 px, supported up to ~16k), #13, #19, #24 (export to the owner's own VTT), #25 and #27 (animated WebP, and possibly GIF; after milestone 1, tokens first), #26 (plain files at a user-chosen px per square), KQ-23, KQ-25, KQ-28, [ADR 0001](0001-provider-integration.md) (canonical mask: 8-bit, white = editable), and the [canvas proposal](proposed-canvas-library.md) (512 px tile pyramid, layer model, soft-brush mask).
+> Status: **accepted** 2026-11-07 (#32, #33): all OQ-IMG picks as written. OQ-IMG-12 (upstream bug report) is still with the owner. Evidence: [research/rust-imaging.md](../../research/rust-imaging.md).
+> Input: #11 and #30 (typically ~2100×2800 to 4200×5600 px, supported up to ~16k), #13, #19, #24 (export to the owner's own VTT), #25 and #27 (animated WebP, and possibly GIF; after milestone 1, tokens first), #26 (plain files at a user-chosen px per square), KQ-23, KQ-25, KQ-28, [ADR 0001](0001-provider-integration.md) (canonical mask: 8-bit, white = editable), and the [canvas proposal](0003-canvas-library.md) (512 px tile pyramid, layer model, soft-brush mask).
 
 ## Context
 
@@ -21,7 +21,7 @@
 | Blend | **A. Inward feather + least-squares colour match, in sRGB, baked by Rust** / B. hard edge (the model blends) / C. linear-light blend | A: edge step 3.6 → 0.28 levels/px, offset 3.4 → 0.03. B leaves a visible line. C differs from the canvas by up to 10 levels. |
 | Animated | **A. libwebp `WebPAnimEncoder` (lossy) + `gif` with NeuQuant** / B. pure-Rust lossless WebP mux + GIF | A: token 1.2 MiB in 2.3 s. B: 32 MiB. |
 
-## Decision (proposed)
+## Decision
 
 - **Crates:** `image` (decode, with explicit `Limits`), `png` (row decode, streaming encode), `jpeg-encoder` (row-pull encode), `fast_image_resize`, `tiny-skia`, `rayon`, **`libwebp-sys` 0.14** (vendored libwebp 1.6.0), and `gif` + `color_quant` for when animation lands (#27).
   - **Not** `webp` 0.3, which vendors libwebp 1.3.1 (CVE-2023-4863).
@@ -67,6 +67,10 @@ flowchart LR
 - tiny-skia is single-threaded, so parallelism comes from strips.
 
 ## Open questions
+
+All picks below were accepted as written (#32, #33), except OQ-IMG-12, which is still with the owner.
+
+All picks below were accepted as written (#32, #33), except OQ-IMG-12, which is still with the owner.
 
 | ID | Question | Options (pick in **bold**) | Tradeoff |
 |---|---|---|---|

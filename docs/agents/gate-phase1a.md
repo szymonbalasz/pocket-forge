@@ -1,13 +1,15 @@
 # Gate: phase 1a (stack) + kickoff leftovers
 
+> **Closed 2026-11-07.** D1 yes, D2 approved, rest accepted (#31–#35). OQ-IMG-12 is still with the owner.
+
 One doc, all open calls. Answer **D1–D2** and say "accept the rest", or name the exceptions.
 
 ## Summaries
 
 | Item | Summary | Verdict |
 |---|---|---|
-| [Canvas research](../research/canvas-library.md) → [proposed ADR](../architecture/adr/proposed-canvas-library.md) | Konva + react-konva over a 512 px **tile pyramid** that Rust serves through a custom URI scheme. With tiles, all three libraries pan a 16k map at ~240 fps. Konva wins on mask painting (228 vs 139 fps for Pixi), built-in transform handles and bundle size. The Tauri window matched the browser. | Sound. Measured on AC power after discarding battery-capped runs. |
-| [Imaging research](../research/rust-imaging.md) → [proposed ADR](../architecture/adr/proposed-large-image-strategy.md) | Pure-Rust crates, plus libwebp (C) for lossy and animated WebP. 16k export composed in 512-row strips (PNG: 13 s, 388 MiB peak). A 48 px feather + colour match removes seams. Regions must fit the provider's maximum input, or the patch looks softer. Output is deterministic. | Sound. Typical maps (#30) are ~11× cheaper. macOS build unverified. |
+| [Canvas research](../research/canvas-library.md) → [proposed ADR](../architecture/adr/0003-canvas-library.md) | Konva + react-konva over a 512 px **tile pyramid** that Rust serves through a custom URI scheme. With tiles, all three libraries pan a 16k map at ~240 fps. Konva wins on mask painting (228 vs 139 fps for Pixi), built-in transform handles and bundle size. The Tauri window matched the browser. | Sound. Measured on AC power after discarding battery-capped runs. |
+| [Imaging research](../research/rust-imaging.md) → [proposed ADR](../architecture/adr/0004-large-image-strategy.md) | Pure-Rust crates, plus libwebp (C) for lossy and animated WebP. 16k export composed in 512-row strips (PNG: 13 s, 388 MiB peak). A 48 px feather + colour match removes seams. Regions must fit the provider's maximum input, or the patch looks softer. Output is deterministic. | Sound. Typical maps (#30) are ~11× cheaper. macOS build unverified. |
 | Toolchain | Current Tauri and crates need **Rust ≥ 1.90**. This machine has 1.86, and the spikes worked around it with older versions. | Needs D1 |
 
 ## Decisions

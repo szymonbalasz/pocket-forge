@@ -6,7 +6,7 @@
 
 ## Recommendation
 
-**Konva (with react-konva), drawing a tile pyramid served by the Rust core through a custom URI scheme.** Proposed in [proposed-canvas-library.md](../architecture/adr/proposed-canvas-library.md).
+**Konva (with react-konva), drawing a tile pyramid served by the Rust core through a custom URI scheme.** Proposed in [0003-canvas-library.md](../architecture/adr/0003-canvas-library.md).
 
 - **Tiles are required whatever the library is.** A single 16k bitmap takes 1.7–2.0 s to first view and 2.5–3.5 GB of browser memory, and in the Canvas2D libraries it causes 0.8–1.0 s hitches while panning. Tiles show first view in 20–60 ms, use 550–800 MB of browser memory and keep 240 fps.
 - **With tiles, display performance is a tie.** All three hold 228–240 fps on the iGPU and on the dGPU, with worst frames of 4.5–21 ms. Coordinate accuracy is also a tie (about 1e-11 px).

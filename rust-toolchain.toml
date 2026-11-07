@@ -1,0 +1,5 @@
+# Pinned Rust toolchain (ADR 0002, #31). rustup installs it automatically.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

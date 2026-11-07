@@ -1,7 +1,7 @@
-# Proposed ADR: Canvas library and rendering architecture
+# ADR 0003: Canvas library and rendering architecture
 
-> Status: **proposed** (not accepted). Input: KQ-32, the [canvas research](../../research/canvas-library.md), the [spike prototype](../../../spikes/canvas/README.md), #3, #11, #16, #19, KQ-25, KQ-30, [ADR 0001](0001-provider-integration.md).
-> This depends on the frontend framework (KQ-30: React + TS + Vite) and on Tauri, both of which are still provisional.
+> Status: **accepted** 2026-11-07 (#33): option A, with all OQ-CNV picks as written. Input: KQ-32, the [canvas research](../../research/canvas-library.md), the [spike prototype](../../../spikes/canvas/README.md), #3, #11, #16, #19, KQ-25, KQ-30, [ADR 0001](0001-provider-integration.md).
+> The stack is fixed by [ADR 0002](0002-desktop-stack.md).
 
 ## Context
 
@@ -56,6 +56,10 @@ flowchart LR
 - Playwright tests read app state and the Konva node tree (`stage.find`) through a test hook, never canvas pixels, except for a few probe tests like the spike's.
 
 ## Open questions
+
+All picks below were accepted as written (#33).
+
+All picks below were accepted as written (#33).
 
 | ID | Question | Options (pick in **bold**) | Tradeoff |
 |---|---|---|---|

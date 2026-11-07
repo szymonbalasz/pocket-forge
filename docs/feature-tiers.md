@@ -46,6 +46,7 @@
 | Animated GIF export (#25) | B | B |
 | Motion source: provider video model and/or in-app looping layers | ? (KQ-39) | open (KQ-39) |
 | Grid metadata and overlay | B | B |
+| MCP endpoint in the running app so an external agent can iterate on prompts, model choice and settings (#36) | A | A (post-MVP; order TBD) |
 | macOS build | C | C |
 | Cards | C | C |
 | Other generation providers | C | C |

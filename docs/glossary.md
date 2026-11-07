@@ -27,4 +27,7 @@
 | **Provider** | The generation service. Currently Scenario. |
 | **Model capabilities** | The settings and inputs a provider model actually supports. They drive which controls are shown. |
 | **Cost** | The provider-reported charge for a job, in provider units (Scenario: Compute Units). |
+| **Tile pyramid** | Multi-resolution 512 px tiles of an image, used for display. A rebuildable cache. |
+| **View** | The editor's current zoom and pan. |
+| **Feather** | The soft inward edge Rust applies to a patch layer's mask so it blends without seams. |
 | **Export** | A flattened image, written for use in a VTT. |
