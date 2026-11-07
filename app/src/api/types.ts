@@ -152,6 +152,36 @@ export interface ExportSettings {
   [k: string]: unknown;
 }
 
+/** Integer image-px rectangle. */
+export interface RectPx {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** `rgn_region_fit` result (RGN §9). */
+export interface RegionFit {
+  inner: RectPx;
+  outer: RectPx;
+  margin: number;
+  sent_w: number;
+  sent_h: number;
+  scale: number;
+}
+
+/** `edt_mask_submit` result (FR-EDT-18). */
+export interface MaskRef {
+  mask_id: string;
+  rect: RectPx;
+}
+
+/** `edt_mask_read` result: raw w·h bytes (an array over IPC) + rect. */
+export interface MaskRead {
+  rect: RectPx;
+  bytes: number[] | ArrayBuffer;
+}
+
 /** Core command name → [input, output]. Append new commands. */
 export interface Commands {
   app_info: [Record<string, never>, AppInfo];
@@ -169,6 +199,12 @@ export interface Commands {
   provider_status: [Record<string, never>, ProviderStatus];
   edt_tiles_open: [{ project_id: string; image_id: string; rebuild?: boolean }, TilesDescriptor];
   export_get_settings: [Record<string, never>, ExportSettings];
+  rgn_region_fit: [
+    { project_id: string; inner: RectPx; margin?: number; model_id?: string | null },
+    RegionFit,
+  ];
+  edt_mask_read: [{ project_id: string; mask_id: string }, MaskRead];
+  project_restore_revision: [{ rev_id: string }, RevisionEntry];
 }
 
 export type CommandName = keyof Commands;

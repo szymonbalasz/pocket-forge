@@ -158,3 +158,86 @@
 .editor-canvas:focus {
   outline: none;
 }
+
+.edt-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.edt-region-box,
+.edt-region-margin {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.edt-region-box {
+  border: 1px solid var(--pf-accent);
+  box-shadow: 0 0 0 1px var(--pf-overlay);
+}
+
+.edt-region-margin {
+  border: 1px dashed var(--pf-text-dim);
+}
+
+.edt-region-preview {
+  border-style: dotted;
+}
+
+.edt-region-handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -5px 0 0 -5px;
+  background: var(--pf-bg-1);
+  border: 1px solid var(--pf-accent);
+  pointer-events: auto;
+}
+
+.edt-handle-nw,
+.edt-handle-se {
+  cursor: nwse-resize;
+}
+
+.edt-handle-ne,
+.edt-handle-sw {
+  cursor: nesw-resize;
+}
+
+.edt-handle-n,
+.edt-handle-s {
+  cursor: ns-resize;
+}
+
+.edt-handle-e,
+.edt-handle-w {
+  cursor: ew-resize;
+}
+
+.edt-brush {
+  position: absolute;
+  border: 1px solid var(--pf-text);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--pf-overlay);
+}
+
+.edt-brush-hard {
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.edt-brush-erase {
+  border-color: var(--pf-warn);
+}
+
+.edt-cursor-hint {
+  position: absolute;
+  background: var(--pf-bg-3);
+  color: var(--pf-text);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  padding: 2px 6px;
+  font-size: var(--pf-font-size-meta);
+  white-space: nowrap;
+}

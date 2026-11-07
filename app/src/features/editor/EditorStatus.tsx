@@ -5,7 +5,7 @@ import { Tip } from './Tip';
 import { displayScale, zoomPercent } from './view';
 
 export function EditorStatus() {
-  const { view, dpr, image, pxPerSquare } = useEditor((s) => s);
+  const { view, dpr, image, pxPerSquare, undo } = useEditor((s) => s);
   if (!image) return null;
   const display = displayScale(pxPerSquare.source, pxPerSquare.target);
   return (
@@ -43,6 +43,11 @@ export function EditorStatus() {
       <span className="tabular muted">
         {image.w} × {image.h} px
       </span>
+      {undo.error && (
+        <span className="error" data-testid="edt-undo-error" data-code={undo.error}>
+          {undo.busy ? '' : `Undo failed: ${undo.error}`}
+        </span>
+      )}
     </div>
   );
 }

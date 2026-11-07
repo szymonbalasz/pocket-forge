@@ -16,6 +16,7 @@ import { useTestHook } from './hook';
 import { dispatchShortcut, isTextTarget, type ShortcutMap } from './shortcuts';
 import { editorStore, useEditor } from './store';
 import { PatchLayers } from './PatchLayers';
+import { useMaskTools } from './useMaskTools';
 import { konvaSink, TileManager, type TileStats } from './TileManager';
 import { fit, panBy, scaleLimits, wheelFactor, zoomAbout } from './view';
 
@@ -65,6 +66,7 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   const tilesRef = useRef<TileManager | null>(null);
   const patchesLayerRef = useRef<Konva.Layer>(null);
   const patchesRef = useRef<PatchLayers | null>(null);
+  const maskLayerRef = useRef<Konva.Layer>(null);
   const [stack, setStack] = useState<ManifestLayer[]>(project.layers);
   const [layerError, setLayerError] = useState<string | null>(null);
   const [desc, setDesc] = useState<TilesDescriptor | null>(null);
@@ -72,7 +74,8 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   const [buildError, setBuildError] = useState<string | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
   const drag = useRef<Drag | null>(null);
-  const { view, viewport, dpr, tool, image } = useEditor((s) => s);
+  const { view, viewport, dpr, tool, image, maskVisible } = useEditor((s) => s);
+  const tools = useMaskTools({ project, maskLayer: maskLayerRef, container: containerRef });
 
   useElementSize(containerRef);
   useDevicePixelRatio(stageRef);
@@ -282,12 +285,19 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
     // Take focus from text fields, so tool shortcuts work after clicking the canvas (FR-EDT-30).
     containerRef.current?.focus({ preventScroll: true });
     const panning = e.button === 1 || (e.button === 0 && (tool === 'pan' || spaceHeld));
-    if (!panning) return;
+    if (!panning) {
+      if (tools.onPointerDown(e)) {
+        e.preventDefault();
+        containerRef.current?.setPointerCapture?.(e.pointerId);
+      }
+      return;
+    }
     e.preventDefault();
     drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, pointerId: e.pointerId };
     containerRef.current?.setPointerCapture?.(e.pointerId);
   };
   const onPointerMove = (e: React.PointerEvent) => {
+    tools.onPointerMove(e);
     const d = drag.current;
     if (!d || d.pointerId !== e.pointerId) return;
     const dx = e.clientX - d.x;
@@ -298,6 +308,7 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
     if (s.image) editorStore.set({ view: panBy(s.view, dx, dy, s.image, s.viewport) });
   };
   const onPointerUp = (e: React.PointerEvent) => {
+    tools.onPointerUp(e);
     if (drag.current?.pointerId === e.pointerId) drag.current = null;
   };
 
@@ -308,6 +319,8 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
     extra: () => ({
       layers: () => patchesRef.current?.drawn() ?? [],
       stack: () => stack.map((l) => l.id),
+      ...tools.testExtras(),
+      setView: (v: { scale: number; tx: number; ty: number }) => editorStore.set({ view: v }),
     }),
   });
 
@@ -346,8 +359,16 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
               imageSmoothingEnabled={view.scale * dpr < 1}
             />
             <Layer ref={patchesLayerRef} name="patches" listening={false} />
+            <Layer
+              ref={maskLayerRef}
+              name="mask"
+              listening={false}
+              visible={maskVisible}
+              imageSmoothingEnabled={false}
+            />
           </Stage>
         )}
+        {tools.overlay}
         {!loaded && !buildError && (
           <div className="editor-spinner" data-testid="edt-loading" aria-label="Loading" />
         )}

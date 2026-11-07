@@ -97,6 +97,7 @@ export const api = {
     saveRevision: (label?: string) =>
       call('project_save_revision', label === undefined ? {} : { label }),
     listRevisions: () => call('project_list_revisions', {}),
+    restoreRevision: (revId: string) => call('project_restore_revision', { rev_id: revId }),
   },
   recent: { list: () => call('recent_list', {}) },
   editor: {
@@ -110,5 +111,17 @@ export const api = {
       }),
   },
   export: { getSettings: () => call('export_get_settings', {}) },
+  region: {
+    fit: (projectId: string, inner: Commands['rgn_region_fit'][0]['inner'], margin?: number) =>
+      call('rgn_region_fit', {
+        project_id: projectId,
+        inner,
+        ...(margin === undefined ? {} : { margin }),
+      }),
+  },
+  mask: {
+    read: (projectId: string, maskId: string) =>
+      call('edt_mask_read', { project_id: projectId, mask_id: maskId }),
+  },
   provider: { status: () => call('provider_status', {}) },
 };
