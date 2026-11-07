@@ -9,7 +9,7 @@
 | Spec: editor-canvas | — | merged | in-review | gate |
 | Spec: region-edit | — | merged | in-review | gate |
 | Spec: provider | — | merged | in-review | gate |
-| Spec: export | spec-exp | `spec/export` | working | — |
+| Spec: export | — | merged | in-review | gate |
 | Canvas library spike | — | merged (PR #3) | done | ADR proposed; gate with imaging spike |
 | Rust imaging spike (+ animated WebP/GIF encoding) | — | merged (PR #4) | done | ADR proposed |
 | Scenario video/animation research | — | merged (PR #2) | done | OQ-ANI decided at the animation spec |
