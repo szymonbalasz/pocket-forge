@@ -80,6 +80,8 @@ export async function mockCore(page: Page, seed: MockSeed = defaultSeed): Promis
         revisions: [...revisions],
         head_revision: revisions.at(-1)?.id ?? null,
         commit_seq: seq,
+        // Feature mocks override snapshot fields here (layers, read_only, draft, …).
+        ...(((window as unknown as Rec).__pfMockSnapshot as Rec | undefined) ?? {}),
       });
 
       const fail = (code: string, message: string) => Promise.reject({ code, message });

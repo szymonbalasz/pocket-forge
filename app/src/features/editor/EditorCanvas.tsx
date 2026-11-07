@@ -4,11 +4,18 @@ import Konva from 'konva';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Layer, Stage } from 'react-konva';
 
-import { api, onEvent, type ProjectSnapshot, type TilesDescriptor } from '../../api';
+import {
+  api,
+  onEvent,
+  type Layer as ManifestLayer,
+  type ProjectSnapshot,
+  type TilesDescriptor,
+} from '../../api';
 import { actions } from './actions';
 import { useTestHook } from './hook';
 import { dispatchShortcut, isTextTarget, type ShortcutMap } from './shortcuts';
 import { editorStore, useEditor } from './store';
+import { PatchLayers } from './PatchLayers';
 import { konvaSink, TileManager, type TileStats } from './TileManager';
 import { fit, panBy, scaleLimits, wheelFactor, zoomAbout } from './view';
 
@@ -56,6 +63,10 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   const stageRef = useRef<Konva.Stage>(null);
   const tilesLayerRef = useRef<Konva.Layer>(null);
   const tilesRef = useRef<TileManager | null>(null);
+  const patchesLayerRef = useRef<Konva.Layer>(null);
+  const patchesRef = useRef<PatchLayers | null>(null);
+  const [stack, setStack] = useState<ManifestLayer[]>(project.layers);
+  const [layerError, setLayerError] = useState<string | null>(null);
   const [desc, setDesc] = useState<TilesDescriptor | null>(null);
   const [tileStats, setTileStats] = useState<TileStats | null>(null);
   const [buildError, setBuildError] = useState<string | null>(null);
@@ -112,6 +123,40 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
           ),
       );
   }, [desc]);
+
+  // FR-EDT-13: the drawn stack follows the manifest; refreshed after every commit.
+  useEffect(() => {
+    setStack(project.layers);
+    const sub = onEvent('project:committed', () => {
+      api.project.get().then(
+        (p) => p && p.project_id === project.project_id && setStack(p.layers),
+        () => undefined,
+      );
+    });
+    return () =>
+      void sub.then(
+        (u) => u(),
+        () => undefined,
+      );
+  }, [project.project_id, project.layers]);
+
+  useEffect(() => {
+    const layer = patchesLayerRef.current;
+    if (!layer) return;
+    if (!patchesRef.current) {
+      patchesRef.current = new PatchLayers(layer, project.project_id, (_id, msg) =>
+        setLayerError(msg),
+      );
+    }
+    patchesRef.current.setStack(stack);
+  }, [stack, project.project_id, viewport.w]);
+  useEffect(
+    () => () => {
+      patchesRef.current?.destroy();
+      patchesRef.current = null;
+    },
+    [],
+  );
 
   // Export's px-per-square values for Display size (FR-EDT-04, FR-EXP-26).
   useEffect(() => {
@@ -260,7 +305,10 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
     store: editorStore.get,
     stage: () => stageRef.current,
     tiles: () => tilesRef.current?.stats() ?? null,
-    extra: () => ({}),
+    extra: () => ({
+      layers: () => patchesRef.current?.drawn() ?? [],
+      stack: () => stack.map((l) => l.id),
+    }),
   });
 
   const loaded = tileStats?.backdropShown ?? false;
@@ -297,6 +345,7 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
               listening={false}
               imageSmoothingEnabled={view.scale * dpr < 1}
             />
+            <Layer ref={patchesLayerRef} name="patches" listening={false} />
           </Stage>
         )}
         {!loaded && !buildError && (
@@ -308,6 +357,11 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
             <button type="button" className="link" onClick={() => void openTiles(true)}>
               Rebuild
             </button>
+          </div>
+        )}
+        {layerError && (
+          <div className="banner banner-error editor-banner" data-testid="edt-layer-error">
+            A layer could not be shown: {layerError}
           </div>
         )}
         {!!tileStats?.failed && (
