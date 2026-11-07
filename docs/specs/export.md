@@ -57,7 +57,7 @@ Tier S ([feature-tiers](../feature-tiers.md)): *Flattened export at full resolut
 | FR-EXP-22 | A missing or undecodable layer file fails the export with `layer_unreadable{layer_id}`. No partial or layer-skipping output is ever written. |
 | FR-EXP-23 | Big buffers are reserved fallibly (`try_reserve`). An allocation failure returns `out_of_memory` and the app keeps running. |
 | FR-EXP-24 | `export_plan` is pure (it only stats the destination and reads manifest sizes). It returns output size, scale, formats with reasons, destination path, `exists`, estimated peak memory and warnings. A peak estimate above 2 GiB adds a warning. |
-| FR-EXP-25 | Settings (grid input, target, format) are session state of the open project until `export_start`, which commits them through PRJ `put_export` (R6). Typing never commits. After an export, settings and `last` are field-identical on reopen (OQ-EXP-04). |
+| FR-EXP-25 | Settings (grid input, target, format) are session state of the open project. PRJ's debounced draft save (≥ 2 s after the last change, and on close, FR-PRJ-19) commits them to the manifest `export` record (R30), and `export_start` commits them through PRJ `put_export` (R6). A keystroke never commits by itself. Settings, and so display size, are field-identical on reopen with or without an export; after an export, `last` is too (OQ-EXP-04). |
 | FR-EXP-26 | `export_get_settings` returns `source_px_per_square` and `target_px_per_square` (each or null); every settings change emits `export:settings-changed`. EDT's display size = target ÷ source and needs **both** values (R6, FR-EDT-04). |
 | FR-EXP-27 | On success, after the rename, a second `put_export` commits `last = {at, revision_id: head_revision, layers_hash, path, format, width, height, bytes, fallback, strip_h, compose_version}`. `layers_hash` is computed over the stack snapshot (manifest-schema §4.10); `path` is relative to the project folder (R6, FR-PRJ-12). |
 | FR-EXP-28 | Until PRJ's `DecodedOriginal` is ready, `export_start` returns `original_unavailable` (R11). Opening the panel calls `project_prefetch_original`; Start is enabled once `project:original-ready` has fired. |
@@ -77,17 +77,17 @@ Field shapes live in [manifest-schema §4.10](../architecture/manifest-schema.md
 |---|---|---|---|
 | Export file | `<library-root>/Exports/<rel dir>/<name>` (synced, #13) | `export_start`, temp → rename | Derived. Reproducible when the stack at `last.revision_id` hashes to `last.layers_hash`, with the same settings and `compose_version`. A replaced export isn't kept. |
 | Temp file | same folder, `.<name>.pf-tmp-<ulid>` | `export_start` | Deleted on success, cancel or failure; stale ones by FR-EXP-17 |
-| Manifest `export` (`grid`, `target_px_per_square`, `format`, `last`) | asset project, via PRJ `put_export` | settings at `export_start`; `last` after the rename | Yes, as manifest state |
-| Settings before an export | memory (session) | `export_set_settings` | Lost on close if never exported (OQ-EXP-11) |
+| Manifest `export` (`grid`, `target_px_per_square`, `format`, `last`) | asset project, via PRJ | settings by the debounced draft save (R30) and at `export_start` (`put_export`); `last` after the rename | Yes, as manifest state |
+| Settings typed since the last draft save | memory (session) | `export_set_settings` | Only the last < 2 s of typing is lost in a crash (R30) |
 | Flatten buffers, plan | memory | — | Transient |
 
-- Reads: `read_project` (current `layers[]`, `head_revision`, original size) and `decoded_original` (PRJ store API, R4). No other store calls; EXP never uses the pending-write spool. `last.layers_hash` equal to the current hash ⇒ the export shows exactly the current stack.
+- Store calls (PRJ store API, R4): `read_project` (current `layers[]`, `head_revision`, original size), `decoded_original` and `put_export`; the settings also ride PRJ's draft save (R30). EXP never uses the pending-write spool. `last.layers_hash` equal to the current hash ⇒ the export shows exactly the current stack.
 
 ## 9. Commands and events
 | Command | Input → result | Errors |
 |---|---|---|
 | `export_get_settings` | — → settings + `source_px_per_square`, `target_px_per_square` | `no_project` |
-| `export_set_settings` | settings → settings (session only, no commit) | `no_project`, `invalid_settings{field, limit}` |
+| `export_set_settings` | settings → settings (session state; committed by the next draft save, R30) | `no_project`, `invalid_settings{field, limit}` |
 | `export_plan` | settings → `{width, height, scale, formats[{format, available, reason}], path, exists{bytes, mtime}?, est_peak_mib, warnings[]}` | `invalid_settings`, `dest_unavailable` (root offline or not writable) |
 | `export_start` | settings, `replace` → `export_id` | the above + `exists`, `busy`, `original_unavailable`, `too_large{format, limit}`, PRJ's `read_only` / `locked` / `conflict` from the settings commit (R12; nothing is written) |
 | `export_cancel` | `export_id` → ok | `unknown_id` (already finished) |
@@ -110,7 +110,7 @@ N/A. Export makes no provider calls and has no cost.
 | Undo across the feature boundary | Exporting isn't on the undo stack. Undo of accept or re-tune is `project_restore_revision(parent)` (R3), so the current stack — and the next export — no longer holds that patch. |
 
 ## 12. Performance budget
-Release build on the owner's desktop. Typical = 4200×5600 (#30). Memory is extra beyond PRJ's `DecodedOriginal` (≤ 70 MiB typical, 768 MiB at 16k, FR-PRJ-42).
+Release build on the owner's desktop. Typical = 4200×5600 (#30). Memory is extra beyond PRJ's `DecodedOriginal` (≤ 70 MiB typical, 768 MiB at 16k, [asset-project §12](asset-project.md#12-performance-budget)).
 
 | Operation | Typical | 16k |
 |---|---|---|
@@ -119,14 +119,14 @@ Release build on the owner's desktop. Typical = 4200×5600 (#30). Memory is extr
 | Rescale to 0.5× + PNG | ≤ 3 s | ≤ 25 s |
 | WebP lossy (extrapolated from 130 s at 10240², OQ-EXP-07) | ≤ 35 s | n/a (> 16383) |
 | Extra memory: strips / full buffer + rescale / WebP | ≤ 60 / 140 / 250 MiB | ≤ 400 MiB / 1.6 GiB / n/a |
-| Whole-app line (R11), core side at 16k | — | decoded original 768 MiB + EXP ≤ 1.6 GiB = ≤ 2.4 GiB |
+| Whole-app line (R11) | owned by PRJ ([asset-project §12](asset-project.md#12-performance-budget)) | EXP adds ≤ 400 MiB (stream) or ≤ 1.6 GiB (rescale) |
 | Progress interval · cancel acknowledgement | ≤ 500 ms · ≤ 1 s | ≤ 500 ms · ≤ 3 s |
 
 ## 13. Test plan
 - **Unit (Rust, `pf-imaging`, `fr_exp_NN_*`):** size and scale maths and limits (06–08, 11); naming and the relative-path mirror (13, 14); integer-placement detection (03); PNG/JPEG/WebP chunk lists hold no metadata (10); settings validation table.
 - **Golden (Rust, OQ-IMG-07):** decoded pixels exact on Windows, ±1 elsewhere; strip height 512 and `COMPOSE_VERSION` pinned. Cases: (a) no layers = original; (b) 3 baked patches from **fake provider** candidates at fixed seeds; (c) one affine layer (scale 1.3, rotation 15°, opacity 0.8); (d) Lanczos3 140 → 70 px per square. Lossless PNGs at 1024×1280 (< 1 MB each), regenerated only with `PF_UPDATE_GOLDENS=1` and reviewed in the diff.
 - **Property (Rust):** `compose_rect(r)` = crop of the flatten for 200 random rects (04). Strip heights 512 / 256 / full are equal for integer layers. Alpha-0 pixels equal the original. JPEG and WebP decode within PSNR ≥ 40 dB of the PNG export.
-- **Integration (Rust, `pf-core`):** PRJ's fault seam fails before and after the rename → no partial final file, old file intact (16). Locked k times then free (18). Encoder seam returns partition overflow → lossless (12). Cancel mid-strip and mid-WebP (20). `busy`, `exists`/`replace`, `layer_unreadable`, `out_of_memory` (allocator seam). `export_set_settings` leaves `commit.seq` unchanged; `export_start` commits; reopen is field-identical (25). `last.layers_hash` equals the schema hash of the snapshot and `last.path` is project-relative (27). Before `DecodedOriginal` is ready → `original_unavailable` (28). Read-only → `read_only`, nothing written (29). Accept, then restore the parent (R3), then export = golden (a). Seam fixture with fake `offset(12)` accepted → FR-RGN-32 metric passes on the exported PNG (R25). A 16384² generated export streams under 450 MiB extra peak.
+- **Integration (Rust, `pf-core`):** PRJ's fault seam fails before and after the rename → no partial final file, old file intact (16). Locked k times then free (18). Encoder seam returns partition overflow → lossless (12). Cancel mid-strip and mid-WebP (20). `busy`, `exists`/`replace`, `layer_unreadable`, `out_of_memory` (allocator seam). `export_set_settings` leaves `commit.seq` unchanged until the draft save (fake clock, ≥ 2 s) commits once; `export_start` commits; reopen without an export is field-identical (25, R30). `last.layers_hash` equals the schema hash of the snapshot and `last.path` is project-relative (27). Before `DecodedOriginal` is ready → `original_unavailable` (28). Read-only → `read_only`, nothing written (29). Accept, then restore the parent (R3), then export = golden (a). Seam fixture with fake `offset(12)` accepted → FR-RGN-32 metric passes on the exported PNG (R25). A 16384² generated export streams within 400 MiB extra peak (§12).
 - **Thin e2e (Playwright, mocked core, KQ-33):** panel modes → plan line; WebP disabled with its reason; Replace flow; loading and read-only states; progress and cancel; done toast; errors; `export:settings-changed` enables EDT's `Ctrl+2` only with both values.
 - **Tauri smoke (Windows):** export the generated typical map to PNG in `.pf-dev/`, then decode it and check its size.
 - **Fixtures (generated, KQ-22):** EDT's `fixtures/gen` battlemap (2048×2560; 4200×5600 = 30×40 cells at 140 px; 16384² on demand), RGN's seam fixture, synthetic RGBA patches (feathered disc), fake-provider candidates (PRV). No personal art.
@@ -142,11 +142,9 @@ Release build on the owner's desktop. Typical = 4200×5600 (#30). Memory is extr
 | 5 | Tauri smoke + walkthrough | none | 4 |
 
 ## 15. Open questions
-| ID | Question | Options (pick in **bold**) | Blocking? | Affects |
-|---|---|---|---|---|
-| OQ-EXP-11 | Settings typed but never exported are lost on close (R6 commits only at `export_start`), so display size must be re-entered | **A. Accept it: R6 as written; values are quick to retype** / B. also commit them with PRJ's debounced draft save — A adds nothing. B keeps display size across reopen but adds an `export` part to the draft. | No | asset-project |
+None open.
 
-**Resolved:** OQ-EXP-01 ✅ A, `Exports/` mirror (#40) · OQ-EXP-02 ✅ A, `<stem>_<target>px` (#40) · OQ-EXP-03 ✅ A, inline Replace (#40) · OQ-EXP-04 ✅ A, per asset project, manifest `export` (#40, R6) · OQ-EXP-05 ✅ A, ≤ 4× (#40) · OQ-EXP-06 ✅ A, q90 (#40) · OQ-EXP-07 ✅ A, measure in slice 2 (#40) · OQ-EXP-08 ✅ A, EXP supplies reference and tolerance, EDT reads back (#40) · OQ-EXP-09 ✅ A, snapshot at start (#40) · OQ-EXP-10 ✅ Px per square in the glossary (R27).
+**Resolved:** OQ-EXP-01 ✅ A, `Exports/` mirror (#40) · OQ-EXP-02 ✅ A, `<stem>_<target>px` (#40) · OQ-EXP-03 ✅ A, inline Replace (#40) · OQ-EXP-04 ✅ A, per asset project, manifest `export` (#40, R6) · OQ-EXP-05 ✅ A, ≤ 4× (#40) · OQ-EXP-06 ✅ A, q90 (#40) · OQ-EXP-07 ✅ A, measure in slice 2 (#40) · OQ-EXP-08 ✅ A, EXP supplies reference and tolerance, EDT reads back (#40) · OQ-EXP-09 ✅ A, snapshot at start (#40) · OQ-EXP-10 ✅ Px per square in the glossary (R27) · OQ-EXP-11 ✅ B, settings persist through PRJ's debounced draft save (R30).
 
 **Answers to other specs:** OQ-EDT-01 ✅ both values required (R6). OQ-RGN-02 ✅ RGN calls `compose_rect` on the outer rect of the current stack (FR-RGN-04), delivered in slice 1.
 

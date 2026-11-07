@@ -40,14 +40,14 @@ Tier S ([feature-tiers](../feature-tiers.md)): "Localised edit of a masked regio
 | FR-PRV-07 | No command returns the secret. `provider_status` exposes `configured` plus the last 4 characters of the key id. |
 | FR-PRV-08 | `Secret` redacts `Debug`/`Display` and has no `Serialize`. A log capture over a full fake + replay job (including every error case) contains neither the key, the secret nor an `Authorization` header. |
 | FR-PRV-09 | The auth header is sent only to the API base host, never to signed or presigned URLs. |
-| FR-PRV-10 | The normaliser maps every `inputs[]` entry to a generic control (int, float, enum, bool, string, seed, image, mask) with min/max/step/allowed/default/required/cost-affecting, and both `required.conditional` and `conditionalValues` to generic `rules[]` ([Appendix C](#appendix-c-generic-shapes)). An unknown type → control omitted + warning; if that input is required, the model isn't offered. Unknown fields are ignored; malformed JSON → an error, never a panic. |
+| FR-PRV-10 | The normaliser maps every `inputs[]` entry to a generic control (int, float, enum, bool, string, seed, image, mask) with a `role` (`source \| mask \| prompt \| candidate_count \| seed \| reference \| other`; from the overlay row where Scenario doesn't say, R28) and min/max/step/allowed/default/required/cost-affecting, and both `required.conditional` and `conditionalValues` to generic `rules[]` ([Appendix C](#appendix-c-generic-shapes)). An unknown type → control omitted + warning; if that input is required, the model isn't offered. Unknown fields are ignored; malformed JSON → an error, never a panic. |
 | FR-PRV-11 | Masked edit is offered only if an overlay row gives the model a mask convention **and** its capabilities list a mask input (#15). Each overlay row has a fixture test. |
 | FR-PRV-12 | Mask conversion is **polarity only** (R1). Input: the canonical mask (L8, white = edit) at exactly the size of the sent image (the outer rect after fit), already padded and resampled by RGN; any other size → `invalid_request(mask)`. Output: a PNG of the same size in the row's convention, applying its `soft` rule (`pass-through` \| `threshold(128)`). `alpha_transparent_edit` masks are RGBA carrying the sent image's RGB. One golden per convention × soft rule. |
 | FR-PRV-13 | Backstop for RGN's `input_too_large` pre-check (R20): in `estimate` and `submit`, before any network call, a sent image outside `input_px{min,max,multiple_of}` or a converted file over `max_bytes` → `invalid_request(image\|mask)`, with zero network calls. |
 | FR-PRV-14 | Upload < 4 MB → `POST /assets` (base64, `hide: true`). ≥ 4 MB → `/uploads` multipart (parts ≥ 5 MB) + complete. Each converted file is uploaded **at most once per content hash** (`sha2`) per session; the in-memory ref cache is cleared on a mode or credential change (R15). |
 | FR-PRV-15 | Re-upload: if estimate/submit reports a referenced asset as missing, PRV re-converts the caller's as-sent bytes, re-uploads once and retries once. New refs go into `provider.asset_refs`. A second failure → `invalid_request(image\|mask)`. No user-visible step (#20). |
 | FR-PRV-16 | `estimate` uses `?dryRun=true` and never sets `ipDetection`. HTTP 269 → `Cost{amount, unit:"CU"}`; no cost field → `Unknown`. If the overlay row's `dry_run_assets` is `false` (set from a recorded free dry run), estimate uploads nothing and uploads wait for submit; if `true`, estimate uploads (FR-PRV-14 dedupes) (R15). |
-| FR-PRV-17 | `submit` maps the generic request to the body through the overlay's input names and returns `provider{}` with `job_handle` set. It is never retried once request bytes were sent. Insufficient balance → its distinct error. |
+| FR-PRV-17 | `submit` maps the generic request to the body through each control's `role` and input name (R28) and returns `provider{}` with `job_handle` set. It is never retried once request bytes were sent. Insufficient balance → its distinct error. |
 | FR-PRV-18 | `status` maps Scenario states per [Appendix C](#appendix-c-generic-shapes). Progress is clamped to 0–1. Cost comes from `billing.cuCost` when present. |
 | FR-PRV-19 | `poll_delay(elapsed, last_error)` is pure: 2 s for the first 30 s, then +2 s per poll up to 10 s. `rate_limited` → max(retry_after, schedule). Offline → 10 s, state `unknown`. `long_running(elapsed)` is true from 180 s. PRV runs no loop and has no total timeout; RGN's runner polls until terminal (R14). Polling never resubmits (OQ-PRV-05). |
 | FR-PRV-20 | `cancel` → `POST /jobs/{id}/action`. "Not cancellable" → the ack `not_cancellable`, not an error. |
@@ -125,7 +125,7 @@ graph LR
 - Fake jobs: zero wall time under the fake clock in tests, ~2 s per job in dev.
 
 ## 13. Test plan
-- **Unit (Rust):** the normaliser over every input type, both conditional forms, malformed and drift fixtures (FR-10); `evaluate` rule tables (30); mask goldens per convention × soft rule, plus the wrong-size error (12); limit backstops with zero network (13); `poll_delay` under a fake clock (19); the error map (23); the retry policy (24); `Secret` redaction (08); fake determinism and every case (03–05).
+- **Unit (Rust):** the normaliser over every input type and `role` (R28), both conditional forms, malformed and drift fixtures (FR-10); `evaluate` rule tables (30); mask goldens per convention × soft rule, plus the wrong-size error (12); limit backstops with zero network (13); `poll_delay` under a fake clock (19); the error map (23); the retry policy (24); `Secret` redaction (08); fake determinism and every case (03–05).
 - **Contract (Rust):** `ScenarioProvider` over `ReplayTransport` per recording: requests match (method, path, body shape, no auth on signed URLs) and so do the generic outputs. Covers both upload paths, upload once per hash (14), re-upload (15), dry run with and without assets (16), submit, the status sequence, cancel, fetch with an expired URL, and balance.
 - **Integration:** the credential store on `windows-latest` with a throwaway target (06); the log capture (08); the cache stale/corrupt paths (25); settings through a fake PRJ settings store (29). **Thin e2e** (Playwright, mocked commands): settings save/clear/test, the chip states, the fake badge.
 - **Fixtures:** a generated 512 px "room" image with disc and ramp masks, synthetic error recordings, and recorded free calls (`get-model`, `dry-run`) per overlay model. No personal art.
@@ -152,7 +152,6 @@ Closed questions (✅) are in [Appendix E](#appendix-e-closed-open-questions).
 
 | ID | Question | Options (pick in **bold**) | Blocking? | Affects |
 |---|---|---|---|---|
-| OQ-PRV-21 | Glossary: *Fake provider*, *Mask convention*, *Model overlay* were added (R27). Still missing: *Provider asset ref*, *Balance* | **A. Add both** (they name ADR 0001 outputs) / B. keep them as code identifiers only — A lets prose use them; B keeps the glossary smaller | No | glossary (orchestrator) |
 | OQ-PRV-22 | Where the job handle lives | **A. Inside `provider{}`; RGN asks `has_handle()`** / B. a top-level job field mirrored by PRV — A keeps one source of truth; B lets PRJ index it without PRV | No | [asset-project](asset-project.md) (manifest-schema) |
 
 ## Appendix A: recording format
@@ -162,7 +161,7 @@ Closed questions (✅) are in [Appendix E](#appendix-e-closed-open-questions).
 `{v: 1, name: "scenario"|"fake", model: <provider model id>, job_handle?: <id>, asset_refs: {image?, mask?, hash_image?, hash_mask?}, request: <body as sent, redacted>, raw_status?: <last provider state>, cost_raw?: <billing object>}`. `asset_refs` is a disposable cache (#20). RGN persists the object verbatim on every transition and passes it back to `status`, `cancel` and `fetch_candidates`; nothing outside `pf-provider` reads its fields.
 
 ## Appendix C: generic shapes
-- **Capabilities:** `{model_id, operations[], controls[{name, type, min, max, step, allowed[], default, required, cost_affecting}], rules[{if: {control, op: eq|in, value}, then: {control, required? | allowed? | hidden?}}], mask: {convention, soft}, input_px: {min, max, multiple_of}, max_bytes, seed: bool, prompt_required, slots[], warnings[]}`. `slots[]` lists extra image inputs; none are sent in tier S, and a required one means the model isn't offered.
+- **Capabilities:** `{model_id, operations[], controls[{name, type, role, min, max, step, allowed[], default, required, cost_affecting}], rules[{if: {control, op: eq|in, value}, then: {control, required? | allowed? | hidden?}}], mask: {convention, soft}, input_px: {min, max, multiple_of}, max_bytes, seed: bool, prompt_required, slots[], warnings[]}`. `slots[]` lists extra image inputs; none are sent in tier S, and a required one means the model isn't offered.
 - **Status map:** `queued`/`warming-up`/`pending` → `queued`; `in-progress`/`finalizing` → `running`; `success` → `succeeded`; `failure` → `failed`(hint); `canceled` → `canceled`; offline → `unknown`.
 - **Error map:**
 
@@ -175,7 +174,7 @@ Closed questions (✅) are in [Appendix E](#appendix-e-closed-open-questions).
 | `provider_failure(hint)` | 5xx after retries; job `failure` + `hint`; malformed JSON |
 | `offline` / `timeout` | connect/DNS error / request timeout |
 
-- **Overlay rows** (Scenario docs, #15; each row also records the image/mask/prompt/count input names, max px, `dry_run_assets`, doc URL and checked date):
+- **Overlay rows** (Scenario docs, #15; each row also records the input name per `role` where Scenario doesn't mark it (source, mask, prompt, candidate count, R28), max px, `dry_run_assets`, doc URL and checked date):
 
 | Model | Convention | `soft` |
 |---|---|---|
@@ -210,3 +209,4 @@ The `soft` values are picks confirmed against Scenario's docs when each row is r
 | OQ-PRV-14–18 ✅ | Dispatch, fake level, mask conversion location, team id, overlay format | **A for each, as written** (#40): `AnyProvider` enum; generic fake + `ReplayTransport`; conversion in `pf-provider` with `png`; optional team id; static Rust overlay table | — |
 | OQ-PRV-19 ✅ | Who runs the poll loop | **A. RGN's runner; PRV gives `status` + `poll_delay`** (R14) | region-edit |
 | OQ-PRV-20 ✅ | Default mode in release builds | **A. `scenario`; dev/test default to fake** (#40) | AGENTS §9 |
+| OQ-PRV-21 ✅ | Glossary: *Provider asset ref*, *Balance* | **A. Added** (R29) | glossary |
