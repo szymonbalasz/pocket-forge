@@ -406,7 +406,7 @@ impl Context {
             fs: Box::new(OsFsAttributes),
             faults: Faults::none(),
             events: Box::new(NoEvents),
-            provider: AnyProvider::for_mode(ProviderMode::Fake),
+            provider: AnyProvider::fake(),
             credentials: std::sync::Arc::new(KeyringStore::for_provider("scenario")),
             data_dir,
             library_override: None,
@@ -438,8 +438,11 @@ impl Context {
         };
         let mut ctx = Context::new(data_dir);
         ctx.library_override = var("PF_LIBRARY_DIR").map(PathBuf::from);
-        ctx.provider =
-            AnyProvider::for_mode(ProviderMode::from_env_value(var("PF_PROVIDER").as_deref())?);
+        ctx.provider = AnyProvider::for_mode(
+            ProviderMode::from_env_value(var("PF_PROVIDER").as_deref())?,
+            ctx.credentials.clone(),
+            Some(ctx.data_dir.join("cache").join("provider")),
+        );
         if let (Some(case), Some(fake)) = (var("PF_FAKE_CASE"), ctx.provider.as_fake()) {
             fake.set_case(
                 pf_provider::fake::FakeCase::parse(&case)

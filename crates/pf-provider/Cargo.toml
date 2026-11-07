@@ -38,3 +38,8 @@ tracing-subscriber.workspace = true
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "pf-record"
+path = "src/bin/pf-record.rs"
+required-features = ["real-call"]

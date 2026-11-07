@@ -12,16 +12,25 @@
 
 pub mod credentials;
 mod error;
+mod evaluate;
 pub mod fake;
+pub mod fixtures;
+mod limits;
+mod pixels;
 mod poll;
+pub mod replay;
+pub mod scenario;
 mod secret;
+pub mod transport;
 mod types;
 
 use std::future::Future;
 
 pub use credentials::{CredentialStore, KeyringStore, MemoryStore, StoreUnavailable};
 pub use error::ProviderError;
+pub use evaluate::{ControlError, ControlErrorCode, EffectiveControl, Evaluation};
 pub use poll::{long_running, poll_delay};
+pub use scenario::{ScenarioConfig, ScenarioProvider};
 pub use secret::{Credentials, Secret};
 pub use types::*;
 
@@ -169,31 +178,42 @@ pub struct ProviderAccount {
 #[derive(Debug)]
 pub enum AnyProvider {
     Fake(fake::FakeProvider),
-    /// The mode has no implementation in this build yet (Scenario lands in PRV slices 3–4).
-    /// Every operation fails with `provider_failure`; nothing is faked silently.
-    Unavailable(ProviderMode),
+    Scenario(ScenarioProvider),
 }
 
 impl AnyProvider {
-    /// The provider for a mode.
-    pub fn for_mode(mode: ProviderMode) -> Self {
+    /// The fake provider (default case `success`).
+    pub fn fake() -> Self {
+        AnyProvider::Fake(fake::FakeProvider::default())
+    }
+
+    /// The provider for a mode with the real wiring: Scenario reads credentials from `store`
+    /// and caches models under `cache_dir` (`<data-dir>/cache/provider/`). No network call
+    /// happens until an operation runs.
+    pub fn for_mode(
+        mode: ProviderMode,
+        store: std::sync::Arc<dyn CredentialStore>,
+        cache_dir: Option<std::path::PathBuf>,
+    ) -> Self {
         match mode {
-            ProviderMode::Fake => AnyProvider::Fake(fake::FakeProvider::default()),
-            ProviderMode::Scenario => AnyProvider::Unavailable(mode),
+            ProviderMode::Fake => Self::fake(),
+            ProviderMode::Scenario => AnyProvider::Scenario(ScenarioProvider::new(
+                ScenarioConfig::real(store, cache_dir),
+            )),
         }
     }
 
     pub fn mode(&self) -> ProviderMode {
         match self {
             AnyProvider::Fake(_) => ProviderMode::Fake,
-            AnyProvider::Unavailable(mode) => *mode,
+            AnyProvider::Scenario(_) => ProviderMode::Scenario,
         }
     }
 
     pub fn as_fake(&self) -> Option<&fake::FakeProvider> {
         match self {
             AnyProvider::Fake(p) => Some(p),
-            _ => None,
+            AnyProvider::Scenario(_) => None,
         }
     }
 
@@ -201,50 +221,52 @@ impl AnyProvider {
     pub fn connectivity(&self) -> Connectivity {
         match self {
             AnyProvider::Fake(p) => p.connectivity.get(),
-            AnyProvider::Unavailable(_) => Connectivity::Unknown,
+            AnyProvider::Scenario(p) => p.connectivity(),
         }
     }
 
     /// The core calls this after the credentials were set or cleared: the in-memory upload ref
     /// cache is dropped (R15) and connectivity goes back to `unknown`.
     pub fn credentials_changed(&self) {
-        if let AnyProvider::Fake(p) = self {
-            p.connectivity.set(Connectivity::Unknown);
+        match self {
+            AnyProvider::Fake(p) => p.connectivity.set(Connectivity::Unknown),
+            AnyProvider::Scenario(p) => p.credentials_changed(),
         }
     }
 
     /// Pushes the `provider` settings section in (FR-PRV-29).
-    pub fn set_account(&self, _account: ProviderAccount) {}
+    pub fn set_account(&self, account: ProviderAccount) {
+        if let AnyProvider::Scenario(p) = self {
+            p.set_account(account);
+        }
+    }
 
     /// `list_models`, plus `stale: true` when the cached list was returned offline (FR-PRV-25).
     pub async fn list_models_cached(&self, filter: &ModelFilter) -> ProviderResult<ModelList> {
-        self.list_models(filter).await.map(|models| ModelList {
-            models,
-            stale: false,
-        })
+        match self {
+            AnyProvider::Fake(p) => p.list_models(filter).await.map(|models| ModelList {
+                models,
+                stale: false,
+            }),
+            AnyProvider::Scenario(p) => p.list_models_cached(filter).await,
+        }
     }
 
     /// One free call that proves the credentials work (`provider_test_connection`).
     pub async fn test_connection(&self) -> ProviderResult<()> {
-        self.list_models(&ModelFilter::default()).await.map(|_| ())
+        match self {
+            AnyProvider::Fake(p) => p.list_models(&ModelFilter::default()).await.map(|_| ()),
+            AnyProvider::Scenario(p) => p.test_connection().await,
+        }
     }
 }
 
-fn unavailable(mode: ProviderMode) -> ProviderError {
-    ProviderError::ProviderFailure {
-        hint: format!("the {mode:?} provider is not available in this build"),
-    }
-}
-
+/// Each provider tracks its own connectivity (Scenario per HTTP outcome, the fake per case).
 macro_rules! dispatch {
     ($self:ident, $p:ident => $call:expr) => {
         match $self {
-            AnyProvider::Fake($p) => {
-                let out = $call.await;
-                $p.connectivity.note(&out);
-                out
-            }
-            AnyProvider::Unavailable(mode) => Err(unavailable(*mode)),
+            AnyProvider::Fake($p) => $call.await,
+            AnyProvider::Scenario($p) => $call.await,
         }
     };
 }
@@ -334,10 +356,15 @@ mod tests {
     }
 
     #[test]
-    fn fr_prv_02_unavailable_mode_fails_every_operation_without_faking() {
-        let p = AnyProvider::for_mode(ProviderMode::Scenario);
+    fn fr_prv_02_scenario_mode_without_credentials_makes_no_call() {
+        let store = std::sync::Arc::new(MemoryStore::default());
+        let p = AnyProvider::for_mode(ProviderMode::Scenario, store, None);
         assert_eq!(p.mode(), ProviderMode::Scenario);
-        let err = block_on_ready(p.balance()).unwrap_err();
-        assert_eq!(err.code(), "provider_failure");
+        assert_eq!(
+            block_on(p.test_connection()).unwrap_err(),
+            ProviderError::Auth
+        );
+        assert_eq!(p.connectivity(), Connectivity::Unknown);
+        assert!(p.as_fake().is_none());
     }
 }

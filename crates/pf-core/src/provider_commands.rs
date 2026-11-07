@@ -391,7 +391,7 @@ mod tests {
     ) -> (tempfile::TempDir, Core, Arc<RecordedEvents>) {
         let dir = tempfile::tempdir().unwrap();
         let mut ctx = Context::deterministic(dir.path().join("data"), Timestamp(1_800_000_000_000));
-        ctx.provider = AnyProvider::for_mode(mode);
+        ctx.provider = AnyProvider::for_mode(mode, store.clone(), None);
         ctx.credentials = store;
         let events = Arc::new(RecordedEvents::default());
         ctx.events = Box::new(events.clone());
