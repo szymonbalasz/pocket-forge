@@ -48,3 +48,7 @@ unwrap_used = "warn"
 # Image decode, hashing and PNG encode are unusably slow at opt-level 0; dependencies get optimised in dev and test.
 [profile.dev.package."*"]
 opt-level = 2
+
+# Walkthroughs of 4200×5600 and 16k maps need optimised pixel code in dev builds (EDT report Q2).
+[profile.dev.package.pf-imaging]
+opt-level = 2

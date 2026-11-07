@@ -1,0 +1,35 @@
+/* Design tokens (docs/architecture/ui-guidelines.md, #46). CSS variables only: features use these and
+   never hard-code colours. Change values through the orchestrator. */
+:root {
+  color-scheme: dark;
+
+  --pf-bg-0: #1b1b1b; /* canvas surround */
+  --pf-bg-1: #232323; /* app, rails */
+  --pf-bg-2: #2b2b2b; /* panels */
+  --pf-bg-3: #353535; /* inputs, hover */
+  --pf-border: #3d3d3d; /* dividers */
+  --pf-text: #e4e4e4;
+  --pf-text-dim: #9a9a9a; /* meta */
+  --pf-accent: #4a90e2; /* selection, primary button, focus ring */
+  --pf-warn: #e0a030; /* cost and threshold warnings */
+  --pf-danger: #e05050; /* errors, destructive */
+  --pf-ok: #4caf6a; /* succeeded */
+  --pf-radius: 4px;
+  --pf-space-1: 4px;
+  --pf-space-2: 8px;
+  --pf-space-3: 12px;
+  --pf-space-4: 16px;
+
+  /* Derived (still tokens, so features never hard-code colours). */
+  --pf-accent-soft: color-mix(in srgb, var(--pf-accent) 25%, transparent);
+  --pf-warn-soft: color-mix(in srgb, var(--pf-warn) 18%, var(--pf-bg-2));
+  --pf-danger-soft: color-mix(in srgb, var(--pf-danger) 18%, var(--pf-bg-2));
+  --pf-overlay: rgb(0 0 0 / 55%);
+  --pf-font-size: 13px;
+  --pf-font-size-meta: 11px;
+
+  font-family: system-ui, 'Segoe UI', sans-serif;
+  font-size: var(--pf-font-size);
+  background: var(--pf-bg-1);
+  color: var(--pf-text);
+}

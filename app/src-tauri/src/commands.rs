@@ -45,6 +45,7 @@ tauri_commands! {
     recent_list => c::RecentList,
     edt_image_open => c::EdtImageOpen,
     provider_status => c::ProviderStatus,
+    edt_tiles_open => c::EdtTilesOpen,
 }
 
 #[cfg(test)]

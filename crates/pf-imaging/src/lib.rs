@@ -11,10 +11,13 @@
 mod compose;
 mod encode;
 mod probe;
+pub mod pyramid;
 mod resize;
+mod rgb_source;
 mod sizing;
 #[cfg(test)]
 mod test_support;
+pub mod thumbnail;
 mod webp;
 
 pub use compose::{

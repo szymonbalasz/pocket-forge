@@ -1,16 +1,37 @@
 //! The `pf-tiles` URI scheme, served by the core (EDT Appendix A). The Tauri layer only adapts
-//! requests. Skeleton scope: `/i/<key>.<ext>` serves a registered whole image; the tile pyramid
-//! (`/t/…`) is EDT slice 1.
+//! requests. This module holds the grammar, the response type and the whole-image registry
+//! (`/i/<key>.<ext>`); tile pyramids (`/t/…`) and the serving entry point are in `tiles`.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+
+/// Where a registered image's bytes come from.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImageBody {
+    /// A file the core resolved itself (an original, a layer file, a cached copy).
+    File(PathBuf),
+    /// In-memory bytes: a transient image (FR-EDT-31).
+    Bytes(Arc<Vec<u8>>),
+}
 
 /// An image registered for the open asset project.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ServedImage {
-    pub path: PathBuf,
+    pub body: ImageBody,
     pub mime: &'static str,
     pub ext: &'static str,
+}
+
+impl ServedImage {
+    /// A registered file.
+    pub fn file(path: PathBuf, mime: &'static str, ext: &'static str) -> Self {
+        ServedImage {
+            body: ImageBody::File(path),
+            mime,
+            ext,
+        }
+    }
 }
 
 /// Keys → images. Keys are unregistered when the project closes (then 404).
@@ -24,12 +45,20 @@ impl ImageRegistry {
         self.images.insert(key, image);
     }
 
+    pub fn remove(&mut self, key: &str) -> Option<ServedImage> {
+        self.images.remove(key)
+    }
+
     pub fn clear(&mut self) {
         self.images.clear();
     }
 
     pub fn get(&self, key: &str) -> Option<&ServedImage> {
         self.images.get(key)
+    }
+
+    pub fn keys(&self) -> impl Iterator<Item = String> + '_ {
+        self.images.keys().cloned()
     }
 }
 
@@ -43,7 +72,7 @@ pub struct SchemeResponse {
 }
 
 impl SchemeResponse {
-    fn status(status: u16) -> Self {
+    pub fn status(status: u16) -> Self {
         SchemeResponse {
             status,
             content_type: None,
@@ -111,25 +140,26 @@ pub fn parse_path(path: &str) -> Option<SchemePath> {
     }
 }
 
-/// Serves a request path from the registry. Never maps a URL to a file path itself.
-pub fn serve(registry: &ImageRegistry, path: &str) -> SchemeResponse {
-    match parse_path(path) {
-        None => SchemeResponse::status(400),
-        Some(SchemePath::Tile { .. }) => SchemeResponse::status(404),
-        Some(SchemePath::Image { key, ext }) => match registry.get(&key) {
-            Some(img) if img.ext == ext => match std::fs::read(&img.path) {
-                Ok(body) => SchemeResponse {
-                    status: 200,
-                    content_type: Some(img.mime),
-                    cache_immutable: true,
-                    body,
-                },
-                Err(e) => {
-                    tracing::warn!(key, error = %e, "pf-tiles: registered image unreadable");
-                    SchemeResponse::status(404)
-                }
-            },
-            _ => SchemeResponse::status(404),
+/// A 200 response with immutable caching (keys never change meaning, Appendix A).
+pub fn ok(content_type: &'static str, body: Vec<u8>) -> SchemeResponse {
+    SchemeResponse {
+        status: 200,
+        content_type: Some(content_type),
+        cache_immutable: true,
+        body,
+    }
+}
+
+/// Reads a registered image (outside any lock). Never maps a URL to a file path itself.
+pub fn read_image(key: &str, img: &ServedImage) -> SchemeResponse {
+    match &img.body {
+        ImageBody::Bytes(b) => ok(img.mime, b.as_ref().clone()),
+        ImageBody::File(path) => match std::fs::read(path) {
+            Ok(body) => ok(img.mime, body),
+            Err(e) => {
+                tracing::warn!(key, error = %e, "pf-tiles: registered image unreadable");
+                SchemeResponse::status(404)
+            }
         },
     }
 }
@@ -171,33 +201,19 @@ mod tests {
             "/t/k/+1/1_2.jpg",
             "C:/Windows/x.png",
             "/x/a.png",
+            "/t/../0/0_0.jpg",
+            "/t/%2e%2e/0/0_0.jpg",
+            "/t/k/0/0_0.png",
+            "/t/k/0/../0_0.jpg",
+            "/t/k/0/1_2_3.jpg",
+            "/t/k/0/-1_0.jpg",
+            "/t/k/0/0_0",
+            "/t/k/0/0_0.jpg/x",
+            "/t/C:/0/0_0.jpg",
+            "//t/k/0/0_0.jpg",
         ] {
             assert_eq!(parse_path(bad), None, "{bad}");
         }
         assert_eq!(parse_path(&format!("/i/{}.png", "a".repeat(81))), None);
-    }
-
-    #[test]
-    fn fr_edt_09_serves_only_registered_keys() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("a.png");
-        std::fs::write(&file, b"png-bytes").unwrap();
-        let mut reg = ImageRegistry::default();
-        reg.register(
-            "k1".into(),
-            ServedImage {
-                path: file,
-                mime: "image/png",
-                ext: "png",
-            },
-        );
-        let ok = serve(&reg, "/i/k1.png");
-        assert_eq!((ok.status, ok.body.as_slice()), (200, &b"png-bytes"[..]));
-        assert!(ok.cache_immutable);
-        assert_eq!(serve(&reg, "/i/k1.webp").status, 404);
-        assert_eq!(serve(&reg, "/i/k2.png").status, 404);
-        assert_eq!(serve(&reg, "/i/../a.png").status, 400);
-        reg.clear();
-        assert_eq!(serve(&reg, "/i/k1.png").status, 404);
     }
 }

@@ -1,0 +1,92 @@
+// EDT e2e helpers on top of mock-core: open the fixture map, read the `__pfTest` hook, override
+// EDT command handlers per test (window.__pfMockHandlers).
+import { expect, type Page } from '@playwright/test';
+
+import { defaultSeed, mockCore, type MockSeed } from './mock-core';
+
+export interface EdtMockOptions {
+  /** Levels not built yet at open (default: none). */
+  incomplete?: number[];
+  /** `export_get_settings` values; omitted → the command fails (EXP not present). */
+  pxPerSquare?: { source: number | null; target: number | null };
+  readOnly?: boolean;
+  seed?: MockSeed;
+}
+
+/** The mocked map: 2048×2560 → levels 0–3 (4×5, 2×3, 1×2, 1×1 tiles). Every tile is the fixture
+ *  PNG, stretched; tests assert on state, not pixels. */
+export const MAP = { w: 2048, h: 2560 };
+
+export async function openMap(page: Page, opts: EdtMockOptions = {}): Promise<void> {
+  const seed = opts.seed ?? { ...defaultSeed, image: MAP };
+  await mockCore(page, seed);
+  await page.addInitScript(
+    (o) => {
+      type Rec = Record<string, unknown>;
+      const h = ((window as unknown as Rec).__pfMockHandlers ??= {}) as Record<
+        string,
+        (input: Rec) => unknown
+      >;
+      const calls = ((window as unknown as Rec).__pfEdtTilesOpen = []) as Rec[];
+      h.edt_tiles_open = (input) => {
+        calls.push(input);
+        const rebuilt = input.rebuild === true;
+        const key = rebuilt ? 'tk2' : 'tk1';
+        const { w, h: ht } = o.size;
+        const levels = [];
+        for (let level = 0; ; level++) {
+          const lw = Math.ceil(w / 2 ** level);
+          const lh = Math.ceil(ht / 2 ** level);
+          const cols = Math.ceil(lw / 512);
+          const rows = Math.ceil(lh / 512);
+          const complete = rebuilt || !(o.incomplete ?? []).includes(level);
+          levels.push({
+            level,
+            scale: 1 / 2 ** level,
+            cols,
+            rows,
+            ext: level ? 'jpg' : 'webp',
+            complete,
+          });
+          if (cols === 1 && rows === 1) break;
+        }
+        return {
+          key,
+          base_url: `http://pf-tiles.localhost/t/${key}`,
+          width: w,
+          height: ht,
+          tile_size: 512,
+          levels,
+        };
+      };
+      if (o.pxPerSquare) {
+        h.export_get_settings = () => ({
+          source_px_per_square: o.pxPerSquare!.source,
+          target_px_per_square: o.pxPerSquare!.target,
+        });
+      }
+    },
+    { ...opts, size: seed.image },
+  );
+  await page.goto('/');
+  await page.getByTestId('prj-home-recent-item').first().click();
+  await expect(page.getByTestId('edt-canvas-stage')).toHaveAttribute('data-image-loaded', 'true');
+  await page.waitForFunction(() => !!window.__pfTest?.view);
+}
+
+/** Calls a `window.__pfTest` entry. */
+export function hook<T = unknown>(page: Page, name: string, ...args: unknown[]): Promise<T> {
+  return page.evaluate(([n, a]) => window.__pfTest![n as string]!(...(a as unknown[])) as T, [
+    name,
+    args,
+  ] as const);
+}
+
+export type View = { scale: number; tx: number; ty: number };
+export const view = (page: Page) => hook<View>(page, 'view');
+
+export async function stageBox(page: Page) {
+  const b = await page.getByTestId('edt-canvas-stage').boundingBox();
+  if (!b) throw new Error('no stage');
+  return b;
+}

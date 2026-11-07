@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node ../scripts/check-no-test-hook.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint --max-warnings 0 .",
     "format": "prettier --write .",
@@ -17,6 +17,7 @@
   "dependencies": {
     "@tauri-apps/api": "2.12.4",
     "konva": "10.9.1",
+    "radix-ui": "1.8.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-konva": "19.3.2"

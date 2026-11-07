@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { calls, defaultSeed, FIXTURE_SIZE, LIBRARY, mockCore } from './mock-core';
 
 type View = { scale: number; tx: number; ty: number };
-const view = (page: Page) => page.evaluate(() => window.__pfTest!.view() as View);
+const view = (page: Page) => page.evaluate(() => window.__pfTest!.view!() as View);
 
 test.beforeEach(async ({ page }) => {
   await mockCore(page);
