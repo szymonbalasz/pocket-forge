@@ -6,7 +6,8 @@
 |---|---|---|---|---|
 | Kickoff Q&A | orchestrator | `main` | in progress | owner answers |
 | Canvas library spike | spike-canvas | `spike/canvas-large-image` | working | — |
-| Rust imaging spike | spike-imaging | `spike/rust-imaging` | working | — |
+| Rust imaging spike (+ animated WebP/GIF encoding) | spike-imaging | `spike/rust-imaging` | working | — |
+| Scenario video/animation research | spike-video | `spike/scenario-video` | working | — |
 | Scenario API spike | — | merged (PR #1) | done | ADR 0001 accepted |
 
 ## Pending owner decisions

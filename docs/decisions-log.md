@@ -26,5 +26,8 @@ Append-only. Cite decisions as `#N`. Changing a decision takes a new row that su
 | 20 | Local-first provider use: uploads are automatic and invisible. The local asset project is the source of truth, and provider-side assets are a disposable cache that is re-uploaded when missing. The user never manages provider profile state. | Work locally; don't depend on provider state | Owner, OQ-PRV-03 |
 | 21 | ADR 0001's remaining picks are accepted as written (OQ-PRV-02, 04–10), including the `reqwest` HTTP client dependency and the glossary term "Cost". | Implementation details | Owner |
 | 22 | Canvas and Rust-imaging spikes approved. Throwaway dependencies are allowed on spike branches only; the spikes trial React + TS + Vite and pnpm. | De-risk the provisional stack before ADRs | Owner |
+| 23 | Spend guardrails: every job shows its free pre-flight cost estimate. There is a per-session spend cap, plus an extra confirmation for any single job above a user-set threshold. | Visible, bounded cost | Owner, KQ-06 |
+| 24 | The export target is the owner's own custom VTT, not a third-party VTT. | Owner controls the import side | Owner, KQ-21 |
+| 25 | Animated output is required: **animated WebP**, and possibly GIF. The source of the motion and the tier are still open (KQ-39). | Animated tokens and map elements | Owner |
 
 The tech stack (Tauri, Rust, a TS web UI and the canvas library) is **provisional**. It is not logged until the stack ADRs are accepted.

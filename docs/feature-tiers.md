@@ -40,7 +40,10 @@
 | Joining / overlapping map sections (map extension) | B | |
 | Comments / notes pinned to image locations | B | |
 | Links to campaign subjects (locations, NPCs, items) | B | |
-| VTT-specific export presets | B | |
+| Export preset for the owner's custom VTT (#24) | A? | |
+| Animated WebP export (#25) | ? (KQ-39) | |
+| Animated GIF export (#25) | B? | |
+| Animation from a provider video model | ? (KQ-39) | |
 | Grid metadata and overlay | B | |
 | macOS build | C | |
 | Cards | C | |
