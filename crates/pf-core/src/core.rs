@@ -5,7 +5,7 @@
 //! normalised [`CoreError`]. The Tauri layer and the future MCP endpoint (#36) only adapt
 //! commands; [`Core::dispatch`] runs one by name from JSON.
 
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -13,9 +13,10 @@ use serde_json::Value;
 
 use crate::context::Context;
 use crate::error::{CoreError, CoreResult, ErrorCode};
-use crate::images::{self, ImageRegistry, SchemeResponse};
+use crate::images::SchemeResponse;
 use crate::project::OpenProject;
 use crate::settings::{self, Settings, SettingsWarning};
+use crate::tiles::{self, Served};
 
 /// Input validation at the command boundary. Deserialisation already checked the shape.
 pub trait Validate {
@@ -39,7 +40,6 @@ pub struct State {
     pub settings: Settings,
     pub settings_warnings: Vec<SettingsWarning>,
     pub project: Option<OpenProject>,
-    pub images: ImageRegistry,
 }
 
 /// The core: seams plus state. One per app process.
@@ -47,6 +47,9 @@ pub struct State {
 pub struct Core {
     pub ctx: Context,
     state: Mutex<State>,
+    /// The `pf-tiles` registry, behind its own lock so serving never waits for a command
+    /// (EDT). Lock order: `state` first, then `served`.
+    pub(crate) served: Arc<Mutex<Served>>,
 }
 
 impl Core {
@@ -60,8 +63,8 @@ impl Core {
                 settings,
                 settings_warnings,
                 project: None,
-                images: ImageRegistry::default(),
             }),
+            served: Arc::default(),
         })
     }
 
@@ -90,9 +93,14 @@ impl Core {
         (entry.1)(self, input)
     }
 
-    /// Serves a `pf-tiles` request path.
+    /// Serves a `pf-tiles` request path. Never takes the state lock.
     pub fn serve_scheme(&self, path: &str) -> SchemeResponse {
-        images::serve(&self.state().images, path)
+        tiles::serve(&self.served, path)
+    }
+
+    /// The `pf-tiles` registry (see [`Core::serve_scheme`]).
+    pub fn served(&self) -> MutexGuard<'_, Served> {
+        self.served.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 

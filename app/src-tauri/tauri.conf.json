@@ -21,7 +21,34 @@
         "dragDropEnabled": true
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self'",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' blob: data: http://pf-tiles.localhost pf-tiles:",
+        "connect-src": "'self' ipc: http://ipc.localhost http://pf-tiles.localhost pf-tiles:",
+        "worker-src": "'self' blob:",
+        "font-src": "'self'",
+        "object-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'none'",
+        "frame-ancestors": "'none'"
+      },
+      "devCsp": {
+        "default-src": "'self'",
+        "script-src": "'self' 'unsafe-inline' http://localhost:*",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' blob: data: http://pf-tiles.localhost pf-tiles:",
+        "connect-src": "'self' ipc: http://ipc.localhost http://pf-tiles.localhost pf-tiles: http://localhost:* ws://localhost:*",
+        "worker-src": "'self' blob:",
+        "font-src": "'self'",
+        "object-src": "'none'",
+        "base-uri": "'none'",
+        "form-action": "'none'",
+        "frame-ancestors": "'none'"
+      }
+    }
   },
   "bundle": { "active": false, "icon": ["icons/icon.ico"] }
 }

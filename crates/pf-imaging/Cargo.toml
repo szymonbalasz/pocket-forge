@@ -9,10 +9,10 @@ publish.workspace = true
 
 [dependencies]
 image.workspace = true
+png.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-png.workspace = true
 tempfile.workspace = true
 
 [lints]

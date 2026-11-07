@@ -73,7 +73,7 @@ pub fn run() {
         .invoke_handler(commands::handler())
         .setup(|app| {
             let mut ctx = Context::from_env()?;
-            ctx.events = Box::new(TauriEvents(app.handle().clone()));
+            ctx.events = std::sync::Arc::new(TauriEvents(app.handle().clone()));
             tracing::info!(?ctx, "starting");
             let core = Core::new(ctx).map_err(|e| e.to_string())?;
             app.manage(core);

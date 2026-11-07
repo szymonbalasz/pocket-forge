@@ -5,5 +5,8 @@
 //! This crate knows nothing about asset projects: it works on bytes, paths and pixel buffers.
 
 mod probe;
+pub mod pyramid;
+mod rgb_source;
+pub mod thumbnail;
 
 pub use probe::{ImageFormat, ImageInfo, MAX_SIDE, ProbeError, probe_bytes, probe_file, sniff};

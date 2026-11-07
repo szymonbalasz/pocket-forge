@@ -27,6 +27,12 @@ pub enum ErrorCode {
     Unchanged,
     UnknownId,
     Unsaved,
+    /// `edt_image_open` without `max_side` on an image over 4096 px per side: use tiles.
+    UseTiles,
+    /// A mask rect outside the image or over 4096 px per side (EDT `edt_mask_submit`).
+    InvalidRect,
+    /// A mask body that isn't w·h bytes (EDT `edt_mask_submit`).
+    SizeMismatch,
     /// A provider error; `detail.provider` holds the normalised provider code.
     Provider,
     Io,
@@ -52,6 +58,9 @@ impl ErrorCode {
             ErrorCode::Unchanged => "unchanged",
             ErrorCode::UnknownId => "unknown_id",
             ErrorCode::Unsaved => "unsaved",
+            ErrorCode::UseTiles => "use_tiles",
+            ErrorCode::InvalidRect => "invalid_rect",
+            ErrorCode::SizeMismatch => "size_mismatch",
             ErrorCode::Provider => "provider",
             ErrorCode::Io => "io",
             ErrorCode::Internal => "internal",
