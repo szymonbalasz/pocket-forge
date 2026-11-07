@@ -183,3 +183,5 @@ jobs:
       - name: Smoke (launch, UI reaches the core, exit)
         run: node scripts/tauri-smoke.mjs --no-build
       - run: cargo test -p pocket-forge --locked
+      - name: pf-provider OS credential store test (Windows only, FR-PRV-06)
+        run: cargo test -p pf-provider --locked fr_prv_06
