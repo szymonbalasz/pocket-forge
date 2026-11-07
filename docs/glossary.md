@@ -5,13 +5,13 @@
 | Term | Meaning |
 |---|---|
 | **Asset** | One piece of campaign art: a battlemap, token, item art or (later) card. |
-| **Asset type** | The kind of asset. It decides the presets and specialised controls. |
+| **Asset type** | The kind of asset: map, token or item (manifest field `kind`). It decides the section, presets and specialised controls. |
 | **Asset project** | The working record of an asset: source images, references, prompts, settings, masks, layers and revisions. |
 | **Library** | The set of local folders the app indexes. It holds assets and asset projects. |
-| **Library root** | A folder the user adds to the library. It can be cloud-synced. |
+| **Library root** | A folder the user adds to the library. It holds the sections. It can be cloud-synced. |
 | **Collection** | A user-defined group of assets. |
 | **Campaign subject** | A location, NPC or item in the user's campaign that assets can link to. |
-| **Original** | The image an asset project started from. It is never modified. |
+| **Original** | The image an asset project started from, copied into the project's `working/` folder. Neither the copy nor the source is ever modified. |
 | **Layer** | An image placed in an asset project with position, scale, rotation, opacity and visibility. |
 | **Patch layer** | A layer made by accepting a candidate for a region. It is positioned over the region it edits. |
 | **Mask** | Painted pixels that mark which part of a region the provider may change. |
@@ -29,10 +29,10 @@
 | **Candidate** | One image a job returns, waiting to be compared, picked or discarded. |
 | **Revision** | A saved state of an asset project (on accept, explicit save, restore, re-tune or conflict resolution). Revisions form a recoverable history. |
 | **Re-tune** | Changing a patch layer's feather or colour match after accept. It creates a new layer file and a revision. |
-| **Manifest** | The file in an asset project that records its current state (layers, masks, jobs, candidates, revisions). |
+| **Manifest** | `project.json` in a project folder. It records the asset project's current state (layers, masks, jobs, candidates, revisions). |
 | **Draft** | Unsubmitted work in an asset project (prompt, settings, mask), saved automatically after a short idle. |
 | **Head revision** | The most recent revision of an asset project. |
-| **Import destination** | The library folder that imported images are copied into (default `Imported/`). |
+| **Import destination** | Retired by #44: images are copied into the new project folder's `working/`. |
 | **Spool** | Per-machine holding area for writes that can't reach the library yet (e.g. during a sync conflict); replayed afterwards. |
 | **Trash** | Per-project holding area for discarded items; emptied after 30 days (#18). |
 | **Conflict copy** | A duplicate file created by a sync service when two machines changed the same file. |
@@ -57,3 +57,12 @@
 | **Px per square** | Pixels per grid square of a map. Export scales from the source px per square to a target. |
 | **Display size** | Viewing an asset at the size it will appear in the VTT. |
 | **Colour match** | An automatic colour adjustment that makes a patch layer match its surroundings. |
+| **Section** | One asset type's folder in a library root (`Maps/`, `Tokens/`, `Items/`) and its rail entry (#44). Not the same as section-based editing, which means editing by region. |
+| **Project folder** | The visible folder of one asset project: `<section>/<name>/` with `project.json`, `working/`, `references/`, `structure/`, `parts/`, `results/`, `exports/` and a hidden `.pforge/` (#44). |
+| **Working image** | The original plus its accepted patch layers: what the canvas shows and the home thumbnail depicts. |
+| **Iteration** | One job that returned candidates, stored as one `results/NNN <slug>/` folder. |
+| **Iteration tracker** | The bottom strip listing a project's iterations; it hosts the candidate picker for the selected one. |
+| **Part** | A reusable cut-out (door, statue, cart) kept in `parts/` and placed on other projects later (tier A, #45). |
+| **Home** | The screen shown when no project is open: the project grid of the selected section. |
+| **Thumbnail** | The small preview of a project's working image shown on home (`.pforge/thumb.jpg`). |
+| **User-owned folder** | A project folder the user fills from Explorer (`references/`, `structure/`, `parts/`); the app picks up files there. The others are app-owned. |
