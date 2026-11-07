@@ -121,6 +121,8 @@ const args = process.argv.slice(2).filter((a) => a !== '--');
 if (args.includes('--committed')) {
   // Small fixtures used by e2e and docs. Keep each < 1 MB.
   write(join(root, 'images', 'grid-map-512x640.png'), gridMap(512, 640, { cell: 64 }));
+  // Export goldens base (export spec §13): 1024×1280, 8×10 cells at 128 px.
+  write(join(root, 'images', 'grid-map-1024x1280.png'), gridMap(1024, 1280, { cell: 128 }));
 } else if (args.includes('--size')) {
   const [w, h] = parseSize(args[args.indexOf('--size') + 1]);
   write(join(root, 'generated', `grid-map-${w}x${h}.png`), gridMap(w, h));

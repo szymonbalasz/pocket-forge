@@ -11,6 +11,7 @@ publish.workspace = true
 image.workspace = true
 png.workspace = true
 thiserror.workspace = true
+tiny-skia.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
