@@ -40,10 +40,11 @@
 | Joining / overlapping map sections (map extension) | B | |
 | Comments / notes pinned to image locations | B | |
 | Links to campaign subjects (locations, NPCs, items) | B | |
-| Export preset for the owner's custom VTT (#24) | A? | |
-| Animated WebP export (#25) | ? (KQ-39) | |
-| Animated GIF export (#25) | B? | |
-| Animation from a provider video model | ? (KQ-39) | |
+| Export at a chosen px per square, plain image files (#26) | S | S |
+| Animated tokens, exported as animated WebP (#25, #27) | A | A (first after the milestone) |
+| Animated map elements, whole maps, item art (#27) | A | A (after tokens) |
+| Animated GIF export (#25) | B | |
+| Motion source: provider video model and/or in-app looping layers | ? (KQ-39) | |
 | Grid metadata and overlay | B | |
 | macOS build | C | |
 | Cards | C | |

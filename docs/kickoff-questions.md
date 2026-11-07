@@ -34,15 +34,15 @@ Questions marked ✅ are answered, ⏳ are in progress. Each question is tagged 
 | ID | Question | Options (pick in **bold**) | Blocks |
 |---|---|---|---|
 | KQ-20 ✅ | **Answered: 5–10k px per side typical, up to about 16k; 70–140 px per square (#11).** Typical and maximum battlemap size (pixels, grid size, pixels per square)? | free answer. My guess: 5–10k px per side, up to about 16k | S, M |
-| KQ-21 ⏳ | **Partly answered: the owner's own custom VTT (#24). Its import format and limits are still open (KQ-29).** Which VTT(s), and their limits (max dimensions, format, file size)? | **A. Generic PNG/WebP/JPEG at a chosen px-per-square** / B. specific VTT presets now | M |
+| KQ-21 ✅ | **Answered: the owner's own custom VTT (#24); plain image files (#26).** Which VTT(s), and their limits (max dimensions, format, file size)? | **A. Generic PNG/WebP/JPEG at a chosen px-per-square** / B. specific VTT presets now | M |
 | KQ-22 | The milestone says "a real battlemap", but the repo is public. Test fixtures must be generated or CC0. OK to keep your own maps out of the repo and use them for manual playtests only? | **A. Yes** / B. you have shareable maps | M |
 | KQ-23 | Patch seams: how should edges blend? | **A. Feathered mask edge + optional colour match, tunable per patch** / B. a hard edge (the model blends) | S |
 | KQ-24 | Does the milestone loop need a *real* Scenario call, or is a fake provider enough for acceptance, with a real call as a manual check? | **A. Fake provider in CI; one manual real call at acceptance** / B. real calls in acceptance | M |
 | KQ-25 | Who composites? The canvas preview and the Rust export must match. | **A. Rust is the authority for flatten/export; the canvas approximates; golden-image tests** / B. composite in the UI only | S |
 | KQ-26 | Grid awareness (pixels per square, snapping patches to cells): in the MVP? | **A. Tier B: store and overlay only** / B. MVP | V |
 | KQ-27 | Notes pinned to image locations: notes for you, or instructions fed to the edit prompt? | **A. Notes for you (tier B)** / B. instructions into the prompt | V |
-| KQ-29 | What does the owner's custom VTT import, and what should export emit? | **A. Image file(s) plus a small JSON sidecar (px per square, grid offset, size in squares, animation info)** / B. image only | M |
-| KQ-39 | Animation: what gets animated, where does motion come from, and which tier? | pending `spike/scenario-video` | V, S |
+| KQ-29 ✅ | **Answered: image files only, no sidecar. The grid size is set in the VTT; its limits are generous (#26).** What does the owner's custom VTT import, and what should export emit? | **A. Image file(s) plus a small JSON sidecar (px per square, grid offset, size in squares, animation info)** / B. image only | M |
+| KQ-39 ⏳ | Animation: what gets animated, where does motion come from, and which tier? **Partly answered (#27): everything eventually, after the first milestone, tokens first. Motion source pending `spike/scenario-video`.** | | V, S |
 | KQ-28 | Input formats? | **A. PNG, JPEG, WebP (no PSD)** / B. also PSD/layered | M |
 
 ## D. Engineering and process
