@@ -102,6 +102,13 @@ export const api = {
   editor: {
     imageOpen: (projectId: string, imageId: string) =>
       call('edt_image_open', { project_id: projectId, image_id: imageId }),
+    tilesOpen: (projectId: string, imageId: string, rebuild = false) =>
+      call('edt_tiles_open', {
+        project_id: projectId,
+        image_id: imageId,
+        ...(rebuild ? { rebuild: true } : {}),
+      }),
   },
+  export: { getSettings: () => call('export_get_settings', {}) },
   provider: { status: () => call('provider_status', {}) },
 };

@@ -10,7 +10,7 @@
 //   └────┴───────────┴────────────────────────────┴─────────────┘
 import { useCallback, useRef, useState, type ReactNode } from 'react';
 
-import type { Feature, Slot } from '../shared/feature';
+import type { Feature, Slot, StatusSegment } from '../shared/feature';
 
 export function slotComponents(features: readonly Feature[], slot: Slot) {
   return features.flatMap((f) => {
@@ -26,6 +26,36 @@ function SlotView({ features, slot }: { features: readonly Feature[]; slot: Slot
         <C key={id} />
       ))}
     </>
+  );
+}
+
+/** Every registered status segment, by priority then registry order. */
+export function statusSegments(features: readonly Feature[]) {
+  return features
+    .flatMap((f, fi) =>
+      (f.status ?? []).map((seg: StatusSegment, si) => ({
+        feature: f.id,
+        seg,
+        order: fi * 1000 + si,
+      })),
+    )
+    .sort((a, b) => a.seg.priority - b.seg.priority || a.order - b.order);
+}
+
+/** The shared status bar (EDT owns it; features register segments). */
+function StatusBar({ features }: { features: readonly Feature[] }) {
+  return (
+    <footer className="pf-status" data-testid="app-status-bar">
+      {statusSegments(features).map(({ feature, seg }) => (
+        <div
+          key={`${feature}:${seg.id}`}
+          className={`pf-status-segment${seg.grow ? ' pf-status-grow' : ''}`}
+          data-segment={`${feature}:${seg.id}`}
+        >
+          <seg.Component />
+        </div>
+      ))}
+    </footer>
   );
 }
 
@@ -110,9 +140,7 @@ export function Layout({
             <SlotView features={features} slot="bottom" />
           </div>
         )}
-        <footer className="pf-status" data-testid="app-slot-status">
-          <SlotView features={features} slot="status" />
-        </footer>
+        <StatusBar features={features} />
       </div>
       {has('right') && (
         <aside className="pf-right" data-testid="app-slot-right">

@@ -125,6 +125,33 @@ export interface ProviderStatus {
   connectivity: string;
 }
 
+/** One pyramid level (EDT Appendix B). `scale` = 1 / 2^level. */
+export interface TilesLevel {
+  level: number;
+  scale: number;
+  cols: number;
+  rows: number;
+  ext: 'jpg' | 'webp';
+  complete: boolean;
+}
+
+/** `edt_tiles_open` result. Tiles are at `${base_url}/<level>/<col>_<row>.<ext>`. */
+export interface TilesDescriptor {
+  key: string;
+  base_url: string;
+  width: number;
+  height: number;
+  tile_size: number;
+  levels: TilesLevel[];
+}
+
+/** EXP's settings as EDT reads them (FR-EXP-26); the rest of the shape is EXP's. */
+export interface ExportSettings {
+  source_px_per_square: number | null;
+  target_px_per_square: number | null;
+  [k: string]: unknown;
+}
+
 /** Core command name → [input, output]. Append new commands. */
 export interface Commands {
   app_info: [Record<string, never>, AppInfo];
@@ -140,6 +167,8 @@ export interface Commands {
   recent_list: [Record<string, never>, RecentEntry[]];
   edt_image_open: [{ project_id: string; image_id: string }, ImageOpen];
   provider_status: [Record<string, never>, ProviderStatus];
+  edt_tiles_open: [{ project_id: string; image_id: string; rebuild?: boolean }, TilesDescriptor];
+  export_get_settings: [Record<string, never>, ExportSettings];
 }
 
 export type CommandName = keyof Commands;
@@ -148,4 +177,8 @@ export type CommandName = keyof Commands;
 export interface Events {
   'project:committed': { seq: number };
   'import:done': { total: number };
+  'edt:tiles-progress': { key: string; level: number };
+  'edt:tiles-ready': { key: string };
+  'edt:tiles-failed': { key: string; error: CoreErrorShape | string };
+  'export:settings-changed': { source: number | null; target: number | null };
 }

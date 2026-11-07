@@ -212,6 +212,17 @@ h2 {
   font-size: var(--pf-font-size-meta);
 }
 
+.pf-status-segment {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  min-width: 0;
+}
+
+.pf-status-grow {
+  flex: 1;
+}
+
 .pf-right {
   flex: 0 0 340px;
   min-width: 300px;
