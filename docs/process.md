@@ -7,7 +7,7 @@ How the owner and a team of coding agents build Pocket Forge. Specs come before 
 | Who | Does | Never does |
 |---|---|---|
 | **Owner** (human) | Product decisions. Accepts ADRs, sets specs to `complete`, says "go" at every gate, playtests | Day-to-day merging or sequencing |
-| **Orchestrator** | Plans, writes briefs, spawns agents, merges green PRs, numbers ADRs, keeps the shared docs, brings decisions to the owner | Feature work |
+| **Orchestrator** | Plans, writes briefs, spawns agents, merges green branches locally, numbers ADRs, keeps the shared docs, brings decisions to the owner | Feature work |
 | **Spec agent** `spec-<feature>` | Writes ONE spec on `spec/<feature>` | Code; editing other specs |
 | **Review agent** `review-<topic>` | Read-only checks against the rules | Editing files |
 | **Spike agent** `spike-<topic>` | Throwaway proof that answers one technical question; writes the findings and a proposed ADR | Production code |
@@ -33,7 +33,7 @@ Per-phase cycle: **spec → review → owner gate → consolidate → build → 
 See [AGENTS.md §5](../AGENTS.md#5-ci-and-merging). In short:
 - CI on GitHub Actions runs everything, split evenly across parallel jobs.
 - Local runs stay targeted.
-- PRs merge only when green.
+- Branches merge locally (`--no-ff`) only when their CI is green (#28).
 - A red `main` is fixed before any new work.
 
 ## Orchestrator working files
