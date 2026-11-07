@@ -2,65 +2,67 @@
 feature: asset-project
 prefix: PRJ
 owner: rev-asset-project
-status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: []
 ---
 
 # Asset project and library folder
 
 ## 1. Summary
-The **library** is plain folders the user picks, usually cloud-synced (#5, #13). This spec covers how images get in (a copy, no friction, #16), how an **asset project** is laid out on disk, how a commit survives crashes, sync and locked files, retention and **trash** (#18), the **local cache** split (#19), app settings, and the decoded original in memory. Every other spec reads and writes project state through PRJ's store API. All field shapes live in [manifest-schema](../architecture/manifest-schema.md) (R26).
+The **library** is plain folders the user picks, usually cloud-synced (#5, #13). Each **library root** holds three **sections**, `Maps/`, `Tokens/` and `Items/`, and each **asset project** is a visible **project folder** in one of them (#44). This spec covers the folder layout, "new from image" (a copy; the source is never touched), the home grid, section rail and left project panel (#45, [ui-guidelines](../architecture/ui-guidelines.md)), crash-safe commits, sync and locked files, retention and **trash** (#18), the **local cache** split (#19), app settings and the decoded original. Every other spec reads and writes project state through PRJ's store API. Field shapes live in [manifest-schema](../architecture/manifest-schema.md) (R26).
 
 ## 2. Scope
-Tier S ([feature-tiers](../feature-tiers.md)): *Open an existing image as an asset project* and *Save and reopen the asset project*, plus the storage side of #16, #18, #19, #20, KQ-13, KQ-16, KQ-17. Includes a minimal revision list, a recent-projects list and relink (#40).
+Tier S ([feature-tiers](../feature-tiers.md)): *Open an existing image as an asset project*, *Save and reopen the asset project*, and *Sections, project-as-folder layout, home grid* (#44, #45), plus the storage side of #16, #18, #19, #20, KQ-13, KQ-16, KQ-17. Includes a minimal revision list and relink (#40).
 
 ## 3. Goals
-Zero-dialog import (drop, paste, multi-file, folder) · pixel-identical reopen (#35) and crash-safe commits · sync-friendly files (write-once, relative paths, conflict detection) · bounded, visible disk growth.
+Browsable in Explorer: one folder per project, a home for references and results · zero-dialog creation (drop, paste, multi-file, folder) · pixel-identical reopen (#35), crash-safe commits · sync-friendly files (write-once, relative paths, conflict detection) · bounded, visible disk growth.
 
 ## 4. Non-goals
-Library browsing, thumbnails, search, tags (tier A) · several machines editing at once (KQ-13) · record-level conflict merge (#39) · persisted undo (KQ-16) · "empty trash now" · moving or renaming assets in the app.
+Search, tags, collections (tier A) · using `references/`, `structure/` or `parts/` in generation, placing parts (tier A, #45) · moving a project between sections in the app · blank projects · several machines editing at once (KQ-13) · record-level conflict merge (#39) · persisted undo (KQ-16) · "empty trash now" · a file watcher.
 
 ## 5. User stories
-- I drop a folder of maps or paste one from a browser, and it's in my library without any questions. I close the laptop mid-edit and open the desktop later: everything I accepted is there. If both machines touched the project, I see both versions, keep one, and the other stays in the history.
-- I can see how much disk a project uses, and old rejected candidates go away on their own.
+- I drop three maps on the Maps home. Each becomes a project card with its thumbnail; my source files stay where they were. In Explorer I see `Maps/Crypt/results/003 kitchen/` with the candidates I kept, and I drop mood images into `Maps/Crypt/references/`; the project panel lists them.
+- I close the laptop mid-edit and open the desktop later: everything I accepted is there. If both machines touched the project, I see both versions, keep one, and the other stays in the history.
 
 ## 6. Functional requirements
+FRs marked (#44) were rewritten for the project-as-folder model; retired ones keep their number.
+
 | ID | Requirement (testable) |
 |---|---|
-| FR-PRJ-01 | Library roots are per machine, in `settings.json` `library`. A root must exist, be writable, and not be nested in another root or `<data-dir>`. Each violation returns a field-level error. |
+| FR-PRJ-01 | Library roots are per machine, in `settings.json` `library.roots[]`; the first receives new projects (#44). A root must exist, be writable, and not be nested in another root or `<data-dir>`; each violation is a field-level error. Setting a root creates any missing `Maps/`, `Tokens/`, `Items/` in it. |
 | FR-PRJ-02 | A root unavailable at startup shows **Library unavailable**. Nothing is written under it. |
-| FR-PRJ-03 | `import_paths` takes paths from drag-and-drop (files and folders), a multi-select dialog and a pasted file list. `import_clipboard_image` takes pasted image data. |
-| FR-PRJ-04 | A source outside every root is **copied** to the import destination (default `<library-root>/Imported/`, #40). The source's size, mtime and hash are unchanged after import. |
-| FR-PRJ-05 | A source already inside a root is used in place, never copied. |
-| FR-PRJ-06 | Accepted: PNG, JPEG, WebP (KQ-28), ≤ 16384 px per side (#11). Anything else is skipped with `unsupported`, `animated`, `too_large` or `corrupt`, and the batch continues. |
-| FR-PRJ-07 | A folder import recurses and keeps the relative structure under `<dest>/<folder name>/`. |
-| FR-PRJ-08 | A name collision gets ` (2)`, ` (3)`, … before the extension. Same content hash already in the target folder → reused, reported `already_in_library`. |
-| FR-PRJ-09 | Every copy goes to a temp name in the target folder, then is renamed. An interrupted import never leaves a partial file under a final name. |
-| FR-PRJ-10 | Pasted data is saved as lossless `pasted-<UTC yyyymmdd-hhmmss>.png` (clock seam). |
-| FR-PRJ-11 | Import emits `import:progress` per file. `import_cancel` stops it; files already finished stay. |
-| FR-PRJ-12 | The asset project of `<file>` is `<file>.pforge/` next to it (#40). Project files hold only project-relative paths and never credentials. |
-| FR-PRJ-13 | Opening an image writes nothing. The first commit creates the folder and revision `r0`. |
-| FR-PRJ-14 | Opening an image with a `.pforge` sibling opens that project; opening the `.pforge` folder works too. |
-| FR-PRJ-15 | The **original** is never written, moved or renamed. On open, size and mtime are compared with the manifest; if they differ, the hash is checked, and a different hash opens **read-only** ("Original changed"). |
-| FR-PRJ-16 | A missing original opens with "Original missing" and **Relink**, which accepts a file only if its hash matches. |
-| FR-PRJ-17 | A cloud-only original (fs-attributes seam: `is_cloud_only`, `hydrate`, R13) is hydrated on open ("Downloading from cloud"). Offline → `not_available_offline`, nothing written. No other file is ever hydrated (#19, KQ-14). |
-| FR-PRJ-18 | Every mutating command commits before it returns success: new write-once files, then the manifest, each temp → flush → rename. The manifest rename is the commit point ([schema §3](../architecture/manifest-schema.md#3-write-rules)). |
-| FR-PRJ-19 | The draft is saved by `project_put_draft` ≥ 2 s after the last draft or export-settings change and on close (#40). The same commit writes EXP's unsaved export settings into manifest `export` (R30). `put_mask` (from `edt_mask_submit`, FR-EDT-28) writes the mask and points the draft at it in one commit. Masks no draft, job or revision references go to the trash at the next commit (R7). |
-| FR-PRJ-20 | After a kill at any step of a commit, reopen shows exactly the state before or after it. On open, temp files are deleted, roll-forward steps run, and files referenced by no manifest field, revision or job file go to the trash. |
+| FR-PRJ-03 | (#44) **New from image** takes paths from a drop on the home grid, the **+ New** multi-select dialog and a pasted file list (`project_create`), or pasted image data (`project_create_from_clipboard`). Projects go into the selected section. |
+| FR-PRJ-04 | (#44) Every source is **copied** to `<section>/<name>/working/<source file name>`, also when it is already inside the library (e.g. a result of another project). The source's size, mtime and hash are unchanged afterwards. |
+| FR-PRJ-05 | Retired (#44): sources inside a root are no longer used in place. |
+| FR-PRJ-06 | Accepted: PNG, JPEG, WebP (KQ-28), ≤ 16384 px per side (#11), passing the end-of-file check (R33). Anything else is skipped with `unsupported`, `animated`, `too_large` or `corrupt`, and the batch continues. |
+| FR-PRJ-07 | (#44) A dropped folder makes one project per supported image found recursively; folder structure is not kept. |
+| FR-PRJ-08 | (#44) A taken name gets ` (2)`, ` (3)`, … (FR-PRJ-44). A source whose hash equals an existing project's original in the same section creates nothing and reports `already_in_library{project}`. |
+| FR-PRJ-09 | (#44) A project is built in `<section>/.<name>.pf-tmp-<ulid>/` (working copy, subfolders, `project.json`, `r0`), then renamed to `<section>/<name>/`. An interrupted creation never leaves a partial project under a final name; temp folders older than 1 h are removed at startup (R35). |
+| FR-PRJ-10 | (#44) Pasted data becomes project `pasted-<UTC yyyymmdd-hhmmss>` (clock seam) with a lossless PNG `working/pasted-<…>.png`. |
+| FR-PRJ-11 | Creation emits `import:progress` per file. `project_create_cancel` stops it; projects already finished stay. |
+| FR-PRJ-12 | (#44) A project folder holds `project.json` (the **manifest**), `working/`, `references/`, `structure/`, `parts/`, `results/`, `exports/` and a hidden `.pforge/` (§8). Project files hold only project-relative paths and never credentials. |
+| FR-PRJ-13 | Retired (#44): creation writes the project and `r0` at once (FR-PRJ-09); opening never creates one. |
+| FR-PRJ-14 | (#44) `project_open` takes a project folder (one with `project.json`) inside a root; anything else → `not_a_project` or `outside_library`. |
+| FR-PRJ-15 | The **original** `working/<file>` is never written, moved or renamed by the app. On open, size and mtime are compared with the manifest; if they differ, the hash is checked, and a different hash (e.g. saved over by another editor) opens **read-only** ("Original changed"). |
+| FR-PRJ-16 | (#44) A missing original opens with "Original missing" and **Relink**, which accepts a file only if its hash matches and copies it back into `working/`. |
+| FR-PRJ-17 | (#44) Cloud-only files (fs-attributes seam: `is_cloud_only`, `hydrate`, R13) are hydrated only when needed: `project.json` and the thumbnail for the home grid, the original on open, and a file the user views (a thumbnail in the left panel or tracker). Offline → `not_available_offline`, nothing written. Nothing else is ever hydrated (#19, KQ-14). |
+| FR-PRJ-18 | Every mutating command commits before it returns success: new write-once files, then `project.json`, each temp → flush → rename. The manifest rename is the commit point ([schema §3](../architecture/manifest-schema.md#3-write-rules)). |
+| FR-PRJ-19 | The draft is saved by `project_put_draft` ≥ 2 s after the last draft or export-settings change and on close (#40); the same commit writes EXP's unsaved export settings (R30). `put_mask` (FR-EDT-28) writes the mask and points the draft at it in one commit. Masks no draft, job or revision references go to the trash at the next commit (R7). |
+| FR-PRJ-20 | After a kill at any step of a commit, reopen shows exactly the state before or after it. On open, temp files are deleted, roll-forward steps run, and files in `.pforge/` that no manifest field, revision or job file references go to the trash. User-owned files are never swept (FR-PRJ-47). |
 | FR-PRJ-21 | A locked file is retried with backoff for ≤ 3 s, then `project:save-failed{reason: locked}` fires, state stays in memory and is retried every 10 s, and closing with unsaved state asks first. |
 | FR-PRJ-22 | Save → close → reopen is pixel-identical for the original, layers and masks, and field-identical for prompts, settings, jobs, candidates and revisions. |
 | FR-PRJ-23 | A **revision** is a write-once snapshot of the layer stack plus the draft. Reasons: `create` (`r0`), `accept`, `save` (Ctrl+S, only if changed since the head), `restore`, `retune`, `conflict` (R24). Restore writes a new revision with the restored layers and draft. Optional `label`; `r<seq>` is a display label. None is ever deleted. |
-| FR-PRJ-24 | If `manifest.json` is missing or unreadable, open rebuilds it from the newest revision and the revision and job files, and reports `project:recovered`. |
-| FR-PRJ-25 | `schema_version` migrations run in order on load; the migrated file is written at its next commit, keeping `manifest.v<N>.json` ([schema §6](../architecture/manifest-schema.md#6-versioning-and-migration)). |
+| FR-PRJ-24 | If `project.json` is missing or unreadable, open rebuilds it from the newest revision and the revision and job files, and reports `project:recovered`. |
+| FR-PRJ-25 | `schema_version` migrations run in order on load; the migrated file is written at its next commit, keeping `.pforge/project.v<N>.json` ([schema §6](../architecture/manifest-schema.md#6-versioning-and-migration)). |
 | FR-PRJ-26 | A newer `schema_version` than supported opens **read-only** ("Made by a newer Pocket Forge"). Nothing is written. |
 | FR-PRJ-27 | Unknown fields are kept on write. JSON is UTF-8, LF, pretty-printed, stable field order. |
-| FR-PRJ-28 | A job record is `jobs/<id>/job.json` + `region.png` + `mask.png` (as sent: after fit, before polarity conversion). State is persisted on **every** transition, with PRV's opaque `provider{}` (which holds the handle) verbatim. The job file is authoritative; manifest `jobs[]` is an index rebuilt on open (R2). |
+| FR-PRJ-28 | A job record is `.pforge/jobs/<id>/job.json` + `region.png` + `mask.png` (as sent: after fit, before polarity conversion). State is persisted on **every** transition, with PRV's opaque `provider{}` verbatim. The job file is authoritative; manifest `jobs[]` is an index rebuilt on open (R2). |
 | FR-PRJ-29 | `project_open` reports every non-terminal job as resumable (RGN consumes it). A `requested` job (no handle) reopened after a crash becomes `lost`. |
-| FR-PRJ-30 | Candidates are stored untouched as `candidates/<id>.<sniffed ext>` (R10). Accepted or starred candidates, and files any revision references, are never trashed or purged (#18). |
-| FR-PRJ-31 | Accept = one commit: patch layer, candidate statuses, revision, and the job's unstarred, unaccepted candidates to the trash (R4). A job that ends with nothing accepted or starred sends its candidates **and inputs** to the trash; accepted jobs keep inputs forever (R9, KQ-17). Starring or restoring brings an item back. |
+| FR-PRJ-30 | (#44) Candidates are stored untouched as `results/NNN <slug>/NN.<sniffed ext>`, one folder per **iteration** (FR-RGN-39, R10). The folder name is committed in `job.json` before any file is written, so a re-fetch after a crash replaces only its own unreferenced files. Accepted or starred candidates, and files any revision references, are never trashed or purged (#18). |
+| FR-PRJ-31 | Accept = one commit: patch layer, candidate statuses, revision, and the job's unstarred, unaccepted candidates to the trash (R4). A job that ends with nothing accepted or starred sends its candidates **and inputs** to the trash; accepted jobs keep inputs forever (R9, KQ-17). A trashed result leaves `results/`; an iteration folder left empty is removed (OQ-RGN-16). Starring or restoring brings an item back to its old path. |
 | FR-PRJ-32 | On open, trash items older than 30 days (clock seam) are deleted. Nothing else is ever deleted by the app. |
-| FR-PRJ-33 | Disk use per project by category (original, layers, masks, job inputs, candidates, trash, other) comes from file metadata only and never hydrates a file. |
-| FR-PRJ-34 | Open and every commit look for **conflict copies** of `manifest.json` and `job.json`: the name with a sync suffix (`-<any>` or ` (<n>)`) before the extension. |
+| FR-PRJ-33 | (#44) Disk use per project by category (original, layers, masks, job inputs, results, trash, user folders, exports, other) comes from file metadata only and never hydrates a file. |
+| FR-PRJ-34 | Open and every commit look for **conflict copies** of `project.json` and `job.json`: the name with a sync suffix (`-<any>` or ` (<n>)`) before the extension. A conflict copy of the thumbnail goes to the trash. |
 | FR-PRJ-35 | Before every manifest write, on-disk `commit{seq, install_id}` is compared with the last loaded or written values. A mismatch refuses the write and fires `project:conflict`. |
 | FR-PRJ-36 | On a conflict, `project_conflict_get` returns both versions (time, this/other machine, layer stack, newest revision label, missing files). The user keeps one; one commit makes it current, writes the other's layers + draft as a `conflict` revision, and trashes the conflict copy. Nothing is merged; files from both sides stay and indexes are rebuilt (#39). A version with missing files can't be kept yet. |
 | FR-PRJ-37 | `<data-dir>` (`PF_DATA_DIR`, default per-user local app data, never synced) holds caches, which rebuild, and per-machine config. Deleting it loses no committed project data (R8). |
@@ -70,40 +72,51 @@ Library browsing, thumbnails, search, tags (tier A) · several machines editing 
 | FR-PRJ-41 | In a **read-only** project the user can view and paint. Every writing command and store call fails fast with `read_only`; the UI disables submit (R12). |
 | FR-PRJ-42 | PRJ owns a `DecodedOriginal` (RGB8, ADR 0004): decoded lazily on the first RGN or EXP use, prefetched by `project_prefetch_original`, released on close. Until ready, RGN and EXP get `original_unavailable` (R11). |
 | FR-PRJ-43 | Undo of an accept or re-tune = `project_restore_revision(parent)` (reason `restore`); redo = restore the later revision. Candidate statuses and trash are unchanged (R3). |
+| FR-PRJ-44 | (#44) **Name** = the folder name: the source stem by default, with `<>:"/\|?*` and control characters replaced by `-`, trailing dots and spaces trimmed, reserved Windows names (`CON`, `NUL`, `COM1`, …) suffixed with `_`, ≤ 64 chars; empty → `untitled`. Names compare case-insensitively within a section. |
+| FR-PRJ-45 | (#44) `project_rename` renames a **closed** project's folder under FR-PRJ-44 rules; nothing inside changes (paths are relative). Taken → `name_taken`; open → `project_open`; locked → `locked`. |
+| FR-PRJ-46 | (#44) `project.json` `kind` is `map`, `token` or `item`, from the section. A project found in another section's folder (moved in Explorer) is listed there and takes that `kind` at its next commit. |
+| FR-PRJ-47 | (#44) App-owned: `project.json`, `working/` (written only at creation and relink), `results/`, `exports/` (EXP) and `.pforge/`. User-owned: `references/`, `structure/`, `parts/`; the app only adds copies there (`project_folder_add`) and never moves, renames or deletes in them. Files the app didn't name in `results/` or `exports/` are ignored, never swept. |
+| FR-PRJ-48 | (#44) User folders are listed on open, when the window regains focus and on Refresh: supported images with a thumbnail, other files by name. Files dropped there in Explorer appear without a restart. |
+| FR-PRJ-49 | (#44, #45) `library_list_projects(section)` reads only `project.json` and the thumbnail of each project folder in every root. Cards: thumbnail, name, iteration count, last edited (`commit.at`), newest first, with badges read-only, conflict, unreadable, not available offline. A folder without `project.json` is ignored. |
+| FR-PRJ-50 | (#44) The **thumbnail** `.pforge/thumb.jpg` (≤ 512 px long side, JPEG q80) of the **working image** is written in the background after creation and after each commit that changes `layers[]`, temp → rename, outside the commit (OQ-PRJ-13). Missing or older than the last layer change → rebuilt on open. It never blocks a commit. |
 
 ## 7. UI/UX notes
-- **First run:** "Choose your library folder" (`prj-setup-pick-root`); **library unavailable:** banner with "Choose again". **Home:** full-window drop zone (`prj-home-dropzone`), "Open image…", recent projects (`prj-home-recent`, `data-record-id`).
-- **Import:** toast "12 / 40" with Cancel (`prj-import-cancel`); the summary lists imported, already in library, skipped + reason. No confirmation dialog.
-- **Status bar** (`prj-status-save`): Saved · time / Saving… / Save failed, file locked, retrying / Read-only (reason) / Conflict.
-- **Project panel** (`prj-panel-*`): disk use by category, trash count, size and next purge date, revisions (`r<seq>`, label, Restore), trashed items with Restore.
+Slots per [ui-guidelines](../architecture/ui-guidelines.md); PRJ owns the section rail, the home grid and the left panel.
+- **Section rail** (`prj-rail-{maps,tokens,items,settings}`): picks the section; the home grid shows it. **First run:** "Choose your library folder" (`prj-setup-pick-root`); **library unavailable:** banner with "Choose again".
+- **Home** (no project open): project cards (`prj-home-card`, `data-record-id` = project id; open on click; Rename in the context menu), **+ New** (`prj-home-new`), full-area drop zone (`prj-home-dropzone`), paste. Empty section: "Drop an image to start a map / token / item".
+- **Creation:** toast "12 / 40" with Cancel (`prj-import-cancel`); the summary lists created, already in library (with Open), skipped + reason. No confirmation dialog.
+- **Left panel** (`prj-panel-*`): Working, References, Structure, Parts (file lists, **Add…** copies in, Refresh), Results (iterations, RGN's tracker selects them), then History (revisions `r<seq>`, label, Restore) and Storage (disk use, trash count, size, next purge date, trashed items with Restore).
+- **Status bar segment** (`prj-status-save`): Saved · time / Saving… / Save failed, file locked, retrying / Read-only (reason) / Conflict.
 - **Loading:** "Downloading from cloud…", then the backdrop (EDT). **Offline:** `not_available_offline` with Retry. **Job running:** closing is allowed; the job resumes on reopen (FR-PRJ-29).
 - **Conflict:** banner "This project was also changed on another machine" → a two-pane view (`prj-conflict-this`, `prj-conflict-other`) with time and layer stack per side (OQ-PRJ-11), and **Keep this** / **Keep other** (`prj-conflict-keep-this`, `-keep-other`). A side with missing files shows "Still syncing" and its Keep is disabled.
 
 ## 8. Data and file effects
 Full tree and field tables: [manifest-schema](../architecture/manifest-schema.md). In short:
-- **Synced:** `<file>.pforge/` holds `manifest.json` (mutable, commit point), write-once `revisions/`, `layers/`, `masks/`, `candidates/`, mutable `jobs/<id>/job.json` + write-once inputs, and `trash/`.
-- **Local (`<data-dir>`):** `settings.json`, `recent.json`, `cache/tiles/` (EDT), `cache/provider/` (PRV), `pending/` (spool).
-- **Growth:** each re-tune writes a new layer PNG kept by its revision; acceptable (#18 keeps accepted history), shown in disk use.
-- **Recoverable:** a lost manifest is rebuilt (FR-PRJ-24). Trash restores for 30 days. The original and accepted candidates are never deleted. A lost `<data-dir>` costs re-picking roots, the spend cap, cache rebuilds, and any unreplayed spool.
+- **Synced, per project** `<library-root>/<Maps|Tokens|Items>/<name>/`: `project.json` (mutable, commit point) · `working/<file>` (the original) · `references/`, `structure/`, `parts/` (user-owned) · `results/NNN <slug>/NN.<ext>` (write-once) · `exports/` (EXP) · `.pforge/`: write-once `revisions/`, `layers/`, `masks/`, mutable `jobs/<id>/job.json` + write-once inputs, `trash/`, `thumb.jpg` (rebuildable).
+- **Local (`<data-dir>`):** `settings.json`, `cache/tiles/` (EDT), `cache/provider/` (PRV), `pending/` (spool). `recent.json` is retired (OQ-PRJ-14).
+- **Growth and recovery:** each re-tune writes a new layer PNG kept by its revision; acceptable (#18), shown in disk use. A lost manifest is rebuilt (FR-PRJ-24). Trash restores for 30 days. The original and accepted candidates are never deleted. The thumbnail rebuilds. A lost `<data-dir>` costs re-picking roots, the spend cap, cache rebuilds, and any unreplayed spool.
+- **Migration:** none. No real projects exist yet (only dev data in `.pf-dev/`, which is deleted), so manifest v1 is redefined in place and there is no migration code. `library.import_dest` is dropped from `settings.json`; an old value is kept as an unknown field and ignored.
 
 ## 9. Commands and events
 | Command | Input → result | Errors |
 |---|---|---|
-| `library_get_config` / `library_set_roots` | — / `roots[]`, `import_dest` → config | FR-PRJ-01 field errors |
-| `import_paths` / `import_cancel` | `paths[]` → per item `imported` \| `already_in_library` \| `skipped(reason)` | `library_unavailable`, `canceled` (partial results) |
-| `import_clipboard_image` | image bytes → library path | `unsupported`, `too_large` |
-| `project_open` | image or `.pforge` path → snapshot + `warnings[]` (read-only reason, conflict, recovered, resumable, lost) | `not_found`, `not_available_offline`, `corrupt`, `outside_library` (UI calls `import_paths` first) |
-| `project_close` | — → ok | `unsaved` |
+| `library_get_config` / `library_set_roots` | — / `roots[]` → config | FR-PRJ-01 field errors |
+| `library_list_projects` | section → cards (FR-PRJ-49) | `library_unavailable` |
+| `project_create` / `project_create_cancel` | section, `paths[]` → per item `created{path}` \| `already_in_library{path}` \| `skipped(reason)` | `library_unavailable`, `canceled` (partial results) |
+| `project_create_from_clipboard` | section, image bytes → project path | `unsupported`, `too_large` |
+| `project_rename` | path, name → new path | `name_taken`, `invalid_name`, `project_open`, `locked` |
+| `project_open` / `project_close` | project folder → snapshot (`kind`, name, layers, draft, revisions) + `warnings[]` (read-only reason, conflict, recovered, resumable, lost) / — → ok | `not_found`, `not_a_project`, `outside_library`, `not_available_offline`, `corrupt` / `unsaved` |
+| `project_folder_list` / `project_folder_add` | folder (`working\|references\|structure\|parts\|exports`) / folder, `paths[]` → files `[{name, bytes, mtime, image}]` | `unknown_folder`, `read_only` (add) |
 | `project_put_draft` | draft (+ EXP's unsaved export settings, R30) → `seq` | `read_only`, `locked`, `conflict` |
 | `project_list_revisions` / `project_save_revision` / `project_restore_revision` | — / label? / `rev_id` → `[{id, seq, created_at, reason, label}]` / revision | `unchanged`, `unknown_id`, `read_only` |
 | `project_trash_list` / `project_trash_restore` | — / item id → items / ok | `unknown_id`, `read_only` |
 | `project_disk_usage` / `project_relink_original` | — / path → bytes per category + next purge date / ok | — / `hash_mismatch` |
 | `project_prefetch_original` | — → ok (decode starts) | `corrupt`, `not_available_offline` |
 | `project_conflict_get` / `project_resolve_conflict` | — / `keep: this \| other` → both versions / revision | `no_conflict`, `files_missing` |
-| `recent_list` | — → `[{path, name, opened_at}]` | — |
 
-- **Store API** (Rust, one commit each, `read_only`/`locked`/`conflict` as above, R4): `read_project` (current layer stack, R6), `record_job`, `update_job`, `add_candidates`, `put_mask`, `accept_candidate` (also restores a trashed candidate file in the same commit for a re-pick, FR-RGN-36), `set_star`, `discard_candidate`, `resolve_job`, `replace_patch_layer` (re-tune), `put_export` (export settings + `last`), `settings_get` / `settings_put(section)`, `decoded_original`, `resolve_image(image_id)` (original, layer or candidate → file, for EDT). User-facing job and candidate commands are RGN's (`rgn_*`).
-- **Events:** `import:progress{done, total}`, `import:done`, `project:committed{seq}`, `project:save-failed{reason, retrying}`, `project:conflict`, `project:recovered`, `project:original-ready`, `trash:purged{count, bytes}` (R21).
+- Retired (#44): `import_paths`, `import_clipboard_image`, `import_cancel` (→ `project_create*`), `recent_list` (OQ-PRJ-14).
+- **Store API** (Rust, one commit each, `read_only`/`locked`/`conflict` as above, R4): `read_project` (current layer stack, R6), `record_job`, `update_job`, `add_candidates` (assigns the iteration folder, FR-RGN-39), `put_mask`, `accept_candidate` (also restores a trashed candidate file for a re-pick, FR-RGN-36), `set_star`, `discard_candidate`, `resolve_job`, `replace_patch_layer` (re-tune), `put_export` (export settings + `last`), `settings_get` / `settings_put(section)`, `decoded_original`, `resolve_image(image_id)` (original, layer or candidate → file, for EDT). User-facing job and candidate commands are RGN's (`rgn_*`).
+- **Events:** `import:progress{done, total}`, `import:done`, `project:committed{seq}`, `project:save-failed{reason, retrying}`, `project:conflict`, `project:recovered`, `project:original-ready`, `project:thumb-updated{project_id}`, `trash:purged{count, bytes}` (R21).
 
 ## 10. Provider interaction
 N/A: no provider calls. PRJ persists the job record ADR 0001 requires (KQ-17) and keeps the opaque `provider{}` as a cache (#20).
@@ -111,58 +124,63 @@ N/A: no provider calls. PRJ persists the job record ADR 0001 requires (KQ-17) an
 ## 11. Edge cases
 | Case | Behaviour |
 |---|---|
-| Crash mid-save | FR-PRJ-18/20; job follow-ups roll forward on open. Mid-import: only temp files, cleaned up (FR-PRJ-09). |
-| Sync conflict / locked file | FR-PRJ-21, 34–36, 40. Both the copy check and the seq check are needed; sync can land either way. |
+| Crash mid-save | FR-PRJ-18/20; job follow-ups roll forward on open. Mid-creation: only a temp folder, removed (FR-PRJ-09). |
+| Sync conflict / locked file | FR-PRJ-21, 34–36, 40. Two machines creating the same name offline get one merged folder with a `project.json` conflict copy: the conflict view shows both, and the kept side's sweep trashes the other's `.pforge/` files (30-day restore). |
+| Folder renamed or moved in Explorer | Closed: works (relative paths), listed where it now is (FR-PRJ-46). Open: the next commit fails with `not_found`, state stays in memory, and the banner asks to reopen from home. |
 | Offline / provider error | Only cloud-only files are affected (FR-PRJ-17). PRJ makes no provider calls; the job record keeps any error. |
-| Very large image | > 16384 px rejected (FR-PRJ-06). Hashing streams and is skipped while size and mtime match. 16k decode is background (FR-PRJ-42). |
-| Corrupt input or settings | Skipped at import by header check. A decode failure on open → `corrupt`, nothing written. Corrupt `settings.json` → FR-PRJ-39. |
+| Very large image | > 16384 px rejected (FR-PRJ-06). Hashing streams and is skipped while size and mtime match. 16k decode and thumbnail are background (FR-PRJ-42, 50). |
+| Corrupt input or settings | Skipped at creation by the header and end-of-file check (R33). A decode failure on open → `corrupt`, nothing written. Corrupt `settings.json` → FR-PRJ-39. |
 | Undo across features | In-session only (KQ-16); accept/re-tune per FR-PRJ-43. |
 
 ## 12. Performance budget
 | Operation | Typical map (#30) | 16k |
 |---|---|---|
+| `library_list_projects`, 200 local projects (manifest + thumb stat) | < 500 ms | same |
 | `project_open`, PRJ share (manifest + layer metadata, no hash) | < 150 ms | < 300 ms |
-| A commit (manifest ≤ 200 KB, local SSD) | < 50 ms | same |
-| Patch layer PNG write (≤ 4096², fast compression) | < 300 ms | same |
-| Import copy + hash | ≈ disk speed, < 1 s | < 5 s |
+| A commit (manifest ≤ 200 KB, local SSD) / patch layer PNG write (≤ 4096²) | < 50 ms / < 300 ms | same |
+| New from image: copy + hash / thumbnail (background) | < 1 s / < 1 s | < 5 s / < 6 s |
 | `DecodedOriginal` decode (background) / memory; PRJ other memory < 20 MiB | < 0.5 s / ≤ 70 MiB | < 4 s / 768 MiB |
-| Whole app, region job running (EDT UI 704 + core transient 256 MiB, decoded original, RGN 400 MiB, PRJ 20 MiB) | < 1.5 GiB | ≤ 2.1 GiB |
-| Whole app, export running (EDT UI 704 + core transient 256 MiB, decoded original, EXP stream 400 MiB / rescale 1.6 GiB, PRJ 20 MiB) | < 1.5 GiB | ≤ 2.1 GiB / ≤ 3.3 GiB |
+| Whole app (EDT UI 704 + core transient 256 MiB, decoded original, PRJ 20 MiB, plus RGN job 400 MiB / EXP stream 400 MiB / EXP rescale 1.6 GiB) | < 1.5 GiB | ≤ 2.1 GiB / ≤ 2.1 GiB / ≤ 3.3 GiB |
 
 ## 13. Test plan
-- **Unit (`pf-core`, `fr_prj_NN_*`):** manifest round-trip + field order; each migration from a v0 fixture; conflict-copy matcher; collision suffixes; purge date math (fake clock); import validation; settings corrupt → defaults.
-- **Integration (Rust):** fault-injecting fs seam at each commit step → reopen = before or after, roll-forward of job follow-ups (FR-PRJ-20). Lock: k failures then success (FR-PRJ-21). Seq-mismatch refusal; spool replay after resolve (FR-PRJ-35/40). Conflict resolve keeps both sides' job and revision files (FR-PRJ-36). Fake fs-attributes: cloud-only + offline, and disk use never calls `hydrate` (FR-PRJ-17/33). Import of a generated tree with the source re-hashed. Save → reopen identity with a patch from the **fake provider** (FR-PRJ-22). Rebuild from a deleted manifest. R9 retention. Undo via restore (FR-PRJ-43). Read-only refusals. A real-process kill test.
-- **Thin e2e (Playwright, mocked core):** drop → summary; status bar states; conflict view; read-only banner; revision restore.
-- **Fixtures (generated, KQ-22, no personal art):** procedural grid map 2100×2800; small PNG/JPEG/WebP; animated WebP; truncated PNG; PSD-magic file; 16385 px header-only PNG; manifest v0/v1; conflict-copy names.
-- **Walkthrough:** [Appendix A](#appendix-a-walkthrough), 10 steps incl. a manual OneDrive check (R13).
+- **Unit (`pf-core`, `fr_prj_NN_*`):** manifest round-trip + field order; conflict-copy matcher; name sanitising and collision suffixes (44, 08); iteration slug and numbering (with RGN); purge date math (fake clock); creation validation; settings corrupt → defaults.
+- **Integration (Rust):** fault-injecting fs seam at each commit step and during creation → reopen = before or after; no partial project folder (09, 20). Lock: k failures then success (21). Seq-mismatch refusal; spool replay after resolve (35, 40). Conflict resolve keeps both sides' files (36). Fake fs-attributes: cloud-only + offline, home listing hydrates only manifest and thumb, disk use never hydrates (17, 33). Creation from a generated tree with the sources re-hashed (04, 07). Rename (45). A file dropped in `references/` is listed and never swept (47, 48). Save → reopen identity with a **fake provider** patch (22). Rebuild from a deleted manifest. R9 retention and trashed results leaving `results/` (31). Undo via restore (43). Read-only refusals. A real-process kill test.
+- **Thin e2e (Playwright, mocked core):** rail → home grid; drop → summary → cards; status bar states; left panel lists; conflict view; read-only banner; revision restore.
+- **Fixtures (generated, KQ-22, no personal art):** procedural grid map 2100×2800; small PNG/JPEG/WebP; animated WebP; truncated PNG; PSD-magic file; 16385 px header-only PNG; manifest v1; conflict-copy names; awkward names (`CON.png`, `a:b?.png`, 80-char stem).
+- **Walkthrough:** [Appendix A](#appendix-a-walkthrough), incl. a manual OneDrive check (R13).
 
 ## 14. Build split
 | # | Slice | Shared files (AGENTS §9) | Depends on |
 |---|---|---|---|
-| 1 | Store core: atomic writer (temp, rename, retry, fault seam), manifest v1 types, migrations, version guard, `settings.json` | manifest schema (new) | skeleton |
-| 2 | Library config + import (paths, folder, clipboard, validation, dedupe, hash) + home drop zone | command + UI registries (append) | 1 |
-| 3 | Open/create/close: original checks, relink, fs-attributes seam, recent list, `DecodedOriginal`, read-only | command registry (append) | 1 |
-| 4 | Store API: jobs, candidates, masks, patch layers, revisions, draft, export; roll-forward; undo via restore | manifest schema (add fields), command registry | 3. RGN, EDT, EXP build on it |
-| 5 | Retention: trash, purge, restore, disk use + project panel | command registry (append) | 4 |
+| 1 | Store core: atomic writer (temp, rename, retry, fault seam), manifest v1 types (`project.json`, `kind`), version guard, `settings.json` | manifest schema | skeleton |
+| 2 | Library + creation: roots, sections, `project_create*`, naming, dedupe, temp-folder build, thumbnail; home grid, rail, drop zone | command + UI registries (append) | 1 |
+| 3 | Open/close: original checks, relink, fs-attributes seam, `DecodedOriginal`, read-only, rename; left panel folders | command registry (append) | 1 |
+| 4 | Store API: jobs, candidates (iteration folders), masks, patch layers, revisions, draft, export; roll-forward; undo via restore | manifest schema (add fields), command registry | 3. RGN, EDT, EXP build on it |
+| 5 | Retention: trash, purge, restore, disk use; History and Storage in the left panel | command registry (append) | 4 |
 | 6 | Conflicts: copy + seq detection, spool, conflict view, resolve, status bar | command registry (append) | 4 |
 
 ## 15. Open questions
-None open.
+| ID | Question | Options (tradeoff) | Blocking? |
+|---|---|---|---|
+| OQ-PRJ-13 | Where does the home thumbnail live? | **A. `.pforge/thumb.jpg`, synced: other machines show it without the big image; small sync churn** / B. local cache: no churn, but a new machine must hydrate and decode every original | No (slice 2) |
+| OQ-PRJ-14 | Keep the recent-projects list (#40)? | **A. Retire it: the home grid sorted by last edited replaces it; less code** / B. keep a cross-section "Recent" row: one more list to maintain | No |
+| OQ-PRJ-15 | Should `working/` also hold a flattened current image? | **A. No: `working/` holds the untouched original; the current state is seen in the thumbnail and `exports/`; no 16k flatten per accept** / B. yes, rewritten on each accept: Explorer shows edits, but seconds per accept and sync churn | No |
+| OQ-PRJ-16 | Home thumbnails and user-folder files need image URLs outside the open project's manifest; EDT's `/i/` keys (FR-EDT-31/32) are per open project. Names [editor-canvas](editor-canvas.md). | **A. EDT adds a `library` key space: a core fn registers a file (≤ 512 px copy) and returns `/i/<key>`; released when the view closes** / B. PRJ serves its own scheme: a second URI handler to secure | No (slice 2) |
 
-**Resolved:** OQ-PRJ-01 ✅ A, `<file>.pforge/` (#40) · OQ-PRJ-02 ✅ A, `Imported/` (#40) · OQ-PRJ-03 ✅ A, first commit (#40) · OQ-PRJ-04 ✅ A, commit every change, draft after 2 s idle (#40) · OQ-PRJ-05 ✅ A, `sha2` (#38) · OQ-PRJ-06 ✅ restore the parent revision (R3, FR-PRJ-43) · OQ-PRJ-07 ✅ A, PRJ minimal revision list, recent list, relink (#40) · OQ-PRJ-08 ✅ added to the glossary (R27) · OQ-PRJ-09 ✅ EDT owns the tile cache, 2 GiB (R5) · OQ-PRJ-12 ✅ A, Head revision, Import destination and Spool added (R29) · OQ-PRJ-10 ✅ A, the `job.json` copy with the later state wins (#41) · OQ-PRJ-11 ✅ A, EDT draws a given layer stack read-only (#41) · OQ-EDT-14 ✅ A, a restore brings back the revision's draft and EDT re-submits the live mask (#41).
+**Resolved:** OQ-PRJ-01 ✅ superseded by #44 (project folder) · OQ-PRJ-02 ✅ superseded by #44 (copy into the project's `working/`) · OQ-PRJ-03 ✅ superseded by #44 (creation writes `r0`) · OQ-PRJ-04 ✅ A, commit every change, draft after 2 s idle (#40) · OQ-PRJ-05 ✅ A, `sha2` (#38) · OQ-PRJ-06 ✅ restore the parent revision (R3, FR-PRJ-43) · OQ-PRJ-07 ✅ A, minimal revision list and relink (#40); recent list → OQ-PRJ-14 · OQ-PRJ-08 ✅ glossary (R27) · OQ-PRJ-09 ✅ EDT owns the tile cache, 2 GiB (R5) · OQ-PRJ-12 ✅ A (R29) · OQ-PRJ-10 ✅ A, the later `job.json` wins (#41) · OQ-PRJ-11 ✅ A, EDT draws a given layer stack read-only (#41) · OQ-EDT-14 ✅ A (#41).
 
 ## Appendix A: walkthrough
 `PF_DATA_DIR` + `PF_LIBRARY_DIR` in `.pf-dev/`, fake provider.
 
 | # | Step | Expected |
 |---|---|---|
-| 1 | First launch, pick `.pf-dev/library` | Empty home with the drop zone |
-| 2 | Drop a PNG, a JPEG and a `.psd` from outside the library | 2 in `Imported/`, 1 `unsupported`; sources unchanged |
-| 3 | Paste an image; drop a folder with subfolders | `pasted-….png`; structure kept |
-| 4 | Open the PNG | Displays; no `.pforge` yet |
-| 5 | Paint, submit (3 candidates), accept one, star one | Manifest, `jobs/<id>/` (job + inputs), mask, layer, `r0`, `r1`; 1 candidate in `trash/` |
+| 1 | First launch, pick `.pf-dev/library` | `Maps/`, `Tokens/`, `Items/` created; empty Maps home with the drop zone |
+| 2 | Drop a PNG, a JPEG and a `.psd` from outside the library on Maps | 2 cards with thumbnails, 1 `unsupported`; sources unchanged; each folder has the §8 layout |
+| 3 | Paste an image; drop a folder with subfolders on Tokens; drop the PNG again on Maps | `pasted-…` project; one Tokens project per image; `already_in_library` |
+| 4 | Copy an image into `Maps/<name>/references/` in Explorer, focus the app, open the project | References lists it |
+| 5 | Paint, submit (3 candidates), accept one, star one | `results/001 <slug>/` holds the accepted and starred ones; 1 in `.pforge/trash/`; `r0`, `r1`; card thumbnail shows the patch, iteration count 1 |
 | 6 | Kill during a commit (`PF_FAULT=after_temp`), relaunch | Last committed state, no stray files |
-| 7 | Copy `manifest.json` to `manifest-OTHERPC.json`, reopen | Conflict view shows both; Keep this → `r2` (`conflict`), copy in trash |
+| 7 | Copy `project.json` to `project-OTHERPC.json`, reopen | Conflict view shows both; Keep this → `r2` (`conflict`), copy in trash |
 | 8 | Relaunch with `PF_FAKE_NOW` + 31 days | Trashed candidate gone; starred and accepted remain |
-| 9 | Restore `r0`, close, reopen | Original only; `r0`–`r3` intact; pixel-identical |
-| 10 | Manual: a cloud-only original in a real OneDrive folder, online then offline | Hydrates once; offline → `not_available_offline` |
+| 9 | Restore `r0`, close, rename the project from its card, reopen | Original only; `r0`–`r3` intact; pixel-identical |
+| 10 | Manual: library in a real OneDrive folder, a cloud-only project, online then offline | Home hydrates only manifest and thumb; open hydrates the original once; offline → `not_available_offline` |

@@ -22,6 +22,35 @@ env:
 
 # Jobs run in parallel; keep them balanced (AGENTS §5). Rebalance when one runs > 2× the median.
 jobs:
+  # Docs-only pushes skip the build and test jobs (hygiene always runs).
+  changes:
+    name: Changes (docs-only?)
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BEFORE: ${{ github.event.before }}
+          REF: ${{ github.ref_name }}
+        run: |
+          if [ "$REF" = "main" ] && [ -n "$BEFORE" ] && ! echo "$BEFORE" | grep -q '^0*$'; then
+            base="$BEFORE"
+          else
+            base=$(git merge-base origin/main HEAD)
+          fi
+          files=$(git diff --name-only "$base" HEAD || echo "unknown")
+          echo "$files"
+          if [ -z "$files" ] || echo "$files" | grep -qvE '^docs/|\.md$'; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   hygiene:
     name: Hygiene (public repo, rustfmt, crate direction)
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
@@ -36,7 +65,8 @@ jobs:
 
   rust:
     name: Rust ${{ matrix.crate }} (clippy + tests)
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -54,7 +84,8 @@ jobs:
 
   ui:
     name: UI (tsc, ESLint, Prettier, Vitest)
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,7 +106,8 @@ jobs:
 
   e2e:
     name: E2E (Playwright, mocked core)
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -104,7 +136,8 @@ jobs:
   # parallel jobs: clippy (check artifacts) and test + build + smoke (full artifacts) share nothing.
   windows-clippy:
     name: Windows app clippy
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -126,7 +159,8 @@ jobs:
 
   windows:
     name: Windows app tests, Tauri build + smoke
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

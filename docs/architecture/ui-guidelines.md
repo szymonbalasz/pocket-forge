@@ -37,11 +37,12 @@
 ```
 - **Section rail** (56 px): Maps, Tokens, Items, then Settings at the bottom. Owner: asset-project (PRJ).
 - **Home** (no project open): a grid of project cards for the selected section (thumbnail of the working image, name, iteration count, last edited) and **+ New**. Owner: PRJ.
-- **Left panel** (240–360 px, resizable): the project's folders (Working, References, Structure, Parts, Results). Owner: PRJ.
+- **Left panel** (240–360 px, resizable): the project's folders (Working, References, Structure, Parts, Results), then History (revisions) and Storage (disk use). Owner: PRJ.
 - **Canvas, toolbar, status bar, candidate picker:** editor-canvas (EDT).
 - **Right panel** (300–380 px): Generate (region-edit, RGN), then Export (EXP), as collapsible sections.
 - **Iteration tracker:** the bottom strip lists iterations (`results/NNN`). Owner: RGN, using EDT's picker for the selected iteration.
-- Slots live in `app/src/shell/Layout.tsx`; features register into a slot through the feature registry. A feature never renders into another feature's slot.
+- **Status bar** is shared: features register **segments** (EDT zoom and mask, PRJ save state, RGN job state, PRV provider chip) through the feature registry, ordered by a `priority` number. EDT owns the bar itself.
+- Slots live in `app/src/shell/Layout.tsx`; features register into a slot (or a status-bar segment) through the feature registry. A feature never renders into another feature's slot.
 
 ## Behaviour
 - Keyboard first: every tool has a shortcut (see each spec). Shortcuts are ignored while a text field has focus (R23).
