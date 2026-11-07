@@ -8,8 +8,9 @@ on:
   pull_request:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  # Never cancel on main: a later docs-only push would skip the tests the cancelled run owed.
+  group: ci-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  # On main every commit gets its own group and is never cancelled: a later docs-only push
+  # would otherwise skip the tests a cancelled or replaced run owed.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
