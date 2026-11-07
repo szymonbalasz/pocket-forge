@@ -5,14 +5,18 @@
 
 ## Recommendation
 
-**Pure-Rust crates for everything except WebP encoding, which uses vendored libwebp through `libwebp-sys`.** Stream PNG/JPEG export in 512-row strips. Use JPEG 512 px preview tiles. Blend in sRGB with an inward feather and a least-squares colour match, both baked by Rust.
+**Pure-Rust crates for everything except WebP encoding, which uses vendored libwebp through `libwebp-sys`.** Stream PNG/JPEG export in 512-row strips. Build a 512 px tile pyramid (JPEG, plus a lossless 1:1 level). Blend in sRGB with an inward feather and a least-squares colour match, both baked by Rust.
 
+- **Typical maps are easy.** At ~4200×5600 (#30, ≈ 1/11 of 16k), every step below scales about linearly: decode ≈ 0.2 s, pyramid ≈ 0.3 s, flatten + PNG export ≈ 1.2 s, ≈ 70 MiB per decoded copy. The 16k numbers are the stress case.
 - **Crates:** `image` (decode), `png` (row-streaming decode and encode), `jpeg-encoder` (row-pull encode), `fast_image_resize`, `tiny-skia` (layer compose), `rayon`. Add `libwebp-sys` 0.14 (lossy and animated WebP) and `gif` + `color_quant` (GIF).
 - **Memory:** a 16k original costs 768 MiB as RGB8. Hold at most one decoded copy. Import a PNG by streaming its rows (peak **279 MiB** for a 16k pyramid). Export in strips: **388 MiB** peak at 16k, against 1155 MiB for one full-size buffer.
-- **Tiles:** JPEG, 512 px. A 16k pyramid (1365 tiles) is written in **1.1 s** after decode and takes 67 MiB. Lossy WebP tiles are half the size but take 3× the encode time and 2× the decode time.
+- **Tiles:** 512 px, matching the [canvas proposal](../architecture/adr/proposed-canvas-library.md).
+  - JPEG: a 16k pyramid (1365 tiles) is written in **1.1 s** after decode and takes 67 MiB.
+  - Lossless WebP for the 1:1 level (OQ-CNV-01) raises the cache to ≈ 270 MiB at 16k (≈ 25 MiB typical) and costs ≈ 0.2 s more.
+  - Lossy WebP tiles are half the size of JPEG but take 3× the encode time and 2× the decode time.
 - **Regions:** prefer a region that fits the provider's maximum input, so there's no resampling. A room-sized region (3000 × 2200 + 256 px context) fits GPT Image's 3840 px limit. Downscaling 3.4× leaves a **sharpness seam** that feathering can't hide.
 - **Export:** PNG with `Compression::Fast` (16k in 13 s). `Balanced` takes 341 s, which is unusable. JPEG q90 takes 17 s, streamed. **WebP stops at 16383 px**, and lossy WebP can fail below that.
-- **Animated:** libwebp `WebPAnimEncoder`, lossy. A 48-frame 1024 px token encodes in 2.3 s and takes 1.2 MiB. GIF uses `gif` + NeuQuant. **libimagequant is GPL-3.0 and can't be used** (#17).
+- **Animated (#25, after milestone 1 per #27):** libwebp `WebPAnimEncoder`, lossy. A 48-frame 1024 px token encodes in 2.3 s and takes 1.2 MiB. GIF uses `gif` + NeuQuant. **libimagequant is GPL-3.0 and can't be used** (#17).
 
 ## Test machine and fixture
 
@@ -51,7 +55,7 @@
 | JPEG q85, **256 px tiles** | 5907 | 70 | 1.3 ms (4× the tiles: 5461) |
 | JPEG q85, **PNG row streaming** | 3809 | 67 | peak **279 MiB** instead of 970 |
 
-- The webview decodes tiles with native decoders, and JPEG is its cheapest format. Its actual tile cost belongs to the canvas spike.
+- The webview decodes tiles natively. The [canvas research](canvas-library.md) covers delivery and decode (custom URI scheme, `createImageBitmap`).
 
 ### 3. Region extraction and provider resize (source: a 16k image held in memory)
 
@@ -159,7 +163,7 @@ The fake provider returns the region with a repainted room, global colour drift 
 | WebP container / animation | canvas 2²⁴, area ≤ 2³² − 1 | Frames are still VP8/VP8L (≤ 16383 via libwebp; measured). Frame offsets are stored ÷ 2, so they must be even. Duration is 24-bit ms. Loop count is 16-bit. No frame-count limit in the spec. | [RIFF container spec](https://developers.google.com/speed/webp/docs/riff_container), libwebp `format_constants.h` |
 | GIF | 65535 | 256 colours per table, delay in 1/100 s, 1-bit transparency. Browsers show delays ≤ 10 ms as 100 ms, so use ≥ 20 ms. | [GIF89a](https://www.w3.org/Graphics/GIF/spec-gif89a.txt); [Gigazine](https://gigazine.net/gsc_news/en/20220222-fastest-gif-animation/), [splopp](https://ww.splopp.com/blog/The-Fastest-GIF-Does-Not-Exist) |
 
-**Consequence:** a 16384 px battlemap (#11's upper end) exports to PNG or JPEG only. WebP export must be capped at 16383 px, and lossy WebP can still fail on large, detailed maps.
+**Consequence:** a 16384 px battlemap (#11's upper end) exports to PNG or JPEG only. WebP export must be capped at 16383 px, and lossy WebP can still fail on large, detailed maps. The VTT is the owner's own (#24), so its import limits can follow these.
 
 ## Crates and licences (all compatible with MIT, #17, except where marked)
 
@@ -186,4 +190,4 @@ The fake provider returns the region with a repainted room, global colour drift 
 - **The `libwebp-sys` wrapper is thin and partly sloppy.** For example, its `WebPConfig::new` passes the decoder ABI version. Call the `*Internal` functions with the correct ABI constants, as the spike does.
 - **The toolchain is older than the crates.** Local Rust is 1.86, and current `image`, `fast_image_resize` 6 and `quantette` need 1.88–1.90. Pin a newer toolchain in the stack ADR.
 - **Synthetic content** makes PNG/WebP sizes and lossy timings worse than real maps. Re-measure once with CC0 or the owner's maps (manual check only, KQ-22).
-- **Not measured:** macOS build and run, and webview decode cost (canvas spike).
+- **Not measured:** the macOS build and run, and the resample step for export at a different px per square (#26, OQ-IMG-13). Expect ~3 s at 16k from the region resize rates.
