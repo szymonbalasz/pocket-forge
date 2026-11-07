@@ -4,7 +4,7 @@
 
 | Tier | Meaning |
 |---|---|
-| **S** | MVP (the first milestone loop) |
+| **S** | MVP: a **full implementation** of the vertical slice (the first milestone loop), not a cut-down prototype (#37) |
 | **A** | soon after the MVP |
 | **B** | only if nearly free |
 | **C** | eventually |
@@ -30,7 +30,7 @@
 | Art recipes (style text, references, constraints, output, settings) | A | A |
 | Reference images with roles (style / structure / identity) | A | A |
 | Prompt preview and editing of the final submitted prompt | S? | S |
-| Model capability discovery (controls reflect the model) | A | A |
+| Model capability discovery (controls reflect the model) | A | **S** (#37) |
 | Structural sketch: import or draw | A | A |
 | Basic brushes, sketches and shapes | A | A |
 | Tags and collections | A | A |

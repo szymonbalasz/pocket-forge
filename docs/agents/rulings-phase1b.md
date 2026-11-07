@@ -1,6 +1,6 @@
 # Rulings: phase 1b spec review
 
-Integrator rulings on the two review reports (review-data, review-ui-provider). Spec authors apply these in the revision round. Where a ruling conflicts with older spec text, **the ruling wins**. Product calls are in [gate-phase1b.md](gate-phase1b.md), not here.
+Integrator rulings on the two review reports (review-data, review-ui-provider). Spec authors apply these in the revision round. Where a ruling conflicts with older spec text, **the ruling wins**. Product calls are in [gate-phase1b.md](gate-phase1b.md), not here. **Accepted by the owner (#40).** Gate decisions that also apply: #37 (capability-driven controls are tier S), #39 (simple conflict resolution).
 
 | # | Topic | Ruling | Specs |
 |---|---|---|---|

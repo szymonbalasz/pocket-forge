@@ -1,5 +1,7 @@
 # Gate: phase 1b (foundation specs + build conventions)
 
+> **Closed 2026-11-07.** D1 = **B** (full vertical slice; controls reflect each model, #37). D2 approved (#38). D3 = A (#39). Rest accepted (#40).
+
 Answer **D1–D3** and say "accept the rest", or name the exceptions. After your answers, a revision round applies your decisions plus the [integrator rulings](rulings-phase1b.md) to the specs. Then I bring them back for you to mark `complete`.
 
 ## Summaries
