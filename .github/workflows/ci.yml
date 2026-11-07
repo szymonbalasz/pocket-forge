@@ -1,8 +1,10 @@
 name: CI
 
 on:
+  # Every branch push runs CI: branches are merged locally once green (#28).
   push:
-    branches: [main]
+    branches: ['**']
+  # PRs from forks only (same-repo branches are already covered by push).
   pull_request:
 
 concurrency:
@@ -15,6 +17,7 @@ permissions:
 jobs:
   hygiene:
     name: Public-repo hygiene
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

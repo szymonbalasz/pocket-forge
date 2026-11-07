@@ -1,6 +1,6 @@
 # Feature tiers
 
-> Status: **proposed tiers. The owner hasn't ranked them yet.** The *Proposed* column is the orchestrator's suggestion. Only the *Owner* column counts.
+> Status: **owner-ranked** (#29). Only the *Owner* column counts. Change a tier only with the owner's OK.
 
 | Tier | Meaning |
 |---|---|
@@ -13,41 +13,41 @@
 
 | Feature | Proposed | Owner |
 |---|---|---|
-| Open an existing image as an asset project | S | |
-| Zoom, pan, view at intended display size | S | |
-| Paint and adjust masks (brush, erase, feather) | S | |
-| Localised edit of a masked region via Scenario | S | |
-| Region extraction with context for large images (section-based editing) | S | |
-| Candidate comparison (before/after, pick) | S | |
-| Accept a candidate as a positioned patch layer | S | |
-| Save and reopen the asset project (layers, masks, prompts, settings, revisions) | S | |
-| Undo within a session | S | |
-| Flattened export at full resolution | S | |
-| Visible job status and cost; user-controlled retry | S | |
-| Image layers: move, scale, rotate, opacity, visibility | A | |
-| Cropping | A | |
-| Library: thumbnails, previews, search | A | |
-| Art recipes (style text, references, constraints, output, settings) | A | |
-| Reference images with roles (style / structure / identity) | A | |
-| Prompt preview and editing of the final submitted prompt | S? | |
-| Model capability discovery (controls reflect the model) | A | |
-| Structural sketch: import or draw | A | |
-| Basic brushes, sketches and shapes | A | |
-| Tags and collections | A | |
-| Token workflow and presets | A | |
-| Item art workflow and presets | A | |
-| Text-to-image generation of a new asset | A | |
-| Joining / overlapping map sections (map extension) | B | |
-| Comments / notes pinned to image locations | B | |
-| Links to campaign subjects (locations, NPCs, items) | B | |
+| Open an existing image as an asset project | S | S |
+| Zoom, pan, view at intended display size | S | S |
+| Paint and adjust masks (brush, erase, feather) | S | S |
+| Localised edit of a masked region via Scenario | S | S |
+| Region extraction with context for large images (section-based editing) | S | S |
+| Candidate comparison (before/after, pick) | S | S |
+| Accept a candidate as a positioned patch layer | S | S |
+| Save and reopen the asset project (layers, masks, prompts, settings, revisions) | S | S |
+| Undo within a session | S | S |
+| Flattened export at full resolution | S | S |
+| Visible job status and cost; user-controlled retry | S | S |
+| Image layers: move, scale, rotate, opacity, visibility | A | A |
+| Cropping | A | A |
+| Library: thumbnails, previews, search | A | A |
+| Art recipes (style text, references, constraints, output, settings) | A | A |
+| Reference images with roles (style / structure / identity) | A | A |
+| Prompt preview and editing of the final submitted prompt | S? | S |
+| Model capability discovery (controls reflect the model) | A | A |
+| Structural sketch: import or draw | A | A |
+| Basic brushes, sketches and shapes | A | A |
+| Tags and collections | A | A |
+| Token workflow and presets | A | A |
+| Item art workflow and presets | A | A |
+| Text-to-image generation of a new asset | A | A |
+| Joining / overlapping map sections (map extension) | B | B |
+| Comments / notes pinned to image locations | B | B |
+| Links to campaign subjects (locations, NPCs, items) | B | B |
 | Export at a chosen px per square, plain image files (#26) | S | S |
 | Animated tokens, exported as animated WebP (#25, #27) | A | A (first after the milestone) |
 | Animated map elements, whole maps, item art (#27) | A | A (after tokens) |
-| Animated GIF export (#25) | B | |
-| Motion source: provider video model and/or in-app looping layers | ? (KQ-39) | |
-| Grid metadata and overlay | B | |
-| macOS build | C | |
-| Cards | C | |
-| Other generation providers | C | |
-| Custom-model training on approved art | C | |
-| Built-in VTT / multiplayer | F | |
+| Animated GIF export (#25) | B | B |
+| Motion source: provider video model and/or in-app looping layers | ? (KQ-39) | open (KQ-39) |
+| Grid metadata and overlay | B | B |
+| macOS build | C | C |
+| Cards | C | C |
+| Other generation providers | C | C |
+| Custom-model training on approved art | C | C |
+| Built-in VTT / multiplayer | F | F |

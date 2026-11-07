@@ -56,5 +56,5 @@ Questions marked ✅ are answered, ⏳ are in progress. Each question is tagged 
 | KQ-34 | CI runners? | **A. Rust core + UI tests on Linux (fast); app build + smoke on `windows-latest`; add macOS later** / B. Windows only | S |
 | KQ-35 | Installer signing (unsigned = SmartScreen warning) and auto-update? | **A. Unsigned, no auto-update for now** / B. sign from the start | C |
 | KQ-36 | Telemetry or crash reporting? | **A. None** / B. opt-in crash reports | V |
-| KQ-37 | Merge flow: PRs with required checks and auto-merge when green, or direct `--no-ff` merges after the CI watch? | **A. PRs + branch protection + `gh pr merge --auto`** / B. direct merges | process |
+| KQ-37 ✅ | **Answered: local `--no-ff` merges after green branch CI; no branch protection (#28).** Merge flow: PRs with required checks and auto-merge when green, or direct `--no-ff` merges after the CI watch? | **A. PRs + branch protection + `gh pr merge --auto`** / B. direct merges | process |
 | KQ-38 | Worker agent kind and concurrency? | **A. Claude workers, max 4 concurrent** / B. mixed kinds | process |

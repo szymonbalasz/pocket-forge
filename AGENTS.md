@@ -53,8 +53,8 @@ Start with [docs/vision.md](docs/vision.md), [docs/feature-tiers.md](docs/featur
 
 - **CI runs everything.** Locally, run only targeted checks (the tests touched by your diff, plus the one e2e test you're working on). Run heavy suites in CI only.
 - Spread suites evenly across parallel GitHub Actions jobs and shards. When one job runs longer than about twice the median, rebalance.
-- Every branch goes up as a PR. After a push, watch CI in the background (`gh pr checks <n> --watch`). Never sleep or poll in the foreground.
-- **Merge only when CI is green.** The orchestrator merges green PRs (merge commit, no squash) and tells active builders to rebase.
+- **Push the branch. CI runs on every branch push.** Watch it in the background (`gh run watch <run-id> --exit-status`, or `gh run list --branch <b>`). Never sleep or poll in the foreground.
+- **Merge locally, and only when the branch's CI is green.** The orchestrator runs `git merge --no-ff <branch>` on `main`, pushes, and tells active builders to rebase. PRs are optional, for example for outside contributors. No branch protection; use common sense (#28).
 - **A red `main` gets fixed first**, before any new work.
 - A test that passes only on retry is reported as **flaky** and gets a backlog row.
 

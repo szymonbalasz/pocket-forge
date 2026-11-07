@@ -31,5 +31,7 @@ Append-only. Cite decisions as `#N`. Changing a decision takes a new row that su
 | 25 | Animated output is required: **animated WebP**, and possibly GIF. The source of the motion and the tier are still open (KQ-39). | Animated tokens and map elements | Owner |
 | 26 | Export is plain image files, with no metadata sidecar. The owner sets the grid size in their VTT, whose size limits are generous. The app exports at a user-chosen px per square. | Simple; the VTT owns grid config | Owner, KQ-29 |
 | 27 | Animation covers every asset type eventually (tokens, map elements, whole maps, item art). It comes after the first milestone, **tokens first**. Motion source still open (KQ-39). | Static loop first; animation is the next big step | Owner, KQ-39 |
+| 28 | Merging is local: branches are pushed and CI runs on every branch push. The orchestrator merges with `--no-ff` once the branch is green. No PRs required, no branch protection: a single maintainer using common sense. | Simple single-maintainer flow | Owner, KQ-37 |
+| 29 | Feature tiers accepted as proposed. | Owner review | Owner |
 
 The tech stack (Tauri, Rust, a TS web UI and the canvas library) is **provisional**. It is not logged until the stack ADRs are accepted.
