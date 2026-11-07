@@ -1,0 +1,192 @@
+// A mocked core for Playwright (KQ-33). It replaces window.__TAURI_INTERNALS__, the layer under
+// app/src/api/, so the real api wrapper runs. Tests seed it with `MockSeed` and read the calls
+// back through window.__pfMock.
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+import type { Page } from '@playwright/test';
+
+export const FIXTURE = fileURLToPath(
+  new URL('../../fixtures/images/grid-map-512x640.png', import.meta.url),
+);
+export const FIXTURE_SIZE = { w: 512, h: 640 };
+export const LIBRARY = 'C:/pf-e2e/library';
+
+export interface MockSeed {
+  configured: boolean;
+  recent: { path: string; name: string; opened_at: string }[];
+  image: { w: number; h: number };
+}
+
+export const defaultSeed: MockSeed = {
+  configured: true,
+  recent: [
+    {
+      path: `${LIBRARY}/Imported/grid-map-512x640.png`,
+      name: 'grid-map-512x640.png',
+      opened_at: '2026-11-07T10:00:00.000Z',
+    },
+  ],
+  image: FIXTURE_SIZE,
+};
+
+/** Installs the mock core and serves the fixture on the pf-tiles scheme. */
+export async function mockCore(page: Page, seed: MockSeed = defaultSeed): Promise<void> {
+  const png = readFileSync(FIXTURE);
+  await page.route('http://pf-tiles.localhost/**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'image/png',
+      body: png,
+      headers: { 'Access-Control-Allow-Origin': '*' },
+    }),
+  );
+  await page.addInitScript(
+    ({ seed, library }) => {
+      type Rec = Record<string, unknown>;
+      const calls: { cmd: string; args: unknown }[] = [];
+      const callbacks = new Map<number, (payload: unknown) => void>();
+      let nextId = 1;
+      let project: Rec | null = null;
+      let seq = 0;
+      const revisions: Rec[] = [];
+      const recent = [...seed.recent];
+
+      const snapshot = (path: string): Rec => ({
+        project_id: '01JPROJECT0000000000000000',
+        name: path.split('/').pop(),
+        image_path: path,
+        project_dir: `${path}.pforge`,
+        saved: revisions.length > 0,
+        read_only: null,
+        warnings: [],
+        width: seed.image.w,
+        height: seed.image.h,
+        format: 'png',
+        layers: [
+          {
+            id: '01JLAYER00000000000000000',
+            kind: 'original',
+            file: null,
+            cx: seed.image.w / 2,
+            cy: seed.image.h / 2,
+            scale: 1,
+            rotation: 0,
+            opacity: 1,
+            visible: true,
+          },
+        ],
+        draft: null,
+        revisions: [...revisions],
+        head_revision: revisions.at(-1)?.id ?? null,
+        commit_seq: seq,
+      });
+
+      const fail = (code: string, message: string) => Promise.reject({ code, message });
+
+      const handlers: Record<string, (input: Rec) => unknown> = {
+        app_info: () => ({
+          version: '0.1.0',
+          provider_mode: 'fake',
+          data_dir: 'C:/pf-e2e/data',
+          library_overridden: true,
+          warnings: [],
+        }),
+        app_ready: () => null,
+        provider_status: () => ({ mode: 'fake', configured: true, connectivity: 'ok' }),
+        library_get_config: () => ({
+          roots: seed.configured ? [{ path: library, available: true }] : [],
+          import_dest: seed.configured ? `${library}/Imported` : null,
+          overridden: false,
+          configured: seed.configured,
+        }),
+        recent_list: () => recent,
+        import_paths: (input) => ({
+          items: (input.paths as string[]).map((source) =>
+            source.endsWith('.psd')
+              ? { status: 'skipped', source, reason: 'unsupported' }
+              : {
+                  status: 'imported',
+                  source,
+                  path: `${library}/Imported/${source.split(/[\\/]/).pop()}`,
+                },
+          ),
+        }),
+        project_open: (input) => {
+          const path = input.path as string;
+          project = snapshot(path);
+          if (!recent.some((r) => r.path === path))
+            recent.unshift({
+              path,
+              name: String(project.name),
+              opened_at: '2026-11-07T11:00:00.000Z',
+            });
+          return project;
+        },
+        project_get: () => (project ? snapshot(String(project.image_path)) : null),
+        project_close: () => {
+          project = null;
+          return {};
+        },
+        project_save_revision: () => {
+          if (!project) return fail('no_project', 'no asset project is open');
+          if (revisions.length > 0)
+            return fail('unchanged', 'nothing changed since the last revision');
+          seq += 1;
+          const rev = {
+            id: '01JREV0000000000000000000',
+            seq: 0,
+            created_at: '2026-11-07T11:00:01.000Z',
+            reason: 'create',
+          };
+          revisions.push(rev);
+          return rev;
+        },
+        edt_image_open: () => ({
+          key: 'k1',
+          url: 'http://pf-tiles.localhost/i/k1.png',
+          width: seed.image.w,
+          height: seed.image.h,
+        }),
+        'plugin:event|listen': () => nextId++,
+        'plugin:event|unlisten': () => null,
+      };
+
+      (window as unknown as Rec).__TAURI_INTERNALS__ = {
+        metadata: {
+          currentWindow: { label: 'main' },
+          currentWebview: { windowLabel: 'main', label: 'main' },
+        },
+        transformCallback(cb: (p: unknown) => void) {
+          const id = nextId++;
+          callbacks.set(id, cb);
+          return id;
+        },
+        unregisterCallback(id: number) {
+          callbacks.delete(id);
+        },
+        convertFileSrc: (p: string) => p,
+        async invoke(cmd: string, args: Rec) {
+          calls.push({ cmd, args });
+          const h = handlers[cmd];
+          if (!h) return fail('not_found', `mock: unknown command ${cmd}`);
+          return h((args?.input as Rec) ?? args ?? {});
+        },
+      };
+      (window as unknown as Rec).__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+        unregisterListener: () => undefined,
+      };
+      (window as unknown as Rec).__pfMock = { calls };
+    },
+    { seed, library: LIBRARY },
+  );
+}
+
+/** Commands the UI called, in order. */
+export function calls(page: Page): Promise<{ cmd: string; args: unknown }[]> {
+  return page.evaluate(
+    () =>
+      (window as unknown as { __pfMock: { calls: { cmd: string; args: unknown }[] } }).__pfMock
+        .calls,
+  );
+}
