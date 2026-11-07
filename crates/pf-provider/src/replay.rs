@@ -39,7 +39,8 @@ pub struct Exchange {
 }
 
 /// `path` is relative to the API base (`/models/x`) or an absolute non-API URL
-/// (`fake://asset/1`). `body` is JSON, `{"fixture": "<name>.png"}` for binary, or absent.
+/// (`fake://asset/1`). `body` is JSON, `{"fixture": "<name>.png"}` for binary, or absent
+/// (not checked).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RecordedRequest {
     pub method: Method,
@@ -228,7 +229,8 @@ impl ReplayTransport {
             return Err(format!("{path}: query {query:?}, expected {:?}", r.query));
         }
         match (&r.body, &req.body) {
-            (None, None) => Ok(()),
+            // No recorded body: not checked (hand-built exchanges in unit tests).
+            (None, _) => Ok(()),
             (Some(rb), Some(ab)) if fixture_name(rb).is_some() => {
                 if ab.is_empty() {
                     Err(format!("{path}: empty binary body"))

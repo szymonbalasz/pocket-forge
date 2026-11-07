@@ -16,6 +16,7 @@ mod evaluate;
 pub mod fake;
 pub mod fixtures;
 mod limits;
+pub mod mask;
 mod pixels;
 mod poll;
 pub mod replay;

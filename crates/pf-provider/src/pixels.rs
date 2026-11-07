@@ -8,7 +8,6 @@ pub(crate) struct Rgb8 {
     pub data: Vec<u8>,
 }
 
-#[allow(dead_code)] // width/height are read by mask conversion (PRV slice 4)
 pub(crate) struct Grey8 {
     pub width: u32,
     pub height: u32,

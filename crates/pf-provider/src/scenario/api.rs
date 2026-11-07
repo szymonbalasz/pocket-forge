@@ -17,7 +17,6 @@ pub const DEFAULT_BASE_URL: &str = "https://api.cloud.scenario.com/v1";
 
 /// Timeouts (FR-PRV-24).
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-#[allow(dead_code)] // uploads land in PRV slice 4
 pub const UPLOAD_PART_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// Retry: at most 3 attempts, waiting 1 then 2 s (the schedule continues 4 s), at least
@@ -28,7 +27,6 @@ pub const RETRY_AFTER_CAP: Duration = Duration::from_secs(30);
 
 /// Whether a call may be repeated. Submit is never retried once bytes were sent (FR-PRV-17).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // `Once` (submit) lands in PRV slice 4
 pub enum Retry {
     Idempotent,
     Once,
@@ -46,7 +44,6 @@ pub struct Api {
 }
 
 /// A body to send.
-#[allow(dead_code)] // `Bytes` (upload parts) lands in PRV slice 4
 pub enum Body {
     None,
     Json(Value),
@@ -320,7 +317,6 @@ pub fn map_error(
 }
 
 /// True if an estimate/submit rejection says a referenced asset is gone (FR-PRV-15).
-#[allow(dead_code)] // re-upload lands in PRV slice 4
 pub fn is_missing_asset(resp: &HttpResponse) -> bool {
     if !matches!(resp.status, 400 | 404 | 410 | 422) {
         return false;

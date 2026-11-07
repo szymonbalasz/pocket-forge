@@ -3,10 +3,13 @@
 
 pub(crate) mod api;
 pub(crate) mod cache;
+pub(crate) mod jobs;
 pub(crate) mod normalise;
 pub(crate) mod overlay;
 pub mod record;
 
+#[cfg(test)]
+mod contract_tests;
 #[cfg(test)]
 mod tests;
 
@@ -101,6 +104,12 @@ const TEST_FIXTURES: &[(&str, &str, &str)] = fixture_table![
     "model_ideogram-v4-5-precise-edit" / "get-model",
     "model_ideogram-v3" / "get-model",
     "model_ideogram-character" / "get-model",
+    "model_ideogram-v3" / "contract",
+    "model_ideogram-v3" / "dry-run-no-assets",
+    "model_ideogram-v3" / "upload-multipart",
+    "model_ideogram-v3" / "reupload",
+    "model_ideogram-v3" / "fetch-expired-url",
+    "model_ideogram-v3" / "cancel",
 ];
 
 /// A committed recording by model and case.
@@ -114,12 +123,6 @@ pub(crate) fn fixture_recording(model: &str, case: &str) -> Option<Recording> {
         .flat_map(|t| t.iter())
         .find(|(m, c, _)| *m == model && *c == case)
         .and_then(|(_, _, json)| Recording::parse(json).ok())
-}
-
-fn not_yet() -> ProviderError {
-    ProviderError::ProviderFailure {
-        hint: "this Scenario operation lands in PRV slice 4".into(),
-    }
 }
 
 impl ScenarioProvider {
@@ -288,7 +291,6 @@ impl ScenarioProvider {
     }
 
     /// Capabilities for a job: this session's copy, else fetched (estimate/submit).
-    #[allow(dead_code)] // estimate/submit land in PRV slice 4
     pub(crate) async fn job_capabilities(&self, model_id: &str) -> ProviderResult<Capabilities> {
         if let Some(c) = lock(&self.caps).get(model_id).cloned() {
             return Ok(c);
@@ -316,31 +318,31 @@ impl Provider for ScenarioProvider {
         self.fetch_capabilities(model_id).await
     }
 
-    async fn upload(&self, _bytes: &[u8], _purpose: UploadPurpose) -> ProviderResult<AssetRef> {
-        Err(not_yet())
+    async fn upload(&self, bytes: &[u8], purpose: UploadPurpose) -> ProviderResult<AssetRef> {
+        self.do_upload(bytes, purpose).await
     }
 
-    async fn estimate(&self, _request: &JobRequest) -> ProviderResult<Estimate> {
-        Err(not_yet())
+    async fn estimate(&self, request: &JobRequest) -> ProviderResult<Estimate> {
+        self.do_estimate(request).await
     }
 
-    async fn submit(&self, _request: &JobRequest) -> ProviderResult<ProviderRecord> {
-        Err(not_yet())
+    async fn submit(&self, request: &JobRequest) -> ProviderResult<ProviderRecord> {
+        self.do_submit(request).await
     }
 
-    async fn status(&self, _job: &ProviderRecord) -> ProviderResult<JobStatus> {
-        Err(not_yet())
+    async fn status(&self, job: &ProviderRecord) -> ProviderResult<JobStatus> {
+        self.do_status(job).await
     }
 
-    async fn cancel(&self, _job: &ProviderRecord) -> ProviderResult<CancelAck> {
-        Err(not_yet())
+    async fn cancel(&self, job: &ProviderRecord) -> ProviderResult<CancelAck> {
+        self.do_cancel(job).await
     }
 
-    async fn fetch_candidates(&self, _job: &ProviderRecord) -> ProviderResult<Candidates> {
-        Err(not_yet())
+    async fn fetch_candidates(&self, job: &ProviderRecord) -> ProviderResult<Candidates> {
+        self.do_fetch(job).await
     }
 
     async fn balance(&self) -> ProviderResult<Balance> {
-        Err(not_yet())
+        self.do_balance().await
     }
 }

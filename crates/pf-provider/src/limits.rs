@@ -28,7 +28,6 @@ pub fn check(caps: &Capabilities, request: &JobRequest) -> ProviderResult<(u32, 
     Ok((w, h))
 }
 
-#[allow(dead_code)] // mask conversion lands in PRV slice 4
 /// A converted file over `max_bytes` → `invalid_request(field)`.
 pub fn check_converted(caps: &Capabilities, bytes: &[u8], field: &str) -> ProviderResult<()> {
     if bytes.len() as u64 > caps.max_bytes {
