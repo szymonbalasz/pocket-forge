@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use pf_provider::{AnyProvider, ProviderMode};
+use pf_provider::{AnyProvider, CredentialStore, KeyringStore, MemoryStore, ProviderMode};
 use serde_json::Value;
 use ulid::Ulid;
 
@@ -383,6 +383,8 @@ pub struct Context {
     /// Shared, so background work (tile pyramid builds) can emit too.
     pub events: Arc<dyn EventSink>,
     pub provider: AnyProvider,
+    /// The OS credential store for provider keys (FR-PRV-06). Tests use a memory store.
+    pub credentials: std::sync::Arc<dyn CredentialStore>,
     /// `<data-dir>`: local, per machine, never synced (FR-PRJ-37).
     pub data_dir: PathBuf,
     /// `PF_LIBRARY_DIR`: replaces the configured library roots for this run.
@@ -420,7 +422,8 @@ impl Context {
             fs: Box::new(OsFsAttributes),
             faults: Faults::none(),
             events: Arc::new(NoEvents),
-            provider: AnyProvider::for_mode(ProviderMode::Fake),
+            provider: AnyProvider::fake(),
+            credentials: std::sync::Arc::new(KeyringStore::for_provider("scenario")),
             data_dir,
             library_override: None,
             tiles_base_url: default_tiles_base_url(),
@@ -435,13 +438,14 @@ impl Context {
             rng: Box::new(SeededRng::new(42)),
             ids: Box::new(SequentialIds::default()),
             fs: Box::new(FakeFsAttributes::default()),
+            credentials: std::sync::Arc::new(MemoryStore::default()),
             ..Context::new(data_dir)
         }
     }
 
     /// The app's context from the environment (AGENTS §9):
-    /// `PF_DATA_DIR`, `PF_LIBRARY_DIR`, `PF_PROVIDER`; in test builds also `PF_FAULT` and
-    /// `PF_FAKE_NOW` (never read by release builds).
+    /// `PF_DATA_DIR`, `PF_LIBRARY_DIR`, `PF_PROVIDER`, `PF_FAKE_CASE`; in test builds also
+    /// `PF_FAULT` and `PF_FAKE_NOW` (never read by release builds).
     pub fn from_env() -> Result<Self, String> {
         let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
         let data_dir = match var("PF_DATA_DIR") {
@@ -450,8 +454,17 @@ impl Context {
         };
         let mut ctx = Context::new(data_dir);
         ctx.library_override = var("PF_LIBRARY_DIR").map(PathBuf::from);
-        ctx.provider =
-            AnyProvider::for_mode(ProviderMode::from_env_value(var("PF_PROVIDER").as_deref())?);
+        ctx.provider = AnyProvider::for_mode(
+            ProviderMode::from_env_value(var("PF_PROVIDER").as_deref())?,
+            ctx.credentials.clone(),
+            Some(ctx.data_dir.join("cache").join("provider")),
+        );
+        if let (Some(case), Some(fake)) = (var("PF_FAKE_CASE"), ctx.provider.as_fake()) {
+            fake.set_case(
+                pf_provider::fake::FakeCase::parse(&case)
+                    .ok_or_else(|| format!("PF_FAKE_CASE: unknown case {case:?}"))?,
+            );
+        }
         #[cfg(debug_assertions)]
         {
             if let Some(spec) = var("PF_FAULT") {

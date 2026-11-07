@@ -10,15 +10,29 @@
 //!
 //! This crate must not depend on `pf-core` or Tauri (AGENTS §9 dependency direction).
 
+pub mod credentials;
 mod error;
+mod evaluate;
 pub mod fake;
+pub mod fixtures;
+mod limits;
+pub mod mask;
+mod pixels;
 mod poll;
+pub mod replay;
+pub mod scenario;
+mod secret;
+pub mod transport;
 mod types;
 
 use std::future::Future;
 
+pub use credentials::{CredentialStore, KeyringStore, MemoryStore, StoreUnavailable};
 pub use error::ProviderError;
+pub use evaluate::{ControlError, ControlErrorCode, EffectiveControl, Evaluation};
 pub use poll::{long_running, poll_delay};
+pub use scenario::{ScenarioConfig, ScenarioProvider};
+pub use secret::{Credentials, Secret};
 pub use types::*;
 
 /// Result of every provider operation.
@@ -109,43 +123,151 @@ impl ProviderMode {
     }
 }
 
+/// What the app last learned about reaching the provider (the status chip, FR-PRV-07).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Connectivity {
+    /// Nothing called yet since start or the last credential change.
+    #[default]
+    Unknown,
+    Ok,
+    Offline,
+    AuthError,
+}
+
+/// Tracks [`Connectivity`] from operation outcomes.
+#[derive(Debug, Default)]
+pub struct ConnectivityCell(std::sync::Mutex<Connectivity>);
+
+impl ConnectivityCell {
+    pub fn get(&self) -> Connectivity {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn set(&self, c: Connectivity) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = c;
+    }
+
+    /// Updates from an error: auth → `auth_error`, offline/timeout → `offline`. Other errors
+    /// came back from a reachable, authenticated provider → `ok`.
+    pub fn note_error(&self, e: &ProviderError) {
+        self.set(match e {
+            ProviderError::Auth => Connectivity::AuthError,
+            ProviderError::Offline | ProviderError::Timeout => Connectivity::Offline,
+            _ => Connectivity::Ok,
+        });
+    }
+
+    /// Updates from an operation result.
+    pub fn note<T>(&self, r: &ProviderResult<T>) {
+        match r {
+            Ok(_) => self.set(Connectivity::Ok),
+            Err(e) => self.note_error(e),
+        }
+    }
+}
+
+/// Account settings from the `provider` section of `settings.json` (FR-PRV-29). PRV writes no
+/// settings file of its own; the core pushes these in on start and on change.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProviderAccount {
+    pub team_id: Option<String>,
+    pub project_id: Option<String>,
+}
+
 /// The dispatch enum the core holds (OQ-PRV-14).
 #[derive(Debug)]
 pub enum AnyProvider {
     Fake(fake::FakeProvider),
-    /// The mode has no implementation in this build yet (Scenario lands in PRV slices 3–4).
-    /// Every operation fails with `provider_failure`; nothing is faked silently.
-    Unavailable(ProviderMode),
+    Scenario(ScenarioProvider),
 }
 
 impl AnyProvider {
-    /// The provider for a mode.
-    pub fn for_mode(mode: ProviderMode) -> Self {
+    /// The fake provider (default case `success`).
+    pub fn fake() -> Self {
+        AnyProvider::Fake(fake::FakeProvider::default())
+    }
+
+    /// The provider for a mode with the real wiring: Scenario reads credentials from `store`
+    /// and caches models under `cache_dir` (`<data-dir>/cache/provider/`). No network call
+    /// happens until an operation runs.
+    pub fn for_mode(
+        mode: ProviderMode,
+        store: std::sync::Arc<dyn CredentialStore>,
+        cache_dir: Option<std::path::PathBuf>,
+    ) -> Self {
         match mode {
-            ProviderMode::Fake => AnyProvider::Fake(fake::FakeProvider::default()),
-            ProviderMode::Scenario => AnyProvider::Unavailable(mode),
+            ProviderMode::Fake => Self::fake(),
+            ProviderMode::Scenario => AnyProvider::Scenario(ScenarioProvider::new(
+                ScenarioConfig::real(store, cache_dir),
+            )),
         }
     }
 
     pub fn mode(&self) -> ProviderMode {
         match self {
             AnyProvider::Fake(_) => ProviderMode::Fake,
-            AnyProvider::Unavailable(mode) => *mode,
+            AnyProvider::Scenario(_) => ProviderMode::Scenario,
+        }
+    }
+
+    pub fn as_fake(&self) -> Option<&fake::FakeProvider> {
+        match self {
+            AnyProvider::Fake(p) => Some(p),
+            AnyProvider::Scenario(_) => None,
+        }
+    }
+
+    /// Last known connectivity (FR-PRV-07).
+    pub fn connectivity(&self) -> Connectivity {
+        match self {
+            AnyProvider::Fake(p) => p.connectivity.get(),
+            AnyProvider::Scenario(p) => p.connectivity(),
+        }
+    }
+
+    /// The core calls this after the credentials were set or cleared: the in-memory upload ref
+    /// cache is dropped (R15) and connectivity goes back to `unknown`.
+    pub fn credentials_changed(&self) {
+        match self {
+            AnyProvider::Fake(p) => p.connectivity.set(Connectivity::Unknown),
+            AnyProvider::Scenario(p) => p.credentials_changed(),
+        }
+    }
+
+    /// Pushes the `provider` settings section in (FR-PRV-29).
+    pub fn set_account(&self, account: ProviderAccount) {
+        if let AnyProvider::Scenario(p) = self {
+            p.set_account(account);
+        }
+    }
+
+    /// `list_models`, plus `stale: true` when the cached list was returned offline (FR-PRV-25).
+    pub async fn list_models_cached(&self, filter: &ModelFilter) -> ProviderResult<ModelList> {
+        match self {
+            AnyProvider::Fake(p) => p.list_models(filter).await.map(|models| ModelList {
+                models,
+                stale: false,
+            }),
+            AnyProvider::Scenario(p) => p.list_models_cached(filter).await,
+        }
+    }
+
+    /// One free call that proves the credentials work (`provider_test_connection`).
+    pub async fn test_connection(&self) -> ProviderResult<()> {
+        match self {
+            AnyProvider::Fake(p) => p.list_models(&ModelFilter::default()).await.map(|_| ()),
+            AnyProvider::Scenario(p) => p.test_connection().await,
         }
     }
 }
 
-fn unavailable(mode: ProviderMode) -> ProviderError {
-    ProviderError::ProviderFailure {
-        hint: format!("the {mode:?} provider is not available in this build"),
-    }
-}
-
+/// Each provider tracks its own connectivity (Scenario per HTTP outcome, the fake per case).
 macro_rules! dispatch {
     ($self:ident, $p:ident => $call:expr) => {
         match $self {
             AnyProvider::Fake($p) => $call.await,
-            AnyProvider::Unavailable(mode) => Err(unavailable(*mode)),
+            AnyProvider::Scenario($p) => $call.await,
         }
     };
 }
@@ -188,16 +310,33 @@ impl Provider for AnyProvider {
     }
 }
 
-/// Runs a future that never waits (the fake provider's) to completion. Test and tooling helper.
-pub fn block_on_ready<F: Future>(fut: F) -> F::Output {
+/// Runs a provider future to completion on the calling thread, parking between polls. Core
+/// commands are synchronous and call this; it works on any thread, including inside another
+/// async runtime (network work runs on the provider's own runtime).
+pub fn block_on<F: Future>(fut: F) -> F::Output {
+    struct ThreadWaker(std::thread::Thread);
+    impl std::task::Wake for ThreadWaker {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.unpark();
+        }
+        fn wake_by_ref(self: &std::sync::Arc<Self>) {
+            self.0.unpark();
+        }
+    }
     let mut fut = std::pin::pin!(fut);
-    let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+    let waker = std::task::Waker::from(std::sync::Arc::new(ThreadWaker(std::thread::current())));
+    let mut cx = std::task::Context::from_waker(&waker);
     loop {
         if let std::task::Poll::Ready(out) = fut.as_mut().poll(&mut cx) {
             return out;
         }
-        std::thread::yield_now();
+        std::thread::park();
     }
+}
+
+/// Old name of [`block_on`] (the skeleton's fake-only helper).
+pub fn block_on_ready<F: Future>(fut: F) -> F::Output {
+    block_on(fut)
 }
 
 #[cfg(test)]
@@ -218,10 +357,15 @@ mod tests {
     }
 
     #[test]
-    fn fr_prv_02_unavailable_mode_fails_every_operation_without_faking() {
-        let p = AnyProvider::for_mode(ProviderMode::Scenario);
+    fn fr_prv_02_scenario_mode_without_credentials_makes_no_call() {
+        let store = std::sync::Arc::new(MemoryStore::default());
+        let p = AnyProvider::for_mode(ProviderMode::Scenario, store, None);
         assert_eq!(p.mode(), ProviderMode::Scenario);
-        let err = block_on_ready(p.balance()).unwrap_err();
-        assert_eq!(err.code(), "provider_failure");
+        assert_eq!(
+            block_on(p.test_connection()).unwrap_err(),
+            ProviderError::Auth
+        );
+        assert_eq!(p.connectivity(), Connectivity::Unknown);
+        assert!(p.as_fake().is_none());
     }
 }

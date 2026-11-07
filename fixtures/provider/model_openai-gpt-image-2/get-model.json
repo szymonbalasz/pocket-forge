@@ -1,0 +1,99 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_openai-gpt-image-2",
+  "case": "get-model",
+  "recorded_on": "2026-11-07",
+  "source": "synthetic",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_openai-gpt-image-2"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "id": "model_openai-gpt-image-2",
+            "name": "GPT Image 2",
+            "type": "custom",
+            "capabilities": [
+              "img2img",
+              "inpaint"
+            ],
+            "inputs": [
+              {
+                "name": "prompt",
+                "type": "string",
+                "label": "Prompt",
+                "required": {
+                  "always": true
+                }
+              },
+              {
+                "name": "image",
+                "type": "file",
+                "kind": "image",
+                "required": {
+                  "always": true
+                },
+                "maxSize": 52428800,
+                "max": 3840
+              },
+              {
+                "name": "mask",
+                "type": "file",
+                "kind": "image",
+                "maskFrom": "image",
+                "description": "PNG, transparent = edit, same size as image"
+              },
+              {
+                "name": "numOutputs",
+                "type": "number",
+                "min": 1,
+                "max": 4,
+                "step": 1,
+                "default": 1,
+                "costImpact": true
+              },
+              {
+                "name": "quality",
+                "type": "string",
+                "allowedValues": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "default": "medium",
+                "costImpact": true
+              },
+              {
+                "name": "background",
+                "type": "string",
+                "allowedValues": [
+                  "auto",
+                  "transparent",
+                  "opaque"
+                ],
+                "default": "auto"
+              },
+              {
+                "name": "inputFidelity",
+                "type": "string",
+                "allowedValues": [
+                  "low",
+                  "high"
+                ],
+                "default": "low"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

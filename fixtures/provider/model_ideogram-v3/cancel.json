@@ -1,0 +1,43 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_ideogram-v3",
+  "case": "cancel",
+  "recorded_on": "2026-11-07",
+  "source": "synthetic",
+  "exchanges": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/jobs/<job-1>/action",
+        "body": {
+          "action": "cancel"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "job": {
+            "jobId": "<job-1>",
+            "status": "canceled"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/jobs/<job-1>/action",
+        "body": {
+          "action": "cancel"
+        }
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "reason": "Job <job-1> cannot be canceled in its current state"
+        }
+      }
+    }
+  ]
+}

@@ -37,6 +37,12 @@ pub enum ErrorCode {
     Provider,
     Io,
     Internal,
+    /// The OS credential store can't be used (FR-PRV-06; no fallback file).
+    StoreUnavailable,
+    /// The provider has no credentials (`provider_test_connection`).
+    NotConfigured,
+    /// A fake-only command ran in another provider mode.
+    NotFakeMode,
 }
 
 impl ErrorCode {
@@ -64,6 +70,9 @@ impl ErrorCode {
             ErrorCode::Provider => "provider",
             ErrorCode::Io => "io",
             ErrorCode::Internal => "internal",
+            ErrorCode::StoreUnavailable => "store_unavailable",
+            ErrorCode::NotConfigured => "not_configured",
+            ErrorCode::NotFakeMode => "not_fake_mode",
         }
     }
 }

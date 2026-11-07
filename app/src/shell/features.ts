@@ -4,5 +4,11 @@ import type { Feature } from '../shared/feature';
 import { editorFeature } from '../features/editor';
 import { libraryFeature } from '../features/library';
 import { projectFeature } from '../features/project';
+import { providerFeature } from '../features/provider';
 
-export const features: readonly Feature[] = [libraryFeature, editorFeature, projectFeature];
+export const features: readonly Feature[] = [
+  libraryFeature,
+  editorFeature,
+  projectFeature,
+  providerFeature,
+];

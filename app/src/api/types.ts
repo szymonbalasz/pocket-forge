@@ -119,10 +119,67 @@ export interface ImageOpen {
   height: number;
 }
 
+export type ProviderMode = 'fake' | 'scenario';
+
+export type Connectivity = 'unknown' | 'ok' | 'offline' | 'auth_error';
+
 export interface ProviderStatus {
-  mode: 'fake' | 'scenario';
+  mode: ProviderMode;
   configured: boolean;
-  connectivity: string;
+  /** Last 4 characters of the stored key id; the secret is never returned (FR-PRV-07). */
+  key_suffix?: string;
+  connectivity: Connectivity;
+  store_unavailable: boolean;
+}
+
+export interface ProviderSettings {
+  team_id: string | null;
+  project_id: string | null;
+}
+
+export type Operation =
+  'generate' | 'edit_masked' | 'extend' | 'upscale' | 'remove_background' | 'tile';
+
+export interface ModelSummary {
+  id: string;
+  name: string;
+  operations: Operation[];
+}
+
+export type Balance =
+  | { kind: 'known'; remaining: number; unit: string; period_end: string | null }
+  | { kind: 'unknown' };
+
+/** Generic model capabilities (provider spec Appendix C). */
+export interface Capabilities {
+  model_id: string;
+  operations: Operation[];
+  controls: {
+    name: string;
+    type: 'int' | 'float' | 'enum' | 'bool' | 'string' | 'seed' | 'image' | 'mask';
+    role: 'source' | 'mask' | 'prompt' | 'candidate_count' | 'seed' | 'reference' | 'other';
+    min: number | null;
+    max: number | null;
+    step: number | null;
+    allowed: unknown[];
+    default: unknown;
+    required: boolean;
+    cost_affecting: boolean;
+  }[];
+  rules: {
+    if: { control: string; op: 'eq' | 'in'; value: unknown };
+    then: { control: string; required?: boolean; allowed?: unknown[]; hidden?: boolean };
+  }[];
+  mask: {
+    convention: 'white_edit' | 'black_edit' | 'alpha_transparent_edit';
+    soft: { rule: 'pass_through' } | { rule: 'threshold'; level: number };
+  } | null;
+  input_px: { min: number; max: number; multiple_of: number };
+  max_bytes: number;
+  seed: boolean;
+  prompt_required: boolean;
+  slots: { name: string; role: string | null; required: boolean }[];
+  warnings: string[];
 }
 
 /** One pyramid level (EDT Appendix B). `scale` = 1 / 2^level. */
@@ -205,6 +262,18 @@ export interface Commands {
   ];
   edt_mask_read: [{ project_id: string; mask_id: string }, MaskRead];
   project_restore_revision: [{ rev_id: string }, RevisionEntry];
+  provider_credentials_set: [{ key: string; secret: string }, Record<string, never>];
+  provider_credentials_clear: [Record<string, never>, Record<string, never>];
+  provider_test_connection: [Record<string, never>, Record<string, never>];
+  provider_settings_get: [Record<string, never>, ProviderSettings];
+  provider_settings_set: [
+    { team_id?: string | null; project_id?: string | null },
+    ProviderSettings,
+  ];
+  provider_list_models: [{ operation: Operation }, { models: ModelSummary[]; stale: boolean }];
+  provider_get_capabilities: [{ model_id: string }, Capabilities];
+  provider_balance: [Record<string, never>, Balance];
+  provider_fake_set_case: [{ case: string }, Record<string, never>];
 }
 
 export type CommandName = keyof Commands;
@@ -217,4 +286,5 @@ export interface Events {
   'edt:tiles-ready': { key: string };
   'edt:tiles-failed': { key: string; error: CoreErrorShape | string };
   'export:settings-changed': { source: number | null; target: number | null };
+  'provider:status-changed': { connectivity: Connectivity };
 }

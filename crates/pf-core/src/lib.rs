@@ -14,6 +14,7 @@ pub mod import;
 pub mod library;
 pub mod manifest;
 pub mod project;
+mod provider_commands;
 pub mod recent;
 pub mod settings;
 pub mod tiles;

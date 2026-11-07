@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Tooltip } from 'radix-ui';
 
 import { api, type AppInfo } from '../api';
+import { openProviderSettings } from '../features/provider';
 import { features } from './features';
 import { IconItems, IconMaps, IconSettings, IconTokens } from './icons';
 import { Layout } from './Layout';
@@ -46,6 +47,7 @@ function RailPlaceholder({ info }: { info: AppInfo | null }) {
         aria-label="Settings"
         title="Settings"
         data-testid="app-rail-settings"
+        onClick={openProviderSettings}
       >
         <IconSettings size={20} />
       </button>

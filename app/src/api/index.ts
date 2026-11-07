@@ -127,5 +127,19 @@ export const api = {
     read: (projectId: string, maskId: string) =>
       call('edt_mask_read', { project_id: projectId, mask_id: maskId }),
   },
-  provider: { status: () => call('provider_status', {}) },
+  provider: {
+    status: () => call('provider_status', {}),
+    setCredentials: (key: string, secret: string) =>
+      call('provider_credentials_set', { key, secret }),
+    clearCredentials: () => call('provider_credentials_clear', {}),
+    testConnection: () => call('provider_test_connection', {}),
+    getSettings: () => call('provider_settings_get', {}),
+    setSettings: (teamId: string | null, projectId: string | null) =>
+      call('provider_settings_set', { team_id: teamId, project_id: projectId }),
+    listModels: (operation: Commands['provider_list_models'][0]['operation']) =>
+      call('provider_list_models', { operation }),
+    getCapabilities: (modelId: string) => call('provider_get_capabilities', { model_id: modelId }),
+    balance: () => call('provider_balance', {}),
+    fakeSetCase: (fakeCase: string) => call('provider_fake_set_case', { case: fakeCase }),
+  },
 };

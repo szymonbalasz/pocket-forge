@@ -1,0 +1,140 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_ideogram-character",
+  "case": "get-model",
+  "recorded_on": "2026-11-07",
+  "source": "synthetic",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_ideogram-character"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "id": "model_ideogram-character",
+            "name": "Ideogram Character",
+            "type": "custom",
+            "capabilities": [
+              "img2img",
+              "inpaint"
+            ],
+            "inputs": [
+              {
+                "name": "prompt",
+                "type": "string",
+                "required": {
+                  "always": true
+                }
+              },
+              {
+                "name": "image",
+                "type": "file",
+                "kind": "image",
+                "required": {
+                  "always": true
+                },
+                "maxSize": 52428800
+              },
+              {
+                "name": "mask",
+                "type": "file",
+                "kind": "image",
+                "maskFrom": "image",
+                "required": {
+                  "always": true
+                }
+              },
+              {
+                "name": "numOutputs",
+                "type": "number",
+                "min": 1,
+                "max": 4,
+                "step": 1,
+                "default": 1,
+                "costImpact": true
+              },
+              {
+                "name": "seed",
+                "type": "number",
+                "min": 0,
+                "max": 2147483647,
+                "step": 1
+              },
+              {
+                "name": "renderingSpeed",
+                "type": "string",
+                "allowedValues": [
+                  "TURBO",
+                  "DEFAULT",
+                  "QUALITY"
+                ],
+                "default": "DEFAULT",
+                "costImpact": true
+              },
+              {
+                "name": "magicPrompt",
+                "type": "string",
+                "allowedValues": [
+                  "AUTO",
+                  "ON",
+                  "OFF"
+                ],
+                "default": "AUTO"
+              },
+              {
+                "name": "styleType",
+                "type": "string",
+                "allowedValues": [
+                  "AUTO",
+                  "GENERAL",
+                  "REALISTIC",
+                  "DESIGN",
+                  "FICTION"
+                ],
+                "default": "AUTO"
+              },
+              {
+                "name": "colorPalette",
+                "type": "string",
+                "allowedValues": [
+                  "EMBER",
+                  "FRESH",
+                  "JUNGLE",
+                  "MAGIC",
+                  "MELON",
+                  "MOSAIC",
+                  "PASTEL",
+                  "ULTRAMARINE"
+                ],
+                "required": {
+                  "always": false,
+                  "conditionalValues": {
+                    "styleType": [
+                      "DESIGN"
+                    ]
+                  }
+                }
+              },
+              {
+                "name": "characterReferenceImages",
+                "type": "file_array",
+                "kind": "image",
+                "max": 1,
+                "required": {
+                  "always": true
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

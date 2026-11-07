@@ -48,6 +48,16 @@ pub struct ProviderSettings {
     pub extra: BTreeMap<String, Value>,
 }
 
+impl ProviderSettings {
+    /// The account part PRV needs (FR-PRV-29).
+    pub fn account(&self) -> pf_provider::ProviderAccount {
+        pf_provider::ProviderAccount {
+            team_id: self.team_id.clone(),
+            project_id: self.project_id.clone(),
+        }
+    }
+}
+
 /// The whole settings file. Unknown sections and fields are kept (written after known ones).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Settings {

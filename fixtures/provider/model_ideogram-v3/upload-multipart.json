@@ -1,0 +1,93 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_ideogram-v3",
+  "case": "upload-multipart",
+  "recorded_on": "2026-11-07",
+  "source": "synthetic",
+  "exchanges": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/uploads",
+        "body": {
+          "contentType": "image/png",
+          "fileName": "pocket-forge-source.png",
+          "fileSize": 1,
+          "kind": "image",
+          "parts": 1
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "upload": {
+            "id": "<upload-1>",
+            "parts": [
+              {
+                "number": 1,
+                "url": "fake://upload/1/part/1"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "PUT",
+        "path": "fake://upload/1/part/1",
+        "body": {
+          "fixture": "noise-1200.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "etag": "\"etag-1\""
+        },
+        "body": null
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/uploads/<upload-1>/action",
+        "body": {
+          "action": "complete",
+          "parts": [
+            {
+              "etag": "\"etag-1\"",
+              "number": 1
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "upload": {
+            "id": "<upload-1>",
+            "status": "validating"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/uploads/<upload-1>"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "upload": {
+            "id": "<upload-1>",
+            "status": "complete",
+            "assetId": "<asset-1>"
+          }
+        }
+      }
+    }
+  ]
+}

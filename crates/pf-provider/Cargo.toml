@@ -1,18 +1,45 @@
 [package]
 name = "pf-provider"
-description = "Pocket Forge provider adapter (ADR 0001): the provider-agnostic trait, the fake provider and (later) Scenario."
+description = "Pocket Forge provider adapter (ADR 0001): the provider-agnostic trait, the fake provider and Scenario."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Real Scenario calls outside the app (the recorder; real-call tests in PRV slice 5). Never set in CI (FR-PRV-28).
+real-call = []
+
 [dependencies]
+# Approved in #38 (keyring, sha2, tokio, serde/serde_json, base64) and #21/#32 (reqwest, rustls).
+base64 = "0.23"
 png.workspace = true
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+tracing.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["linux-native"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "pf-record"
+path = "src/bin/pf-record.rs"
+required-features = ["real-call"]

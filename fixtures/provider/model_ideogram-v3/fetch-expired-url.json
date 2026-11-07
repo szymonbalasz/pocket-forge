@@ -1,0 +1,88 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_ideogram-v3",
+  "case": "fetch-expired-url",
+  "recorded_on": "2026-11-07",
+  "source": "synthetic",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/jobs/<job-1>"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "job": {
+            "jobId": "<job-1>",
+            "status": "success",
+            "progress": 1,
+            "metadata": {
+              "assetIds": [
+                "<asset-3>"
+              ],
+              "input": {
+                "seed": 7
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/assets/<asset-3>"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "asset": {
+            "id": "<asset-3>",
+            "url": "fake://asset/1"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "fake://asset/1"
+      },
+      "response": {
+        "status": 403,
+        "body": {
+          "message": "Request has expired"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/assets/<asset-3>"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "asset": {
+            "id": "<asset-3>",
+            "url": "fake://asset/2"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "fake://asset/2"
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "fixture": "candidate-1-256.png"
+        }
+      }
+    }
+  ]
+}
