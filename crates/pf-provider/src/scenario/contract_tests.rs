@@ -652,3 +652,14 @@ fn fr_prv_26_the_record_has_the_appendix_b_shape() {
     let back: Capabilities = serde_json::from_value(serde_json::to_value(&caps).unwrap()).unwrap();
     assert_eq!(back, caps);
 }
+
+#[test]
+fn fr_prv_01_the_suite_runs_through_the_any_provider_enum() {
+    contract_suite(&crate::AnyProvider::fake(), "fake-white-edit");
+    let r = scenario("contract");
+    r.p.set_account(ProviderAccount {
+        team_id: Some("<team-id>".into()),
+        project_id: None,
+    });
+    contract_suite(&crate::AnyProvider::Scenario(r.p), V3);
+}

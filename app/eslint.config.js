@@ -80,6 +80,11 @@ export default defineConfig(
               allow: { to: { element: { types: ['api', 'store', 'shared'] } } },
             },
             {
+              // ui-guidelines: the shared inline icon set lives in the shell.
+              from: { element: { type: 'feature' } },
+              allow: { to: { element: { type: 'shell' }, file: { path: '**/shell/icons.tsx' } } },
+            },
+            {
               from: { element: { type: 'feature' } },
               allow: {
                 to: {

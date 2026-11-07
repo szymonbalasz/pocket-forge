@@ -394,7 +394,7 @@ mod tests {
         ctx.provider = AnyProvider::for_mode(mode, store.clone(), None);
         ctx.credentials = store;
         let events = Arc::new(RecordedEvents::default());
-        ctx.events = Box::new(events.clone());
+        ctx.events = events.clone();
         (dir, Core::new(ctx).unwrap(), events)
     }
 

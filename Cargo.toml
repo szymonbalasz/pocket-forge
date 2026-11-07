@@ -17,8 +17,12 @@ pf-core = { path = "crates/pf-core" }
 pf-imaging = { path = "crates/pf-imaging" }
 pf-provider = { path = "crates/pf-provider" }
 
+fast_image_resize = "6.1.0"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp"] }
+jpeg-encoder = { version = "0.7.1", features = ["simd"] }
+libwebp-sys = "0.14.4"
 png = "0.18.1"
+rayon = "1.12.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.11.1"
@@ -26,6 +30,7 @@ tauri = { version = "2.11.6", features = [] }
 tauri-build = { version = "2.6.3", features = [] }
 tempfile = "3"
 thiserror = "2.0.21"
+tiny-skia = { version = "0.12.0", default-features = false, features = ["std", "simd"] }
 tokio = { version = "1.54.1", default-features = false }
 tracing = "0.1"
 tracing-subscriber = "0.3"
@@ -42,4 +47,8 @@ unwrap_used = "warn"
 
 # Image decode, hashing and PNG encode are unusably slow at opt-level 0; dependencies get optimised in dev and test.
 [profile.dev.package."*"]
+opt-level = 2
+
+# Walkthroughs of 4200×5600 and 16k maps need optimised pixel code in dev builds (EDT report Q2).
+[profile.dev.package.pf-imaging]
 opt-level = 2

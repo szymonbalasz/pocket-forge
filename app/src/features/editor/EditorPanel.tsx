@@ -1,5 +1,6 @@
 import { useProjectState } from '../../store/project';
-import { EditorStage } from './EditorStage';
+import { EditorCanvas } from './EditorCanvas';
+import './editor.css';
 
 /** The editor area: the empty state, or the open asset project's canvas. */
 export function EditorPanel() {
@@ -12,6 +13,6 @@ export function EditorPanel() {
       </div>
     );
   }
-  // Remount per project, so the view refits and the image reloads.
-  return <EditorStage key={project.project_id} project={project} />;
+  // Remount per project, so the view refits and the tiles reload.
+  return <EditorCanvas key={project.project_id} project={project} />;
 }

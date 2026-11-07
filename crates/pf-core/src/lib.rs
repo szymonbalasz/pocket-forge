@@ -17,6 +17,7 @@ pub mod project;
 mod provider_commands;
 pub mod recent;
 pub mod settings;
+pub mod tiles;
 pub mod time;
 
 pub use crate::core::{Command, Core, State, Validate, dispatch_json};

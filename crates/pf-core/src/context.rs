@@ -5,8 +5,8 @@
 use std::collections::HashSet;
 use std::hash::{BuildHasher, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use pf_provider::{AnyProvider, CredentialStore, KeyringStore, MemoryStore, ProviderMode};
@@ -229,6 +229,8 @@ pub enum FaultPoint {
     AfterTemp,
     /// The rename has happened.
     AfterRename,
+    /// A tile pyramid level is complete and marked (`after_level:<k>`, FR-EDT-10).
+    AfterLevel(u32),
 }
 
 /// What an injected fault does.
@@ -249,7 +251,7 @@ struct FaultRule {
 }
 
 /// Fault injection (AGENTS §9 `PF_FAULT`). Checks compile to nothing in release builds.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Faults {
     rule: Option<FaultRule>,
 }
@@ -259,8 +261,21 @@ impl Faults {
         Faults::default()
     }
 
-    /// Parses `PF_FAULT`: `<point>[:<file name>]`, point = `after_temp` | `after_rename`.
+    /// Parses `PF_FAULT`: `<point>[:<file name>]`, point = `after_temp` | `after_rename`;
+    /// or `after_level:<k>` (stop a tile pyramid build once level `k` is complete).
     pub fn parse(spec: &str, action: FaultAction) -> Result<Self, String> {
+        if let Some(k) = spec.trim().strip_prefix("after_level:") {
+            let level = k
+                .parse()
+                .map_err(|_| format!("PF_FAULT: after_level needs a level number, got {k:?}"))?;
+            return Ok(Faults {
+                rule: Some(FaultRule {
+                    point: FaultPoint::AfterLevel(level),
+                    file: None,
+                    action,
+                }),
+            });
+        }
         let (point, file) = match spec.trim().split_once(':') {
             Some((p, f)) => (p, Some(f.to_owned())),
             None => (spec.trim(), None),
@@ -365,7 +380,8 @@ pub struct Context {
     pub ids: Box<dyn IdGen>,
     pub fs: Box<dyn FsAttributes>,
     pub faults: Faults,
-    pub events: Box<dyn EventSink>,
+    /// Shared, so background work (tile pyramid builds) can emit too.
+    pub events: Arc<dyn EventSink>,
     pub provider: AnyProvider,
     /// The OS credential store for provider keys (FR-PRV-06). Tests use a memory store.
     pub credentials: std::sync::Arc<dyn CredentialStore>,
@@ -405,7 +421,7 @@ impl Context {
             ids: Box::new(UlidGen),
             fs: Box::new(OsFsAttributes),
             faults: Faults::none(),
-            events: Box::new(NoEvents),
+            events: Arc::new(NoEvents),
             provider: AnyProvider::fake(),
             credentials: std::sync::Arc::new(KeyringStore::for_provider("scenario")),
             data_dir,
@@ -570,6 +586,10 @@ mod tests {
                 .is_ok()
         );
         assert!(Faults::parse("mid_write", FaultAction::Error).is_err());
+        let lv = Faults::parse("after_level:2", FaultAction::Error).unwrap();
+        assert!(lv.hit(FaultPoint::AfterLevel(2), Path::new("x")).is_err());
+        assert!(lv.hit(FaultPoint::AfterLevel(1), Path::new("x")).is_ok());
+        assert!(Faults::parse("after_level:x", FaultAction::Error).is_err());
     }
 
     #[test]

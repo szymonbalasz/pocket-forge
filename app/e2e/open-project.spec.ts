@@ -3,7 +3,11 @@ import { expect, test, type Page } from '@playwright/test';
 import { calls, defaultSeed, FIXTURE_SIZE, LIBRARY, mockCore } from './mock-core';
 
 type View = { scale: number; tx: number; ty: number };
-const view = (page: Page) => page.evaluate(() => window.__pfTest!.view() as View);
+// The hook installs after a dynamic import (FR-EDT-26): wait for it, as edt-mock.ts does.
+const view = async (page: Page) => {
+  await page.waitForFunction(() => !!window.__pfTest?.view);
+  return page.evaluate(() => window.__pfTest!.view!() as View);
+};
 
 test.beforeEach(async ({ page }) => {
   await mockCore(page);

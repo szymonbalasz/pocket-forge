@@ -80,6 +80,8 @@ export async function mockCore(page: Page, seed: MockSeed = defaultSeed): Promis
         revisions: [...revisions],
         head_revision: revisions.at(-1)?.id ?? null,
         commit_seq: seq,
+        // Feature mocks override snapshot fields here (layers, read_only, draft, …).
+        ...(((window as unknown as Rec).__pfMockSnapshot as Rec | undefined) ?? {}),
       });
 
       const fail = (code: string, message: string) => Promise.reject({ code, message });
@@ -148,9 +150,42 @@ export async function mockCore(page: Page, seed: MockSeed = defaultSeed): Promis
           width: seed.image.w,
           height: seed.image.h,
         }),
-        'plugin:event|listen': () => nextId++,
-        'plugin:event|unlisten': () => null,
+        // EDT: a 512 px pyramid of the fixture (512×640 → level 0: 1×2 tiles, level 1: 1 tile).
+        edt_tiles_open: () => ({
+          key: 'tk1',
+          base_url: 'http://pf-tiles.localhost/t/tk1',
+          width: seed.image.w,
+          height: seed.image.h,
+          tile_size: 512,
+          levels: [
+            {
+              level: 0,
+              scale: 1,
+              cols: Math.ceil(seed.image.w / 512),
+              rows: Math.ceil(seed.image.h / 512),
+              ext: 'webp',
+              complete: true,
+            },
+            { level: 1, scale: 0.5, cols: 1, rows: 1, ext: 'jpg', complete: true },
+          ],
+        }),
+        'plugin:event|listen': (input) => {
+          const id = nextId++;
+          const ev = String(input.event);
+          listeners.set(id, { event: ev, handler: Number(input.handler) });
+          return id;
+        },
+        'plugin:event|unlisten': (input) => {
+          listeners.delete(Number(input.eventId));
+          return null;
+        },
       };
+      const listeners = new Map<number, { event: string; handler: number }>();
+      /** Feature mocks (e2e/<feature>-mock.ts) add or override handlers here. */
+      const extra = ((window as unknown as Rec).__pfMockHandlers ??= {}) as Record<
+        string,
+        (input: Rec) => unknown
+      >;
 
       (window as unknown as Rec).__TAURI_INTERNALS__ = {
         metadata: {
@@ -168,7 +203,7 @@ export async function mockCore(page: Page, seed: MockSeed = defaultSeed): Promis
         convertFileSrc: (p: string) => p,
         async invoke(cmd: string, args: Rec) {
           calls.push({ cmd, args });
-          const h = handlers[cmd];
+          const h = extra[cmd] ?? handlers[cmd];
           if (!h) return fail('not_found', `mock: unknown command ${cmd}`);
           return h((args?.input as Rec) ?? args ?? {});
         },
@@ -176,9 +211,28 @@ export async function mockCore(page: Page, seed: MockSeed = defaultSeed): Promis
       (window as unknown as Rec).__TAURI_EVENT_PLUGIN_INTERNALS__ = {
         unregisterListener: () => undefined,
       };
-      (window as unknown as Rec).__pfMock = { calls };
+      (window as unknown as Rec).__pfMock = {
+        calls,
+        /** Emits a core event to the UI's listeners. */
+        emit(event: string, payload: unknown) {
+          for (const [id, l] of listeners)
+            if (l.event === event) callbacks.get(l.handler)?.({ event, id, payload });
+        },
+      };
     },
     { seed, library: LIBRARY },
+  );
+}
+
+/** Emits a core event (`edt:tiles-progress`, `export:settings-changed`, …) to the UI. */
+export function emit(page: Page, event: string, payload: unknown): Promise<void> {
+  return page.evaluate(
+    ([e, p]) =>
+      (window as unknown as { __pfMock: { emit: (e: string, p: unknown) => void } }).__pfMock.emit(
+        e as string,
+        p,
+      ),
+    [event, payload] as const,
   );
 }
 

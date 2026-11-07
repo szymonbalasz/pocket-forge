@@ -1,44 +1,41 @@
-/* Provider chip and settings (provider spec §7). Colours only for state. */
-
-/* The status bar lays its slot items out in a row so the chip sits at the right end.
-   For the shell owner: move this into the shell layout (Layout.tsx) and drop it here. */
-.statusbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.statusbar > .status {
-  flex: 1;
-}
-
+/* Provider chip and settings (provider spec §7). Theme tokens only; colour only for state. */
 .prv-chip {
-  font-size: 11px;
+  font-size: var(--pf-font-size-meta);
+  border: 1px solid var(--pf-border);
   border-radius: 10px;
-  padding: 1px 10px;
+  padding: 1px var(--pf-space-2);
+  background: transparent;
+  color: var(--pf-text-dim);
   font-variant-numeric: tabular-nums;
-  color: var(--muted);
 }
 
 .prv-chip-offline,
 .prv-chip-not_configured {
-  color: var(--warning);
+  color: var(--pf-warn);
 }
 
 .prv-chip-auth_error {
-  color: var(--error);
+  color: var(--pf-danger);
+}
+
+.prv-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--pf-overlay);
+  z-index: 40;
 }
 
 .prv-settings {
   position: fixed;
-  right: 16px;
-  bottom: 48px;
-  width: 340px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 12px;
-  z-index: 20;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(380px, calc(100vw - 2 * var(--pf-space-4)));
+  background: var(--pf-bg-2);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  padding: var(--pf-space-4);
+  z-index: 41;
 }
 
 .prv-settings-head {
@@ -47,21 +44,43 @@
   align-items: center;
 }
 
+.prv-title {
+  font-size: var(--pf-font-size);
+  font-weight: 600;
+  margin: 0;
+}
+
+.prv-meta {
+  font-size: var(--pf-font-size-meta);
+  color: var(--pf-text-dim);
+}
+
+.prv-error {
+  color: var(--pf-danger);
+}
+
 .prv-field {
   display: block;
-  margin: 8px 0;
-  font-size: 12px;
-  color: var(--muted);
+  margin: var(--pf-space-2) 0;
+  font-size: var(--pf-font-size-meta);
+  color: var(--pf-text-dim);
 }
 
 .prv-field input {
-  margin-top: 4px;
+  margin-top: var(--pf-space-1);
+  width: 100%;
 }
 
 .prv-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 12px;
+  gap: var(--pf-space-2);
+  margin-top: var(--pf-space-3);
+}
+
+.prv-close {
+  position: absolute;
+  top: var(--pf-space-4);
+  right: var(--pf-space-4);
 }
 
 .prv-spinner {
@@ -69,7 +88,7 @@
   width: 10px;
   height: 10px;
   margin-right: 6px;
-  border: 2px solid var(--muted);
+  border: 2px solid var(--pf-text-dim);
   border-top-color: transparent;
   border-radius: 50%;
   animation: prv-spin 0.8s linear infinite;

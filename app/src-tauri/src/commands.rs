@@ -45,6 +45,7 @@ tauri_commands! {
     recent_list => c::RecentList,
     edt_image_open => c::EdtImageOpen,
     provider_status => c::ProviderStatus,
+    edt_tiles_open => c::EdtTilesOpen,
     provider_credentials_set => c::ProviderCredentialsSet,
     provider_credentials_clear => c::ProviderCredentialsClear,
     provider_test_connection => c::ProviderTestConnection,

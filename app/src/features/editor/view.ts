@@ -76,3 +76,19 @@ export function panBy(
 
 /** Readout: image px : device px as a percentage (FR-EDT-04). */
 export const zoomPercent = (v: View, dpr: number): number => Math.round(v.scale * dpr * 100);
+
+/** Zoom to an absolute scale, keeping the image point under `anchor` fixed (presets). */
+export function zoomTo(v: View, scale: number, anchor: Pt): View {
+  const p = screenToImage(v, anchor);
+  return { scale, tx: anchor.x - p.x * scale, ty: anchor.y - p.y * scale };
+}
+
+/** FR-EDT-04 Actual pixels: 1 image px = 1 device px. */
+export const actualScale = (dpr: number): number => 1 / dpr;
+
+/** FR-EDT-04 Display size (R23): 1 image px = target ÷ source px per square, in **CSS** px.
+ *  `null` until both values exist (R6). */
+export function displayScale(source: number | null, target: number | null): number | null {
+  if (source === null || target === null || !(source > 0) || !(target > 0)) return null;
+  return target / source;
+}

@@ -40,3 +40,6 @@ Integrator rulings on the two review reports (review-data, review-ui-provider). 
 | R34 | Original layer fields | `region`, `rect`, `blend` and `retune_of` are patch-only in schema §4.3; the original layer omits them. | schema |
 | R35 | Temp-file sweep | The open-time sweep also removes orphan temp files in the library import folder and `<data-dir>` (PRJ slice 5). | PRJ |
 | R36 | CSP | A strict Content Security Policy lands with EDT slice 1 (the `pf-tiles` scheme), not before. | EDT |
+| R37 | Branch updates | Builders merge `origin/main` into their branch instead of force-pushing a rebase (no history rewrites; a safety hook blocks force pushes anyway). | all builders |
+| R38 | pf-imaging build | `unsafe_code = "deny"` in pf-imaging (only `webp.rs` allows it, for libwebp FFI); the workspace keeps `forbid`. `jpeg-encoder` with `simd`. Lossless WebP fallback at level 1. Dev profile builds pf-imaging at `opt-level = 2`. `rayon` is in workspace deps, unused until a builder needs it. | EXP, EDT |
+| R39 | Region fit fallback | EDT's local `rgn_region_fit` fallback is removed when RGN's command lands. | EDT, RGN |

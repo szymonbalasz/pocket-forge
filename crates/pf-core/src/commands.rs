@@ -12,13 +12,13 @@ use ulid::Ulid;
 
 use crate::core::{Command, Core, Validate, dispatch_json};
 use crate::error::{CoreError, CoreResult, ErrorCode};
-use crate::images::ServedImage;
 use crate::import::{self, ImportItem};
 use crate::library::{self, LibraryConfig};
 use crate::manifest::RevisionEntry;
 use crate::project::{self, DraftInput, ProjectSnapshot};
 use crate::recent::{self, RecentEntry};
 use crate::settings::{self, SettingsWarning};
+use crate::tiles;
 
 const MAX_PATH_CHARS: usize = 4096;
 const MAX_PATHS: usize = 10_000;
@@ -221,7 +221,7 @@ impl Command for ProjectOpen {
         if let Err(e) = recent::touch(&core.ctx, &p.image_path, &snap.name) {
             tracing::warn!(error = %e, "could not update recent.json");
         }
-        state.images.clear();
+        core.served().reset(Some(snap.project_id));
         state.project = Some(p);
         Ok(snap)
     }
@@ -237,7 +237,7 @@ impl Command for ProjectClose {
     fn run(core: &Core, _: NoInput) -> CoreResult<Ok_> {
         let mut state = core.state();
         state.project = None;
-        state.images.clear();
+        core.served().reset(None);
         Ok(Ok_ {})
     }
 }
@@ -361,8 +361,9 @@ impl Command for RecentList {
 
 // ---------------------------------------------------------------- editor
 
-/// Skeleton version of EDT's `edt_image_open`: serves the original as-is under `/i/<key>`.
-/// EDT slice 3 adds `max_side`, the 4096 px limit (`use_tiles`) and layer/candidate images.
+/// EDT `edt_image_open` (FR-EDT-31/32): a whole image of the open project (the original or a
+/// layer file) under `/i/<key>`. Without `max_side` it must be ≤ 4096 per side (`use_tiles`);
+/// with it, a cached Lanczos3 PNG copy that fits within `max_side` (the picker uses 256).
 pub struct EdtImageOpen;
 
 #[derive(Debug, Deserialize)]
@@ -370,17 +371,22 @@ pub struct EdtImageOpen;
 pub struct EdtImageOpenInput {
     pub project_id: Ulid,
     pub image_id: Ulid,
+    #[serde(default)]
+    pub max_side: Option<u32>,
 }
 
-impl Validate for EdtImageOpenInput {}
-
-#[derive(Debug, Serialize)]
-pub struct ImageOpenOutput {
-    pub key: String,
-    pub url: String,
-    pub width: u32,
-    pub height: u32,
+impl Validate for EdtImageOpenInput {
+    fn validate(&self) -> CoreResult<()> {
+        match self.max_side {
+            Some(m) if !(1..=tiles::WHOLE_IMAGE_MAX_SIDE).contains(&m) => {
+                Err(CoreError::invalid("max_side", "max_side is 1 to 4096 px"))
+            }
+            _ => Ok(()),
+        }
+    }
 }
+
+pub use crate::tiles::{ImageOpenOutput, TilesOpenOutput};
 
 impl Command for EdtImageOpen {
     const NAME: &'static str = "edt_image_open";
@@ -388,42 +394,7 @@ impl Command for EdtImageOpen {
     type Output = ImageOpenOutput;
 
     fn run(core: &Core, input: Self::Input) -> CoreResult<ImageOpenOutput> {
-        let mut state = core.state();
-        let p = state.project.as_ref().ok_or_else(no_project)?;
-        if p.manifest.project_id != input.project_id {
-            return Err(
-                CoreError::new(ErrorCode::NotFound, "that project isn't open")
-                    .with_field("project_id"),
-            );
-        }
-        let original = &p.manifest.layers[0];
-        if original.id != input.image_id {
-            return Err(CoreError::new(ErrorCode::NotFound, "unknown image").with_field("image_id"));
-        }
-        let format = pf_imaging::probe_file(&p.image_path)
-            .map_err(|e| CoreError::new(ErrorCode::Corrupt, e.to_string()))?
-            .format;
-        let (width, height, path) = (
-            p.manifest.original.width,
-            p.manifest.original.height,
-            p.image_path.clone(),
-        );
-        let key = core.ctx.new_id().to_string().to_lowercase();
-        let ext = format.extension();
-        state.images.register(
-            key.clone(),
-            ServedImage {
-                path,
-                mime: format.mime(),
-                ext,
-            },
-        );
-        Ok(ImageOpenOutput {
-            url: format!("{}/i/{key}.{ext}", core.ctx.tiles_base_url),
-            key,
-            width,
-            height,
-        })
+        tiles::image_open(core, input.project_id, input.image_id, input.max_side)
     }
 }
 
@@ -435,6 +406,34 @@ pub use crate::provider_commands::{
     ProviderGetCapabilities, ProviderListModels, ProviderSettingsGet, ProviderSettingsSet,
     ProviderStatus, ProviderTestConnection,
 };
+
+// ---------------------------------------------------------------- editor: tiles
+
+/// EDT `edt_tiles_open` (FR-EDT-07): the pyramid descriptor at once; missing levels build in
+/// the background, smallest first (`edt:tiles-progress` / `edt:tiles-ready` / `edt:tiles-failed`).
+pub struct EdtTilesOpen;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EdtTilesOpenInput {
+    pub project_id: Ulid,
+    pub image_id: Ulid,
+    /// Deletes the cached pyramid and builds it again (the tile error badge, FR-EDT-12).
+    #[serde(default)]
+    pub rebuild: bool,
+}
+
+impl Validate for EdtTilesOpenInput {}
+
+impl Command for EdtTilesOpen {
+    const NAME: &'static str = "edt_tiles_open";
+    type Input = EdtTilesOpenInput;
+    type Output = TilesOpenOutput;
+
+    fn run(core: &Core, input: Self::Input) -> CoreResult<TilesOpenOutput> {
+        tiles::tiles_open(core, input.project_id, input.image_id, input.rebuild)
+    }
+}
 
 // ---------------------------------------------------------------- registry (append-only)
 
@@ -464,6 +463,7 @@ registry![
     RecentList,
     EdtImageOpen,
     ProviderStatus,
+    EdtTilesOpen,
     ProviderCredentialsSet,
     ProviderCredentialsClear,
     ProviderTestConnection,
