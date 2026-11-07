@@ -10,7 +10,8 @@
 
 - **Tiles are required whatever the library is.** A single 16k bitmap takes 1.7–2.0 s to first view and 2.5–3.5 GB of browser memory, and in the Canvas2D libraries it causes 0.8–1.0 s hitches while panning. Tiles show first view in 20–60 ms, use 550–800 MB of browser memory and keep 240 fps.
 - **With tiles, display performance is a tie.** All three hold 228–240 fps on the iGPU and on the dGPU, with worst frames of 4.5–21 ms. Coordinate accuracy is also a tie (about 1e-11 px).
-- **Konva wins on what we'd otherwise build or maintain.** It has a built-in Transformer (move/scale/rotate handles), an official React binding that is current, and layers as separate canvases. A mask canvas is drawn live with no texture upload, and its bundle is the smallest of the three.
+- **Typical maps are smaller (#30: about 2.1k–5.6k px per side).** At that size a single bitmap would be acceptable (8k single: 0.4 s to first view, 220 ms worst frame). Tiles still keep one code path up to the 16k bound, and they're cheaper at every size.
+- **Konva wins on what we'd otherwise build or maintain.** Free-form layer handles are tier A, while tier S needs only a positioned patch layer. That makes the Transformer a head start rather than a must-have. It has a built-in Transformer (move/scale/rotate handles), an official React binding that is current, and layers as separate canvases. A mask canvas is drawn live with no texture upload, and its bundle is the smallest of the three.
 
 ## Decisive findings
 

@@ -5,8 +5,8 @@
 
 ## Context
 
-- The editor must display **originals** of 5–10k px per side, up to about 16k (#11), and zoom and pan them at full fidelity. That's MVP scenario step 1.
-- On top of the image it needs a **mask** painted at full resolution over a **region** (step 2), and **patch layers** with position, scale, rotation, opacity and visibility (step 5).
+- The editor must display **originals** at full fidelity and zoom and pan them (MVP scenario step 1). Most maps are about 2.1k–5.6k px per side, and 16k is the supported upper bound (#11, #30).
+- On top of the image it needs a **mask** painted at full resolution over a **region** (step 2) and positioned **patch layers** (step 5, tier S). Free-form move/scale/rotate/opacity/visibility of layers is tier A.
 - Rust is the authority for flatten and export, and the canvas is a preview (KQ-25). The canvas must therefore use the same image-px transform model as the Rust composite.
 - Chromium caps a 2D canvas at 268,435,456 px and WebGL textures at 16384 px per side. A 16k image is already at both limits.
 
