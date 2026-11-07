@@ -4,6 +4,11 @@
 //! (FR-PRJ-06). Tile pyramid, region extract, blend, flatten and encode land in their own modules.
 //! This crate knows nothing about asset projects: it works on bytes, paths and pixel buffers.
 
+mod compose;
 mod probe;
 
+pub use compose::{
+    COMPOSE_VERSION, ComposeError, Layer, LayerStack, PixelRect, Placement, STRIP_H, Strip,
+    compose_rect, flatten_full, flatten_strips,
+};
 pub use probe::{ImageFormat, ImageInfo, MAX_SIDE, ProbeError, probe_bytes, probe_file, sniff};
