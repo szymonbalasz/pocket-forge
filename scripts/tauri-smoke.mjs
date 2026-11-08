@@ -116,7 +116,16 @@ if (process.platform !== 'win32') {
   const started = Date.now();
   let port = 9320;
   while (!(await portFree(port))) port++;
-  const app = launch({ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}` });
+  const args = `--remote-debugging-port=${port}`;
+  // The CI runner's WebView2 ignores the environment variable; there (only: the runner is
+  // throwaway) the same arguments go in through the per-exe WebView2 policy, removed afterwards.
+  const policy = String.raw`HKCU\Software\Policies\Microsoft\Edge\WebView2\AdditionalBrowserArguments`;
+  const ci = process.env.GITHUB_ACTIONS === 'true';
+  if (ci)
+    spawnSync('reg', ['add', policy, '/v', 'pocket-forge.exe', '/t', 'REG_SZ', '/d', args, '/f'], {
+      stdio: 'inherit',
+    });
+  const app = launch({ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: args });
   const image = join(app.library, 'smoke-map.png');
   copyFileSync(FIXTURE, image);
   let browser;
@@ -128,6 +137,7 @@ if (process.platform !== 'win32') {
     killTree(app.child);
     await app.exited;
     app.cleanup();
+    if (ci) spawnSync('reg', ['delete', policy, '/v', 'pocket-forge.exe', '/f'], { stdio: 'ignore' });
     if (error) fail(`tile check failed after ${secs(started)} s: ${error}`);
   };
   const timer = setTimeout(() => finish('timed out after 120 s'), TIMEOUT_MS);
