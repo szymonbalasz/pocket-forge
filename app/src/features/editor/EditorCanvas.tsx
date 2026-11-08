@@ -21,6 +21,7 @@ import { CompareLayer } from './CompareLayer';
 import { PatchLayers } from './PatchLayers';
 import { useMaskTools } from './useMaskTools';
 import { konvaSink, TileManager, type TileStats } from './TileManager';
+import { TileEventLog } from './tileEvents';
 import { fit, panBy, scaleLimits, wheelFactor, zoomAbout } from './view';
 
 function useElementSize(ref: React.RefObject<HTMLElement | null>) {
@@ -91,15 +92,50 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
 
   const originalId = project.layers[0]?.id;
 
+  // Tile events, subscribed before any `tilesOpen` (D1): a small pyramid is built and reported
+  // before the call returns. Every event is recorded, so a descriptor or tile manager created
+  // later still learns what was built or failed; the descriptor is the state at subscribe time.
+  const tileLog = useRef(new TileEventLog());
+  const openKey = useRef<string | null>(null);
+  const subscribed = useRef<Promise<unknown>>(Promise.resolve());
+  useEffect(() => {
+    const subs = [
+      onEvent('edt:tiles-progress', (p) => {
+        tileLog.current.progress(p.key, p.level);
+        if (p.key === tilesRef.current?.descriptor.key) tilesRef.current.markBuilt(p.level);
+      }),
+      onEvent('edt:tiles-failed', (p) => {
+        const msg = tileLog.current.fail(p.key, p.error);
+        if (p.key === openKey.current) setBuildError(msg);
+      }),
+    ];
+    subscribed.current = Promise.allSettled(subs);
+    return () =>
+      subs.forEach(
+        (s) =>
+          void s.then(
+            (u) => u(),
+            () => undefined,
+          ),
+      );
+  }, []);
+
   // Open the pyramid (FR-EDT-07): the descriptor comes back at once; levels arrive by event.
   const openTiles = useCallback(
     async (rebuild: boolean) => {
       if (!originalId) return;
       setBuildError(null);
+      if (rebuild) tileLog.current.clear();
       try {
-        const d = await api.editor.tilesOpen(project.project_id, originalId, rebuild);
+        await subscribed.current;
+        const d = tileLog.current.apply(
+          await api.editor.tilesOpen(project.project_id, originalId, rebuild),
+        );
+        openKey.current = d.key;
         setDesc(d);
         if (rebuild) tilesRef.current?.reset(d);
+        const failed = tileLog.current.failure(d.key);
+        if (failed) setBuildError(failed);
       } catch (e) {
         setBuildError((e as Error).message);
       }
@@ -113,28 +149,6 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
     void openTiles(false);
     return () => editorStore.set({ image: null });
   }, [project.project_id, project.width, project.height, openTiles]);
-
-  // Tile events for this pyramid.
-  useEffect(() => {
-    if (!desc) return;
-    const subs = [
-      onEvent('edt:tiles-progress', (p) => {
-        if (p.key === tilesRef.current?.descriptor.key) tilesRef.current.markBuilt(p.level);
-      }),
-      onEvent('edt:tiles-failed', (p) => {
-        if (p.key !== tilesRef.current?.descriptor.key) return;
-        setBuildError(typeof p.error === 'string' ? p.error : p.error.message);
-      }),
-    ];
-    return () =>
-      subs.forEach(
-        (s) =>
-          void s.then(
-            (u) => u(),
-            () => undefined,
-          ),
-      );
-  }, [desc]);
 
   // FR-EDT-13: the drawn stack follows the manifest; refreshed after every commit.
   useEffect(() => {
@@ -219,7 +233,7 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
     if (tilesRef.current?.descriptor.key === desc.key && tilesBoundTo.current === tilesLayer)
       return;
     tilesRef.current?.destroy();
-    const tm = new TileManager(konvaSink(tilesLayer), desc, setTileStats);
+    const tm = new TileManager(konvaSink(tilesLayer), tileLog.current.apply(desc), setTileStats);
     tilesRef.current = tm;
     tilesBoundTo.current = tilesLayer;
     const s = editorStore.get();

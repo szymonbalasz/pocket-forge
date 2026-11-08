@@ -6,7 +6,7 @@ import { Collapsible, Select, Slider, Switch } from 'radix-ui';
 
 import { useSlotIdle } from '../../shared/slot';
 import { useProjectState } from '../../store/project';
-import { useEditorRegion } from '../editor';
+import { useEditorRegion, useEditorRegionRestored } from '../editor';
 import { openProviderSettings } from '../provider';
 import { ReferencesBlock } from '../references';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -25,20 +25,24 @@ import {
 } from './store';
 import './rgn.css';
 
-/** Binds the store to the open project and to EDT's region (R18). */
+/** Binds the store to the open project and to EDT's region (R18). EDT's region is followed only
+ *  once EDT has restored this project's saved region: before that it is null or the previous
+ *  project's, and must not reach this project's draft (walk D2). */
 function useRgnSession(): void {
   const { project } = useProjectState();
   const region = useEditorRegion();
+  const restoredFor = useEditorRegionRestored();
   const pid = project?.project_id ?? null;
   useEffect(() => {
-    if (project) void rgn.attach(project).then(() => rgn.setRegion(region?.inner ?? null));
+    if (project) void rgn.attach(project);
     else rgn.detach();
-    // `region` is pushed by the effect below; re-attach only per project / read-only change.
+    // Re-attach only per project / read-only change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pid, project?.read_only]);
   useEffect(() => {
-    if (pid && rgn.get().projectId === pid) rgn.setRegion(region?.inner ?? null);
-  }, [pid, region?.inner]);
+    if (pid && restoredFor === pid && rgn.get().projectId === pid)
+      rgn.editorRegion(region?.inner ?? null);
+  }, [pid, restoredFor, region?.inner]);
 }
 
 function RegionSection({ s }: { s: RgnState }) {

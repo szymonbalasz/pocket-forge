@@ -8,7 +8,8 @@ export function fitLabel(fit: Pick<RegionFit, 'outer' | 'sent_w' | 'sent_h'>): s
   return `patch ${ratio.toFixed(1)}× softer`;
 }
 
-const num = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
+// signDisplay 'negative': a zero spend (or one that rounds to 0) never shows as "-0" (walk D6).
+const num = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2, signDisplay: 'negative' });
 
 export const amountLabel = (n: number, unit: string): string => `${num.format(n)} ${unit}`;
 
