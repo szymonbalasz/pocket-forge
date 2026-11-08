@@ -678,6 +678,14 @@ export interface Events {
   'export:canceled': { export_id: string };
   'import:progress': { done: number; total: number };
   'project:save-failed': { reason: string; retrying: boolean };
+  /** A spooled job write the store refused for good was deleted (BL-25). */
+  'project:spool-dropped': {
+    project_id: string;
+    job_id: string;
+    seq: number;
+    op: 'update_job' | 'add_candidates';
+    code: string;
+  };
   'project:conflict': Record<string, never>;
   'project:recovered': Record<string, never>;
   'project:thumb-updated': { project_id: string };

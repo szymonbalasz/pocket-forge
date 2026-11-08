@@ -211,17 +211,35 @@ fn remove_entry(dir: &Path, entry: &Entry, path: &Path) {
     let _ = std::fs::remove_file(path);
 }
 
+/// The event that tells the user a spooled write was dropped (BL-25):
+/// `{project_id, job_id, seq, op: update_job|add_candidates, code}`.
+pub const EVENT_SPOOL_DROPPED: &str = "project:spool-dropped";
+
+/// A spool entry the store refused for good (BL-25).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Dropped {
+    pub seq: u64,
+    pub job_id: Ulid,
+    /// `update_job` or `add_candidates`.
+    pub op: &'static str,
+    /// The store's error code.
+    pub code: ErrorCode,
+}
+
 /// What a replay did.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Replayed {
     /// Jobs whose candidates were committed by this replay.
     pub fetched: Vec<Ulid>,
     pub entries: usize,
+    /// Entries refused for good and deleted; each also fired [`EVENT_SPOOL_DROPPED`].
+    pub dropped: Vec<Dropped>,
 }
 
 /// Replays the project's spool in `seq` order (FR-RGN-37). Stops at the first entry that still
 /// can't commit (it's retried later). An entry the store refuses for good (a transition the job
-/// already passed, an unknown job) is dropped with a log line.
+/// already passed, an unknown job) is dropped with a log line and an [`EVENT_SPOOL_DROPPED`]
+/// event, so the user is told (BL-25).
 pub fn replay(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> CoreResult<Replayed> {
     let mut out = Replayed::default();
     // Read-only, or a conflict the user hasn't resolved: every store write would refuse.
@@ -282,6 +300,26 @@ pub fn replay(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> CoreResul
             Err(e) => {
                 tracing::warn!(seq = entry.seq, error = %e, "spool entry refused; dropped");
                 remove_entry(&dir, &entry, &path);
+                let d = Dropped {
+                    seq: entry.seq,
+                    job_id: entry.job_id,
+                    op: match entry.op {
+                        Op::UpdateJob => "update_job",
+                        Op::AddCandidates => "add_candidates",
+                    },
+                    code: e.code,
+                };
+                ctx.emit(
+                    EVENT_SPOOL_DROPPED,
+                    serde_json::json!({
+                        "project_id": p.manifest.project_id,
+                        "job_id": d.job_id,
+                        "seq": d.seq,
+                        "op": d.op,
+                        "code": d.code,
+                    }),
+                );
+                out.dropped.push(d);
             }
         }
     }

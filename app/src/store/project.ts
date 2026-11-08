@@ -59,6 +59,12 @@ function savedAt(p: ProjectSnapshot): string {
   return p.committed_at ?? p.revisions.at(-1)?.created_at ?? '';
 }
 
+/** The banner text for `project:spool-dropped`, from codes only (no paths). */
+export function spoolDroppedMessage(op: string, code: string): string {
+  const what = op === 'add_candidates' ? 'Results of a job' : 'A job status update';
+  return `${what} waiting to be saved couldn’t be applied and was discarded (${code.replace(/_/g, ' ')}).`;
+}
+
 function bump(): void {
   set({ revision: state.revision + 1 });
 }
@@ -81,6 +87,14 @@ function listen(): void {
       set({
         save: { kind: 'failed', code: reason, message: reason.replace(/_/g, ' '), retrying },
       });
+    }),
+  );
+  on(
+    onEvent('project:spool-dropped', ({ project_id, op, code }) => {
+      // BL-25: a write that waited in the spool was refused for good; say so, don't drop silently.
+      if (state.project?.project_id !== project_id) return;
+      set({ error: { code: 'spool_dropped', message: spoolDroppedMessage(op, code) } });
+      bump();
     }),
   );
   on(
