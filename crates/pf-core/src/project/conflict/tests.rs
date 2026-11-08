@@ -480,3 +480,43 @@ fn fr_prj_34_a_thumbnail_copy_goes_to_the_trash() {
                 && t.files == vec![".pforge/thumb-LAPTOP.jpg".to_owned()])
     );
 }
+
+/// Walk 2 N2, R57: a trashed `project.json` conflict copy has no Restore and the core refuses it
+/// before moving anything, so the project doesn't fall back into a conflict.
+#[test]
+fn fr_prj_31_r57_a_manifest_conflict_copy_is_not_restorable() {
+    use crate::project::retention::{trash_list, trash_restore};
+    let mut s = setup();
+    draft(&mut s, "mine").unwrap();
+    let copy = make_copy(&s, "theirs");
+    s.reopen();
+    resolve_conflict(&s.e.ctx, s.e.install(), &mut s.p, Keep::This).unwrap();
+    let row = trash_list(&s.p)
+        .into_iter()
+        .find(|r| r.kind == TrashKind::ConflictCopy)
+        .unwrap();
+    assert!(!row.restorable, "no Restore button");
+    assert!(row.bytes > 0);
+
+    let err = trash_restore(&s.e.ctx, s.e.install(), &mut s.p, row.id).unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotRestorable);
+    assert!(!copy.exists(), "nothing moved back");
+    assert!(s.p.conflict.is_none(), "no phantom conflict");
+    assert!(!s.p.warnings.iter().any(|w| w.code == "conflict"));
+    draft(&mut s, "still writable").unwrap();
+}
+
+/// Walk 2 N2: Keep this when the copy has gone meanwhile resolves without an empty trash item.
+#[test]
+fn fr_prj_36_keep_this_after_the_copy_vanished_adds_no_trash_item() {
+    let mut s = setup();
+    draft(&mut s, "mine").unwrap();
+    let copy = make_copy(&s, "theirs");
+    s.reopen();
+    std::fs::remove_file(&copy).unwrap();
+    let view = conflict_get(&s.p, s.e.install()).unwrap();
+    assert!(!view.other.readable);
+    resolve_conflict(&s.e.ctx, s.e.install(), &mut s.p, Keep::This).unwrap();
+    assert!(s.p.conflict.is_none());
+    assert!(s.p.manifest.trash.is_empty(), "{:?}", s.p.manifest.trash);
+}

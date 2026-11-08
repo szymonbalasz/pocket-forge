@@ -188,6 +188,29 @@ test('FR-PRJ-31 Restore is offered only for restorable trash items (R51)', async
   expect(within(row('T2')).queryByTestId('prj-panel-storage-restore')).toBeNull();
 });
 
+test('FR-PRJ-31 a failed restore says why as a sentence, not raw core text (walk 2 N2)', async () => {
+  await openCrypt({
+    trash: [
+      {
+        id: 'T1',
+        path: 'jobs/J1/job (2).json',
+        kind: 'conflict_copy',
+        bytes: 1024,
+        trashed_at: '2026-11-01T00:00:00Z',
+        restorable: true,
+      },
+    ],
+  });
+  core.useHandlers({
+    ...core.handlersSnapshot(),
+    project_trash_restore: () => {
+      throw { code: 'conflict', message: 'jobs/J1/job.json exists again' };
+    },
+  });
+  fireEvent.click(await screen.findByTestId('prj-panel-storage-restore'));
+  expect(await screen.findByText('Jobs/J1/job.json exists again.')).not.toBeNull();
+});
+
 test('FR-PRJ-40 a spooled write refused for good shows a banner (BL-25)', async () => {
   await openCrypt();
   const pid = projectStore.get().project!.project_id;

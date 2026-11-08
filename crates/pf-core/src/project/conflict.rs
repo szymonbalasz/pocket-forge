@@ -382,7 +382,7 @@ pub fn resolve_conflict(
             Some(l) if l.commit.install_id == install_id => "this machine",
             _ => "other machine",
         };
-        commit_with(ctx, install_id, p, true, |ctx, _, m, plan| {
+        commit_with(ctx, install_id, p, true, |ctx, op, m, plan| {
             if let Some(l) = &lost {
                 let rev = RevisionFile {
                     schema_version: REVISION_SCHEMA_VERSION,
@@ -403,7 +403,8 @@ pub fn resolve_conflict(
                 m.revisions.push(rev.entry());
                 plan.revisions.push(rev);
             }
-            if let Some(copy) = &s.copy {
+            // A copy that's gone already (deleted, or synced away) leaves no empty trash item.
+            if let Some(copy) = s.copy.as_ref().filter(|c| op.path(c).is_file()) {
                 super::store::trash_files(
                     ctx,
                     m,
