@@ -273,11 +273,7 @@ function PackCardView({ card }: { card: PackCard }) {
 /** What the last listing did (adopted a folder, gave a copied pack a new id, resolved a
  *  `pack.json` conflict, FR-REF-04, 05, 28), from the cards' `notices[]`. */
 function ListNotices() {
-  const { cards, noticesSeen } = useRefs();
-  const notices = (cards ?? []).flatMap((c) =>
-    c.notices.map((n) => ({ ...n, id: `${c.id}:${n.code}:${n.message}` })),
-  );
-  const shown = notices.filter((n) => !noticesSeen.includes(n.id));
+  const { notices: shown } = useRefs();
   if (!shown.length) return null;
   return (
     <div className="banner banner-warning" role="status" data-testid="ref-home-notices">

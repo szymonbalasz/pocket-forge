@@ -492,10 +492,15 @@ export function refMock(
   };
 
   const handlers: Record<string, Handler> = {
-    ref_list_packs: () =>
-      [...[...state.packs.values()].map(card), ...notReady.map(notReadyCard)].sort((a, b) =>
-        byName(a.name, b.name),
-      ),
+    ref_list_packs: () => {
+      const cards = [...[...state.packs.values()].map(card), ...notReady.map(notReadyCard)].sort(
+        (a, b) => byName(a.name, b.name),
+      );
+      // Like pf-core, a listing reports what it did once (adopted, conflict resolved, …).
+      for (const x of extras.values()) x.notices = [];
+      for (const p of notReady) p.notices = [];
+      return cards;
+    },
     ref_pack_get: (input) => {
       const p = getPack(input);
       return p ? packOut(p) : fail('unknown_id', 'Unknown pack');

@@ -36,8 +36,17 @@ export interface RefsState {
   summary: { pack: string; items: PackAddItem[] } | null;
   /** The last failed action (rename, delete, …), shown as a banner. */
   error: UiError | null;
-  /** Card notices the user dismissed (by `<card id>:<code>:<message>`). */
-  noticesSeen: string[];
+  /** What listings did (adopted, new id, conflict resolved, …; FR-REF-04, 05, 28), until
+   *  dismissed. Each listing reports an action once, so notices from every listing are kept,
+   *  whichever of two overlapping listings lands last (walk R5). */
+  notices: ListNotice[];
+}
+
+export interface ListNotice {
+  /** `<card id>:<code>:<message>`. */
+  id: string;
+  code: string;
+  message: string;
 }
 
 const initial: RefsState = {
@@ -50,8 +59,11 @@ const initial: RefsState = {
   adding: null,
   summary: null,
   error: null,
-  noticesSeen: [],
+  notices: [],
 };
+
+/** The newest listing request wins the cards; an older answer only adds its notices. */
+let listToken = 0;
 
 let state: RefsState = initial;
 const listeners = new Set<() => void>();
@@ -103,17 +115,27 @@ export const refs = {
   /** Re-lists the cards, the trash and the open pack (FR-REF-09). */
   async refresh(): Promise<void> {
     await Promise.all([
-      refs.refreshList(),
-      refs.refreshTrash(),
+      // A listing can move a conflict copy to the trash (FR-REF-28): the trash is listed after
+      // it, so the item shows at once (walk R5).
+      refs.refreshList().then(() => refs.refreshTrash()),
       state.openId ? refs.refreshPack() : null,
     ]);
   },
 
   async refreshList(): Promise<void> {
+    const t = ++listToken;
     try {
-      set({ cards: await api.references.listPacks(), listError: null });
+      const cards = await api.references.listPacks();
+      const fresh = cards.flatMap((c) =>
+        c.notices.map((n) => ({ ...n, id: `${c.id}:${n.code}:${n.message}` })),
+      );
+      const notices = [
+        ...state.notices,
+        ...fresh.filter((n) => !state.notices.some((o) => o.id === n.id)),
+      ];
+      set(t === listToken ? { cards, listError: null, notices } : { notices });
     } catch (e) {
-      set({ cards: state.cards ?? [], listError: errorOf(e) });
+      if (t === listToken) set({ cards: state.cards ?? [], listError: errorOf(e) });
     }
   },
 
@@ -251,7 +273,7 @@ export const refs = {
   },
 
   dismissNotices(ids: string[]): void {
-    set({ noticesSeen: [...state.noticesSeen, ...ids] });
+    set({ notices: state.notices.filter((n) => !ids.includes(n.id)) });
   },
 
   dismissSummary(): void {
