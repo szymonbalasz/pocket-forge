@@ -169,6 +169,41 @@ export async function mockCore(page: Page, seed: MockSeed = defaultSeed): Promis
             { level: 1, scale: 0.5, cols: 1, rows: 1, ext: 'jpg', complete: true },
           ],
         }),
+        // RGN `rgn_region_fit` without a model (FR-RGN-01/02): snap, clamp, ≥ 16 px, margin
+        // (default 128) clamped to the image, outer ≤ 4096. Mirrors pf-core region_edit::fit.
+        rgn_region_fit: (input) => {
+          const r = input.inner as { x: number; y: number; w: number; h: number };
+          const margin = typeof input.margin === 'number' ? input.margin : 128;
+          const { w: iw, h: ih } = seed.image;
+          const c = (v: number, max: number) => Math.min(max, Math.max(0, Math.round(v)));
+          const ax = c(r.x, iw);
+          const bx = c(r.x + r.w, iw);
+          const ay = c(r.y, ih);
+          const by = c(r.y + r.h, ih);
+          const [x0, x1] = [Math.min(ax, bx), Math.max(ax, bx)];
+          const [y0, y1] = [Math.min(ay, by), Math.max(ay, by)];
+          if (x1 <= x0 || y1 <= y0) return fail('out_of_bounds', 'the region is outside the image');
+          if (x1 - x0 < 16 || y1 - y0 < 16)
+            return fail('region_too_small', 'a region is at least 16 × 16 px');
+          const ox0 = Math.max(0, x0 - margin);
+          const oy0 = Math.max(0, y0 - margin);
+          const outer = {
+            x: ox0,
+            y: oy0,
+            w: Math.min(iw, x1 + margin) - ox0,
+            h: Math.min(ih, y1 + margin) - oy0,
+          };
+          if (outer.w > 4096 || outer.h > 4096)
+            return fail('region_too_large', 'the region plus its context margin is over 4096 px');
+          return {
+            inner: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 },
+            outer,
+            margin,
+            sent_w: outer.w,
+            sent_h: outer.h,
+            scale: 1,
+          };
+        },
         'plugin:event|listen': (input) => {
           const id = nextId++;
           const ev = String(input.event);

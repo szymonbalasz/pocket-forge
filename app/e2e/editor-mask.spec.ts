@@ -1,5 +1,4 @@
-// EDT slice 4: region tool, mask tools and undo (mocked core; rgn_region_fit falls back to the
-// local mock because the mocked core doesn't know it).
+// EDT slice 4: region tool, mask tools and undo (mocked core, including RGN's rgn_region_fit).
 import { expect, test, type Page } from '@playwright/test';
 
 import { hook, openMap, stageBox, view } from './edt-mock';
