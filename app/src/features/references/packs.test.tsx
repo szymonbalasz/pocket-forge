@@ -420,6 +420,27 @@ test('FR-REF-05 FR-REF-28 what a listing did is shown from the cards’ notices 
   expect(screen.queryByTestId('ref-home-notices')).toBeNull();
 });
 
+test('R61 a trashed pack.json has no Restore and is labelled as such', async () => {
+  setup({
+    trash: [
+      {
+        id: '01JMOCKTRASHPACKJSON000000',
+        kind: 'images',
+        pack_id: '01JMOCKPACKWEAPONS00000000',
+        pack_name: 'Weapons',
+        files: ['pack.json'],
+        trashed_at: '2026-11-08T12:00:00Z',
+        purge_at: '2026-12-08T12:00:00Z',
+        restorable: false,
+      },
+    ],
+  });
+  const row = await screen.findByTestId('ref-trash-item');
+  expect(row.textContent).toContain('Weapons’s older pack.json');
+  expect(row.textContent).not.toContain('1 image');
+  expect(within(row).queryByTestId('ref-trash-restore')).toBeNull();
+});
+
 test('FR-REF-12 Recently deleted shows the pack name and the purge date', async () => {
   setup();
   await waitFor(() => expect(cards()).toHaveLength(2));
@@ -428,7 +449,13 @@ test('FR-REF-12 Recently deleted shows the pack name and the purge date', async 
   fireEvent.click(await screen.findByTestId('ref-dialog-delete-confirm'));
   const row = await screen.findByTestId('ref-trash-item');
   expect(row.textContent).toContain('armour');
-  expect(row.textContent).toContain('until 2026-12-08');
+  // History's day format (walk R7), not the raw ISO date.
+  const day = new Date('2026-12-08T12:00:00Z').toLocaleDateString([], {
+    month: 'short',
+    day: 'numeric',
+  });
+  expect(row.textContent).toContain(`until ${day}`);
+  expect(row.textContent).not.toContain('2026-12-08');
   fireEvent.click(within(row).getByTestId('ref-trash-restore'));
   await waitFor(() => expect(cardNames()).toEqual(['armour', 'Weapons']));
   expect(core.calls.find((c) => c.cmd === 'ref_trash_restore')?.input).toEqual({

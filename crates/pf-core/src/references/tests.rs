@@ -560,7 +560,13 @@ fn fr_ref_28_pack_json_conflict_copy_later_updated_at_wins() {
     assert_eq!(cards[0].notes_first_line, "from the laptop");
     assert!(!dir.join("pack-LAPTOP.json").exists());
     let t = trash::list(&e.ctx, &e.settings);
-    assert_eq!(t[0].files, ["pack.json"], "the older one is restorable");
+    assert_eq!(t[0].files, ["pack.json"], "the older one is in the trash");
+    // R61 (like R57): it is not restorable, so it can't loop back as a conflict copy.
+    assert!(!t[0].restorable);
+    let err = trash::restore(&e.ctx, &e.settings, t[0].id).unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotRestorable);
+    assert_eq!(trash::list(&e.ctx, &e.settings).len(), 1, "still in the trash");
+    assert!(!dir.join("pack (2).json").exists());
     // An older conflict copy loses.
     let mut older = newer.clone();
     older.notes = "stale".into();
@@ -573,6 +579,15 @@ fn fr_ref_28_pack_json_conflict_copy_later_updated_at_wins() {
     let cards = packs::list_packs(&e.ctx, &e.settings);
     assert_eq!(cards[0].notes_first_line, "from the laptop");
     assert_eq!(cards[0].pack_id, Some(out.pack.pack_id));
+    let t = trash::list(&e.ctx, &e.settings);
+    assert_eq!(t[0].files, ["pack (2).json"]);
+    assert!(!t[0].restorable);
+    // Images and packs stay restorable.
+    let l = loc(&e, out.pack.pack_id);
+    let img = trash::remove_images(&e.ctx, &l, &["a.png".into()]).unwrap();
+    let t = trash::list(&e.ctx, &e.settings);
+    assert!(t.iter().find(|i| i.id == img).unwrap().restorable);
+    trash::restore(&e.ctx, &e.settings, img).unwrap();
 }
 
 #[test]

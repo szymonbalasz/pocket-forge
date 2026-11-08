@@ -49,6 +49,18 @@ pub struct TrashItem {
 }
 
 impl TrashItem {
+    /// R61 (like R57): a trashed `pack.json` (a conflict-resolution loser, or an unreadable one)
+    /// is not restorable. Back in the pack it can only land as a conflict copy, which the next
+    /// listing trashes again. Packs and images are.
+    pub fn restorable(&self) -> bool {
+        !(self.kind == TrashKind::Images
+            && !self.files.is_empty()
+            && self
+                .files
+                .iter()
+                .all(|f| f == PACK_FILE || naming::is_conflict_copy(f, PACK_FILE)))
+    }
+
     /// The pack folder name from `from`.
     pub fn pack_name(&self) -> &str {
         self.from
@@ -162,6 +174,8 @@ pub struct TrashEntry {
     pub trashed_at: Timestamp,
     /// When it will be purged.
     pub purge_at: Timestamp,
+    /// False for a trashed `pack.json` (R61): no Restore.
+    pub restorable: bool,
 }
 
 /// Every item of one root's trash, with its folder.
@@ -194,6 +208,7 @@ pub fn list(ctx: &Context, settings: &Settings) -> Vec<TrashEntry> {
             files: i.files.clone(),
             trashed_at: i.trashed_at,
             purge_at: i.trashed_at.plus(TRASH_KEEP),
+            restorable: i.restorable(),
         })
         .collect();
     out.sort_by(|a, b| b.trashed_at.cmp(&a.trashed_at).then(b.id.cmp(&a.id)));
@@ -215,6 +230,13 @@ pub fn restore(ctx: &Context, settings: &Settings, id: Ulid) -> CoreResult<PathB
         .ok_or_else(|| {
             CoreError::new(ErrorCode::UnknownId, format!("no trash item {id}")).with_field("id")
         })?;
+    if !item.restorable() {
+        return Err(CoreError::new(
+            ErrorCode::NotRestorable,
+            "a trashed pack.json can't be restored; the pack keeps the version that was kept",
+        )
+        .with_field("id"));
+    }
     item.restored_at = Some(ctx.now());
     write_item(ctx, &item_dir, &item)?;
     let path = finish_restore(ctx, settings, &root, &item_dir, &item)?;

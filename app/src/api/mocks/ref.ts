@@ -273,6 +273,7 @@ export function refMock(
       files,
       trashed_at: seed.now,
       purge_at: addDays(seed.now, 30),
+      restorable: true,
     };
     state.trash.unshift(item);
     return item;
@@ -591,6 +592,8 @@ export function refMock(
       const id = String(input.id);
       const item = state.trash.find((t) => t.id === id);
       if (!item) return fail('unknown_id', 'Unknown trash item');
+      if (item.restorable === false)
+        return fail('not_restorable', "A trashed pack.json can't be restored");
       const saved = trashed.get(id) ?? {
         pack_id: item.pack_id ?? newId('PACK'),
         name: item.pack_name,
