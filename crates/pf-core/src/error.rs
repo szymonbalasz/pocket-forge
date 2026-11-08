@@ -85,6 +85,23 @@ pub enum ErrorCode {
     Canceled,
     /// A re-pick that's no longer possible (R32, FR-RGN-36).
     RepickUnavailable,
+    /// A candidate that won't decode or doesn't belong to the job (RGN §9).
+    InvalidCandidate,
+    /// A file a re-tune or retry needs is gone (purged from the trash, RGN §9).
+    SourceMissing,
+    /// A ticked reference can't be read; `detail{key, reason}` (FR-REF-21).
+    ReferenceUnavailable,
+    /// A reference slot under its minimum; `detail{slot, min}` (FR-REF-18).
+    ReferencesRequired,
+    /// A reference slot over its maximum; `detail{slot, max}` (FR-REF-18).
+    TooManyReferences,
+    /// `project_conflict_get` / `project_resolve_conflict` without a conflict (FR-PRJ-36).
+    NoConflict,
+    /// The version to keep needs files that haven't synced yet (FR-PRJ-36).
+    FilesMissing,
+    /// `project_trash_restore` of an item kind the next sweep would trash again (R51, BL-24);
+    /// `detail.kind` names it.
+    NotRestorable,
 }
 
 impl ErrorCode {
@@ -136,6 +153,14 @@ impl ErrorCode {
             ErrorCode::HashMismatch => "hash_mismatch",
             ErrorCode::Canceled => "canceled",
             ErrorCode::RepickUnavailable => "repick_unavailable",
+            ErrorCode::InvalidCandidate => "invalid_candidate",
+            ErrorCode::SourceMissing => "source_missing",
+            ErrorCode::ReferenceUnavailable => "reference_unavailable",
+            ErrorCode::ReferencesRequired => "references_required",
+            ErrorCode::TooManyReferences => "too_many_references",
+            ErrorCode::NoConflict => "no_conflict",
+            ErrorCode::FilesMissing => "files_missing",
+            ErrorCode::NotRestorable => "not_restorable",
         }
     }
 }
@@ -219,7 +244,9 @@ impl From<pf_provider::ProviderError> for CoreError {
 pub fn is_locked(e: &std::io::Error) -> bool {
     // ERROR_SHARING_VIOLATION (32), ERROR_LOCK_VIOLATION (33), ERROR_ACCESS_DENIED (5) on rename
     // over a file another process has open.
-    cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33))
+    // `ResourceBusy` (EBUSY elsewhere) is treated the same, and is what the `Locked` fault returns.
+    (cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33)))
+        || e.kind() == std::io::ErrorKind::ResourceBusy
 }
 
 #[cfg(test)]

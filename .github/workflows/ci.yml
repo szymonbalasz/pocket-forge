@@ -82,6 +82,7 @@ jobs:
         with:
           key: ${{ matrix.crate }}
       - run: cargo clippy -p ${{ matrix.crate }} --all-targets --locked -- -D warnings
+      - run: cargo clippy -p ${{ matrix.crate }} --all-targets --release --locked -- -D warnings
       - run: cargo test -p ${{ matrix.crate }} --locked
 
   ui:

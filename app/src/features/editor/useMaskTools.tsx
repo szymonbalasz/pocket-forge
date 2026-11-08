@@ -72,11 +72,20 @@ export function useMaskTools({
     return () => mv.destroy();
   }, [maskLayer, project.project_id]);
 
-  // FR-EDT-28: submit before the project closes; retry a failed submit after the next commit
-  // (a resolved conflict, a released lock); a read-only change refreshes the status.
+  // FR-EDT-28: submit before the project closes, on PRJ's close guard (R55); a failed submit still
+  // closes (the status said unsaved). Retry a failed submit after the next commit (a resolved
+  // conflict, a released lock); a read-only change refreshes the status.
   useEffect(() => {
     bindRegionSink((r) => ctl.current?.applyValidated(r));
-    const off = projectStore.onBeforeClose(() => sync.current?.flush() ?? Promise.resolve());
+    const off = projectStore.addCloseGuard((proceed) => {
+      const s = sync.current;
+      if (!s?.pending) return true;
+      void s
+        .flush()
+        .catch(() => undefined)
+        .then(proceed);
+      return false;
+    });
     const sub = onEvent('project:committed', () => sync.current?.retry());
     return () => {
       bindRegionSink(null);
@@ -104,7 +113,11 @@ export function useMaskTools({
       region?: { inner?: Rect; margin?: number } | null;
     } | null;
     const inner = draft?.region?.inner;
-    if (inner && image) {
+    const restored = () => {
+      if (ctl.current === c) editorStore.set({ regionFor: project.project_id });
+    };
+    if (!inner) restored();
+    else {
       void (async () => {
         try {
           const r = await fitRegion(project.project_id, inner, draft?.region?.margin);
@@ -127,6 +140,7 @@ export function useMaskTools({
         } catch {
           // The saved region no longer fits: start without one.
         }
+        restored();
       })();
     }
     return undefined;
@@ -140,6 +154,8 @@ export function useMaskTools({
       setActiveMaskSync(null);
       editorStore.set({ maskStatus: { kind: 'none' } });
       undoStack.clear(); // KQ-16: history is per session.
+      // The region left behind is this session's; a reopen restores it again first.
+      editorStore.set({ regionFor: null });
     },
     [],
   );

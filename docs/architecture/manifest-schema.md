@@ -107,7 +107,7 @@
 `id`, `file` (`.pforge/masks/<id>.png`), `rect` (the region, inner), `created_at`.
 
 ### 4.5 Draft
-`final_prompt`, `model_id`, `controls{}` (keyed by capability control `name`, #37), `seed` (int \| null), `region` (`{inner, margin}` \| null), `mask_id` (latest mask, R7) \| null, `references` (#51, REF: `{packs: [{pack_id, name}], items: [{key, on, role \| null}]}` \| null; null = REF's defaults, FR-REF-17), `updated_at`.
+`final_prompt`, `model_id`, `controls{}` (keyed by capability control `name`, #37), `seed` (int \| null), `region` (`{inner, margin}` \| null), `mask_id` (latest mask, R7) \| null, `references` (#51, REF: `{packs: [{pack_id, name}], items: [{key, on, role \| null, retry_of?, changed?}]}` \| null; null = REF's defaults, FR-REF-17; an item's `role` is set only when the user chose one, null = the model's default, R53; `retry_of` = the iteration `NNN` a Retry restored the item from, `changed: true` when its bytes differ from what that job sent, FR-REF-26), `updated_at`.
 
 ### 4.6 Job (`.pforge/jobs/<id>/job.json`)
 | Field | Type | Notes |
@@ -174,7 +174,8 @@ Terminal = `failed | canceled | lost | closed`. A re-pick (RGN FR-RGN-36) accept
 | `provider_meta` | object | opaque (PRV) |
 | `status` | `new\|accepted\|dismissed\|discarded\|trashed\|invalid` | R10 |
 | `starred` | bool | separate from status; starred is never trashed |
-| `trash_id` | ULID \| null | set while the file is in the trash |
+| `trash_id` | ULID \| null | set while the file is in the trash; after a purge it still names the purged item |
+| `purged_at` | timestamp, optional | set when the 30-day purge deleted the file (FR-PRJ-32, BL-23); the record stays |
 
 - `new` = ready to compare · `accepted` · `dismissed` = left over when its job was resolved · `discarded` = the user discarded it · `trashed` = moved by a sweep (orphan, conflict) · `invalid` = won't decode. UI statuses (`pending|ready|invalid`) are EDT/RGN's only.
 - A rebuild (FR-PRJ-24, conflict) adds candidates listed in a job's `candidate_ids[]` but missing here, as `new` (or `invalid` if the file won't decode).
@@ -183,7 +184,7 @@ Terminal = `failed | canceled | lost | closed`. A re-pick (RGN FR-RGN-36) accept
 `id`, `kind` (`candidates|job_inputs|mask|layer|manifest|orphan|conflict_copy`), `files[]` (from → `.pforge/trash/<id>/<from>`; a restore moves it back to `<from>`, recreating its folder), `trashed_at`, `reason`. The manifest records the item first; the file moves follow the commit and are rolled forward on open. Purged when `trashed_at` + 30 days < now (at open).
 
 ### 4.9 Spool entry (`<data-dir>/pending/<project-id>/`)
-`<seq>.json` = `{seq, op: add_candidates|update_job, job_id, payload, created_at}`, plus `<seq>-<cand-id>.<ext>` bytes. Replayed in `seq` order once the project is writable; each entry is deleted after its commit.
+`<seq>.json` = `{seq, op: add_candidates|update_job, job_id, payload, created_at}`, plus `<seq>-<cand-id>.<ext>` bytes. Replayed in `seq` order once the project is writable; each entry is deleted after its commit. One the store refuses for good is deleted too, and `project:spool-dropped` tells the user (BL-25).
 
 ### 4.10 Export (manifest `export`, EXP owns the meaning)
 | Field | Type | Notes |
@@ -213,7 +214,7 @@ Owner of the meaning: [reference-packs](../specs/reference-packs.md) (REF). In `
 No `name`: the folder name is the pack name (OQ-REF-01).
 
 ### 4.13 References trash item
-`<library-root>/References/.pforge/trash/<item-id>/item.json` = `{schema_version, id, kind: pack|images, pack_id, from, files[], trashed_at}` (`from` = `References/<pack>` for a pack, the file names for images), plus the moved files under the same folder. `item.json` is written first; the move is rolled forward at startup. Purged when `trashed_at` + 30 days < now (FR-REF-12).
+`<library-root>/References/.pforge/trash/<item-id>/item.json` = `{schema_version, id, kind: pack|images, pack_id, from, files[], trashed_at, restored_at?}` (`from` = `References/<pack>` for a pack, the file names for images), plus the moved files under the same folder. `item.json` is written first; the move is rolled forward at startup. `restored_at` is set before a restore moves files back, so a restore interrupted by a crash is finished at startup (R50). Purged when `trashed_at` + 30 days < now (FR-REF-12).
 
 ## 5. `settings.json` (R8)
 | Section | Fields | Owner of the meaning |

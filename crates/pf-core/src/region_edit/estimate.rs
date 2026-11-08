@@ -17,17 +17,23 @@ pub const ESTIMATE_TTL_MS: i64 = 10 * 60 * 1000;
 /// Cached estimates kept per session.
 const MAX_CACHED: usize = 32;
 
-/// FR-RGN-13: `est-` + SHA-256 of the canonical JSON of the cost-affecting inputs.
+/// FR-RGN-13/42: `est-` + SHA-256 of the canonical JSON of the cost-affecting inputs. `refs` =
+/// REF's `estimate_inputs()`, the ordered `(slot, sent hash)` list of cost-affecting slots
+/// (FR-REF-24); an empty list leaves the id as it was before #51.
 pub fn estimate_id(
     model_id: &str,
     fit: &RegionFit,
     cost_inputs: &BTreeMap<String, Value>,
+    refs: &[(String, String)],
 ) -> String {
-    let canonical = serde_json::json!({
+    let mut canonical = serde_json::json!({
         "model": model_id,
         "sent": [fit.sent_w, fit.sent_h],
         "controls": cost_inputs,
     });
+    if !refs.is_empty() {
+        canonical["refs"] = serde_json::json!(refs);
+    }
     let digest = Sha256::digest(canonical.to_string().as_bytes());
     let hex: String = digest.iter().take(16).map(|b| format!("{b:02x}")).collect();
     format!("est-{hex}")
@@ -96,17 +102,32 @@ mod tests {
     fn fr_rgn_13_estimate_id_hashes_only_cost_affecting_inputs() {
         let mut c = BTreeMap::new();
         c.insert("num_samples".to_owned(), serde_json::json!(3));
-        let a = estimate_id("fake-white-edit", &fit(512, 512), &c);
+        let a = estimate_id("fake-white-edit", &fit(512, 512), &c, &[]);
         assert!(a.starts_with("est-") && a.len() == 36);
-        assert_eq!(a, estimate_id("fake-white-edit", &fit(512, 512), &c));
+        assert_eq!(a, estimate_id("fake-white-edit", &fit(512, 512), &c, &[]));
         // Region position doesn't matter, the sent size does.
         let mut moved = fit(512, 512);
         moved.outer.x = 99;
-        assert_eq!(a, estimate_id("fake-white-edit", &moved, &c));
-        assert_ne!(a, estimate_id("fake-white-edit", &fit(512, 520), &c));
-        assert_ne!(a, estimate_id("fake-black-edit", &fit(512, 512), &c));
+        assert_eq!(a, estimate_id("fake-white-edit", &moved, &c, &[]));
+        assert_ne!(a, estimate_id("fake-white-edit", &fit(512, 520), &c, &[]));
+        assert_ne!(a, estimate_id("fake-black-edit", &fit(512, 512), &c, &[]));
         c.insert("num_samples".to_owned(), serde_json::json!(4));
-        assert_ne!(a, estimate_id("fake-white-edit", &fit(512, 512), &c));
+        assert_ne!(a, estimate_id("fake-white-edit", &fit(512, 512), &c, &[]));
+    }
+
+    #[test]
+    fn fr_rgn_42_estimate_id_hashes_the_ordered_cost_affecting_refs() {
+        let c = BTreeMap::new();
+        let f = fit(512, 512);
+        let r = |s: &str, h: &str| (s.to_owned(), h.to_owned());
+        let id = |refs: &[(String, String)]| estimate_id("fake-black-edit", &f, &c, refs);
+        let none = id(&[]);
+        let a = id(&[r("style_refs", "sha256:a")]);
+        assert_ne!(none, a);
+        assert_ne!(a, id(&[r("style_refs", "sha256:c")]));
+        let ab = id(&[r("style_refs", "sha256:a"), r("style_refs", "sha256:b")]);
+        let ba = id(&[r("style_refs", "sha256:b"), r("style_refs", "sha256:a")]);
+        assert_ne!(ab, ba, "the list is ordered");
     }
 
     #[test]

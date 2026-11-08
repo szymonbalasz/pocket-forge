@@ -7,6 +7,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { portFree, requireEnvLocal, root } from './lib/env.mjs';
+import { killTree } from './lib/proc.mjs';
 
 const env = requireEnvLocal();
 const port = Number(env.PF_VITE_PORT);
@@ -18,10 +19,13 @@ if (!(await portFree(port))) {
 const childEnv = { ...process.env, ...env };
 const app = join(root, 'app');
 const shell = process.platform === 'win32';
+// No child reads the console: Vite's key shortcuts would bind stdin (BL-04), and Ctrl+C reaches
+// every process on the console anyway.
+const stdio = ['ignore', 'inherit', 'inherit'];
 const vite = spawn('corepack', ['pnpm', 'exec', 'vite', '--port', String(port), '--strictPort'], {
   cwd: app,
   env: childEnv,
-  stdio: 'inherit',
+  stdio,
   shell,
 });
 // The slot's dev URL, merged over tauri.conf.json through a config file (no shell quoting).
@@ -30,13 +34,16 @@ writeFileSync(config, JSON.stringify({ build: { devUrl: `http://localhost:${port
 const tauri = spawn('corepack', ['pnpm', 'exec', 'tauri', 'dev', '--config', shell ? `"${config}"` : config], {
   cwd: app,
   env: childEnv,
-  stdio: 'inherit',
+  stdio,
   shell,
 });
 
+let stopping = false;
 const stop = (code) => {
-  vite.kill();
-  tauri.kill();
+  if (stopping) return;
+  stopping = true;
+  killTree(vite);
+  killTree(tauri);
   process.exit(code ?? 0);
 };
 tauri.on('exit', stop);

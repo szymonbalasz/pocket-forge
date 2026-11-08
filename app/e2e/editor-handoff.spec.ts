@@ -188,3 +188,60 @@ test('BL-14 FR-EDT-27 a margin change in Generate redraws the outer rect; the ma
   expect((await hook<{ depth: number }>(page, 'undoDepth')).depth).toBe(depth);
   expect((await hook<{ full: number }>(page, 'mask')).full).toBe(400 * 400);
 });
+
+test('BL-26 a restored draft region reaches EDT through the region setter; the overlap is kept', async ({
+  page,
+}) => {
+  await openRgn(page);
+  await drawRegion(page, [400, 500], [800, 900]);
+  type Region = { inner: Rect; outer: Rect } | null;
+  const region = () => hook<Region>(page, 'region');
+  await expect
+    .poll(async () => (await region())?.inner)
+    .toEqual({ x: 400, y: 500, w: 400, h: 400 });
+  await page.getByTestId('edt-toolbar-fill').click();
+  const drafts = async () =>
+    (await calls(page)).filter((c) => c.cmd === 'project_put_draft').length;
+  await expect.poll(drafts).toBeGreaterThan(0); // the new region's own draft save (FR-PRJ-19)
+  const before = await drafts();
+  // History restore: the core brings back an older draft (another region, margin 64).
+  await page.evaluate(() => {
+    type Rec = Record<string, unknown>;
+    const w = window as unknown as Rec & {
+      __pfMock: { emit: (e: string, p: unknown) => void };
+    };
+    const restore = {
+      id: '01JREVRESTORE000000000000',
+      seq: 9,
+      created_at: '2026-11-08T12:00:00.000Z',
+      reason: 'restore',
+    };
+    w.__pfMockSnapshot = {
+      ...(w.__pfMockSnapshot as Rec),
+      revisions: [restore],
+      head_revision: restore.id,
+      draft: {
+        final_prompt: 'old prompt',
+        model_id: null,
+        controls: {},
+        seed: null,
+        region: { inner: { x: 600, y: 500, w: 400, h: 400 }, margin: 64 },
+        mask_id: null,
+        updated_at: '2026-11-08T12:00:00.000Z',
+      },
+    };
+    w.__pfMock.emit('project:committed', { seq: 99 });
+  });
+  await expect
+    .poll(async () => await region())
+    .toEqual({
+      inner: { x: 600, y: 500, w: 400, h: 400 },
+      outer: { x: 536, y: 436, w: 528, h: 528 },
+    });
+  // FR-EDT-20: the overlap (x 600..800) keeps its paint; the rest starts empty.
+  expect((await hook<{ full: number }>(page, 'mask')).full).toBe(200 * 400);
+  await expect(page.getByTestId('rgn-panel-prompt')).toHaveValue('old prompt');
+  // The restore wrote the draft already: EDT's echo of the region is not an edit.
+  await page.waitForTimeout(2500);
+  expect(await drafts()).toBe(before);
+});

@@ -43,6 +43,8 @@ export function installRgnMock(seed: RgnMockSeed): void {
     resolved: boolean;
     error: Rec | null;
     progress: number | null;
+    /** The job's `references[]` (FR-RGN-43), from the REF mock's prepare hook. */
+    refs: Rec[];
   }
   interface Cand {
     id: string;
@@ -287,12 +289,24 @@ export function installRgnMock(seed: RgnMockSeed): void {
     if (seed.costPerSample === 'unknown') return 'unknown';
     return countOf(c, controls) * (seed.costPerSample ?? 1) * (controls.hd === true ? 2 : 1);
   };
-  const estimateId = (draft: Rec, f: Rec, c: Capabilities) => {
+  /** FR-RGN-41: what REF would send (the REF mock's `prepare_for_send` hook, if installed). */
+  const sentRefs = async (draft: Rec, c: Capabilities): Promise<Rec[]> => {
+    const prep = handlers.__ref_prepare;
+    if (!c.slots?.length || !prep) return [];
+    return (await prep({
+      model_id: draft.model_id,
+      references: draft.references ?? null,
+    })) as Rec[];
+  };
+  /** FR-RGN-13/42: cost-affecting controls plus the ordered cost-affecting (slot, hash) list. */
+  const estimateId = (draft: Rec, f: Rec, c: Capabilities, refs: Rec[]) => {
     const controls = (draft.controls ?? {}) as Rec;
     const costly = c.controls
       .filter((x) => x.cost_affecting)
       .map((x) => `${x.name}=${JSON.stringify(controls[x.name] ?? null)}`);
-    return `est:${String(draft.model_id)}:${f.sent_w}x${f.sent_h}:${costly.join(',')}`;
+    const sent = refs.filter((r) => r.cost_affecting).map((r) => `${r.slot}=${r.content_hash}`);
+    const tail = sent.length ? `:refs=${sent.join(',')}` : '';
+    return `est:${String(draft.model_id)}:${f.sent_w}x${f.sent_h}:${costly.join(',')}${tail}`;
   };
 
   /** The prompt and seed are bound by role (R28); evaluate sees them under their names. A
@@ -387,9 +401,12 @@ export function installRgnMock(seed: RgnMockSeed): void {
       s.estimates++;
       const draft = input.draft as Rec;
       const ok = await checkDraft(draft);
+      const refs = await sentRefs(draft, ok.c);
       const cost = costOf(ok.c, (draft.controls ?? {}) as Rec);
       return {
-        estimate_id: estimateId(draft, ok.f, ok.c),
+        estimate_id: estimateId(draft, ok.f, ok.c, refs),
+        references: refs.length,
+        reference_notices: [],
         cost: { amount: cost, unit },
         fit: ok.f,
         candidate_count: countOf(ok.c, (draft.controls ?? {}) as Rec),
@@ -406,7 +423,8 @@ export function installRgnMock(seed: RgnMockSeed): void {
       if (snap.read_only) return fail('read_only', 'The project is read-only.');
       const draft = input.draft as Job['draft'];
       const ok = await checkDraft(draft, true);
-      if (estimateId(draft, ok.f, ok.c) !== input.estimate_id)
+      const refs = await sentRefs(draft, ok.c);
+      if (estimateId(draft, ok.f, ok.c, refs) !== input.estimate_id)
         return fail('estimate_stale', 'The estimate is out of date.');
       if (active()) return fail('job_active', 'A job is already running in this project.');
       const cost = costOf(ok.c, draft.controls);
@@ -436,6 +454,11 @@ export function installRgnMock(seed: RgnMockSeed): void {
         resolved: false,
         error: null,
         progress: 0,
+        refs: refs.map((r) => {
+          const row = { ...r };
+          delete row.cost_affecting;
+          return row;
+        }),
       };
       s.jobs.push(j);
       s.spend += amount;
@@ -453,10 +476,19 @@ export function installRgnMock(seed: RgnMockSeed): void {
       jobEvent(j);
       return { result: 'canceled' };
     },
-    rgn_job_retry_draft: (input: Rec) => {
+    rgn_job_retry_draft: async (input: Rec) => {
       const j = s.jobs.find((x) => x.id === input.job_id);
       if (!j) return fail('not_found', 'no such job');
-      return { ...JSON.parse(JSON.stringify(j.draft)), seed: j.draft.seed ?? null };
+      // FR-RGN-44 / FR-REF-26: the job's references back as the selection.
+      const retry = handlers.__ref_retry;
+      const references = retry
+        ? await retry({
+            rows: j.refs,
+            label: j.n === null ? 'the job' : String(j.n).padStart(3, '0'),
+            has_slots: !!caps(j.draft.model_id)?.slots?.length,
+          })
+        : null;
+      return { ...JSON.parse(JSON.stringify(j.draft)), seed: j.draft.seed ?? null, references };
     },
     rgn_job_dismiss: (input: Rec) => {
       const j = s.jobs.find((x) => x.id === input.job_id);
@@ -557,11 +589,19 @@ export function installRgnMock(seed: RgnMockSeed): void {
             returned: mine.length,
             cost: { amount: j.cost, unit },
             accepted_in_stack: inStack(j),
+            references: j.refs.length,
+            reference_files: j.refs.map((r) => ({
+              file: String(r.path).split('/').pop(),
+              pack_name: r.pack_name ?? null,
+              role: r.role ?? null,
+            })),
           };
         });
       return rows.reverse();
     },
     project_put_draft: (input: Rec) => {
+      const f = failOnce('project_put_draft');
+      if (f) return f;
       if (snap.read_only) return fail('read_only', 'The project is read-only.');
       snap.draft = { ...(snap.draft as Rec), ...(input.draft as Rec) };
       return { seq: s.nextId++ };
@@ -584,8 +624,11 @@ export function installRgnMock(seed: RgnMockSeed): void {
     },
     project_restore_revision: (input: Rec) => {
       const r = s.revs.find((x) => x.id === input.rev_id);
-      if (input.rev_id === 'r0') s.layers = [original];
-      else if (!r) return fail('unknown_id', 'no such revision');
+      // r0's draft is null (a fresh project); the mock doesn't keep later revisions' drafts.
+      if (input.rev_id === 'r0') {
+        s.layers = [original];
+        snap.draft = null;
+      } else if (!r) return fail('unknown_id', 'no such revision');
       else s.layers = r.layers.map((l) => ({ ...l }));
       const rev = {
         id: id('01JREV'),

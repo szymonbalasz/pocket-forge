@@ -1,6 +1,6 @@
 // EDT slice 5 (FR-EDT-18, 28, 29; R7): hands the live mask to PRJ's store (`put_mask`) through
 // `edt_mask_submit`. Triggers: ≥ 2 s after the last stroke end (debounced), before a job submit
-// (`flush`, RGN) and before the project closes (`flush`, PRJ store hook). A submit is skipped when
+// (`flush`, RGN) and before the project closes (`flush`, PRJ's close guard). A submit is skipped when
 // the bytes and rect equal the last successful submit (or the mask loaded on reopen). A read-only
 // project never submits (FR-EDT-29). `locked` / `conflict` / `io` keep the mask in memory, show
 // "unsaved" and retry at the next trigger or the next commit (EDT §11).
@@ -123,6 +123,12 @@ export class MaskSync {
 
   get current(): MaskStatus {
     return this.status;
+  }
+
+  /** True if `flush` may have to submit or wait (cheap: versions only). */
+  get pending(): boolean {
+    if (this.disposed || this.deps.readOnly() || !this.deps.buffer()) return false;
+    return this.inFlight !== null || this.timer !== null || !this.isClean(false);
   }
 
   private schedule(): void {

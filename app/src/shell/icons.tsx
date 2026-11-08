@@ -89,6 +89,14 @@ export const IconItems = make(
   <path d="M8 1.5 13.5 4.5v7L8 14.5l-5.5-3v-7L8 1.5Zm0 0v13M2.5 4.5 8 7.5l5.5-3" />,
   'Items',
 );
+export const IconReferences = make(
+  <>
+    <rect x="2" y="4.5" width="9" height="9" rx="1" />
+    <path d="M5 4.5v-2h9v9h-3" />
+    <path d="m2.5 12 2.5-3 2 2 1.5-1.5 2.5 2.5" />
+  </>,
+  'References',
+);
 export const IconSettings = make(
   <>
     <circle cx="8" cy="8" r="2" />

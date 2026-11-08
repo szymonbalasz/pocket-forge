@@ -36,16 +36,17 @@ export const editorBridge = {
   },
 
   /** BL-14: RGN's validated region (`rgn_region_fit` with its margin and model, or a Retry's
-   *  region). The outline redraws; a different inner rect is a region change (FR-EDT-20). */
-  setRegion(region: RegionState): void {
+   *  region, or a restored draft's, BL-26). The outline redraws; a different inner rect is a region
+   *  change (FR-EDT-20); null removes the region. */
+  setRegion(region: RegionState | null): void {
     regionSink?.(region);
   },
 };
 
-let regionSink: ((r: RegionState) => void) | null = null;
+let regionSink: ((r: RegionState | null) => void) | null = null;
 
 /** The canvas binds the region setter while a project is open (null unbinds). */
-export function bindRegionSink(sink: ((r: RegionState) => void) | null): void {
+export function bindRegionSink(sink: ((r: RegionState | null) => void) | null): void {
   regionSink = sink;
 }
 
@@ -72,4 +73,10 @@ export function flushMask(): Promise<MaskRef | null> {
 /** The validated region (R18) for RGN to fit and send; null while there is none. */
 export function useEditorRegion(): RegionState | null {
   return useEditor((s) => s.region);
+}
+
+/** The project whose saved region EDT has restored (null before): until it is the open project,
+ *  `useEditorRegion` is not that project's region and must not be saved into its draft. */
+export function useEditorRegionRestored(): string | null {
+  return useEditor((s) => s.regionFor);
 }

@@ -87,11 +87,18 @@ export interface FolderFile {
 
 export interface TrashItem {
   id: string;
-  /** Project-relative path the item came from. */
+  /** Project-relative path the item came from (the first of `files`). */
   path: string;
   kind: string;
   bytes: number;
   trashed_at: string;
+  /** Every project path in the item (core, PRJ slice 5). */
+  files?: string[];
+  /** `trashed_at` + 30 days (FR-PRJ-32). */
+  purge_at?: string;
+  reason?: string;
+  /** Restore is offered only when true: `candidates`, `job_inputs`, `conflict_copy` (R51). */
+  restorable: boolean;
 }
 
 export type DiskCategory =
@@ -111,6 +118,8 @@ export interface DiskUsage {
   trash_count: number;
   /** When the oldest trash item is purged (30 days, FR-PRJ-32), or null with an empty trash. */
   next_purge: string | null;
+  /** Sum of `bytes` (core). */
+  total?: number;
 }
 
 export interface Layer {
@@ -132,6 +141,8 @@ export interface Draft {
   seed: number | null;
   region: unknown;
   mask_id: string | null;
+  /** REF's selection (schema §4.5, #51); null = REF's defaults (FR-REF-17). */
+  references?: DraftReferences | null;
   updated_at: string;
 }
 
@@ -146,6 +157,33 @@ export interface RevisionEntry {
 }
 
 export type ReadOnlyReason = 'newer_version' | 'original_changed' | 'original_missing';
+
+/** `project_resolve_conflict` `keep` (FR-PRJ-36). */
+export type ConflictKeep = 'this' | 'other';
+
+/** One version in the conflict view (FR-PRJ-36). */
+export interface ConflictSide {
+  side: ConflictKeep;
+  /** `project.json`, the conflict copy's name, or null for this machine's state in memory. */
+  file: string | null;
+  readable: boolean;
+  committed_at: string | null;
+  seq: number | null;
+  machine: 'this' | 'other';
+  layers: Layer[];
+  newest_revision: RevisionEntry | null;
+  /** Files that version needs but haven't synced yet ("Still syncing"). */
+  missing_files: string[];
+  can_keep: boolean;
+}
+
+/** `project_conflict_get`. */
+export interface ConflictView {
+  /** `copy`: a `project.json` conflict copy; `seq`: changed on disk while open. */
+  source: 'copy' | 'seq';
+  this: ConflictSide;
+  other: ConflictSide;
+}
 
 /** `project_open` warning codes (asset-project §9): read-only reasons, `conflict`, `recovered`,
  *  `resumable`, `lost`, `original_missing` (Relink). */
@@ -188,6 +226,8 @@ export interface DraftInput {
   seed?: number | null;
   region?: unknown;
   mask_id?: string | null;
+  /** REF's selection (FR-REF-20, FR-PRJ-54). Sent only once the user changed it. */
+  references?: DraftReferences | null;
 }
 
 export interface ImageOpen {
@@ -256,8 +296,19 @@ export interface Capabilities {
   max_bytes: number;
   seed: boolean;
   prompt_required: boolean;
-  slots: { name: string; role: string | null; required: boolean }[];
+  slots: CapabilitySlot[];
   warnings: string[];
+}
+
+/** A reference image input of a model (FR-PRV-31, R49). `min` is 1 for a required input;
+ *  `array` = the input takes a list (`file_array`) rather than one file. */
+export interface CapabilitySlot {
+  name: string;
+  role: RefRole | null;
+  min: number;
+  max: number;
+  cost_affecting: boolean;
+  array: boolean;
 }
 
 /** One pyramid level (EDT Appendix B). `scale` = 1 / 2^level. */
@@ -384,6 +435,8 @@ export interface JobDraft {
   controls: Record<string, unknown>;
   /** Pinned seed, or null = random. */
   seed: number | null;
+  /** REF's selection (FR-RGN-41, schema §4.5); null/absent = REF's defaults (FR-REF-17). */
+  references?: DraftReferences | null;
 }
 
 export type SpendNeed = 'threshold' | 'unknown_cost' | 'set_cap';
@@ -400,6 +453,10 @@ export interface JobEstimate {
   needs: SpendNeed[];
   /** spend + estimate > cap: submit fails with `over_spend_cap` until the cap is raised. */
   over_cap: boolean;
+  /** References that will be sent, after dedupe (confirm text, FR-RGN-45). */
+  references: number;
+  /** REF's prepare notices (`duplicate`: identical bytes sent once, FR-REF-21). */
+  reference_notices: RefNotice[];
 }
 
 /** `rgn_spend_get` / `rgn_spend_set` result. */
@@ -461,6 +518,10 @@ export interface RgnIteration {
   returned: number;
   cost: CostValue | null;
   accepted_in_stack: boolean;
+  /** `references[]` count for the chip (FR-RGN-45). */
+  references: number;
+  /** The chip tooltip: each file sent, its pack (null = the project) and role (FR-RGN-45). */
+  reference_files: { file: string; pack_name: string | null; role: RefRole | null }[];
 }
 
 export interface RgnBlend {
@@ -474,6 +535,8 @@ export interface RgnPreview {
   key: string;
   url: string;
   rect: RectPx;
+  /** `colour_match_skipped`: under 1 % of the outer rect is unmasked (FR-RGN-26). */
+  notices?: string[];
 }
 
 /** A manifest candidate (schema §4.7) as `project_get` returns it. */
@@ -485,6 +548,8 @@ export interface CandidateRecord {
   status: 'new' | 'accepted' | 'dismissed' | 'discarded' | 'trashed' | 'invalid';
   starred: boolean;
   trash_id: string | null;
+  /** Set when the 30-day purge deleted the file (BL-23); `trash_id` then names the purged item. */
+  purged_at?: string;
   width?: number;
   height?: number;
   /** Aspect differs from the sent one by > 1 % (FR-RGN-24). */
@@ -497,7 +562,8 @@ export interface Commands {
   library_get_config: [Record<string, never>, LibraryConfig];
   library_set_roots: [{ roots: string[] }, LibraryConfig];
   project_open: [{ path: string }, ProjectSnapshot];
-  project_close: [Record<string, never>, Record<string, never>];
+  /** `force`: close although a save is still pending (FR-PRJ-21, `unsaved` otherwise). */
+  project_close: [{ force?: boolean }, Record<string, never>];
   project_get: [Record<string, never>, ProjectSnapshot | null];
   project_put_draft: [{ draft: DraftInput }, { seq: number }];
   project_save_revision: [{ label?: string }, RevisionEntry];
@@ -572,6 +638,26 @@ export interface Commands {
   project_trash_restore: [{ item_id: string }, Record<string, never>];
   project_disk_usage: [Record<string, never>, DiskUsage];
   project_relink_original: [{ path: string }, Record<string, never>];
+  // reference-packs §9 (#51, #54)
+  ref_list_packs: [Record<string, never>, PackCard[]];
+  ref_pack_get: [{ pack_id: string }, Pack];
+  ref_pack_create: [
+    { name: string; paths?: string[]; suffix_if_taken?: boolean },
+    { pack: Pack; items: PackAddItem[] },
+  ];
+  ref_pack_rename: [{ pack_id: string; name: string }, Pack];
+  ref_pack_update: [
+    { pack_id: string; notes?: string; roles?: Record<string, RefRole | null> },
+    Pack,
+  ];
+  ref_pack_add_images: [{ pack_id: string; paths: string[] }, { items: PackAddItem[]; pack: Pack }];
+  ref_pack_remove_images: [{ pack_id: string; files: string[] }, { item_id: string }];
+  ref_pack_delete: [{ pack_id: string }, { item_id: string }];
+  ref_trash_list: [Record<string, never>, RefTrashItem[]];
+  ref_trash_restore: [{ id: string }, { path: string }];
+  ref_resolve: [{ model_id: string; references: DraftReferences | null }, RefResolved];
+  project_conflict_get: [Record<string, never>, ConflictView];
+  project_resolve_conflict: [{ keep: ConflictKeep }, RevisionEntry];
 }
 
 export type CommandName = keyof Commands;
@@ -612,7 +698,160 @@ export interface Events {
   'export:canceled': { export_id: string };
   'import:progress': { done: number; total: number };
   'project:save-failed': { reason: string; retrying: boolean };
+  /** A spooled job write the store refused for good was deleted (BL-25). */
+  'project:spool-dropped': {
+    project_id: string;
+    job_id: string;
+    seq: number;
+    op: 'update_job' | 'add_candidates';
+    code: string;
+  };
   'project:conflict': Record<string, never>;
   'project:recovered': Record<string, never>;
   'project:thumb-updated': { project_id: string };
+  'ref:packs-changed': Record<string, never> | null;
+  'ref:add-progress': { done: number; total: number };
+  'ref:thumb-updated': { pack_id: string };
+  'ref:trash-purged': { count: number; bytes: number };
+}
+
+// ── Reference packs (REF §9, #51, #54; shapes final per R50, pf-core `references/`) ──────────
+
+/** A per-image role (FR-REF-11); `null` = none. */
+export type RefRole = 'style' | 'structure' | 'identity';
+
+export type PackBadge = 'not_ready' | 'not_available_offline' | 'conflict';
+
+/** Something a listing did that the user is told about (R50): `adopted`, `new_id`,
+ *  `conflict_resolved`, `pack_json_replaced`. */
+export interface RefNotice {
+  code: string;
+  message: string;
+  /** The item a `ref_resolve` notice is about. */
+  key?: string;
+}
+
+/** A packs-home card (FR-REF-06), from `pack.json`, the thumbnail and a directory listing. */
+export interface PackCard {
+  /** The pack id, or the folder path when the pack has no usable `pack.json` (record id). */
+  id: string;
+  /** null while the pack has no `pack.json` (`not_ready`, FR-REF-04): it can't be opened or
+   *  attached until a later listing adopts it. */
+  pack_id: string | null;
+  /** The folder name (OQ-REF-01). */
+  name: string;
+  /** Absolute pack folder. */
+  path: string;
+  image_count: number;
+  /** The first line of the notes ("" when none). */
+  notes_first_line: string;
+  /** `References/<pack>/.pforge/thumb.jpg` on the `pf-tiles` scheme, or null (placeholder). */
+  thumb_url: string | null;
+  badges: PackBadge[];
+  notices: RefNotice[];
+}
+
+export type PackImageState = 'ok' | 'cloud_only' | 'corrupt' | 'unsupported';
+
+/** A pack image (`ref_pack_get`, FR-REF-01, 14). */
+export interface PackImage {
+  file: string;
+  /** Absolute path. */
+  path: string;
+  bytes: number;
+  mtime: string;
+  w?: number;
+  h?: number;
+  role: RefRole | null;
+  state: PackImageState;
+  /** Thumbnail on the `pf-tiles` scheme (EDT `library` keys, FR-REF-14); absent = none. */
+  thumb_url?: string;
+}
+
+export interface Pack {
+  pack_id: string;
+  name: string;
+  /** Absolute pack folder. */
+  path: string;
+  notes: string;
+  images: PackImage[];
+}
+
+/** One source of `ref_pack_create` / `ref_pack_add_images` (FR-REF-07, 08). */
+export type PackAddItem =
+  | { status: 'added'; source: string; file: string }
+  | { status: 'already_in_pack'; source: string; file: string }
+  | { status: 'skipped'; source: string; reason: SkipReason };
+
+/** A Recently deleted row (FR-REF-12). */
+export interface RefTrashItem {
+  id: string;
+  kind: 'pack' | 'images';
+  pack_id: string | null;
+  pack_name: string;
+  files: string[];
+  trashed_at: string;
+  /** When it will be purged (30 days). */
+  purge_at: string;
+}
+
+/** The draft's `references` (schema §4.5). Retry (FR-REF-26) marks restored items with
+ *  `retry_of` (the iteration `NNN`) and `changed` (bytes differ from what that job sent). */
+export interface DraftReferences {
+  packs: { pack_id: string; name: string }[];
+  items: {
+    key: string;
+    on: boolean;
+    role: RefRole | null;
+    retry_of?: string;
+    changed?: boolean;
+  }[];
+}
+
+/** A model reference slot as `ref_resolve` reports it; `on` = items ticked in it. */
+export interface RefSlot {
+  name: string;
+  role: RefRole | null;
+  min: number;
+  max: number;
+  cost_affecting: boolean;
+  on: number;
+}
+
+export type RefItemState = 'ok' | 'cloud_only' | 'corrupt' | 'missing';
+
+/** An available item (FR-REF-16). Badges: `cloud`, `missing`, `corrupt`, `duplicate`,
+ *  `changed_since:<NNN>` (FR-REF-26). */
+export interface RefItem {
+  /** `project:<file>` or `pack:<pack_id>:<file>`. */
+  key: string;
+  source: 'project' | 'pack';
+  pack_id: string | null;
+  pack_name: string | null;
+  file: string;
+  role: RefRole | null;
+  /** The slot it is sent in. */
+  slot: string;
+  on: boolean;
+  state: RefItemState;
+  badges: string[];
+  /** False for missing and corrupt items (they can't be ticked). */
+  checkable: boolean;
+  thumb_key?: string;
+  thumb_url?: string;
+}
+
+/** `ref_resolve` (FR-REF-15..19, 27). */
+export interface RefResolved {
+  /** False when the model has no slots: the block is hidden (FR-REF-15). */
+  visible: boolean;
+  slots: RefSlot[];
+  items: RefItem[];
+  notices: RefNotice[];
+  /** The reconciled draft value, for the draft save (FR-REF-20). */
+  references: DraftReferences;
+  /** Every slot is at or over its `min` (FR-REF-18). */
+  ready: boolean;
+  /** Read-only project (FR-REF-27). */
+  read_only: boolean;
 }

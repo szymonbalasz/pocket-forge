@@ -20,6 +20,7 @@ pub mod masks;
 pub mod naming;
 pub mod project;
 mod provider_commands;
+pub mod references;
 pub mod region_edit;
 pub mod settings;
 pub mod thumb;

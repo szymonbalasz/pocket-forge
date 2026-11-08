@@ -17,5 +17,5 @@ export type { UndoEntry } from './undo';
 export { editorBridge, flushMask, thumbnailUrl } from './bridge';
 export type { CompareSource, PickerCandidate, PickerHandlers } from './store';
 // Read-only for RGN (R18): the validated region the region tool holds, or null.
-export { useEditorRegion } from './bridge';
+export { useEditorRegion, useEditorRegionRestored } from './bridge';
 export type { RegionState } from './store';

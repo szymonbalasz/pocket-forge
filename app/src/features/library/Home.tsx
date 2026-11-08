@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Popover } from 'radix-ui';
 
 import { onFileDrop, pickPaths } from '../../api';
+import { useHomeView } from '../../shared/home';
 import { IconPlus } from '../../shell/icons';
 import { projectStore, useProjectState } from '../../store/project';
 import { Card } from './Card';
@@ -16,7 +17,9 @@ import './library.css';
 
 export function Home() {
   const { project } = useProjectState();
-  if (project) return null;
+  const view = useHomeView();
+  // References shows REF's packs home in this slot instead (FR-PRJ-52).
+  if (project || view === 'references') return null;
   return <HomeView />;
 }
 
@@ -135,7 +138,9 @@ function HomeView() {
       </header>
       {lib.cards && lib.cards.length === 0 && !unavailable && (
         <div className="prj-home-empty" data-testid="prj-home-empty">
-          <p>Drop an image to start a {section.noun}</p>
+          <p>
+            Drop an image to start {/^[aeiou]/.test(section.noun) ? 'an' : 'a'} {section.noun}
+          </p>
           <p className="muted small">
             Drop image files or a folder here, paste an image, or use + New. Your files are copied;
             the originals stay where they are.

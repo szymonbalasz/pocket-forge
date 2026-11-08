@@ -17,6 +17,7 @@ import {
 } from '../../api';
 import { IconPlus } from '../../shell/icons';
 import { errorOf, projectStore, useProjectState } from '../../store/project';
+import { ConflictView } from './ConflictView';
 import { bytesLabel, CATEGORY_LABEL, dateLabel, revisionLabel, timeLabel } from './format';
 import './project.css';
 
@@ -69,6 +70,17 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
       {error && (
         <div className="banner banner-error" data-testid="prj-error" data-code={error.code}>
           {error.message}{' '}
+          {error.code === 'unsaved' && (
+            // FR-PRJ-21: closing with a save still pending asks first.
+            <button
+              type="button"
+              className="link"
+              data-testid="prj-panel-close-anyway"
+              onClick={() => void projectStore.close(true)}
+            >
+              Close anyway
+            </button>
+          )}{' '}
           <button type="button" className="link" onClick={() => projectStore.clearError()}>
             Dismiss
           </button>
@@ -133,11 +145,17 @@ const WARNING_TEXT: Record<string, string> = {
   newer_version: 'Made by a newer Pocket Forge. Read-only.',
   recovered: 'The project file was rebuilt from its revisions.',
   conflict: 'This project was also changed on another machine.',
+  folder_moved:
+    'This project’s folder was moved or renamed outside Pocket Forge, so changes aren’t saved. Reopen it from home.',
 };
 
 function Warnings({ project }: { project: ProjectSnapshot }) {
+  const { save } = useProjectState();
+  const [comparing, setComparing] = useState(false);
   const codes = new Set(project.warnings.map((w) => w.code));
   if (project.read_only) codes.add(project.read_only);
+  if (save.kind === 'conflict') codes.add('conflict');
+  if (save.kind === 'failed' && save.code === 'folder_moved') codes.add('folder_moved');
   if (codes.size === 0) return null;
   return (
     <div className="prj-warnings">
@@ -153,9 +171,31 @@ function Warnings({ project }: { project: ProjectSnapshot }) {
           >
             {WARNING_TEXT[code] ?? w?.message ?? code}
             {code === 'original_missing' && <Relink />}
+            {code === 'folder_moved' && (
+              // §11: closing asks first when the draft couldn't be saved (FR-PRJ-21).
+              <button
+                type="button"
+                className="link"
+                data-testid="prj-panel-reopen-home"
+                onClick={() => void projectStore.close()}
+              >
+                Back to home
+              </button>
+            )}
+            {code === 'conflict' && (
+              <button
+                type="button"
+                className="link"
+                data-testid="prj-panel-conflict-open"
+                onClick={() => setComparing(true)}
+              >
+                Compare versions
+              </button>
+            )}
           </div>
         );
       })}
+      <ConflictView open={comparing} onClose={() => setComparing(false)} />
     </div>
   );
 }
@@ -545,19 +585,21 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
             >
               <span className="prj-file-name">{t.path.split('/').pop()}</span>
               <span className="prj-file-size tabular">{bytesLabel(t.bytes)}</span>
-              <button
-                type="button"
-                className="link"
-                data-testid="prj-panel-storage-restore"
-                disabled={readOnly}
-                onClick={() =>
-                  api.project
-                    .trashRestore(t.id)
-                    .then(load, (e: unknown) => setError(errorOf(e).message))
-                }
-              >
-                Restore
-              </button>
+              {t.restorable && (
+                <button
+                  type="button"
+                  className="link"
+                  data-testid="prj-panel-storage-restore"
+                  disabled={readOnly}
+                  onClick={() =>
+                    api.project
+                      .trashRestore(t.id)
+                      .then(load, (e: unknown) => setError(errorOf(e).message))
+                  }
+                >
+                  Restore
+                </button>
+              )}
             </li>
           ))}
         </ul>

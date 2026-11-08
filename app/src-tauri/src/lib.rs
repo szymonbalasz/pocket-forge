@@ -19,16 +19,48 @@ impl EventSink for TauriEvents {
     }
 }
 
-/// The UI calls this once it has rendered and reached the core. In test builds with
+/// `tauri:smoke` steps. Debug builds only: none of this is compiled into release (R46).
+#[cfg(debug_assertions)]
+mod smoke {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static TILE_ASKED: AtomicBool = AtomicBool::new(false);
+
+    pub fn enabled() -> bool {
+        std::env::var("PF_SMOKE").is_ok_and(|v| v == "1")
+    }
+
+    /// `PF_SMOKE_TILE_IMAGE`, handed out once, after the shell reported ok (BL-07).
+    pub fn tile_image(ok: bool) -> Option<String> {
+        if !ok || TILE_ASKED.swap(true, Ordering::SeqCst) {
+            return None;
+        }
+        std::env::var("PF_SMOKE_TILE_IMAGE")
+            .ok()
+            .filter(|p| !p.is_empty())
+    }
+}
+
+/// The UI calls this once it has rendered and reached the core. In debug builds with
 /// `PF_SMOKE=1` it ends the process (exit 0 if `ok`), which is how `tauri:smoke` knows the
-/// window loaded. Otherwise it only logs.
+/// window loaded. With `PF_SMOKE_TILE_IMAGE` set as well, the first `ok` report instead returns
+/// that image: the UI opens it through the core, fetches tile 0/0_0 through the `pf-tiles`
+/// scheme and reports again (R46). Otherwise it only logs and returns null.
 #[tauri::command]
-fn app_ready(app: AppHandle, ok: bool, detail: String) {
+fn app_ready(app: AppHandle, ok: bool, detail: String) -> Option<String> {
     tracing::info!(ok, %detail, "UI ready");
-    if cfg!(debug_assertions) && std::env::var("PF_SMOKE").is_ok_and(|v| v == "1") {
+    #[cfg(debug_assertions)]
+    if smoke::enabled() {
+        if let Some(image) = smoke::tile_image(ok) {
+            println!("PF_SMOKE shell ok {detail}");
+            return Some(image);
+        }
         println!("PF_SMOKE {} {detail}", if ok { "ok" } else { "failed" });
         app.exit(if ok { 0 } else { 1 });
     }
+    #[cfg(not(debug_assertions))]
+    let _ = app;
+    None
 }
 
 fn scheme_response(core: &Core, path: &str) -> Response<Vec<u8>> {
@@ -78,6 +110,22 @@ pub fn run() {
             tracing::info!(?ctx, "starting");
             let core = Core::new(ctx).map_err(|e| e.to_string())?;
             app.manage(core);
+            // RGN's job runner polls on its own thread while the app runs (FR-RGN-35).
+            let handle = app.handle().clone();
+            std::thread::Builder::new()
+                .name("pf-rgn-runner".into())
+                .spawn(move || {
+                    let core = handle.state::<Core>();
+                    pf_core::region_edit::runner::run_pump(&core)
+                })?;
+            // FR-PRJ-21/40: retry saves that failed with `locked` and replay the spool.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(pf_core::project::SAVE_RETRY_EVERY);
+                    pf_core::project::commands::retry_pending_saves(&handle.state::<Core>());
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

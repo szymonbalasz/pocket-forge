@@ -68,3 +68,11 @@ export function trashOnSubmit(rows: RgnIteration[], all: CandidateRecord[]): num
     (c) => c.job_id === first.job_id && c.status === 'new' && !c.starred && c.trash_id === null,
   ).length;
 }
+
+/** FR-RGN-45: the `N refs` chip tooltip, one line per file sent: name, "project" or its pack,
+ *  and its role when it has one. */
+export function refsTooltip(row: RgnIteration): string {
+  return (row.reference_files ?? [])
+    .map((f) => [f.file, f.pack_name ?? 'project', f.role].filter(Boolean).join(' · '))
+    .join('\n');
+}

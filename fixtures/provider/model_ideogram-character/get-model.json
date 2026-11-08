@@ -123,6 +123,12 @@
                 }
               },
               {
+                "name": "styleReferenceImages",
+                "type": "file_array",
+                "kind": "image",
+                "max": 4
+              },
+              {
                 "name": "characterReferenceImages",
                 "type": "file_array",
                 "kind": "image",

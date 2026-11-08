@@ -269,6 +269,23 @@ describe('validated region from RGN', () => {
 });
 
 describe('cost per dab', () => {
+  test('R55 pending (the close guard holds only then): unsaved edits or a submit in flight', async () => {
+    const r = rig();
+    expect(r.sync.pending).toBe(false); // no region
+    r.ctl.load(region, null);
+    await vi.advanceTimersByTimeAsync(MASK_SUBMIT_DEBOUNCE_MS);
+    expect(r.sent).toHaveLength(0);
+    expect(r.sync.pending).toBe(false); // an empty new mask isn't worth a file
+    stroke(r.ctl, 12, 30);
+    expect(r.sync.pending).toBe(true);
+    await r.sync.flush();
+    expect(r.sent).toHaveLength(1);
+    expect(r.sync.pending).toBe(false);
+    stroke(r.ctl, 12, 30);
+    r.readOnly.value = true;
+    expect(r.sync.pending).toBe(false); // read-only never submits (FR-EDT-29)
+  });
+
   test('FR-EDT-28 §12 a dab never scans the buffer; the debounce checks it once', async () => {
     const r = rig();
     // A new, never-saved 4096² mask: the "is it still empty?" check is a full scan.

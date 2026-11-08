@@ -119,6 +119,8 @@ pub(super) fn load_history(p: &mut OpenProject) -> CoreResult<()> {
 pub(super) fn on_open(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> CoreResult<()> {
     let mut lost = vec![];
     if p.read_only.is_none() {
+        // FR-PRJ-34, OQ-PRJ-10 A: settle job.json copies before rolling jobs forward.
+        super::conflict::settle_job_copies(ctx, p);
         let now = ctx.now();
         let ids: Vec<Ulid> = p.jobs.keys().copied().collect();
         for id in ids {
@@ -164,12 +166,21 @@ pub(super) fn on_open(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> C
             }
         }
         apply_file_moves(p);
-        let orphans = find_orphans(p);
-        if !orphans.is_empty() {
-            commit(ctx, install_id, p, |ctx, _, m, _| {
-                super::store::trash_files(ctx, m, TrashKind::Orphan, orphans, "orphan");
-                Ok(())
-            })?;
+        // Nothing is committed while a conflict waits for the user's pick (FR-PRJ-36).
+        if p.conflict.is_none() {
+            let orphans = find_orphans(p);
+            if !orphans.is_empty() || !super::conflict::side_copies(p).is_empty() {
+                commit(ctx, install_id, p, |ctx, _, m, _| {
+                    if !orphans.is_empty() {
+                        super::store::trash_files(ctx, m, TrashKind::Orphan, orphans, "orphan");
+                    }
+                    Ok(())
+                })?;
+            }
+            // FR-PRJ-32: items older than 30 days are deleted. Not fatal: retried next open.
+            if let Err(e) = super::retention::purge_expired(ctx, install_id, p) {
+                tracing::warn!(error = %e, "trash purge failed; retried at the next open");
+            }
         }
     }
     if !lost.is_empty() {
@@ -316,39 +327,12 @@ pub(super) fn rebuild_manifest(
     };
     let original = rebuild_original(ctx, dir)?;
     let jobs = load_jobs(dir);
-    let mut candidates = vec![];
-    for job in jobs.values() {
-        let Some(it) = &job.iteration else { continue };
-        let files = read_dir_names(&dir.join(&it.dir));
-        for (index, id) in job.candidate_ids.iter().enumerate() {
-            let prefix = format!("{:02}.", index + 1);
-            let Some(name) = files.iter().find(|f| f.starts_with(&prefix)) else {
-                continue;
-            };
-            let rel = format!("{}/{name}", it.dir);
-            let probe = pf_imaging::probe_file(&dir.join(&rel)).ok();
-            let accepted = newest.layers.iter().any(|l| l.candidate_id == Some(*id));
-            candidates.push(Candidate {
-                id: *id,
-                job_id: job.id,
-                index: index as u32,
-                file: rel,
-                format: probe.map_or("unknown".into(), |i| i.format.as_str().into()),
-                width: probe.map_or(0, |i| i.width),
-                height: probe.map_or(0, |i| i.height),
-                seed: None,
-                provider_meta: serde_json::Value::Null,
-                status: match (accepted, probe) {
-                    (true, _) => CandidateStatus::Accepted,
-                    (false, Some(_)) => CandidateStatus::New,
-                    (false, None) => CandidateStatus::Invalid,
-                },
-                starred: false,
-                trash_id: None,
-                extra: Extra::new(),
-            });
-        }
-    }
+    let accepted: HashSet<Ulid> = newest
+        .layers
+        .iter()
+        .filter_map(|l| l.candidate_id)
+        .collect();
+    let candidates = candidates_from_jobs(dir, &jobs, &accepted);
     let masks = rebuild_masks(dir, newest, &jobs);
     let kind = library::kind_of_folder(dir).unwrap_or(Kind::Map);
     let first = &revs[0];
@@ -374,6 +358,68 @@ pub(super) fn rebuild_manifest(
         export: None,
         extra: Extra::new(),
     }))
+}
+
+/// Candidates listed in the jobs' `candidate_ids[]` whose files are in their iteration folder
+/// (schema §4.7: a rebuild adds them as `new`, `invalid` if the file won't decode, `accepted`
+/// if a layer uses it).
+fn candidates_from_jobs(
+    dir: &Path,
+    jobs: &BTreeMap<Ulid, JobFile>,
+    accepted: &HashSet<Ulid>,
+) -> Vec<Candidate> {
+    let mut candidates = vec![];
+    for job in jobs.values() {
+        let Some(it) = &job.iteration else { continue };
+        let files = read_dir_names(&dir.join(&it.dir));
+        for (index, id) in job.candidate_ids.iter().enumerate() {
+            let prefix = format!("{:02}.", index + 1);
+            let Some(name) = files.iter().find(|f| f.starts_with(&prefix)) else {
+                continue;
+            };
+            let rel = format!("{}/{name}", it.dir);
+            let probe = pf_imaging::probe_file(&dir.join(&rel)).ok();
+            let accepted = accepted.contains(id);
+            candidates.push(Candidate {
+                id: *id,
+                job_id: job.id,
+                index: index as u32,
+                file: rel,
+                format: probe.map_or("unknown".into(), |i| i.format.as_str().into()),
+                width: probe.map_or(0, |i| i.width),
+                height: probe.map_or(0, |i| i.height),
+                seed: None,
+                provider_meta: serde_json::Value::Null,
+                status: match (accepted, probe) {
+                    (true, _) => CandidateStatus::Accepted,
+                    (false, Some(_)) => CandidateStatus::New,
+                    (false, None) => CandidateStatus::Invalid,
+                },
+                starred: false,
+                trash_id: None,
+                purged_at: None,
+                extra: Extra::new(),
+            });
+        }
+    }
+    candidates
+}
+
+/// FR-PRJ-36: after a conflict resolve, candidates the kept manifest doesn't list but a job
+/// file does are added (schema §4.7).
+pub(super) fn add_missing_candidates(p: &mut OpenProject) {
+    let accepted: HashSet<Ulid> = p
+        .manifest
+        .layers
+        .iter()
+        .filter_map(|l| l.candidate_id)
+        .collect();
+    let known: HashSet<Ulid> = p.manifest.candidates.iter().map(|c| c.id).collect();
+    let add: Vec<Candidate> = candidates_from_jobs(&p.dir, &p.jobs, &accepted)
+        .into_iter()
+        .filter(|c| !known.contains(&c.id))
+        .collect();
+    p.manifest.candidates.extend(add);
 }
 
 fn rebuild_original(ctx: &Context, dir: &Path) -> CoreResult<Original> {

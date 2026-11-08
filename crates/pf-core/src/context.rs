@@ -250,6 +250,8 @@ pub enum FaultAction {
     Abort,
     /// Return an I/O error (unit tests).
     Error,
+    /// Return a "file locked" error (unit tests, FR-PRJ-21).
+    Locked,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -263,6 +265,10 @@ struct FaultRule {
 /// Fault injection (AGENTS §9 `PF_FAULT`). Checks compile to nothing in release builds.
 #[derive(Debug, Default, Clone)]
 pub struct Faults {
+    #[cfg_attr(
+        not(debug_assertions),
+        expect(dead_code, reason = "`hit` compiles to nothing in release builds")
+    )]
     rule: Option<FaultRule>,
 }
 
@@ -326,6 +332,10 @@ impl Faults {
             FaultAction::Error => Err(std::io::Error::other(format!(
                 "injected fault at {point:?}"
             ))),
+            FaultAction::Locked => Err(std::io::Error::new(
+                std::io::ErrorKind::ResourceBusy,
+                format!("injected lock at {point:?}"),
+            )),
         }
     }
 

@@ -79,6 +79,9 @@ export interface EditorState {
   /** Export's px-per-square values (FR-EDT-04, FR-EXP-26); null until set. */
   pxPerSquare: { source: number | null; target: number | null };
   region: RegionState | null;
+  /** The project whose draft region the region tool has restored, or found none to restore
+   *  (FR-EDT-19); null until then. Before that, `region` isn't this project's yet. */
+  regionFor: string | null;
   undo: UndoSummary;
   compare: CompareSource | null;
   compareMode: CompareMode;
@@ -104,6 +107,7 @@ const initial: EditorState = {
   maskVisible: true,
   pxPerSquare: { source: null, target: null },
   region: null,
+  regionFor: null,
   undo: { depth: 0, redo: 0, label: null, busy: false, error: null },
   compare: null,
   compareMode: 'split',
