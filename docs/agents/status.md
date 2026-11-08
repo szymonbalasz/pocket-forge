@@ -9,15 +9,16 @@
 | Asset-project core + UI (slices 1–4) | — | merged | done | walkthrough pending |
 | Native file dialog (#53) | — | merged | done | — |
 | Backlog: BL-04/06/07/09/11 | `backlog` | `fix/backlog-1` | BL-07 in-app smoke (R46) | — |
-| Region-edit jobs (RGN 3–5) | `rgn-jobs` | `build/region-edit-jobs` | in progress | — |
+| Region-edit jobs (RGN 3–5) | — | merged | done | walkthrough needs fake job persistence (R48) |
 | Export commands (EXP 3, 5) | `exp-cmd` | `build/export-commands` | in progress | — |
 | Editor mask hand-off (EDT 5 + BL-10/14/16) | `edt-mask` | `build/editor-mask-handoff` | in progress | — |
 | Asset-project retention + conflicts (PRJ 5–6) | `prj-ret` | `build/asset-project-retention` | in progress | — |
-| Reference packs core (REF 1, 4) | `ref-core` | `build/reference-packs-core` | in progress | REF 4 needs REF 2 |
-| Provider references (REF 2) | `prv-ref` | `build/provider-references` | in progress | — |
-| Packs UI + References block (REF 3, 5) | `ref-ui` | `build/reference-packs-ui` | in progress | — |
-| Next: asset-project walkthrough | — | — | waiting | a free slot |
-| Later: REF 6 (RGN integration) | — | — | waiting | REF 4, 5 and RGN 3 merged |
+| Reference packs core (REF 1, 4) | — | merged | done | — |
+| Provider references (REF 2) | — | merged | done | — |
+| Packs UI + References block (REF 3, 5) | — | merged | done | — |
+| Asset-project walkthrough (steps 1–6, 9) | — | — | passed with defects (spinner race, draft rewrite, rename-while-open) | — |
+| Walkthrough fixes (spinner, draft) | `fix-prj` | `fix/walk-prj` | in progress | — |
+| REF 6 (RGN integration) | `ref-rgn` | `build/reference-packs-rgn` | in progress | — |
 
 ## Pending owner decisions
 - OQ-IMG-12: file the image-webp bug upstream? (not urgent)

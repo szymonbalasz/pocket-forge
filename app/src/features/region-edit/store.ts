@@ -33,6 +33,7 @@ import {
   thumbnailUrl,
   type PickerCandidate,
 } from '../editor';
+import { referencesBlocker, referencesDraft } from '../references';
 import type { ConfirmPlan } from './confirm';
 import {
   costSignature,
@@ -222,6 +223,8 @@ export function submitBlocker(s: RgnState): string | null {
     return s.fitError ? errorText(s.fitError.code, s.fitError.message) : 'Fitting the region…';
   if (!s.caps) return 'Pick a model.';
   if (!s.maskId) return 'Paint a mask inside the region first.';
+  const refs = referencesBlocker(); // FR-REF-18: a slot under its min
+  if (refs) return refs;
   const m = missing(s);
   if (m.length) return `Required: ${m.join(', ')}.`;
   if (s.estimate.status === 'error' && s.estimate.error)
@@ -296,6 +299,7 @@ function saveDraftSoon(): void {
         controls: Object.fromEntries(s.touched.map((n) => [n, s.values[n]])),
         seed: s.seedMode === 'pinned' ? s.seed : null,
         region: s.inner ? { inner: s.inner, margin: s.margin } : null,
+        ...referencesDraft(), // REF's selection (FR-REF-20)
       })
       .catch(() => undefined); // PRJ surfaces save problems; the next change retries.
   }, DRAFT_SAVE_MS);
@@ -630,6 +634,12 @@ export const rgn = {
       refreshProject(),
       loadModels(d?.controls ?? null),
     ]);
+  },
+
+  /** The References block changed (REF, FR-REF-20): re-render submit; save a user edit. */
+  referencesChanged(save: boolean): void {
+    set({});
+    if (save) saveDraftSoon();
   },
 
   detach(): void {

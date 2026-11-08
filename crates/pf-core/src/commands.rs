@@ -813,6 +813,14 @@ pub use crate::region_edit::commands::{
 };
 pub use crate::region_edit::jobs::{RgnJobCancel, RgnJobDismiss, RgnJobRetryDraft, RgnJobSubmit};
 
+// ---------------------------------------------------------------- reference packs
+
+/// Reference-pack commands live in their own module (reference-packs spec §9).
+pub use crate::references::commands::{
+    RefListPacks, RefPackAddImages, RefPackCreate, RefPackDelete, RefPackGet, RefPackRemoveImages,
+    RefPackRename, RefPackUpdate, RefResolve, RefTrashList, RefTrashRestore,
+};
+
 /// PRJ retention and conflict commands (asset-project §9, slices 5 and 6).
 pub use crate::project::commands::{
     ProjectConflictGet, ProjectDiskUsage, ProjectResolveConflict, ProjectTrashList,
@@ -880,6 +888,17 @@ registry![
     RgnCandidateDiscard,
     RgnPatchRetune,
     RgnIterationsList,
+    RefListPacks,
+    RefPackGet,
+    RefPackCreate,
+    RefPackRename,
+    RefPackUpdate,
+    RefPackAddImages,
+    RefPackRemoveImages,
+    RefPackDelete,
+    RefTrashList,
+    RefTrashRestore,
+    RefResolve,
     ProjectTrashList,
     ProjectTrashRestore,
     ProjectDiskUsage,

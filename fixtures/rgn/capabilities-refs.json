@@ -1,0 +1,115 @@
+{
+  "model_id": "fake-refs",
+  "operations": ["edit_masked"],
+  "controls": [
+    {
+      "name": "image",
+      "type": "image",
+      "role": "source",
+      "min": null,
+      "max": null,
+      "step": null,
+      "allowed": [],
+      "default": null,
+      "required": true,
+      "cost_affecting": false
+    },
+    {
+      "name": "mask",
+      "type": "mask",
+      "role": "mask",
+      "min": null,
+      "max": null,
+      "step": null,
+      "allowed": [],
+      "default": null,
+      "required": true,
+      "cost_affecting": false
+    },
+    {
+      "name": "text",
+      "type": "string",
+      "role": "prompt",
+      "min": null,
+      "max": null,
+      "step": null,
+      "allowed": [],
+      "default": null,
+      "required": true,
+      "cost_affecting": false
+    },
+    {
+      "name": "num_samples",
+      "type": "int",
+      "role": "candidate_count",
+      "min": 1,
+      "max": 4,
+      "step": 1,
+      "allowed": [],
+      "default": 2,
+      "required": false,
+      "cost_affecting": true
+    },
+    {
+      "name": "seed",
+      "type": "seed",
+      "role": "seed",
+      "min": 0,
+      "max": 4294967295,
+      "step": 1,
+      "allowed": [],
+      "default": null,
+      "required": false,
+      "cost_affecting": false
+    },
+    {
+      "name": "styleImages",
+      "type": "image",
+      "role": "reference",
+      "min": null,
+      "max": null,
+      "step": null,
+      "allowed": [],
+      "default": null,
+      "required": false,
+      "cost_affecting": true
+    },
+    {
+      "name": "characterImages",
+      "type": "image",
+      "role": "reference",
+      "min": null,
+      "max": null,
+      "step": null,
+      "allowed": [],
+      "default": null,
+      "required": false,
+      "cost_affecting": false
+    }
+  ],
+  "rules": [],
+  "mask": { "convention": "white_edit", "soft": { "rule": "pass_through" } },
+  "input_px": { "min": 256, "max": 2048, "multiple_of": 8 },
+  "max_bytes": 20971520,
+  "seed": true,
+  "prompt_required": true,
+  "slots": [
+    {
+      "name": "styleImages",
+      "role": "style",
+      "min": 0,
+      "max": 2,
+      "cost_affecting": true,
+      "array": true
+    },
+    {
+      "name": "characterImages",
+      "role": "identity",
+      "min": 0,
+      "max": 1,
+      "cost_affecting": false,
+      "array": true
+    }
+  ],
+  "warnings": []
+}

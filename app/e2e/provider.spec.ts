@@ -14,7 +14,7 @@ const base: ProviderSeed = {
 
 test('FR-PRV-07 fake mode shows the fake badge with its balance', async ({ page }) => {
   await mockProvider(page, { ...base, mode: 'fake' });
-  const chip = page.getByTestId('prv-header-chip');
+  const chip = page.getByTestId('prv-status-chip');
   await expect(chip).toHaveAttribute('data-state', 'fake');
   await expect(chip).toHaveText('Fake provider · 1,234 fake');
 });
@@ -23,7 +23,7 @@ test('FR-PRV-06 FR-PRV-07 save clears the fields, stores the key and shows its s
   page,
 }) => {
   await mockProvider(page, base);
-  const chip = page.getByTestId('prv-header-chip');
+  const chip = page.getByTestId('prv-status-chip');
   await expect(chip).toHaveAttribute('data-state', 'not_configured');
   await chip.click();
   await page.getByTestId('prv-settings-key').fill('dummy-key-abcd');
@@ -54,7 +54,7 @@ test('FR-PRV-07 test connection shows a spinner, then auth error links to settin
   page,
 }) => {
   await mockProvider(page, { ...base, stored: 'k-wxyz', testDelayMs: 300 });
-  const chip = page.getByTestId('prv-header-chip');
+  const chip = page.getByTestId('prv-status-chip');
   await chip.click();
   await page.getByTestId('prv-settings-test').click();
   await expect(page.getByTestId('prv-settings-spinner')).toBeVisible();
@@ -70,7 +70,7 @@ test('FR-PRV-07 test connection shows a spinner, then auth error links to settin
 
 test('FR-PRV-07 an unreachable provider shows offline', async ({ page }) => {
   await mockProvider(page, { ...base, stored: 'k-wxyz', testResult: 'offline' });
-  const chip = page.getByTestId('prv-header-chip');
+  const chip = page.getByTestId('prv-status-chip');
   await chip.click();
   await page.getByTestId('prv-settings-test').click();
   await expect(chip).toHaveAttribute('data-state', 'offline');
@@ -79,7 +79,7 @@ test('FR-PRV-07 an unreachable provider shows offline', async ({ page }) => {
 
 test('FR-PRV-07 a working connection shows ok and the balance', async ({ page }) => {
   await mockProvider(page, { ...base, stored: 'k-wxyz', testResult: 'ok' });
-  const chip = page.getByTestId('prv-header-chip');
+  const chip = page.getByTestId('prv-status-chip');
   await chip.click();
   await page.getByTestId('prv-settings-test').click();
   await expect(page.getByTestId('prv-settings-result')).toHaveText('Connected.');
