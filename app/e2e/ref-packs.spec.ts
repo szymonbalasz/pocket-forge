@@ -26,16 +26,17 @@ test('FR-REF-07 FR-REF-08 FR-REF-10 FR-REF-12 create → add → rename → dele
 }) => {
   await expect(names(page)).toHaveText(['armour', 'Weapons']);
   await expect(page.getByTestId('prj-rail-references')).toHaveAttribute('aria-current', 'page');
-  // Walk R7: the rail says "References" in full, inside its item.
+  // Walk R7: the rail says "References" in full, unclipped and inside the rail. (About 48 px in
+  // Segoe UI on Windows, the app's font; about 54 px in CI's Linux fallback font.)
   const label = page.getByTestId('prj-rail-references').locator('span');
   await expect(label).toHaveText('References');
   expect(await label.evaluate((e) => e.scrollWidth <= e.clientWidth + 0.5)).toBe(true);
-  const [rail, item] = await Promise.all([
+  const [text, rail] = await Promise.all([
     label.boundingBox(),
-    page.getByTestId('prj-rail-references').boundingBox(),
+    page.getByTestId('app-slot-rail').boundingBox(),
   ]);
-  expect(rail!.x).toBeGreaterThanOrEqual(item!.x);
-  expect(rail!.x + rail!.width).toBeLessThanOrEqual(item!.x + item!.width);
+  expect(text!.x).toBeGreaterThanOrEqual(rail!.x);
+  expect(text!.x + text!.width).toBeLessThanOrEqual(rail!.x + rail!.width);
 
   // + New pack "Swords" opens it, empty.
   await page.getByTestId('ref-home-new').click();
