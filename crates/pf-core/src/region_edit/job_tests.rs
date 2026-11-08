@@ -892,3 +892,628 @@ fn fr_rgn_39_a_kill_between_files_and_manifest_refetches_into_the_same_folder() 
         "files replaced, none added"
     );
 }
+
+// ---------------------------------------------------------------- slices 4–5: helpers
+
+/// The full flatten of the open project's current stack.
+fn flatten(lab: &Lab) -> RgbImage {
+    let src = super::pixel_source(&lab.core.ctx, &lab.core.state()).unwrap();
+    let stack = src.layer_stack().unwrap();
+    let (width, height) = src.image_size();
+    pf_imaging::compose_rect(
+        &stack,
+        pf_imaging::PixelRect {
+            x: 0,
+            y: 0,
+            width,
+            height,
+        },
+    )
+    .unwrap()
+}
+
+fn blend(feather: u32, colour: bool) -> Value {
+    json!({"feather_px": feather, "colour_match": colour})
+}
+
+fn accept(lab: &Lab, job: Ulid, cand: Ulid, b: Value) -> Result<Value, CoreError> {
+    lab.core.dispatch(
+        "rgn_candidate_accept",
+        json!({"job_id": job, "candidate_id": cand, "blend": b}),
+    )
+}
+
+fn snapshot(lab: &Lab) -> Value {
+    lab.core.dispatch("project_get", json!({})).unwrap()
+}
+
+fn restore(lab: &Lab, rev: &Value) -> Value {
+    lab.core
+        .dispatch("project_restore_revision", json!({"rev_id": rev}))
+        .unwrap()
+}
+
+fn layer_ids(lab: &Lab) -> Vec<Value> {
+    snapshot(lab)["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["id"].clone())
+        .collect()
+}
+
+fn last_layer(lab: &Lab) -> Value {
+    snapshot(lab)["layers"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone()
+}
+
+// ---------------------------------------------------------------- slice 4: preview
+
+#[test]
+fn fr_rgn_25_preview_is_baked_and_registered_under_a_transient_key() {
+    let lab = Lab::new();
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id)[0].id;
+    let seq = snapshot(&lab)["commit_seq"].clone();
+    let out = lab
+        .core
+        .dispatch(
+            "rgn_candidate_preview",
+            json!({"job_id": id, "candidate_id": c, "blend": blend(48, true)}),
+        )
+        .unwrap();
+    let key = out["key"].as_str().unwrap();
+    assert!(key.starts_with("t-"));
+    assert!(
+        out["url"]
+            .as_str()
+            .unwrap()
+            .ends_with(&format!("/i/{key}.png"))
+    );
+    // The cropped patch sits inside the region (the painted disc).
+    let r = &out["rect"];
+    assert!(r["x"].as_u64().unwrap() >= INNER.x as u64);
+    assert!(r["w"].as_u64().unwrap() < 300 && r["h"].as_u64().unwrap() < 200);
+    let served = lab.core.serve_scheme(&format!("/i/{key}.png"));
+    assert_eq!(served.status, 200);
+    let png = image::load_from_memory(&served.body).unwrap();
+    assert_eq!(
+        (png.width(), png.height()),
+        (
+            r["w"].as_u64().unwrap() as u32,
+            r["h"].as_u64().unwrap() as u32
+        )
+    );
+    assert_eq!(
+        snapshot(&lab)["commit_seq"],
+        seq,
+        "a preview writes nothing"
+    );
+    // Invalid candidates and foreign ids.
+    lab.core
+        .dispatch("rgn_job_dismiss", json!({"job_id": id}))
+        .unwrap();
+    lab.set_case("bad_candidate");
+    let id2 = lab.run("again");
+    let bad = lab.candidates(id2)[0].id;
+    let preview = |job: Ulid, cand: Ulid, b: Value| {
+        lab.core.dispatch(
+            "rgn_candidate_preview",
+            json!({"job_id": job, "candidate_id": cand, "blend": b}),
+        )
+    };
+    assert_eq!(
+        code(preview(id2, bad, blend(48, true))),
+        ErrorCode::InvalidCandidate
+    );
+    assert_eq!(
+        code(preview(id2, c, blend(48, true))),
+        ErrorCode::InvalidCandidate
+    );
+    assert_eq!(
+        code(preview(id2, bad, blend(300, true))),
+        ErrorCode::InvalidInput
+    );
+}
+
+#[test]
+fn fr_rgn_26_blend_controls_change_the_bake() {
+    let lab = Lab::new();
+    lab.set_case("offset(12)");
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id)[0].id;
+    let preview = |b: Value| {
+        lab.core
+            .dispatch(
+                "rgn_candidate_preview",
+                json!({"job_id": id, "candidate_id": c, "blend": b}),
+            )
+            .unwrap()
+    };
+    let hard = preview(blend(0, false));
+    let soft = preview(blend(96, true));
+    assert_ne!(
+        hard["rect"], soft["rect"],
+        "a wide feather eats the disc edge"
+    );
+    assert_eq!(hard["notices"], json!([]));
+}
+
+// ---------------------------------------------------------------- slice 5: accept
+
+#[test]
+fn fr_rgn_27_accept_is_one_commit_and_leaves_the_original_alone() {
+    let lab = Lab::new();
+    let id = lab.run("turn this room into a kitchen with a long prompt that goes on");
+    let before = flatten(&lab);
+    let hash = lab.manifest()["original"]["content_hash"].clone();
+    let seq = snapshot(&lab)["commit_seq"].as_u64().unwrap();
+    let cands = lab.candidates(id);
+    let out = accept(&lab, id, cands[0].id, blend(48, true)).unwrap();
+    let snap = snapshot(&lab);
+    assert_eq!(snap["commit_seq"].as_u64().unwrap(), seq + 1, "one commit");
+    let layer = last_layer(&lab);
+    assert_eq!(layer["id"], out["layer_id"]);
+    assert_eq!(layer["kind"], "patch");
+    assert_eq!(layer["scale"], json!(1.0));
+    assert_eq!(layer["rotation"], json!(0.0));
+    assert_eq!(layer["opacity"], json!(1.0));
+    assert_eq!(layer["visible"], json!(true));
+    assert_eq!(layer["job_id"], json!(id));
+    assert_eq!(layer["candidate_id"], json!(cands[0].id));
+    assert_eq!(layer["blend"]["feather_px"], json!(48));
+    assert_eq!(layer["blend"]["colour_match"]["on"], json!(true));
+    let rev = snap["revisions"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(rev["id"], out["revision_id"]);
+    assert_eq!(rev["reason"], "accept");
+    assert_eq!(
+        rev["label"],
+        json!("turn this room into a kitchen with a lon")
+    );
+    assert_eq!(lab.job(id).state, JobState::Closed);
+    assert!(lab.job(id).resolved_at.is_some());
+    assert_eq!(lab.manifest()["original"]["content_hash"], hash);
+    let original = original();
+    let after = flatten(&lab);
+    // Outside the region nothing changed; the patch covers the painted disc.
+    let mut changed = 0;
+    for (x, y, p) in after.enumerate_pixels() {
+        let inside = x >= INNER.x as u32
+            && x < (INNER.x as u32 + INNER.w)
+            && y >= INNER.y as u32
+            && y < (INNER.y as u32 + INNER.h);
+        if !inside {
+            assert_eq!(p, before.get_pixel(x, y), "({x},{y}) outside the region");
+        } else if p != original.get_pixel(x, y) {
+            changed += 1;
+        }
+    }
+    assert!(changed > 1000, "the patch is visible ({changed} px)");
+    // Reopen: pixel-identical.
+    lab.close();
+    lab.open();
+    assert_eq!(flatten(&lab), after);
+}
+
+#[test]
+fn fr_rgn_28_statuses_and_the_trash_on_accept() {
+    let lab = Lab::new();
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id);
+    lab.core
+        .dispatch(
+            "rgn_candidate_star",
+            json!({"job_id": id, "candidate_id": c[1].id, "starred": true}),
+        )
+        .unwrap();
+    accept(&lab, id, c[0].id, blend(96, true)).unwrap();
+    let c = lab.candidates(id);
+    assert_eq!(c[0].status, CandidateStatus::Accepted);
+    assert_eq!(c[1].status, CandidateStatus::Dismissed);
+    assert!(c[1].starred && c[1].trash_id.is_none(), "starred stays");
+    assert_eq!(c[2].status, CandidateStatus::Dismissed);
+    assert!(c[2].trash_id.is_some(), "unstarred to the trash");
+    let dir = lab.project_dir.join(lab.job(id).iteration.unwrap().dir);
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["01.png", "02.png"]);
+    let trashed = lab
+        .project_dir
+        .join(".pforge/trash")
+        .join(c[2].trash_id.unwrap().to_string());
+    assert!(trashed.join(&c[2].file).is_file(), "moved, not deleted");
+    // Accepted jobs keep their inputs (R9).
+    for f in lab.job(id).input_files() {
+        assert!(lab.project_dir.join(f).is_file());
+    }
+}
+
+#[test]
+fn fr_rgn_28_discard_and_star_restore() {
+    let lab = Lab::new();
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id);
+    lab.core
+        .dispatch(
+            "rgn_candidate_discard",
+            json!({"job_id": id, "candidate_id": c[2].id}),
+        )
+        .unwrap();
+    let c2 = &lab.candidates(id)[2];
+    assert_eq!(c2.status, CandidateStatus::Discarded);
+    assert!(c2.trash_id.is_some());
+    assert!(!lab.project_dir.join(&c2.file).exists(), "left results/");
+    lab.core
+        .dispatch(
+            "rgn_candidate_star",
+            json!({"job_id": id, "candidate_id": c[2].id, "starred": true}),
+        )
+        .unwrap();
+    assert!(
+        lab.project_dir.join(&c[2].file).is_file(),
+        "starring puts it back"
+    );
+    // Wrong job → invalid_candidate; unknown → unknown_id.
+    assert_eq!(
+        code(lab.core.dispatch(
+            "rgn_candidate_star",
+            json!({"job_id": Ulid::from_parts(1, 999), "candidate_id": c[0].id, "starred": true}),
+        )),
+        ErrorCode::InvalidCandidate
+    );
+    assert_eq!(
+        code(lab.core.dispatch(
+            "rgn_candidate_discard",
+            json!({"job_id": id, "candidate_id": Ulid::from_parts(1, 999)}),
+        )),
+        ErrorCode::UnknownId
+    );
+}
+
+#[test]
+fn fr_rgn_28_dismiss_trashes_leftovers_and_unkept_inputs() {
+    let lab = Lab::new();
+    let id = lab.run("kitchen");
+    let out = lab
+        .core
+        .dispatch("rgn_job_dismiss", json!({"job_id": id}))
+        .unwrap();
+    assert_eq!(out, json!({"trashed": 3}));
+    let job = lab.job(id);
+    assert_eq!(job.state, JobState::Closed);
+    assert!(job.resolved_at.is_some());
+    for f in job.input_files() {
+        assert!(!lab.project_dir.join(f).exists(), "R9: inputs trashed");
+    }
+    assert!(
+        !lab.project_dir.join(job.iteration.unwrap().dir).exists(),
+        "an emptied iteration folder is removed"
+    );
+    // A running job can't be dismissed.
+    let id = lab.submit("again");
+    assert_eq!(
+        code(lab.core.dispatch("rgn_job_dismiss", json!({"job_id": id}))),
+        ErrorCode::JobActive
+    );
+}
+
+#[test]
+fn fr_rgn_28_the_next_submit_resolves_the_previous_job() {
+    let lab = Lab::new();
+    let first = lab.run("kitchen");
+    let c = lab.candidates(first);
+    lab.core
+        .dispatch(
+            "rgn_candidate_star",
+            json!({"job_id": first, "candidate_id": c[0].id, "starred": true}),
+        )
+        .unwrap();
+    lab.submit("second");
+    let job = lab.job(first);
+    assert_eq!(job.state, JobState::Closed);
+    assert!(job.resolved_at.is_some());
+    let c = lab.candidates(first);
+    assert!(c[0].starred && c[0].trash_id.is_none());
+    assert!(c[1].trash_id.is_some() && c[2].trash_id.is_some());
+}
+
+#[test]
+fn fr_rgn_29_30_retune_and_undo_redo() {
+    let lab = Lab::new();
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id);
+    let r0 = snapshot(&lab)["head_revision"].clone();
+    let acc = accept(&lab, id, c[0].id, blend(96, true)).unwrap();
+    let accepted = flatten(&lab);
+    let old_file = lab.project_dir.join(format!(
+        ".pforge/layers/{}.png",
+        acc["layer_id"].as_str().unwrap()
+    ));
+    let ret = lab
+        .core
+        .dispatch(
+            "rgn_patch_retune",
+            json!({"layer_id": acc["layer_id"], "blend": blend(32, true)}),
+        )
+        .unwrap();
+    assert_ne!(ret["layer_id"], acc["layer_id"], "a new layer id");
+    let snap = snapshot(&lab);
+    let layer = last_layer(&lab);
+    assert_eq!(layer["id"], ret["layer_id"]);
+    assert_eq!(layer["retune_of"], acc["layer_id"]);
+    assert_eq!(layer["blend"]["feather_px"], json!(32));
+    assert_eq!(
+        snap["layers"].as_array().unwrap().len(),
+        2,
+        "replaced, not added"
+    );
+    assert_eq!(
+        snap["revisions"].as_array().unwrap().last().unwrap()["reason"],
+        "retune"
+    );
+    assert!(
+        old_file.is_file(),
+        "the old file stays, referenced by its revision"
+    );
+    assert_ne!(flatten(&lab), accepted);
+    // Undo the re-tune = restore its parent (the accept revision); redo = restore the re-tune.
+    restore(&lab, &acc["revision_id"]);
+    assert_eq!(flatten(&lab), accepted);
+    restore(&lab, &ret["revision_id"]);
+    assert_eq!(layer_ids(&lab).last().unwrap(), &ret["layer_id"]);
+    // Undo the accept: back to r0's stack. Candidate and job records are unchanged.
+    restore(&lab, &r0);
+    assert_eq!(layer_ids(&lab).len(), 1);
+    assert_eq!(lab.candidates(id)[0].status, CandidateStatus::Accepted);
+    assert_eq!(lab.job(id).state, JobState::Closed);
+    assert!(old_file.is_file(), "undo never deletes a file");
+    let reasons: Vec<String> = snapshot(&lab)["revisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["reason"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        reasons,
+        [
+            "create", "accept", "retune", "restore", "restore", "restore"
+        ]
+    );
+    // Close + reopen keeps the blend values (walkthrough 6).
+    restore(&lab, &ret["revision_id"]);
+    lab.close();
+    lab.open();
+    assert_eq!(last_layer(&lab)["blend"]["feather_px"], json!(32));
+}
+
+#[test]
+fn fr_rgn_36_repick_after_undo_including_a_trashed_candidate() {
+    let lab = Lab::new();
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id);
+    let r0 = snapshot(&lab)["head_revision"].clone();
+    accept(&lab, id, c[0].id, blend(48, true)).unwrap();
+    assert!(lab.candidates(id)[2].trash_id.is_some());
+    let spend = lab.core.dispatch("rgn_spend_get", json!({})).unwrap()["spend"].clone();
+    // Not while its patch is in the stack.
+    assert_eq!(
+        code(accept(&lab, id, c[2].id, blend(48, true))),
+        ErrorCode::RepickUnavailable
+    );
+    restore(&lab, &r0);
+    let out = accept(&lab, id, c[2].id, blend(48, true)).unwrap();
+    let after = lab.candidates(id);
+    assert_eq!(after[2].status, CandidateStatus::Accepted);
+    assert!(
+        after[2].trash_id.is_none(),
+        "restored from the trash in the same commit"
+    );
+    assert!(lab.project_dir.join(&after[2].file).is_file());
+    assert_eq!(
+        after[0].status,
+        CandidateStatus::Accepted,
+        "earlier accept keeps its status"
+    );
+    assert_eq!(lab.job(id).state, JobState::Closed);
+    let layer = last_layer(&lab);
+    assert_eq!(layer["id"], out["layer_id"]);
+    assert_eq!(layer["candidate_id"], json!(c[2].id));
+    assert_eq!(
+        lab.core.dispatch("rgn_spend_get", json!({})).unwrap()["spend"],
+        spend,
+        "no provider call, no spend"
+    );
+    // A newer job ends re-pick.
+    restore(&lab, &r0);
+    lab.run("a newer job");
+    assert_eq!(
+        code(accept(&lab, id, c[1].id, blend(48, true))),
+        ErrorCode::RepickUnavailable
+    );
+}
+
+#[test]
+fn fr_rgn_38_read_only_refuses_every_write_fast() {
+    let lab = Lab::new();
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id)[0].id;
+    let acc = accept(&lab, id, c, blend(48, true)).unwrap();
+    lab.core.state().project.as_mut().unwrap().read_only =
+        Some(crate::project::ReadOnlyReason::OriginalChanged);
+    let calls = [
+        (
+            "rgn_candidate_accept",
+            json!({"job_id": id, "candidate_id": c, "blend": blend(48, true)}),
+        ),
+        (
+            "rgn_candidate_star",
+            json!({"job_id": id, "candidate_id": c, "starred": true}),
+        ),
+        (
+            "rgn_candidate_discard",
+            json!({"job_id": id, "candidate_id": c}),
+        ),
+        (
+            "rgn_patch_retune",
+            json!({"layer_id": acc["layer_id"], "blend": blend(12, true)}),
+        ),
+        ("rgn_job_dismiss", json!({"job_id": id})),
+        ("rgn_job_estimate", json!({"draft": lab.draft("x")})),
+    ];
+    for (name, input) in calls {
+        assert_eq!(
+            code(lab.core.dispatch(name, input)),
+            ErrorCode::ReadOnly,
+            "{name}"
+        );
+    }
+    // Viewing still works.
+    assert!(lab.core.dispatch("rgn_iterations_list", json!({})).is_ok());
+}
+
+#[test]
+fn fr_rgn_40_iterations_list_newest_first_with_the_active_job() {
+    let lab = Lab::new();
+    let first = lab.run("kitchen");
+    let c = lab.candidates(first);
+    accept(&lab, first, c[0].id, blend(48, true)).unwrap();
+    let second = lab.run("a second idea");
+    let third = lab.submit("third");
+    let rows = lab.core.dispatch("rgn_iterations_list", json!({})).unwrap();
+    let rows = rows.as_array().unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0]["job_id"], json!(third));
+    assert_eq!(rows[0]["n"], Value::Null);
+    assert_eq!(rows[0]["state"], "submitted");
+    assert_eq!(rows[1]["job_id"], json!(second));
+    assert_eq!(rows[1]["n"], json!(2));
+    assert_eq!(rows[1]["dir"], "results/002 a second idea");
+    assert_eq!(rows[1]["slug"], "a second idea");
+    assert_eq!(rows[1]["returned"], json!(3));
+    assert_eq!(
+        rows[1]["kept"],
+        json!(0),
+        "resolved by the third submit, all trashed"
+    );
+    assert_eq!(rows[1]["accepted_in_stack"], json!(false));
+    assert_eq!(rows[2]["job_id"], json!(first));
+    assert_eq!(rows[2]["kept"], json!(1));
+    assert_eq!(rows[2]["accepted_in_stack"], json!(true));
+    assert_eq!(rows[2]["cost"]["amount"], json!(3.0));
+    assert_eq!(rows[2]["references"], json!(0));
+    lab.close();
+    assert_eq!(
+        code(lab.core.dispatch("rgn_iterations_list", json!({}))),
+        ErrorCode::NoProject
+    );
+}
+
+/// The seam fixture: texture noise in mid tones (nothing clamps under the fake's `offset(12)`),
+/// tall enough that the per-column means average out the fake's per-pixel edit noise.
+const SEAM_H: u32 = 2000;
+const SEAM_INNER: Rect = Rect {
+    x: 400,
+    y: 200,
+    w: 300,
+    h: 1600,
+};
+
+fn seam_fixture() -> RgbImage {
+    RgbImage::from_fn(W, SEAM_H, |x, y| {
+        let h =
+            (x.wrapping_mul(73_856_093) ^ y.wrapping_mul(19_349_663)).wrapping_mul(2_654_435_761);
+        let n = (h >> 24) as u8 % 48;
+        Rgb([70 + n, 90 + n / 2, 110 + n / 3])
+    })
+}
+
+#[test]
+fn fr_rgn_32_no_visible_seam_with_offset_12() {
+    let lab = Lab::with_original(seam_fixture());
+    let inner = SEAM_INNER;
+    // A hard vertical edge in the middle of the region: left half kept, right half edited.
+    let mask: Vec<u8> = (0..inner.w * inner.h)
+        .map(|i| if i % inner.w >= inner.w / 2 { 255 } else { 0 })
+        .collect();
+    let mask_id = lab.put_mask(inner, &mask);
+    let mut draft = lab.draft("kitchen");
+    draft["mask_id"] = json!(mask_id);
+    draft["region"]["inner"] = json!({"x": inner.x, "y": inner.y, "w": inner.w, "h": inner.h});
+    lab.set_case("offset(12)");
+    let id = lab.submit_draft(draft).unwrap();
+    lab.drive();
+    let c = lab.candidates(id)[0].clone();
+    let src = seam_fixture();
+    let edge = inner.x as u32 + inner.w / 2;
+    let (y0, y1) = (inner.y as u32, inner.y as u32 + inner.h);
+    // Mean (out − src) luma per column across the boundary.
+    let profile = |img: &RgbImage| {
+        let luma = |p: &Rgb<u8>| {
+            0.299 * f64::from(p.0[0]) + 0.587 * f64::from(p.0[1]) + 0.114 * f64::from(p.0[2])
+        };
+        (edge - 16..edge + 16)
+            .map(|x| {
+                (y0..y1)
+                    .map(|y| luma(img.get_pixel(x, y)) - luma(src.get_pixel(x, y)))
+                    .sum::<f64>()
+                    / f64::from(y1 - y0)
+            })
+            .collect::<Vec<f64>>()
+    };
+    let max_step = |p: &[f64]| {
+        p.windows(2)
+            .map(|q| (q[1] - q[0]).abs())
+            .fold(0.0, f64::max)
+    };
+
+    // A hard edge without colour match shows the seam.
+    let r0 = snapshot(&lab)["head_revision"].clone();
+    accept(&lab, id, c.id, blend(0, false)).unwrap();
+    let hard = max_step(&profile(&flatten(&lab)));
+    assert!(hard > 5.0, "the fixture does produce a seam ({hard})");
+    restore(&lab, &r0);
+
+    accept(&lab, id, c.id, blend(48, true)).unwrap();
+    let step = max_step(&profile(&flatten(&lab)));
+    assert!(step <= 0.5, "mean edge step {step} levels/px");
+    // The residual offset: the colour-matched candidate against the source on the context.
+    let layer = last_layer(&lab);
+    let g = &layer["blend"]["colour_match"]["gain"];
+    let o = &layer["blend"]["colour_match"]["offset"];
+    let cand = image::open(lab.project_dir.join(&c.file))
+        .unwrap()
+        .to_rgb8();
+    let outer: super::fit::RectPx =
+        serde_json::from_value(lab.job(id).region["outer"].clone()).unwrap();
+    let (mut sum, mut n) = (0.0, 0.0);
+    for y in 0..outer.h {
+        for x in 0..outer.w {
+            let (ix, iy) = (outer.x + x, outer.y + y);
+            let in_mask = ix >= edge && ix < inner.x as u32 + inner.w && iy >= y0 && iy < y1;
+            if in_mask {
+                continue;
+            }
+            for ch in 0..3 {
+                let v = f64::from(cand.get_pixel(x, y).0[ch]) * g[ch].as_f64().unwrap()
+                    + o[ch].as_f64().unwrap();
+                sum += v - f64::from(src.get_pixel(ix, iy).0[ch]);
+                n += 1.0;
+            }
+        }
+    }
+    let residual = (sum / n).abs();
+    eprintln!("FR-RGN-32: hard {hard:.2}, step {step:.3} levels/px, residual {residual:.3}");
+    assert!(residual <= 0.1, "residual offset {residual} levels");
+}

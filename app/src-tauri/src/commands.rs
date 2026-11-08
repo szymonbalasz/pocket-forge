@@ -72,6 +72,12 @@ tauri_commands! {
     rgn_job_cancel => c::RgnJobCancel,
     rgn_job_retry_draft => c::RgnJobRetryDraft,
     rgn_job_dismiss => c::RgnJobDismiss,
+    rgn_candidate_preview => c::RgnCandidatePreview,
+    rgn_candidate_accept => c::RgnCandidateAccept,
+    rgn_candidate_star => c::RgnCandidateStar,
+    rgn_candidate_discard => c::RgnCandidateDiscard,
+    rgn_patch_retune => c::RgnPatchRetune,
+    rgn_iterations_list => c::RgnIterationsList,
 }
 
 #[cfg(test)]

@@ -547,6 +547,24 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     );
   });
 
+  test('FR-RGN-26 a preview without enough context says colour match was skipped', async () => {
+    await submitted();
+    const handlers = (
+      window as unknown as { __pfMockHandlers: Record<string, (i: unknown) => unknown> }
+    ).__pfMockHandlers;
+    const preview = handlers.rgn_candidate_preview!;
+    handlers.rgn_candidate_preview = (i) => ({
+      ...(preview(i) as object),
+      notices: ['colour_match_skipped'],
+    });
+    act(() => mockControls().finish(2));
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(2));
+    fireEvent.click(screen.getAllByTestId('edt-picker-item')[0]!);
+    await waitFor(() =>
+      expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(/Colour match skipped/),
+    );
+  });
+
   test('FR-RGN-28 dismiss reports the trashed count', async () => {
     await submitted();
     act(() => mockControls().finish(3));

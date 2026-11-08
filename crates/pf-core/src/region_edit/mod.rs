@@ -10,6 +10,8 @@
 //! RGN reads pixels through [`pixels::PixelSource`] (PRJ's decoded original and mask store) and
 //! writes only through PRJ's store API (R4).
 
+pub mod blend;
+pub mod candidates;
 pub mod commands;
 pub mod controls;
 pub mod estimate;

@@ -778,6 +778,10 @@ impl Command for EdtTilesOpen {
 
 // ---------------------------------------------------------------- region edit
 
+pub use crate::region_edit::candidates::{
+    RgnCandidateAccept, RgnCandidateDiscard, RgnCandidatePreview, RgnCandidateStar,
+    RgnIterationsList, RgnPatchRetune,
+};
 /// Region-edit commands live in their own module (region-edit spec §9).
 pub use crate::region_edit::commands::{
     RgnControlsEvaluate, RgnJobEstimate, RgnRegionFit, RgnSpendGet, RgnSpendSet,
@@ -839,6 +843,12 @@ registry![
     RgnJobCancel,
     RgnJobRetryDraft,
     RgnJobDismiss,
+    RgnCandidatePreview,
+    RgnCandidateAccept,
+    RgnCandidateStar,
+    RgnCandidateDiscard,
+    RgnPatchRetune,
+    RgnIterationsList,
 ];
 
 #[cfg(test)]
