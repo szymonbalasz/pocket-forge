@@ -443,6 +443,36 @@ test('FR-PRJ-35 FR-PRJ-36 a conflict found mid-session shows the banner and the 
   expect(screen.getByTestId('prj-status-save').dataset.state).toBe('saved');
 });
 
+test('walk owner-UX L4 the conflict view has one primary Keep and says "1 file missing"', async () => {
+  await openCrypt();
+  const side = (which: 'this' | 'other', missing: string[]) => ({
+    side: which,
+    file: which === 'this' ? null : 'project.json',
+    readable: true,
+    committed_at: '2026-11-07T10:00:00.000Z',
+    seq: which === 'this' ? 3 : 9,
+    machine: which,
+    layers: [],
+    newest_revision: null,
+    missing_files: missing,
+    can_keep: missing.length === 0,
+  });
+  const p = mock.projects.get(CRYPT)!;
+  p.conflict = {
+    source: 'seq',
+    this: side('this', []),
+    other: side('other', ['patches/01P.png']),
+  };
+  act(() => core.emit('project:conflict', {}));
+  fireEvent.click(await screen.findByTestId('prj-panel-conflict-open'));
+  const keepThis = await screen.findByTestId('prj-conflict-keep-this');
+  expect(keepThis.classList.contains('primary')).toBe(true);
+  expect(screen.getByTestId('prj-conflict-keep-other').classList.contains('primary')).toBe(false);
+  expect(screen.getByTestId('prj-conflict-other-syncing').textContent).toBe(
+    'Still syncing (1 file missing)',
+  );
+});
+
 test('FR-PRJ-34 a conflict copy found at open shows Conflict in the status bar, not Saved (walk 2 N3)', async () => {
   await openCrypt({
     warnings: [{ code: 'conflict', message: 'This project was also changed on another machine.' }],

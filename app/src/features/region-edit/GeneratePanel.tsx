@@ -2,7 +2,7 @@
 // label) · Model (picker, capability controls per Appendix A, warnings) · Prompt · Seed · Cost
 // (estimate, session spend / cap) · Submit · blend controls while a candidate is selected.
 import { useEffect, useState } from 'react';
-import { Collapsible, Select, Slider, Switch } from 'radix-ui';
+import { Collapsible, Select, Slider, Switch, Tooltip } from 'radix-ui';
 
 import { useSlotIdle } from '../../shared/slot';
 import { useProjectState } from '../../store/project';
@@ -27,6 +27,8 @@ import {
   type RgnState,
 } from './store';
 import './rgn.css';
+
+const BLEND_TIP = 'Appends the blend instruction (Settings → Region edit) to the prompt';
 
 /** Binds the store to the open project and to EDT's region (R18). EDT's region is followed only
  *  once EDT has restored this project's saved region: before that it is null or the previous
@@ -252,18 +254,30 @@ function PromptSection({ s }: { s: RgnState }) {
         placeholder="Describe the change, e.g. turn this room into a kitchen"
         onChange={(e) => rgn.setPrompt(e.target.value)}
       />
-      <label className="rgn-check" title="Appends the blend instruction (Settings) to the prompt">
-        <Switch.Root
-          className="rgn-switch"
-          aria-label="Blend with surroundings"
-          data-testid="rgn-panel-blend-instruction"
-          checked={s.blendInstruction}
-          onCheckedChange={(v) => rgn.setBlendInstruction(v)}
-        >
-          <Switch.Thumb className="rgn-switch-thumb" />
-        </Switch.Root>
-        Blend with surroundings
-      </label>
+      {/* Walk owner-UX L4: a Radix tip, not a native title (ui-guidelines). */}
+      <Tooltip.Provider delayDuration={400}>
+        <Tooltip.Root>
+          <Tooltip.Trigger asChild>
+            <label className="rgn-check" data-tooltip={BLEND_TIP}>
+              <Switch.Root
+                className="rgn-switch"
+                aria-label="Blend with surroundings"
+                data-testid="rgn-panel-blend-instruction"
+                checked={s.blendInstruction}
+                onCheckedChange={(v) => rgn.setBlendInstruction(v)}
+              >
+                <Switch.Thumb className="rgn-switch-thumb" />
+              </Switch.Root>
+              Blend with surroundings
+            </label>
+          </Tooltip.Trigger>
+          <Tooltip.Portal>
+            <Tooltip.Content className="pf-tooltip" side="left" sideOffset={6}>
+              {BLEND_TIP}
+            </Tooltip.Content>
+          </Tooltip.Portal>
+        </Tooltip.Root>
+      </Tooltip.Provider>
       {draft && (
         <details className="rgn-final" data-testid="rgn-panel-final">
           <summary className="muted small">Final prompt (as sent)</summary>

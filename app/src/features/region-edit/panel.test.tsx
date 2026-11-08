@@ -831,6 +831,15 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect((screen.getAllByTestId('edt-picker-discard')[0] as HTMLButtonElement).disabled).toBe(
       true,
     );
+    // Walk owner-UX L4: Radix tips, not native titles.
+    const discard0 = screen.getAllByTestId('edt-picker-discard')[0]!;
+    expect(discard0.getAttribute('title')).toBeNull();
+    expect(discard0.closest('[data-tooltip]')?.getAttribute('data-tooltip')).toBe(
+      'The accepted candidate can’t be discarded',
+    );
+    expect(screen.getByTestId('edt-picker-discard-rest').className).toContain(
+      'edt-picker-discard-rest',
+    );
     fireEvent.click(screen.getByTestId('edt-picker-discard-rest'));
     await waitFor(() => expect(fake.callsOf('rgn_job_discard_rest')).toHaveLength(1));
     await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(2));

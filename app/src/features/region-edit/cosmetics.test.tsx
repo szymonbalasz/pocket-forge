@@ -71,6 +71,15 @@ test('FR-RGN-22 walk D7 the "can resume" banner stays while the job runs and end
   await waitFor(() => expect(resumable()).toBe(false));
 });
 
+test('walk owner-UX L4 the Blend toggle has a Radix tip, not a native title', async () => {
+  polyfillRadix();
+  fake = mockCore();
+  await open();
+  const label = screen.getByTestId('rgn-panel-blend-instruction').closest('label')!;
+  expect(label.getAttribute('title')).toBeNull();
+  expect(label.dataset.tooltip).toMatch(/blend instruction/);
+});
+
 test('walk D7 the session spend uses the provider’s unit before any estimate (fake: "fake")', async () => {
   polyfillRadix();
   fake = mockCore({ unit: 'fake' });

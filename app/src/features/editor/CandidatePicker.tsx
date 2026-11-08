@@ -153,24 +153,29 @@ export function EditorPicker() {
             >
               <IconStar size={14} fill={c.starred ? 'currentColor' : 'none'} />
             </button>
-            <button
-              type="button"
-              className="edt-tool edt-picker-btn"
-              data-testid="edt-picker-discard"
-              aria-label="Discard"
-              title={
+            {/* Walk owner-UX L4: a Radix tip, not a native title (ui-guidelines). */}
+            <Tip
+              side="top"
+              text={
                 c.accepted
                   ? 'The accepted candidate can’t be discarded'
                   : 'Discard: to the trash for 30 days (X, or Delete on a focused candidate)'
               }
-              disabled={c.status === 'pending' || c.accepted}
-              onClick={(e) => {
-                e.stopPropagation();
-                discardCandidate(c.id);
-              }}
             >
-              <IconTrash size={14} />
-            </button>
+              <button
+                type="button"
+                className="edt-tool edt-picker-btn"
+                data-testid="edt-picker-discard"
+                aria-label="Discard"
+                disabled={c.status === 'pending' || c.accepted}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  discardCandidate(c.id);
+                }}
+              >
+                <IconTrash size={14} />
+              </button>
+            </Tip>
           </div>
         </div>
       ))}
@@ -179,6 +184,7 @@ export function EditorPicker() {
         <Tip text={DISCARD_REST_TIP} side="top">
           <button
             type="button"
+            className="edt-picker-discard-rest"
             data-testid="edt-picker-discard-rest"
             onClick={() => handlers.onDiscardRest?.()}
           >
