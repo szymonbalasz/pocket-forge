@@ -13,7 +13,7 @@ import {
 } from '../../api';
 import { actions } from './actions';
 import { useTestHook } from './hook';
-import { dispatchShortcut, isTextTarget, type ShortcutMap } from './shortcuts';
+import { dispatchShortcut, isControlKey, isTextTarget, type ShortcutMap } from './shortcuts';
 import { editorStore, useEditor } from './store';
 import { editorBridge } from './bridge';
 import { CompareDivider } from './CompareDivider';
@@ -297,7 +297,8 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
         if (!editorStore.get().flipBefore) editorStore.set({ flipBefore: true });
         return;
       }
-      if (e.key === ' ' && !isTextTarget(e.target)) {
+      // Space on a focused button presses it (#48); elsewhere it holds temporary pan.
+      if (e.key === ' ' && !isControlKey(e)) {
         e.preventDefault();
         setSpaceHeld(true);
         return;

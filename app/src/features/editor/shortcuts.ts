@@ -1,5 +1,6 @@
 // Keyboard shortcuts (ui-guidelines: keyboard first). FR-EDT-30 / R23: single-key and bracket
-// shortcuts are ignored while a text input, textarea or contenteditable has focus.
+// shortcuts are ignored while a text input, textarea or contenteditable has focus. #48 (2): Enter
+// and Space go to a focused button or other interactive control first.
 
 /** True when the event target (or the focused element) takes text input. */
 export function isTextTarget(target: EventTarget | null): boolean {
@@ -12,6 +13,22 @@ export function isTextTarget(target: EventTarget | null): boolean {
   }
   if (el instanceof HTMLSelectElement) return true;
   return el instanceof HTMLElement && el.isContentEditable;
+}
+
+const CONTROLS =
+  'button, a[href], input, select, textarea, summary, [contenteditable=""], [contenteditable="true"], ' +
+  '[role="button"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], ' +
+  '[role="menuitem"], [role="link"]';
+
+/** True when the target (or the focused element) is a control that Enter or Space activates. */
+export function isControlTarget(target: EventTarget | null): boolean {
+  const el = (target instanceof Element ? target : null) ?? document.activeElement;
+  return !!el && (isTextTarget(el) || !!el.closest(CONTROLS));
+}
+
+/** #48 (2): Enter and Space belong to a focused button, link or field, not to a shortcut. */
+export function isControlKey(e: KeyboardEvent): boolean {
+  return (e.key === 'Enter' || e.key === ' ') && isControlTarget(e.target);
 }
 
 /** A normalised key chord: `Ctrl+Shift+Z`, `B`, `Shift+[`, `Space`, … (Meta counts as Ctrl). */
@@ -38,6 +55,7 @@ export function dispatchShortcut(e: KeyboardEvent, map: ShortcutMap): boolean {
   const c = chord(e);
   const h = map[c];
   if (!h) return false;
+  if (isControlKey(e)) return false;
   const modified = e.ctrlKey || e.metaKey || e.altKey;
   // In a text field: no single keys, and Ctrl+Z / Ctrl+Y stay the field's own undo.
   if (isTextTarget(e.target) && (!modified || /\+[ZY]$/.test(c))) return false;

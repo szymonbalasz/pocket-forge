@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 
-import { chord, dispatchShortcut } from './shortcuts';
+import { chord, dispatchShortcut, isControlKey } from './shortcuts';
 
 const key = (init: KeyboardEventInit, target?: EventTarget) => {
   const e = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
@@ -41,5 +41,36 @@ describe('shortcuts', () => {
     expect(dispatchShortcut(key({ key: 'b' }, document.body), map)).toBe(true);
     expect(fit).toHaveBeenCalledTimes(1);
     expect(b).toHaveBeenCalledTimes(2);
+  });
+
+  test('FR-EDT-25 FR-EDT-30 Enter and Space go to a focused button or control first (#48)', () => {
+    const enter = vi.fn();
+    const space = vi.fn();
+    const b = vi.fn();
+    const map = { Enter: enter, Space: space, B: b };
+    const button = document.createElement('button');
+    const link = Object.assign(document.createElement('a'), { href: '#x' });
+    const check = Object.assign(document.createElement('input'), { type: 'checkbox' });
+    const roleButton = document.createElement('div');
+    roleButton.setAttribute('role', 'button');
+    const icon = document.createElement('span');
+    button.append(icon);
+    for (const t of [button, link, check, roleButton, icon]) {
+      expect(isControlKey(key({ key: 'Enter' }, t))).toBe(true);
+      expect(isControlKey(key({ key: ' ' }, t))).toBe(true);
+      expect(dispatchShortcut(key({ key: 'Enter' }, t), map)).toBe(false);
+      expect(dispatchShortcut(key({ key: ' ' }, t), map)).toBe(false);
+    }
+    expect(enter).not.toHaveBeenCalled();
+    expect(space).not.toHaveBeenCalled();
+    // Other single keys still reach the shortcut on a focused button.
+    expect(dispatchShortcut(key({ key: 'b' }, button), map)).toBe(true);
+    // On the canvas (a plain focusable div) or the body, Enter and Space are shortcuts.
+    const canvas = Object.assign(document.createElement('div'), { tabIndex: -1 });
+    expect(isControlKey(key({ key: ' ' }, canvas))).toBe(false);
+    expect(dispatchShortcut(key({ key: 'Enter' }, canvas), map)).toBe(true);
+    expect(dispatchShortcut(key({ key: ' ' }, document.body), map)).toBe(true);
+    expect(enter).toHaveBeenCalledTimes(1);
+    expect(space).toHaveBeenCalledTimes(1);
   });
 });

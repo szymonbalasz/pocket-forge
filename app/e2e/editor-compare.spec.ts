@@ -120,3 +120,30 @@ test('FR-EDT-24 compare follows the selection: split divider drag, C switches to
   await expect.poll(() => fetched).toContain('http://pf-tiles.localhost/i/pv2.png');
   await expect.poll(() => hook<boolean>(page, 'compareLoaded')).toBe(true);
 });
+
+test('FR-EDT-25 Enter and Space on a focused button press it: Fit runs, no accept (#48)', async ({
+  page,
+}) => {
+  await page.keyboard.press('1');
+  await expect(page.getByTestId('edt-picker-item').nth(0)).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('Control+0');
+  await page.keyboard.press('r'); // not the pan tool, so the pan cursor only means Space is held
+  const fitted = await hook<{ scale: number }>(page, 'view');
+  const away = { scale: fitted.scale * 3, tx: -100, ty: -50 };
+  const fit = page.getByTestId('edt-view-fit');
+
+  // Enter on the focused Fit button runs Fit and doesn't accept the selected candidate.
+  await hook(page, 'setView', away);
+  await fit.focus();
+  await page.keyboard.press('Enter');
+  await expect.poll(() => hook(page, 'view')).toEqual(fitted);
+
+  // Space presses the button too (it doesn't hold temporary pan).
+  await hook(page, 'setView', away);
+  await fit.focus();
+  await page.keyboard.press(' ');
+  await expect.poll(() => hook(page, 'view')).toEqual(fitted);
+  await expect(page.getByTestId('edt-canvas-stage')).not.toHaveClass(/editor-canvas-pan/);
+
+  expect(await events(page)).toEqual([['select', 'C1']]);
+});
