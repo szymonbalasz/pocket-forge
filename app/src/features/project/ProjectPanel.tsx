@@ -17,7 +17,14 @@ import {
   type TrashItem,
 } from '../../api';
 import { IconPlus } from '../../shell/icons';
-import { errorOf, projectStore, useProjectState } from '../../store/project';
+import {
+  errorOf,
+  folderMoved,
+  FOLDER_MOVED_TEXT,
+  isFolderMovedError,
+  projectStore,
+  useProjectState,
+} from '../../store/project';
 import { ConflictView } from './ConflictView';
 import { bytesLabel, CATEGORY_LABEL, dateLabel, revisionLabel, timeLabel } from './format';
 import './project.css';
@@ -617,18 +624,39 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
   const [trash, setTrash] = useState<TrashItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState(false);
-  const load = useCallback(() => {
-    api.project.diskUsage().then(setUsage, (e: unknown) => {
-      const err = errorOf(e);
-      // BL-30: no stale (or 0 B) figures under the error, e.g. once the folder was moved.
-      setUsage(null);
-      // `ipc`: the core doesn't register the command yet (PRJ slice 5): say so quietly.
-      setError(err.code === 'ipc' ? null : err.message);
-      setUnavailable(err.code === 'ipc');
-    });
-    api.project.trashList().then(setTrash, () => setTrash([]));
+  const moved = folderMoved(useProjectState());
+  /** Walk owner-UX L1: any call failing with `folder_moved` clears the figures and the trash
+   *  list (not only a revision change), and every feature hears of it. */
+  const movedFailure = useCallback((e: unknown): boolean => {
+    if (!isFolderMovedError(e)) return false;
+    setUsage(null);
+    setTrash([]);
+    setError(FOLDER_MOVED_TEXT);
+    projectStore.noteFolderMoved();
+    return true;
   }, []);
-  useEffect(load, [load, revision]);
+  const load = useCallback(() => {
+    api.project.diskUsage().then(
+      (u) => {
+        setUsage(u);
+        setError(null);
+      },
+      (e: unknown) => {
+        if (movedFailure(e)) return;
+        const err = errorOf(e);
+        // BL-30: no stale (or 0 B) figures under the error.
+        setUsage(null);
+        // `ipc`: the core doesn't register the command yet (PRJ slice 5): say so quietly.
+        setError(err.code === 'ipc' ? null : err.message);
+        setUnavailable(err.code === 'ipc');
+      },
+    );
+    api.project.trashList().then(setTrash, (e: unknown) => {
+      if (!movedFailure(e)) setTrash([]);
+    });
+  }, [movedFailure]);
+  // The folder moved (or came back): reload, so the figures never outlive it.
+  useEffect(load, [load, revision, moved]);
 
   const total = usage ? Object.values(usage.bytes).reduce((s, b) => s + b, 0) : 0;
   return (
@@ -681,9 +709,9 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
                   data-testid="prj-panel-storage-restore"
                   disabled={readOnly}
                   onClick={() =>
-                    api.project
-                      .trashRestore(t.id)
-                      .then(load, (e: unknown) => setError(sentence(errorOf(e).message)))
+                    api.project.trashRestore(t.id).then(load, (e: unknown) => {
+                      if (!movedFailure(e)) setError(sentence(errorOf(e).message));
+                    })
                   }
                 >
                   Restore

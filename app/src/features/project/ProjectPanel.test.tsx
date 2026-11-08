@@ -246,6 +246,44 @@ test('BL-30 a moved folder shows the reason in Storage, not 0 B figures', async 
   ).toBeGreaterThanOrEqual(2);
 });
 
+test('BL-30 walk owner-UX L1: a Restore failing with folder_moved clears the figures at once', async () => {
+  await openCrypt({
+    trash: [
+      {
+        id: 'T1',
+        path: 'results/001 kitchen/02.png',
+        kind: 'candidates',
+        bytes: 1024,
+        trashed_at: '2026-11-01T00:00:00Z',
+        restorable: true,
+      },
+    ],
+  });
+  await screen.findByTestId('prj-panel-storage-usage');
+  const moved = () => {
+    throw {
+      code: 'not_found',
+      message: 'The project folder was moved or renamed outside Pocket Forge. Reopen it from home.',
+      detail: { reason: 'folder_moved' },
+    };
+  };
+  core.useHandlers({
+    ...core.handlersSnapshot(),
+    project_disk_usage: moved,
+    project_trash_list: moved,
+    project_trash_restore: moved,
+  });
+  // No commit, no revision change: only the failed call.
+  fireEvent.click(await screen.findByTestId('prj-panel-storage-restore'));
+  await waitFor(() => expect(screen.queryByTestId('prj-panel-storage-usage')).toBeNull());
+  expect(screen.queryByTestId('prj-panel-storage-item')).toBeNull();
+  // The banner (and every feature) knows the folder moved.
+  const banner = screen
+    .getAllByTestId('prj-panel-warning')
+    .find((b) => b.dataset.code === 'folder_moved');
+  expect(banner).toBeTruthy();
+});
+
 test('FR-PRJ-31 a failed restore says why as a sentence, not raw core text (walk 2 N2)', async () => {
   await openCrypt({
     trash: [

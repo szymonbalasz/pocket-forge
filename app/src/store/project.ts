@@ -73,11 +73,31 @@ export function errorOf(e: unknown): { code: string; message: string } {
     : { code: 'ui', message: String(e) };
 }
 
+/** §11: the project folder was moved or renamed while open (`not_found` with
+ *  `detail.reason = folder_moved`). */
+export function isFolderMovedError(e: unknown): boolean {
+  return (
+    e instanceof ApiError && (e.detail as { reason?: unknown } | null)?.reason === 'folder_moved'
+  );
+}
+
+/** §11: the folder-moved state features act on (the save segment failed with it, or the
+ *  project's warnings carry it). It clears with the next commit. */
+export function folderMoved(s: ProjectState): boolean {
+  return (
+    (s.save.kind === 'failed' && s.save.code === 'folder_moved') ||
+    !!s.project?.warnings.some((w) => w.code === 'folder_moved')
+  );
+}
+
+/** What a panel shows instead of its figures while the folder is moved (never OS text). */
+export const FOLDER_MOVED_TEXT =
+  'The project folder was moved or renamed outside Pocket Forge. Reopen it from home.';
+
 /** The save-state code of a failed save: `folder_moved` (§11, `not_found` with that
  *  `detail.reason`), else the error code. */
 function saveCode(e: unknown): string {
-  const reason = e instanceof ApiError ? (e.detail as { reason?: unknown } | null)?.reason : null;
-  return reason === 'folder_moved' ? 'folder_moved' : errorOf(e).code;
+  return isFolderMovedError(e) ? 'folder_moved' : errorOf(e).code;
 }
 
 function savedAt(p: ProjectSnapshot): string {
@@ -108,8 +128,14 @@ function listen(): void {
   const on = (p: Promise<unknown>) => p.catch(() => undefined);
   on(
     onEvent('project:committed', () => {
-      if (!state.project) return;
-      set({ save: { kind: 'saved', at: new Date().toISOString() } });
+      const p = state.project;
+      if (!p) return;
+      // A commit means the folder is back: the core drops its folder_moved warning too.
+      const warnings = p.warnings.filter((w) => w.code !== 'folder_moved');
+      set({
+        save: { kind: 'saved', at: new Date().toISOString() },
+        ...(warnings.length !== p.warnings.length ? { project: { ...p, warnings } } : {}),
+      });
       bump();
     }),
   );
@@ -291,6 +317,13 @@ export const projectStore = {
   draftSaveFailed(e: unknown): void {
     if (!state.project) return;
     set({ save: { kind: 'failed', ...errorOf(e), code: saveCode(e), retrying: false } });
+  },
+
+  /** A feature's call failed with `folder_moved` (§11): the save segment and banner say so,
+   *  and every feature sees `folderMoved` (Storage clears, Generate is blocked). */
+  noteFolderMoved(): void {
+    if (!state.project || folderMoved(state)) return;
+    set({ save: { kind: 'failed', code: 'folder_moved', message: '', retrying: false } });
   },
 
   /** Drops an open-time warning that no longer applies (RGN: `resumable` once no job is left
