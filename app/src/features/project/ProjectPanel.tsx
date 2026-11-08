@@ -17,6 +17,7 @@ import {
 } from '../../api';
 import { IconPlus } from '../../shell/icons';
 import { errorOf, projectStore, useProjectState } from '../../store/project';
+import { ConflictView } from './ConflictView';
 import { bytesLabel, CATEGORY_LABEL, dateLabel, revisionLabel, timeLabel } from './format';
 import './project.css';
 
@@ -147,8 +148,11 @@ const WARNING_TEXT: Record<string, string> = {
 };
 
 function Warnings({ project }: { project: ProjectSnapshot }) {
+  const { save } = useProjectState();
+  const [comparing, setComparing] = useState(false);
   const codes = new Set(project.warnings.map((w) => w.code));
   if (project.read_only) codes.add(project.read_only);
+  if (save.kind === 'conflict') codes.add('conflict');
   if (codes.size === 0) return null;
   return (
     <div className="prj-warnings">
@@ -164,9 +168,20 @@ function Warnings({ project }: { project: ProjectSnapshot }) {
           >
             {WARNING_TEXT[code] ?? w?.message ?? code}
             {code === 'original_missing' && <Relink />}
+            {code === 'conflict' && (
+              <button
+                type="button"
+                className="link"
+                data-testid="prj-panel-conflict-open"
+                onClick={() => setComparing(true)}
+              >
+                Compare versions
+              </button>
+            )}
           </div>
         );
       })}
+      <ConflictView open={comparing} onClose={() => setComparing(false)} />
     </div>
   );
 }

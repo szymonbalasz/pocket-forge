@@ -4,10 +4,12 @@
 use serde::Deserialize;
 use ulid::Ulid;
 
+use super::conflict::{self, ConflictView, Keep};
 use super::retention::{self, DiskUsage, TrashRow};
 use crate::commands::{NoInput, Ok_};
 use crate::core::{Command, Core, Validate};
 use crate::error::{CoreError, CoreResult, ErrorCode};
+use crate::manifest::RevisionEntry;
 
 fn no_project() -> CoreError {
     CoreError::new(ErrorCode::NoProject, "no asset project is open")
@@ -80,6 +82,48 @@ impl Command for ProjectDiskUsage {
     }
 }
 
+// ---------------------------------------------------------------- slice 6: conflicts
+
+pub struct ProjectConflictGet;
+
+impl Command for ProjectConflictGet {
+    const NAME: &'static str = "project_conflict_get";
+    type Input = NoInput;
+    type Output = ConflictView;
+
+    /// FR-PRJ-36: both versions; `no_conflict` if there is none.
+    fn run(core: &Core, _: NoInput) -> CoreResult<ConflictView> {
+        let state = core.state();
+        let install_id = state.settings.install_id;
+        let p = state.project.as_ref().ok_or_else(no_project)?;
+        conflict::conflict_get(p, install_id)
+    }
+}
+
+pub struct ProjectResolveConflict;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResolveConflictInput {
+    pub keep: Keep,
+}
+
+impl Validate for ResolveConflictInput {}
+
+impl Command for ProjectResolveConflict {
+    const NAME: &'static str = "project_resolve_conflict";
+    type Input = ResolveConflictInput;
+    type Output = RevisionEntry;
+
+    /// FR-PRJ-36, #39: keep one version; the other becomes a `conflict` revision.
+    fn run(core: &Core, input: ResolveConflictInput) -> CoreResult<RevisionEntry> {
+        let mut state = core.state();
+        let install_id = state.settings.install_id;
+        let p = state.project.as_mut().ok_or_else(no_project)?;
+        conflict::resolve_conflict(&core.ctx, install_id, p, input.keep)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -146,6 +190,40 @@ mod tests {
                 .unwrap_err()
                 .code,
             ErrorCode::NoProject
+        );
+    }
+
+    #[test]
+    fn fr_prj_36_conflict_commands_report_no_conflict_and_resolve_a_copy() {
+        let (_d, core) = core_with_project();
+        let e = core
+            .dispatch("project_conflict_get", json!({}))
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::NoConflict);
+        let e = core
+            .dispatch("project_resolve_conflict", json!({"keep": "mine"}))
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::InvalidInput);
+        let dir = core.state().project.as_ref().unwrap().dir.clone();
+        std::fs::copy(dir.join("project.json"), dir.join("project (2).json")).unwrap();
+        core.dispatch("project_open", json!({ "path": dir }))
+            .unwrap();
+        let v = core.dispatch("project_conflict_get", json!({})).unwrap();
+        assert_eq!(v["source"], "copy");
+        assert_eq!(v["other"]["file"], "project (2).json");
+        assert_eq!(v["this"]["can_keep"], true);
+        let rev = core
+            .dispatch("project_resolve_conflict", json!({"keep": "other"}))
+            .unwrap();
+        assert_eq!(rev["reason"], "conflict");
+        assert!(!dir.join("project (2).json").exists());
+        let snap = core.dispatch("project_get", json!({})).unwrap();
+        assert!(
+            !snap["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| w["code"] == "conflict")
         );
     }
 

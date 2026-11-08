@@ -154,6 +154,33 @@ export interface RevisionEntry {
 
 export type ReadOnlyReason = 'newer_version' | 'original_changed' | 'original_missing';
 
+/** `project_resolve_conflict` `keep` (FR-PRJ-36). */
+export type ConflictKeep = 'this' | 'other';
+
+/** One version in the conflict view (FR-PRJ-36). */
+export interface ConflictSide {
+  side: ConflictKeep;
+  /** `project.json`, the conflict copy's name, or null for this machine's state in memory. */
+  file: string | null;
+  readable: boolean;
+  committed_at: string | null;
+  seq: number | null;
+  machine: 'this' | 'other';
+  layers: Layer[];
+  newest_revision: RevisionEntry | null;
+  /** Files that version needs but haven't synced yet ("Still syncing"). */
+  missing_files: string[];
+  can_keep: boolean;
+}
+
+/** `project_conflict_get`. */
+export interface ConflictView {
+  /** `copy`: a `project.json` conflict copy; `seq`: changed on disk while open. */
+  source: 'copy' | 'seq';
+  this: ConflictSide;
+  other: ConflictSide;
+}
+
 /** `project_open` warning codes (asset-project §9): read-only reasons, `conflict`, `recovered`,
  *  `resumable`, `lost`, `original_missing` (Relink). */
 
@@ -570,6 +597,8 @@ export interface Commands {
   project_trash_restore: [{ item_id: string }, Record<string, never>];
   project_disk_usage: [Record<string, never>, DiskUsage];
   project_relink_original: [{ path: string }, Record<string, never>];
+  project_conflict_get: [Record<string, never>, ConflictView];
+  project_resolve_conflict: [{ keep: ConflictKeep }, RevisionEntry];
 }
 
 export type CommandName = keyof Commands;

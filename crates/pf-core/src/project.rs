@@ -25,7 +25,9 @@ use crate::thumb::{self, ThumbJob, Thumbnails};
 use crate::time::Timestamp;
 
 pub mod commands;
+pub mod conflict;
 pub mod retention;
+pub mod spool;
 pub mod store;
 mod sweep;
 
@@ -98,6 +100,9 @@ pub struct OpenProject {
     pub thumbs: Option<Thumbnails>,
     /// A draft save that failed with `locked`, retried every 10 s (FR-PRJ-21).
     pub pending_draft: Option<PendingDraft>,
+    /// Set while a sync conflict is open: every commit is refused with `conflict` until
+    /// `project_resolve_conflict` (FR-PRJ-34 … 36).
+    pub conflict: Option<conflict::ConflictSource>,
 }
 
 /// A draft save kept in memory after `locked` (FR-PRJ-21).
@@ -326,6 +331,7 @@ pub fn open(
         refs: RevisionRefs::default(),
         thumbs,
         pending_draft: None,
+        conflict: None,
     };
     check_original(ctx, &mut p)?;
     if let Some(kind) = library::kind_of_folder(&p.dir)
@@ -338,11 +344,9 @@ pub fn open(
             format!("The project is in the {} folder now.", kind.section_dir()),
         ));
     }
-    if library::has_conflict_copy(&p.dir) {
-        p.warnings.push(Warning::new(
-            "conflict",
-            "This project was also changed on another machine.",
-        ));
+    if let Some(copy) = conflict::manifest_copies(&p.dir).into_iter().next() {
+        // FR-PRJ-34: shown on open; writes wait for the user's pick.
+        conflict::mark(ctx, &mut p, conflict::ConflictSource::Copy(copy));
     }
     sweep::load_history(&mut p)?;
     if recovered && p.read_only.is_none() {
@@ -351,6 +355,8 @@ pub fn open(
         write_recovered(ctx, settings, &mut p)?;
     }
     sweep::on_open(ctx, settings.install_id, &mut p)?;
+    // FR-PRJ-40: what couldn't commit last time.
+    spool::replay(ctx, settings.install_id, &mut p);
     if p.read_only != Some(ReadOnlyReason::NewerVersion)
         && p.read_only != Some(ReadOnlyReason::OriginalMissing)
         && thumb::needs_rebuild(&p.dir)
@@ -439,15 +445,42 @@ pub fn commit(
     p: &mut OpenProject,
     change: impl FnOnce(&Context, &OpenProject, &mut Manifest, &mut CommitPlan) -> CoreResult<()>,
 ) -> CoreResult<u64> {
+    commit_with(ctx, install_id, p, false, change)
+}
+
+/// [`commit`]; `resolving` = the conflict resolve's own commit, which skips the conflict checks
+/// (FR-PRJ-34, 35) because it is what ends the conflict.
+pub(crate) fn commit_with(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    resolving: bool,
+    change: impl FnOnce(&Context, &OpenProject, &mut Manifest, &mut CommitPlan) -> CoreResult<()>,
+) -> CoreResult<u64> {
     p.require_writable()?;
+    if !resolving {
+        conflict::check_before_commit(ctx, p)?;
+    }
+    // FR-PRJ-34, OQ-PRJ-10 A: job.json copies settle (the later state wins); they and thumbnail
+    // copies go to the trash with this commit.
+    conflict::settle_job_copies(ctx, p);
+    let copies = conflict::side_copies(p);
     let mut next = p.manifest.clone();
     let mut plan = CommitPlan::default();
     change(ctx, p, &mut next, &mut plan)?;
+    if !copies.is_empty() {
+        store::trash_files(
+            ctx,
+            &mut next,
+            TrashKind::ConflictCopy,
+            copies,
+            "sync conflict copy",
+        );
+    }
     if let Some(kind) = library::kind_of_folder(&p.dir) {
         next.kind = kind;
     }
     store::trash_superseded_masks(ctx, p, &mut next, &plan);
-    check_commit_unchanged(p)?;
     if !p.dir.is_dir() {
         // Renamed or moved in Explorer while open (§11): state stays in memory.
         return Err(CoreError::new(
@@ -509,6 +542,17 @@ pub(crate) fn write_job(ctx: &Context, p: &OpenProject, job: &JobFile) -> CoreRe
             .map_err(|e| CoreError::io(format!("creating {}", parent.display()), &e))?;
     }
     fsx::write_json_atomic(ctx, &path, job)
+}
+
+/// The on-disk `commit{seq, install_id}` of `project.json`, if it can be read.
+pub(crate) fn disk_commit(p: &OpenProject) -> Option<(u64, Ulid)> {
+    let disk: Value = serde_json::from_slice(&std::fs::read(p.manifest_path()).ok()?).ok()?;
+    let seq = disk["commit"]["seq"].as_u64()?;
+    let install = disk["commit"]["install_id"]
+        .as_str()?
+        .parse::<Ulid>()
+        .ok()?;
+    Some((seq, install))
 }
 
 /// FR-PRJ-35: the on-disk commit must still be the one last loaded or written.
@@ -709,7 +753,7 @@ pub fn retry_pending(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> bo
             }
         }
     }
-    false
+    spool::replay(ctx, install_id, p).remaining > 0
 }
 
 /// True if closing would lose state that only lives in memory (FR-PRJ-21: closing asks first).
@@ -797,6 +841,8 @@ pub fn relink_original(
     }
     p.warnings.retain(|w| w.code != "original_missing");
     p.decoded = DecodedOriginal::new(p.manifest.project_id, target);
+    // Writable again: what was spooled meanwhile commits now (FR-PRJ-40).
+    spool::replay(ctx, install_id, p);
     Ok(())
 }
 

@@ -174,6 +174,34 @@ test('FR-PRJ-21 closing with a save still pending asks first; Close anyway close
   ]);
 });
 
+test('FR-PRJ-35 FR-PRJ-36 a conflict found mid-session shows the banner and the view resolves it', async () => {
+  await openCrypt();
+  const side = (which: 'this' | 'other', machine: 'this' | 'other') => ({
+    side: which,
+    file: which === 'this' ? null : 'project.json',
+    readable: true,
+    committed_at: '2026-11-07T10:00:00.000Z',
+    seq: which === 'this' ? 3 : 9,
+    machine,
+    layers: [],
+    newest_revision: null,
+    missing_files: [],
+    can_keep: true,
+  });
+  const p = mock.projects.get(CRYPT)!;
+  p.conflict = { source: 'seq', this: side('this', 'this'), other: side('other', 'other') };
+  act(() => core.emit('project:conflict', {}));
+  const open = await screen.findByTestId('prj-panel-conflict-open');
+  fireEvent.click(open);
+  fireEvent.click(await screen.findByTestId('prj-conflict-keep-other'));
+  await waitFor(() => expect(screen.queryByTestId('prj-conflict')).toBeNull());
+  await waitFor(() => expect(screen.queryByTestId('prj-panel-conflict-open')).toBeNull());
+  expect(core.calls.find((c) => c.cmd === 'project_resolve_conflict')?.input).toEqual({
+    keep: 'other',
+  });
+  expect(screen.getByTestId('prj-status-save').dataset.state).toBe('saved');
+});
+
 test('FR-PRJ-41 FR-PRJ-15 a read-only project shows why and disables Add, Save and Restore', async () => {
   await openCrypt({ read_only: 'original_changed' });
   const w = await screen.findByTestId('prj-panel-warning');

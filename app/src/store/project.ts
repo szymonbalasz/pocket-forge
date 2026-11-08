@@ -78,7 +78,11 @@ function listen(): void {
   );
   on(
     onEvent('project:conflict', () => {
+      // FR-PRJ-35: found mid-session; the snapshot's warnings now carry `conflict` too.
       if (state.project) set({ save: { kind: 'conflict' } });
+      void projectStore.reload().then(() => {
+        if (state.project) set({ save: { kind: 'conflict' } });
+      });
     }),
   );
 }
@@ -171,6 +175,18 @@ export const projectStore = {
       set({ project: project ?? state.project, save: { kind: 'saved', at: rev.created_at } });
     } catch (e) {
       set({ error: errorOf(e), save: { kind: 'saved', at: savedAt(state.project) } });
+    }
+    bump();
+  },
+
+  /** After `project_resolve_conflict` (FR-PRJ-36): re-reads the project, saved again. */
+  async resolved(): Promise<void> {
+    if (!state.project) return;
+    try {
+      const project = await api.project.get();
+      if (project) set({ project, save: { kind: 'saved', at: savedAt(project) } });
+    } catch (e) {
+      set({ error: errorOf(e) });
     }
     bump();
   },

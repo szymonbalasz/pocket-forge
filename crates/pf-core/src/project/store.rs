@@ -9,10 +9,10 @@ use std::sync::Arc;
 
 use image::RgbImage;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::{Map, Value, json};
 use ulid::Ulid;
 
-use super::{CommitPlan, OpenProject, commit, push_revision, write_job};
+use super::{CommitPlan, OpenProject, commit, emit_save_failed, push_revision, spool, write_job};
 use crate::context::Context;
 use crate::error::{CoreError, CoreResult, ErrorCode};
 use crate::job::{Iteration, JOB_SCHEMA_VERSION, JobFile, JobInputs, JobSeed, JobState};
@@ -378,13 +378,16 @@ pub struct JobUpdate {
 /// `update_job` (R2, schema §3): one transition or data update, written to `job.json` only (the
 /// commit point for job state). `fetched` and `closed` are set by `add_candidates`, accept and
 /// `resolve_job`.
+///
+/// While the project can't be written (`read_only`, `conflict`, `locked` after 3 s), the update
+/// goes to the spool (FR-PRJ-40) and is kept in memory, so the runner's next transition
+/// validates; the call still fails with that code and `detail.spooled = true`.
 pub fn update_job(
     ctx: &Context,
     p: &mut OpenProject,
     job_id: Ulid,
     update: JobUpdate,
 ) -> CoreResult<JobFile> {
-    p.require_writable()?;
     let mut next = job(p, job_id)?.clone();
     if let Some(state) = update.state {
         if matches!(state, JobState::Fetched | JobState::Closed) && state != next.state {
@@ -413,12 +416,80 @@ pub fn update_job(
     if let Some(error) = update.error {
         next.error = (!error.is_null()).then_some(error);
     }
-    write_job(ctx, p, &next)?;
-    if let Some(row) = p.manifest.jobs.iter_mut().find(|r| r.id == job_id) {
-        row.state = next.state;
+    let written = match blocked(p) {
+        Some(e) => Err(e),
+        None => write_job(ctx, p, &next),
+    };
+    if let Err(e) = written {
+        if !spool::spoolable(e.code) {
+            return Err(e);
+        }
+        let seq = spool::spool_job(ctx, p, &next)?;
+        if e.code == ErrorCode::Locked {
+            emit_save_failed(ctx, ErrorCode::Locked, true);
+        }
+        set_job(p, next);
+        return Err(spooled(e, json!({ "spool_seq": seq })));
     }
-    p.jobs.insert(job_id, next.clone());
+    set_job(p, next.clone());
     Ok(next)
+}
+
+fn set_job(p: &mut OpenProject, job: JobFile) {
+    if let Some(row) = p.manifest.jobs.iter_mut().find(|r| r.id == job.id) {
+        row.state = job.state;
+        row.iteration = job.iteration.as_ref().map(|i| i.n);
+    }
+    p.jobs.insert(job.id, job);
+}
+
+/// Why the project can't be written right now, if it can't (read-only or in conflict).
+fn blocked(p: &OpenProject) -> Option<CoreError> {
+    if let Err(e) = p.require_writable() {
+        return Some(e);
+    }
+    p.conflict.is_some().then(super::conflict::conflict_error)
+}
+
+/// Marks an error as spooled: `detail.spooled = true` plus `extra`.
+fn spooled(e: CoreError, extra: Value) -> CoreError {
+    let mut detail = match e.detail.clone() {
+        Value::Object(o) => o,
+        _ => Map::new(),
+    };
+    detail.insert("spooled".into(), Value::Bool(true));
+    if let Value::Object(x) = extra {
+        detail.extend(x);
+    }
+    let detail = Value::Object(detail);
+    e.with_detail(detail)
+}
+
+/// Replays a spooled job file (FR-PRJ-40): written unless the file on disk is already as late.
+pub(crate) fn apply_spooled_job(
+    ctx: &Context,
+    p: &mut OpenProject,
+    spooled: JobFile,
+) -> CoreResult<()> {
+    let path = p.path(&format!("{}/{}", spooled.dir(), crate::job::JOB_FILE));
+    let on_disk: Option<JobFile> = super::read_json(&path).ok();
+    if on_disk
+        .as_ref()
+        .is_some_and(|d| !super::conflict::later(&spooled, d))
+    {
+        return Ok(());
+    }
+    if let Some(e) = blocked(p) {
+        return Err(e);
+    }
+    write_job(ctx, p, &spooled)?;
+    // Memory may already hold a later state from a write after the spool: keep the later one.
+    let keep = match p.jobs.get(&spooled.id) {
+        Some(mem) if super::conflict::later(mem, &spooled) => mem.clone(),
+        _ => spooled,
+    };
+    set_job(p, keep);
+    Ok(())
 }
 
 /// One returned candidate, untouched (R10).
@@ -455,6 +526,10 @@ fn next_iteration(p: &OpenProject, prompt: &str) -> Iteration {
 /// `add_candidates` (FR-PRJ-30, schema §3): `job.json` with `iteration` set → the candidate files
 /// in `results/NNN <slug>/NN.<ext>` → the manifest → `job.json` `fetched`. A re-fetch after a
 /// crash reuses the job's folder and replaces only files no candidate record references.
+///
+/// While the project can't be written (`read_only`, `conflict`, `locked` after 3 s), the bytes go
+/// to the spool (FR-PRJ-40) and are committed by its replay: the call fails with that code and
+/// `detail{spooled: true, candidate_ids}` (the ids the replay will use).
 pub fn add_candidates(
     ctx: &Context,
     install_id: Ulid,
@@ -462,7 +537,36 @@ pub fn add_candidates(
     job_id: Ulid,
     candidates: Vec<NewCandidate>,
 ) -> CoreResult<Vec<Candidate>> {
-    p.require_writable()?;
+    let with_ids: Vec<(Ulid, NewCandidate)> =
+        candidates.into_iter().map(|c| (ctx.new_id(), c)).collect();
+    let ids: Vec<Ulid> = with_ids.iter().map(|(id, _)| *id).collect();
+    let keep: Vec<(Ulid, NewCandidate)> = with_ids.clone();
+    match add_candidates_with_ids(ctx, install_id, p, job_id, with_ids) {
+        Err(e) if spool::spoolable(e.code) && !keep.is_empty() && p.jobs.contains_key(&job_id) => {
+            let seq = spool::spool_candidates(ctx, p, job_id, &keep)?;
+            if e.code == ErrorCode::Locked {
+                emit_save_failed(ctx, ErrorCode::Locked, true);
+            }
+            Err(spooled(
+                e,
+                json!({ "spool_seq": seq, "candidate_ids": ids }),
+            ))
+        }
+        other => other,
+    }
+}
+
+/// `add_candidates` with the candidate ids given (the spool replay keeps the ids it spooled).
+pub(crate) fn add_candidates_with_ids(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    job_id: Ulid,
+    candidates: Vec<(Ulid, NewCandidate)>,
+) -> CoreResult<Vec<Candidate>> {
+    if let Some(e) = blocked(p) {
+        return Err(e);
+    }
     let mut job = job(p, job_id)?.clone();
     if job.state != JobState::Succeeded {
         return Err(CoreError::invalid(
@@ -496,7 +600,7 @@ pub fn add_candidates(
         .collect();
     let mut records = vec![];
     let mut files = vec![];
-    for (index, c) in candidates.into_iter().enumerate() {
+    for (index, (cand_id, c)) in candidates.into_iter().enumerate() {
         let probe = pf_imaging::probe_bytes(&c.bytes).ok();
         let ext = pf_imaging::sniff(&c.bytes).map_or("bin", |f| f.extension());
         let file = format!("{dir}/{:02}.{ext}", index + 1);
@@ -507,7 +611,7 @@ pub fn add_candidates(
             ));
         }
         records.push(Candidate {
-            id: ctx.new_id(),
+            id: cand_id,
             job_id,
             index: index as u32,
             file: file.clone(),

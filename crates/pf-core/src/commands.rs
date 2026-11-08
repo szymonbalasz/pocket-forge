@@ -428,8 +428,12 @@ impl Command for ProjectClose {
         let install_id = state.settings.install_id;
         if !input.force
             && let Some(p) = state.project.as_mut()
-            && (project::retry_pending(&core.ctx, install_id, p) || project::has_unsaved(p))
         {
+            // One last try. Spooled writes are on disk already (FR-PRJ-40); only an in-memory
+            // draft makes closing ask.
+            project::retry_pending(&core.ctx, install_id, p);
+        }
+        if !input.force && state.project.as_ref().is_some_and(project::has_unsaved) {
             return Err(CoreError::new(
                 ErrorCode::Unsaved,
                 "a save is still pending (the file is locked); close anyway?",
@@ -802,7 +806,10 @@ pub use crate::region_edit::commands::{
 };
 
 /// PRJ retention and conflict commands (asset-project §9, slices 5 and 6).
-pub use crate::project::commands::{ProjectDiskUsage, ProjectTrashList, ProjectTrashRestore};
+pub use crate::project::commands::{
+    ProjectConflictGet, ProjectDiskUsage, ProjectResolveConflict, ProjectTrashList,
+    ProjectTrashRestore,
+};
 
 // ---------------------------------------------------------------- registry (append-only)
 
@@ -858,6 +865,8 @@ registry![
     ProjectTrashList,
     ProjectTrashRestore,
     ProjectDiskUsage,
+    ProjectConflictGet,
+    ProjectResolveConflict,
 ];
 
 #[cfg(test)]

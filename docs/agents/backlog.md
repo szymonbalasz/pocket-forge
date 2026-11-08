@@ -21,4 +21,5 @@ Small items for idle slots (see [process.md](../process.md)). The planned work a
 | BL-15 | The right panel is empty on Home: show a hint or collapse it | XS | shell | PRJ UI merge | open |
 | BL-16 | EDT `library` keys serve user-folder images at full size: add a `max_side` copy (OQ-PRJ-16 said ≤ 512 px) | XS | `pf-core` tiles.rs | — | open |
 | BL-17 | Flaky: `fr_prj_15_changed_original_opens_read_only` depends on an mtime tick (seen by the PRJ UI builder after the racily-clean fix) | XS | `pf-core` project tests | PRJ retention build | open |
-| BL-18 | FR-PRJ-21: closing with `unsaved` shows the error but doesn't ask first | XS | `features/project` | PRJ retention build | open |
+| BL-18 | FR-PRJ-21: closing with `unsaved` shows the error but doesn't ask first | XS | `features/project` | PRJ retention build | done (PRJ retention: Close anyway) |
+| BL-19 | Conflict view draws each layer stack as text (OQ-PRJ-11 B fallback): EDT has no read-only "draw this layer stack" component yet; swap it into `ConflictView.tsx` panes when EDT exposes one (OQ-PRJ-11 A) | S | `features/editor` export, `features/project/ConflictView.tsx` | EDT build | open |

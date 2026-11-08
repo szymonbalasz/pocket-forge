@@ -85,6 +85,10 @@ pub enum ErrorCode {
     Canceled,
     /// A re-pick that's no longer possible (R32, FR-RGN-36).
     RepickUnavailable,
+    /// `project_conflict_get` / `project_resolve_conflict` without a conflict (FR-PRJ-36).
+    NoConflict,
+    /// The version to keep needs files that haven't synced yet (FR-PRJ-36).
+    FilesMissing,
 }
 
 impl ErrorCode {
@@ -136,6 +140,8 @@ impl ErrorCode {
             ErrorCode::HashMismatch => "hash_mismatch",
             ErrorCode::Canceled => "canceled",
             ErrorCode::RepickUnavailable => "repick_unavailable",
+            ErrorCode::NoConflict => "no_conflict",
+            ErrorCode::FilesMissing => "files_missing",
         }
     }
 }
