@@ -788,6 +788,14 @@ pub use crate::region_edit::commands::{
 };
 pub use crate::region_edit::jobs::{RgnJobCancel, RgnJobDismiss, RgnJobRetryDraft, RgnJobSubmit};
 
+// ---------------------------------------------------------------- reference packs
+
+/// Reference-pack commands live in their own module (reference-packs spec §9).
+pub use crate::references::commands::{
+    RefListPacks, RefPackAddImages, RefPackCreate, RefPackDelete, RefPackGet, RefPackRemoveImages,
+    RefPackRename, RefPackUpdate, RefResolve, RefTrashList, RefTrashRestore,
+};
+
 // ---------------------------------------------------------------- registry (append-only)
 
 /// A registry row: command name → JSON adapter.
@@ -849,6 +857,17 @@ registry![
     RgnCandidateDiscard,
     RgnPatchRetune,
     RgnIterationsList,
+    RefListPacks,
+    RefPackGet,
+    RefPackCreate,
+    RefPackRename,
+    RefPackUpdate,
+    RefPackAddImages,
+    RefPackRemoveImages,
+    RefPackDelete,
+    RefTrashList,
+    RefTrashRestore,
+    RefResolve,
 ];
 
 #[cfg(test)]

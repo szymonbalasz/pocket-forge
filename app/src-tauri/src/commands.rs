@@ -78,6 +78,17 @@ tauri_commands! {
     rgn_candidate_discard => c::RgnCandidateDiscard,
     rgn_patch_retune => c::RgnPatchRetune,
     rgn_iterations_list => c::RgnIterationsList,
+    ref_list_packs => c::RefListPacks,
+    ref_pack_get => c::RefPackGet,
+    ref_pack_create => c::RefPackCreate,
+    ref_pack_rename => c::RefPackRename,
+    ref_pack_update => c::RefPackUpdate,
+    ref_pack_add_images => c::RefPackAddImages,
+    ref_pack_remove_images => c::RefPackRemoveImages,
+    ref_pack_delete => c::RefPackDelete,
+    ref_trash_list => c::RefTrashList,
+    ref_trash_restore => c::RefTrashRestore,
+    ref_resolve => c::RefResolve,
 }
 
 #[cfg(test)]
