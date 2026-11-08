@@ -39,6 +39,22 @@ pub(crate) fn decode_whole(path: &Path) -> Result<image::DynamicImage, ProbeErro
     })
 }
 
+/// Decodes a whole file to RGB8 (PRJ `DecodedOriginal`, FR-PRJ-42): non-interlaced PNGs are
+/// streamed in bands, so no RGBA intermediate is held; other files decode once with the limits.
+pub fn decode_rgb8(path: &Path) -> Result<image::RgbImage, ProbeError> {
+    let src = RgbSource::open(path)?;
+    let (w, h) = (src.width, src.height);
+    let mut buf = Vec::new();
+    buf.try_reserve_exact(w as usize * h as usize * 3)
+        .map_err(|_| ProbeError::Corrupt("out of memory".into()))?;
+    src.for_each_band::<ProbeError>(512, |_, rows| {
+        buf.extend_from_slice(rows);
+        Ok(())
+    })?;
+    image::RgbImage::from_raw(w, h, buf)
+        .ok_or_else(|| ProbeError::Corrupt("the image data is truncated".into()))
+}
+
 enum Kind {
     /// Streamed: the file is re-read on every pass.
     Png(PathBuf),

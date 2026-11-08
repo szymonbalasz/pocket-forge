@@ -16,12 +16,10 @@ pub const SETTINGS_SCHEMA_VERSION: u32 = 1;
 /// `library` section (PRJ).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LibrarySettings {
-    /// Absolute paths, per machine.
+    /// Absolute paths, per machine; the first receives new projects (FR-PRJ-01).
     #[serde(default)]
     pub roots: Vec<PathBuf>,
-    /// Absolute import destination; `None` = `<first root>/Imported/` (#40).
-    #[serde(default)]
-    pub import_dest: Option<PathBuf>,
+    /// Unknown fields, including the retired `import_dest` (#44): kept, ignored.
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -157,6 +155,48 @@ pub fn save(ctx: &Context, settings: &Settings) -> CoreResult<()> {
     fsx::write_json_atomic(ctx, &settings_path(&ctx.data_dir), settings)
 }
 
+/// The sections other features read and write through PRJ (R4, R8).
+pub const SECTIONS: [&str; 3] = ["library", "spend", "provider"];
+
+fn unknown_section(name: &str) -> CoreError {
+    CoreError::invalid(
+        "section",
+        format!("{name:?} is not one of {}", SECTIONS.join(", ")),
+    )
+}
+
+/// `settings_get(section)` (R4): one section as JSON.
+pub fn section_get(settings: &Settings, name: &str) -> CoreResult<Value> {
+    let v = match name {
+        "library" => serde_json::to_value(&settings.library),
+        "spend" => serde_json::to_value(&settings.spend),
+        "provider" => serde_json::to_value(&settings.provider),
+        other => return Err(unknown_section(other)),
+    };
+    v.map_err(|e| CoreError::internal(format!("serialising settings: {e}")))
+}
+
+/// `settings_put(section)` (R4, FR-PRJ-39): replaces one section, validated by its shape, and
+/// writes the file (temp → rename). On any error `settings` is unchanged.
+pub fn section_put(
+    ctx: &Context,
+    settings: &mut Settings,
+    name: &str,
+    value: Value,
+) -> CoreResult<()> {
+    let bad = |e: serde_json::Error| CoreError::invalid(name, format!("invalid {name} settings: {e}"));
+    let mut next = settings.clone();
+    match name {
+        "library" => next.library = serde_json::from_value(value).map_err(bad)?,
+        "spend" => next.spend = serde_json::from_value(value).map_err(bad)?,
+        "provider" => next.provider = serde_json::from_value(value).map_err(bad)?,
+        other => return Err(unknown_section(other)),
+    }
+    save(ctx, &next)?;
+    *settings = next;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,6 +262,24 @@ mod tests {
             serde_json::from_slice(&std::fs::read(settings_path(dir.path())).unwrap()).unwrap();
         assert_eq!(back["future"]["x"], 1);
         assert_eq!(back["library"]["zoom"], 2);
+    }
+
+    #[test]
+    fn fr_prj_39_retired_import_dest_is_kept_and_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = ctx(dir.path());
+        let id = c.new_id();
+        let text = format!(
+            r#"{{"schema_version":1,"install_id":"{id}","library":{{"roots":[],"import_dest":"/old/Imported"}}}}"#
+        );
+        std::fs::write(settings_path(dir.path()), text).unwrap();
+        let (s, w) = load_or_init(&c).unwrap();
+        assert!(w.is_empty());
+        assert_eq!(s.library.extra["import_dest"], "/old/Imported");
+        save(&c, &s).unwrap();
+        let back: Value =
+            serde_json::from_slice(&std::fs::read(settings_path(dir.path())).unwrap()).unwrap();
+        assert_eq!(back["library"]["import_dest"], "/old/Imported");
     }
 
     #[test]

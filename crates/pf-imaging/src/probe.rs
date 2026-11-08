@@ -92,13 +92,31 @@ pub fn sniff(head: &[u8]) -> Option<ImageFormat> {
     }
 }
 
+/// Extensions of the accepted formats. Never trusted for the format itself, only to tell a
+/// broken image (`corrupt`) from another kind of file (`unsupported`) (BL-05).
+const IMAGE_EXTENSIONS: [&str; 4] = ["png", "jpg", "jpeg", "webp"];
+
+/// True if the file name has one of the accepted image extensions.
+pub fn has_image_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| IMAGE_EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
+}
+
 /// Probes an image file: format, size, animation and the size limit. Reads only the header.
+/// Unknown magic bytes are `unsupported`, or `corrupt` when the name says it's an image (BL-05).
 pub fn probe_file(path: &Path) -> Result<ImageInfo, ProbeError> {
     let mut head = Vec::with_capacity(HEAD_BYTES);
     File::open(path)?
         .take(HEAD_BYTES as u64)
         .read_to_end(&mut head)?;
-    let format = sniff(&head).ok_or(ProbeError::Unsupported)?;
+    let format = sniff(&head).ok_or_else(|| {
+        if has_image_extension(path) {
+            ProbeError::Corrupt("the file is not a valid PNG, JPEG or WebP image".into())
+        } else {
+            ProbeError::Unsupported
+        }
+    })?;
     check_animated(format, &head)?;
     let reader =
         image::ImageReader::with_format(BufReader::new(File::open(path)?), format.to_image());
@@ -106,6 +124,58 @@ pub fn probe_file(path: &Path) -> Result<ImageInfo, ProbeError> {
         .into_dimensions()
         .map_err(|e| ProbeError::Corrupt(e.to_string()))?;
     finish(format, width, height)
+}
+
+/// [`probe_file`] plus the cheap end-of-file check (R33): a truncated file is `corrupt`
+/// without a full decode (16k decodes are slow).
+pub fn probe_file_complete(path: &Path) -> Result<ImageInfo, ProbeError> {
+    let info = probe_file(path)?;
+    check_complete(path, info.format)?;
+    Ok(info)
+}
+
+/// Bytes read from the end of a JPEG to find its end-of-image marker (encoders may pad).
+const JPEG_TAIL_BYTES: u64 = 4096;
+
+/// End-of-file check (R33, BL-01): a PNG ends with its `IEND` chunk, a JPEG has an end-of-image
+/// marker near the end, a WebP is at least as long as its RIFF header says.
+pub fn check_complete(path: &Path, format: ImageFormat) -> Result<(), ProbeError> {
+    use std::io::{Seek, SeekFrom};
+    let truncated = || ProbeError::Corrupt("the image data is truncated".into());
+    let mut f = File::open(path)?;
+    let len = f.metadata()?.len();
+    match format {
+        ImageFormat::Png => {
+            const IEND: [u8; 12] = [0, 0, 0, 0, b'I', b'E', b'N', b'D', 0xAE, 0x42, 0x60, 0x82];
+            if len < 12 {
+                return Err(truncated());
+            }
+            let mut tail = [0u8; 12];
+            f.seek(SeekFrom::End(-12))?;
+            f.read_exact(&mut tail)?;
+            if tail != IEND {
+                return Err(truncated());
+            }
+        }
+        ImageFormat::Jpeg => {
+            let n = len.min(JPEG_TAIL_BYTES);
+            let mut tail = vec![0u8; n as usize];
+            f.seek(SeekFrom::End(-(n as i64)))?;
+            f.read_exact(&mut tail)?;
+            if !tail.windows(2).any(|w| w == [0xFF, 0xD9]) {
+                return Err(truncated());
+            }
+        }
+        ImageFormat::Webp => {
+            let mut head = [0u8; 8];
+            f.read_exact(&mut head).map_err(|_| truncated())?;
+            let riff = u32::from_le_bytes([head[4], head[5], head[6], head[7]]);
+            if len < u64::from(riff) + 8 {
+                return Err(truncated());
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Probes in-memory image bytes (e.g. pasted data).
@@ -276,6 +346,53 @@ mod tests {
     fn fr_prj_06_truncated_header_is_corrupt() {
         let bytes = &png_bytes(8, 8)[..20];
         assert!(matches!(probe_bytes(bytes), Err(ProbeError::Corrupt(_))));
+    }
+
+    #[test]
+    fn bl_05_garbage_named_png_is_corrupt_and_psd_is_unsupported() {
+        let dir = tempfile::tempdir().unwrap();
+        let png = dir.path().join("broken.PNG");
+        std::fs::write(&png, b"just some text").unwrap();
+        assert!(matches!(probe_file(&png), Err(ProbeError::Corrupt(_))));
+        let psd = dir.path().join("art.psd");
+        std::fs::write(&psd, b"8BPS\0\x01rest").unwrap();
+        assert!(matches!(probe_file(&psd), Err(ProbeError::Unsupported)));
+    }
+
+    #[test]
+    fn bl_01_fr_prj_06_truncated_files_fail_the_end_of_file_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let full = png_bytes(64, 64);
+        let ok = dir.path().join("ok.png");
+        std::fs::write(&ok, &full).unwrap();
+        probe_file_complete(&ok).unwrap();
+        let cut = dir.path().join("cut.png");
+        std::fs::write(&cut, &full[..full.len() - 20]).unwrap();
+        probe_file(&cut).expect("the header alone is fine");
+        assert!(matches!(
+            probe_file_complete(&cut),
+            Err(ProbeError::Corrupt(_))
+        ));
+
+        let mut jpeg = Vec::new();
+        image::RgbImage::new(16, 16)
+            .write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
+            .unwrap();
+        let j = dir.path().join("a.jpg");
+        std::fs::write(&j, &jpeg).unwrap();
+        probe_file_complete(&j).unwrap();
+        std::fs::write(&j, &jpeg[..jpeg.len() - 2]).unwrap();
+        assert!(matches!(probe_file_complete(&j), Err(ProbeError::Corrupt(_))));
+
+        let mut webp = Vec::new();
+        image::RgbaImage::new(8, 8)
+            .write_to(&mut std::io::Cursor::new(&mut webp), image::ImageFormat::WebP)
+            .unwrap();
+        let w = dir.path().join("a.webp");
+        std::fs::write(&w, &webp).unwrap();
+        probe_file_complete(&w).unwrap();
+        std::fs::write(&w, &webp[..webp.len() - 4]).unwrap();
+        assert!(matches!(probe_file_complete(&w), Err(ProbeError::Corrupt(_))));
     }
 
     #[test]

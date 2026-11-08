@@ -1,0 +1,196 @@
+//! `DecodedOriginal` (FR-PRJ-42, R11): the original as RGB8 (ADR 0004), owned by PRJ. Decoded
+//! lazily on the first RGN or EXP use or by `project_prefetch_original`, in the background, and
+//! released when the project closes. Until it's ready, callers get `original_unavailable`.
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use image::RgbImage;
+use serde_json::json;
+use ulid::Ulid;
+
+use crate::context::{Context, EventSink};
+use crate::error::{CoreError, CoreResult, ErrorCode};
+
+#[derive(Debug, Clone)]
+enum State {
+    Idle,
+    Decoding,
+    Ready(Arc<RgbImage>),
+    Failed(CoreError),
+}
+
+/// The handle an open project holds. Cloning shares the same decode.
+#[derive(Debug, Clone)]
+pub struct DecodedOriginal {
+    project_id: Ulid,
+    path: PathBuf,
+    state: Arc<Mutex<State>>,
+}
+
+impl DecodedOriginal {
+    pub fn new(project_id: Ulid, path: PathBuf) -> Self {
+        DecodedOriginal {
+            project_id,
+            path,
+            state: Arc::new(Mutex::new(State::Idle)),
+        }
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// True once the pixels are in memory.
+    pub fn is_ready(&self) -> bool {
+        matches!(*self.lock(), State::Ready(_))
+    }
+
+    /// The pixels, or `original_unavailable` while the decode runs (starting it if needed), or
+    /// the decode's error (`corrupt`, `not_found`, …).
+    pub fn get(&self, ctx: &Context) -> CoreResult<Arc<RgbImage>> {
+        self.start(ctx);
+        match &*self.lock() {
+            State::Ready(img) => Ok(img.clone()),
+            State::Failed(e) => Err(e.clone()),
+            State::Idle | State::Decoding => Err(CoreError::new(
+                ErrorCode::OriginalUnavailable,
+                "the original is still being decoded",
+            )),
+        }
+    }
+
+    /// Starts the decode unless it's running or done (`project_prefetch_original`). A failed
+    /// decode is retried. Emits `project:original-ready` when the pixels are in memory.
+    pub fn start(&self, ctx: &Context) {
+        {
+            let mut s = self.lock();
+            if matches!(*s, State::Decoding | State::Ready(_)) {
+                return;
+            }
+            *s = State::Decoding;
+        }
+        let job = self.clone();
+        let events = ctx.events.clone();
+        if ctx.inline_background {
+            job.run(&*events);
+        } else {
+            let spawned = std::thread::Builder::new()
+                .name("pf-decode-original".into())
+                .spawn(move || job.run(&*events));
+            if let Err(e) = spawned {
+                *self.lock() = State::Failed(CoreError::internal(format!(
+                    "can't start the decode: {e}"
+                )));
+            }
+        }
+    }
+
+    fn run(&self, events: &dyn EventSink) {
+        let result = pf_imaging::decode_rgb8(&self.path);
+        let mut s = self.lock();
+        // A close drops the handle; a late result for a released handle is simply discarded.
+        match result {
+            Ok(img) => {
+                *s = State::Ready(Arc::new(img));
+                drop(s);
+                events.emit(
+                    "project:original-ready",
+                    json!({ "project_id": self.project_id }),
+                );
+            }
+            Err(e) => {
+                let err = match e {
+                    pf_imaging::ProbeError::Io(io)
+                        if io.kind() != std::io::ErrorKind::UnexpectedEof =>
+                    {
+                        CoreError::io("reading the original", &io)
+                    }
+                    other => CoreError::new(
+                        ErrorCode::Corrupt,
+                        format!("the original can't be decoded: {other}"),
+                    ),
+                };
+                tracing::warn!(error = %err, "decoding the original failed");
+                *s = State::Failed(err);
+            }
+        }
+    }
+
+    /// Drops the pixels (project close). The next use decodes again.
+    pub fn release(&self) {
+        *self.lock() = State::Idle;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::RecordedEvents;
+    use crate::time::Timestamp;
+
+    #[test]
+    fn fr_prj_42_decodes_once_emits_ready_and_releases() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("o.png");
+        image::RgbImage::from_pixel(8, 4, image::Rgb([1, 2, 3]))
+            .save(&path)
+            .unwrap();
+        let mut ctx = Context::deterministic(dir.path().into(), Timestamp(0));
+        let events = Arc::new(RecordedEvents::default());
+        ctx.events = events.clone();
+        let d = DecodedOriginal::new(Ulid::from_parts(0, 1), path);
+        assert!(!d.is_ready());
+        let img = d.get(&ctx).unwrap();
+        assert_eq!((img.width(), img.height(), img.get_pixel(0, 0).0), (8, 4, [1, 2, 3]));
+        assert_eq!(events.names(), ["project:original-ready"]);
+        d.get(&ctx).unwrap();
+        assert_eq!(events.names().len(), 1, "decoded once");
+        d.release();
+        assert!(!d.is_ready());
+    }
+
+    #[test]
+    fn fr_prj_42_unavailable_until_the_background_decode_finishes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("o.png");
+        image::RgbImage::new(4, 4).save(&path).unwrap();
+        let mut ctx = Context::deterministic(dir.path().into(), Timestamp(0));
+        ctx.inline_background = false;
+        let d = DecodedOriginal::new(Ulid::from_parts(0, 1), path);
+        // Marked as decoding by hand: callers get `original_unavailable`, never a partial image.
+        *d.lock() = State::Decoding;
+        assert_eq!(
+            d.get(&ctx).unwrap_err().code,
+            ErrorCode::OriginalUnavailable
+        );
+        *d.lock() = State::Idle;
+        let r = d.get(&ctx);
+        assert!(
+            matches!(&r, Err(e) if e.code == ErrorCode::OriginalUnavailable) || r.is_ok(),
+            "{r:?}"
+        );
+        for _ in 0..500 {
+            if d.is_ready() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("decode never finished");
+    }
+
+    #[test]
+    fn fr_prj_42_corrupt_original_is_corrupt() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("o.png");
+        let mut bytes = Vec::new();
+        image::RgbImage::new(64, 64)
+            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .unwrap();
+        bytes.truncate(bytes.len() / 2);
+        std::fs::write(&path, bytes).unwrap();
+        let ctx = Context::deterministic(dir.path().into(), Timestamp(0));
+        let d = DecodedOriginal::new(Ulid::from_parts(0, 1), path);
+        assert_eq!(d.get(&ctx).unwrap_err().code, ErrorCode::Corrupt);
+    }
+}

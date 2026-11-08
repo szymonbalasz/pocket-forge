@@ -5,6 +5,7 @@
 //! normalised [`CoreError`]. The Tauri layer and the future MCP endpoint (#36) only adapt
 //! commands; [`Core::dispatch`] runs one by name from JSON.
 
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::Serialize;
@@ -16,6 +17,7 @@ use crate::error::{CoreError, CoreResult, ErrorCode};
 use crate::images::SchemeResponse;
 use crate::project::OpenProject;
 use crate::settings::{self, Settings, SettingsWarning};
+use crate::thumb::Thumbnails;
 use crate::tiles::{self, Served};
 
 /// Input validation at the command boundary. Deserialisation already checked the shape.
@@ -50,15 +52,25 @@ pub struct Core {
     /// The `pf-tiles` registry, behind its own lock so serving never waits for a command
     /// (EDT). Lock order: `state` first, then `served`.
     pub(crate) served: Arc<Mutex<Served>>,
+    /// The home-grid thumbnail worker (FR-PRJ-50).
+    pub thumbs: Thumbnails,
+    /// Set by `project_create_cancel`; read between files by a running `project_create`, which
+    /// doesn't hold the state lock (FR-PRJ-11).
+    pub(crate) create_cancel: AtomicBool,
+    /// One creation at a time, so two batches never race for a name.
+    pub(crate) create_lock: Mutex<()>,
 }
 
 impl Core {
-    /// Loads settings (creating them on first run) and prepares the library override.
+    /// Loads settings (creating them on first run), prepares the library override and runs the
+    /// startup sweep (FR-PRJ-09, R35).
     pub fn new(ctx: Context) -> CoreResult<Self> {
         let (settings, settings_warnings) = settings::load_or_init(&ctx)?;
         crate::library::prepare_override(&ctx)?;
+        crate::library::sweep_startup(&ctx, &settings);
         ctx.provider.set_account(settings.provider.account());
         Ok(Core {
+            thumbs: Thumbnails::new(&ctx),
             ctx,
             state: Mutex::new(State {
                 settings,
@@ -66,6 +78,8 @@ impl Core {
                 project: None,
             }),
             served: Arc::default(),
+            create_cancel: AtomicBool::new(false),
+            create_lock: Mutex::new(()),
         })
     }
 

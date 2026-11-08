@@ -43,6 +43,24 @@ pub enum ErrorCode {
     NotConfigured,
     /// A fake-only command ran in another provider mode.
     NotFakeMode,
+    /// A folder without `project.json` (FR-PRJ-14).
+    NotAProject,
+    /// `project_rename` to a name another project in the section has (FR-PRJ-45).
+    NameTaken,
+    /// A name that breaks the FR-PRJ-44 rules.
+    InvalidName,
+    /// The project is open (rename needs it closed, FR-PRJ-45).
+    ProjectOpen,
+    /// `project_folder_*` with a folder that isn't one of the listed ones.
+    UnknownFolder,
+    /// Relink with a file whose hash isn't the original's (FR-PRJ-16).
+    HashMismatch,
+    /// A canceled batch (`project_create_cancel`); `detail.items` holds the partial results.
+    Canceled,
+    /// The decoded original isn't ready yet (R11, FR-PRJ-42).
+    OriginalUnavailable,
+    /// A re-pick that's no longer possible (R32, FR-RGN-36).
+    RepickUnavailable,
 }
 
 impl ErrorCode {
@@ -73,6 +91,15 @@ impl ErrorCode {
             ErrorCode::StoreUnavailable => "store_unavailable",
             ErrorCode::NotConfigured => "not_configured",
             ErrorCode::NotFakeMode => "not_fake_mode",
+            ErrorCode::NotAProject => "not_a_project",
+            ErrorCode::NameTaken => "name_taken",
+            ErrorCode::InvalidName => "invalid_name",
+            ErrorCode::ProjectOpen => "project_open",
+            ErrorCode::UnknownFolder => "unknown_folder",
+            ErrorCode::HashMismatch => "hash_mismatch",
+            ErrorCode::Canceled => "canceled",
+            ErrorCode::OriginalUnavailable => "original_unavailable",
+            ErrorCode::RepickUnavailable => "repick_unavailable",
         }
     }
 }

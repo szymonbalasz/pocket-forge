@@ -28,7 +28,11 @@ pub use encode::{
     EncodeError, ImageRows, JPEG_MAX_SIDE, JPEG_QUALITY, Phase, Progress, RowSource, encode_jpeg,
     encode_png,
 };
-pub use probe::{ImageFormat, ImageInfo, MAX_SIDE, ProbeError, probe_bytes, probe_file, sniff};
+pub use probe::{
+    ImageFormat, ImageInfo, MAX_SIDE, ProbeError, check_complete, has_image_extension,
+    probe_bytes, probe_file, probe_file_complete, sniff,
+};
+pub use rgb_source::decode_rgb8;
 pub use resize::resize_lanczos3;
 pub use sizing::{
     GridInput, InvalidSetting, Limit, MAX_CELLS, MAX_OUTPUT_SIDE, MAX_PX_PER_SQUARE, MAX_SCALE,
