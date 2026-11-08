@@ -73,11 +73,45 @@ export class MaskSync {
   private failed = false;
   private disposed = false;
   private status: MaskStatus = { kind: 'none' };
+  /** BL-31: bumped by `hold`, so a submit started before it is forgotten when it lands. */
+  private generation = 0;
+  /** BL-31: set while the stored mask is being reloaded; resolved by `markLoaded` / `resume`. */
+  private held: { done: Promise<void>; release: () => void } | null = null;
 
   constructor(private readonly deps: MaskSyncDeps) {}
 
+  /** BL-31 (Keep other): the store now holds another mask, being reloaded. A hard cancel: the
+   *  retry timer is cleared, a submit in flight is forgotten when it lands, and nothing is
+   *  submitted (a flush waits) until `markLoaded` or `resume`. */
+  hold(): void {
+    if (this.disposed) return;
+    this.clearTimer();
+    this.generation++;
+    this.inFlight = null;
+    this.failed = false;
+    if (!this.held) {
+      let release!: () => void;
+      const done = new Promise<void>((r) => {
+        release = r;
+      });
+      this.held = { done, release };
+    }
+  }
+
+  /** BL-31: ends a `hold` without a loaded mask (the reload found none, or failed). */
+  resume(): void {
+    const h = this.held;
+    if (!h) return;
+    this.held = null;
+    h.release();
+    this.changed();
+  }
+
   /** The mask loaded on reopen is what the store holds: no submit until it changes (FR-EDT-19). */
   markLoaded(mask: MaskBuffer | null, maskId: string | null): void {
+    const h = this.held;
+    this.held = null;
+    h?.release();
     this.saved = mask
       ? {
           rect: { ...mask.rect },
@@ -91,7 +125,7 @@ export class MaskSync {
   /** Any content change (dabs, fill, clear, region, undo, stroke end): restart the debounce.
    *  Called per dab, so O(1): the exact comparison waits for the timer or a flush. */
   changed(): void {
-    if (this.disposed) return;
+    if (this.disposed || this.held) return;
     this.refresh(false);
     if (!this.deps.buffer() || this.deps.readOnly()) return;
     if (this.deps.version() === this.savedVersion) return;
@@ -100,13 +134,14 @@ export class MaskSync {
 
   /** Retries a failed submit (after a commit, e.g. a resolved conflict). */
   retry(): void {
-    if (this.failed && !this.isClean()) this.schedule();
+    if (this.failed && !this.held && !this.isClean()) this.schedule();
   }
 
   /** Submits now if the mask changed (job submit, close). Resolves to the ref the draft points
    *  at, or null when there is no mask or the project is read-only. Rejects on a failed submit. */
   async flush(): Promise<MaskRef | null> {
     this.clearTimer();
+    if (this.held) await this.held.done;
     if (this.inFlight) await this.inFlight.catch(() => undefined);
     if (this.disposed || this.deps.readOnly() || !this.deps.buffer()) {
       this.refresh();
@@ -119,6 +154,8 @@ export class MaskSync {
   dispose(): void {
     this.disposed = true;
     this.clearTimer();
+    this.held?.release();
+    this.held = null;
   }
 
   get current(): MaskStatus {
@@ -127,7 +164,7 @@ export class MaskSync {
 
   /** True if `flush` may have to submit or wait (cheap: versions only). */
   get pending(): boolean {
-    if (this.disposed || this.deps.readOnly() || !this.deps.buffer()) return false;
+    if (this.disposed || this.held || this.deps.readOnly() || !this.deps.buffer()) return false;
     return this.inFlight !== null || this.timer !== null || !this.isClean(false);
   }
 
@@ -135,6 +172,7 @@ export class MaskSync {
     this.clearTimer();
     this.timer = setTimeout(() => {
       this.timer = null;
+      if (this.held) return;
       if (this.deps.stroking()) {
         this.schedule();
         return;
@@ -194,10 +232,12 @@ export class MaskSync {
 
   private run(rethrow: boolean): Promise<MaskRef | null> {
     const m = this.deps.buffer();
-    if (this.disposed || !m || this.deps.readOnly()) {
-      this.refresh();
+    if (this.disposed || this.held || !m || this.deps.readOnly()) {
+      if (!this.held) this.refresh();
       return Promise.resolve(null);
     }
+    const generation = this.generation;
+    const stale = () => generation !== this.generation;
     const version = this.deps.version();
     const rect = { ...m.rect };
     const data = m.data.slice(); // The bytes sent are the bytes remembered (FR-EDT-18).
@@ -205,11 +245,14 @@ export class MaskSync {
     const p: Promise<MaskRef | null> = Promise.resolve().then(async () => {
       try {
         const ref = await this.deps.handoff.submit(this.deps.projectId, { rect, data });
+        // BL-31: held since: the store holds the reloaded mask, not this one.
+        if (stale()) return null;
         this.saved = { rect, data, ref };
         this.savedVersion = version;
         this.failed = false;
         return ref;
       } catch (e) {
+        if (stale()) return null;
         this.failed = true;
         const { reason, message } = reasonOf(e);
         if (this.inFlight === p) this.inFlight = null;
@@ -217,7 +260,7 @@ export class MaskSync {
         throw e;
       } finally {
         if (this.inFlight === p) this.inFlight = null;
-        if (!this.disposed) {
+        if (!this.disposed && !stale()) {
           if (!this.failed) this.refresh();
           // Changed while saving: submit again after the debounce.
           if (!this.failed && !this.isClean()) this.schedule();

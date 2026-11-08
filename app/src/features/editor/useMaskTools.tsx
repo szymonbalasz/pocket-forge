@@ -105,11 +105,14 @@ export function useMaskTools({
   const draftLoadedFor = useRef<MaskController | null>(null);
   // Walk 2 N1, Keep other: load the kept draft's mask as at reopen, so a retried submit can't
   // write this machine's mask over it (RGN sends the kept region, BL-26). Keep this keeps the
-  // mask and its retry.
+  // mask and its retry. BL-31: a hard hold on the hand-off until the reload lands, so the 2 s
+  // retry (or a submit in flight) can't race it.
   useEffect(
     () =>
       projectStore.onResolved((p, keep) => {
-        if (keep === 'other' && p.project_id === project.project_id) draftLoadedFor.current = null;
+        if (keep !== 'other' || p.project_id !== project.project_id) return;
+        draftLoadedFor.current = null;
+        sync.current?.hold();
       }),
     [project.project_id],
   );
@@ -126,8 +129,10 @@ export function useMaskTools({
     const restored = () => {
       if (ctl.current === c) editorStore.set({ regionFor: project.project_id });
     };
-    if (!inner) restored();
-    else {
+    if (!inner) {
+      sync.current?.resume();
+      restored();
+    } else {
       void (async () => {
         try {
           const r = await fitRegion(project.project_id, inner, draft?.region?.margin);
@@ -149,6 +154,7 @@ export function useMaskTools({
           c.load(r, m);
         } catch {
           // The saved region no longer fits: start without one.
+          if (ctl.current === c) sync.current?.resume();
         }
         restored();
       })();
