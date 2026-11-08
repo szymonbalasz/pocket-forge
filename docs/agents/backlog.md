@@ -29,3 +29,5 @@ Small items for idle slots (see [process.md](../process.md)). The planned work a
 | BL-23 | A purged candidate keeps a `trash_id` that points at nothing | XS | `pf-core` project retention | — | open |
 | BL-24 | Restore only `candidates`, `job_inputs` and `conflict_copy` trash items (R51): restoring an orphan or mask item is undone by the next sweep | XS | `pf-core` project, `features/project` | — | open |
 | BL-25 | RGN spool replay drops an entry the store refuses for good, after logging it: surface it to the user | XS | `pf-core` region_edit runner | — | open |
+| BL-26 | A restored draft's region isn't pushed back into EDT (EDT owns the region); needs the BL-14 bridge setter | XS | `features/region-edit`, `features/editor` bridge | EDT mask hand-off | open |
+| BL-27 | Walkthrough polish: the "¤" cost marker (design call), Choose again's empty field, no feedback on an unchanged Save, lower-case error text, corrupt-body error wording, double `tiles_open` in dev StrictMode | S | `features/*` | — | open |
