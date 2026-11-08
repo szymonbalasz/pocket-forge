@@ -21,7 +21,9 @@
 | Walkthrough fixes (spinner, draft) | — | merged | done | — |
 | Asset-project re-walk | — | — | spinner fixed (44 opens); N1–N4 found | — |
 | Re-walk fixes N1–N4 | `fix-prj2` | `fix/walk-prj-2` | in progress | — |
-| REF 6 (RGN integration) | — | merged | done | REF walkthrough next |
+| REF 6 (RGN integration) | — | merged | done | — |
+| Generate-loop walkthrough (RGN, EDT 5, PRV fake, EXP 3–5) | `walk-rgn` | `test/rgn-walk` | in progress | — |
+| Reference packs walkthrough | `walk-ref` | `test/ref-walk` | in progress | — |
 
 ## Pending owner decisions
 - OQ-IMG-12: file the image-webp bug upstream? (not urgent)
