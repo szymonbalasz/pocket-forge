@@ -26,7 +26,6 @@ use crate::core::Core;
 use crate::error::{CoreError, CoreResult, ErrorCode};
 use crate::fsx::TEMP_MARKER;
 use crate::images::{self, ImageBody, ImageRegistry, SchemePath, SchemeResponse, ServedImage};
-use crate::manifest::LayerKind;
 
 /// FR-EDT-11 / R5.
 pub const CACHE_CAP_BYTES: u64 = 2 * 1024 * 1024 * 1024;
@@ -224,6 +223,9 @@ pub struct Served {
     project_id: Option<Ulid>,
     pyramids: HashMap<String, PyramidEntry>,
     images: ImageRegistry,
+    /// EDT's `library` key space (OQ-PRJ-16): files outside the open project (home-grid
+    /// thumbnails, user-folder files). Survives project open and close.
+    library: ImageRegistry,
     /// Transient keys, oldest first, with their sizes.
     transient: VecDeque<(String, usize)>,
     /// Pyramid keys with a build in flight (idempotent `edt_tiles_open`).
@@ -238,6 +240,7 @@ impl Default for Served {
             project_id: None,
             pyramids: HashMap::new(),
             images: ImageRegistry::default(),
+            library: ImageRegistry::default(),
             transient: VecDeque::new(),
             building: HashSet::new(),
             cap_bytes: CACHE_CAP_BYTES,
@@ -280,7 +283,10 @@ pub fn serve(served: &Mutex<Served>, path: &str) -> SchemeResponse {
     match images::parse_path(path) {
         None => SchemeResponse::status(400),
         Some(SchemePath::Image { key, ext }) => {
-            let img = lock(served).images.get(&key).cloned();
+            let img = {
+                let s = lock(served);
+                s.images.get(&key).or_else(|| s.library.get(&key)).cloned()
+            };
             match img {
                 Some(img) if img.ext == ext => images::read_image(&key, &img),
                 _ => SchemeResponse::status(404),
@@ -333,7 +339,7 @@ fn probe_error(e: pf_imaging::ProbeError) -> CoreError {
     }
 }
 
-/// The image must belong to the open project: the original or a layer file.
+/// The image must belong to the open project: the original, a layer, a candidate or a mask.
 fn resolve(core: &Core, project_id: Ulid, image_id: Ulid) -> CoreResult<Resolved> {
     let path = {
         let state = core.state();
@@ -347,22 +353,8 @@ fn resolve(core: &Core, project_id: Ulid, image_id: Ulid) -> CoreResult<Resolved
                     .with_field("project_id"),
             );
         }
-        let layer = p
-            .manifest
-            .layers
-            .iter()
-            .find(|l| l.id == image_id)
-            .ok_or_else(|| {
-                CoreError::new(ErrorCode::UnknownId, "unknown image").with_field("image_id")
-            })?;
-        match (layer.kind, &layer.file) {
-            (LayerKind::Original, _) => p.image_path.clone(),
-            (LayerKind::Patch, Some(file)) => p.dir.join(file),
-            (LayerKind::Patch, None) => {
-                return Err(CoreError::new(ErrorCode::Corrupt, "the layer has no file")
-                    .with_field("image_id"));
-            }
-        }
+        // PRJ `resolve_image` (#48 (3)): the original by its stable id, layers, candidates.
+        p.resolve_image(image_id)?.path
     };
     let meta = std::fs::metadata(&path).map_err(|e| CoreError::io("reading the image", &e))?;
     let info = pf_imaging::probe_file(&path).map_err(probe_error)?;
@@ -704,6 +696,44 @@ pub fn image_open(
         width,
         height,
     })
+}
+
+// ---------------------------------------------------------------- library images
+
+/// Most `library` keys kept; past it the registry starts over (keys are re-registered by the
+/// next listing).
+pub const LIBRARY_MAX_KEYS: usize = 20_000;
+
+/// OQ-PRJ-16 A, minimal: registers a PNG/JPEG/WebP file outside the open project under
+/// `/i/l-<16 hex>.<ext>` and returns its URL. The key covers path, size and mtime, so it changes
+/// when the file does. Reads metadata only (nothing is hydrated until the image is viewed,
+/// FR-PRJ-17). `None` for a missing file or another extension.
+pub fn register_library_image(core: &Core, path: &Path) -> Option<String> {
+    let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+    let (mime, ext) = match ext.as_str() {
+        "png" => ("image/png", "png"),
+        "jpg" | "jpeg" => ("image/jpeg", "jpg"),
+        "webp" => ("image/webp", "webp"),
+        _ => return None,
+    };
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    let h = fnv1a64(&[
+        path.to_string_lossy().as_bytes(),
+        &meta.len().to_le_bytes(),
+        &mtime_ns(&meta).to_le_bytes(),
+    ]);
+    let key = format!("l-{h:016x}");
+    let mut s = lock(&core.served);
+    if s.library.get(&key).is_none() {
+        if s.library.keys().count() >= LIBRARY_MAX_KEYS {
+            s.library.clear();
+        }
+        s.library.register(
+            key.clone(),
+            ServedImage::file(path.to_path_buf(), mime, ext),
+        );
+    }
+    Some(format!("{}/i/{key}.{ext}", core.ctx.tiles_base_url))
 }
 
 // ---------------------------------------------------------------- transient images

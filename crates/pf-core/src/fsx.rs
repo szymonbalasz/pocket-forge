@@ -100,7 +100,8 @@ pub fn copy_atomic_new(ctx: &Context, source: &Path, target: &Path) -> CoreResul
     })
 }
 
-fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {
+/// Renames with the FR-PRJ-21 lock retry (≤ 3 s of backoff, then the error).
+pub fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {
     let start = std::time::Instant::now();
     let mut delay = Duration::from_millis(25);
     loop {
@@ -137,6 +138,91 @@ fn format_hash(digest: &[u8]) -> String {
         s.push_str(&format!("{b:02x}"));
     }
     s
+}
+
+/// Moves a file within one volume (trash moves, restores), creating the target's folder.
+/// Fails if `to` exists.
+pub fn move_file(from: &Path, to: &Path) -> CoreResult<()> {
+    let result = (|| {
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if to.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "the target exists",
+            ));
+        }
+        rename_with_retry(from, to)
+    })();
+    result.map_err(|e| CoreError::io(format!("moving {}", from.display()), &e))
+}
+
+/// Removes `dir` if it is an empty folder. Never removes anything else.
+pub fn remove_dir_if_empty(dir: &Path) -> bool {
+    fs::read_dir(dir).is_ok_and(|mut d| d.next().is_none()) && fs::remove_dir(dir).is_ok()
+}
+
+/// Sets the hidden attribute on Windows (the `.pforge` folder, schema §2). Best effort: a dot
+/// name already hides it elsewhere, and a failure changes nothing else.
+pub fn set_hidden(path: &Path) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let status = std::process::Command::new("attrib")
+            .arg("+h")
+            .arg(path)
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if !status.is_ok_and(|s| s.success()) {
+            tracing::debug!(path = %path.display(), "could not set the hidden attribute");
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = path;
+}
+
+/// Removes temp **folders** (names containing [`TEMP_MARKER`]) directly in `dir` whose
+/// modification time is older than `max_age` (FR-PRJ-09: a creation interrupted on this or
+/// another machine). Returns how many were removed.
+pub fn remove_stale_temp_dirs(dir: &Path, max_age: Duration) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    let now = std::time::SystemTime::now();
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
+        if !is_dir || !entry.file_name().to_string_lossy().contains(TEMP_MARKER) {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .is_some_and(|age| age >= max_age);
+        if old && fs::remove_dir_all(entry.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// Deletes temp files (names containing [`TEMP_MARKER`]) directly in `dir`, not in subfolders.
+pub fn remove_temp_files_shallow(dir: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .filter(|e| e.file_name().to_string_lossy().contains(TEMP_MARKER))
+        .filter(|e| fs::remove_file(e.path()).is_ok())
+        .count()
 }
 
 /// Deletes temp files (names containing [`TEMP_MARKER`]) in `dir` and its subfolders.
@@ -219,6 +305,33 @@ mod tests {
         );
         assert_eq!(hash, hash_file(&dst).unwrap());
         assert!(copy_atomic_new(&c, &src, &dst).is_err());
+    }
+
+    #[test]
+    fn fr_prj_09_stale_temp_dirs_only() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join(".Crypt.pf-tmp-01")).unwrap();
+        fs::create_dir(dir.path().join("Crypt")).unwrap();
+        assert_eq!(
+            remove_stale_temp_dirs(dir.path(), Duration::from_secs(3600)),
+            0,
+            "a fresh temp folder may be another machine's creation in progress"
+        );
+        assert_eq!(remove_stale_temp_dirs(dir.path(), Duration::ZERO), 1);
+        assert!(dir.path().join("Crypt").is_dir());
+    }
+
+    #[test]
+    fn move_file_creates_folders_and_never_overwrites() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.png");
+        fs::write(&a, b"a").unwrap();
+        let b = dir.path().join("x/y/a.png");
+        move_file(&a, &b).unwrap();
+        assert!(!a.exists() && b.exists());
+        fs::write(&a, b"again").unwrap();
+        assert!(move_file(&a, &b).is_err());
+        assert!(!remove_dir_if_empty(&dir.path().join("x")));
     }
 
     #[test]
