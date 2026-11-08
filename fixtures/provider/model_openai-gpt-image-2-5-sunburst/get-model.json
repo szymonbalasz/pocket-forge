@@ -1,15 +1,15 @@
 {
   "format_version": 1,
   "provider": "scenario",
-  "model": "model_openai-gpt-image-2-5",
+  "model": "model_openai-gpt-image-2-5-sunburst",
   "case": "get-model",
-  "recorded_on": "2026-11-07",
+  "recorded_on": "2026-11-08",
   "source": "synthetic",
   "exchanges": [
     {
       "request": {
         "method": "GET",
-        "path": "/models/model_openai-gpt-image-2-5"
+        "path": "/models/model_openai-gpt-image-2-5-sunburst"
       },
       "response": {
         "status": 200,
@@ -18,8 +18,8 @@
         },
         "body": {
           "model": {
-            "id": "model_openai-gpt-image-2-5",
-            "name": "GPT Image 2.5",
+            "id": "model_openai-gpt-image-2-5-sunburst",
+            "name": "GPT Image 2.5 Sunburst",
             "type": "custom",
             "capabilities": [
               "img2img",
@@ -35,27 +35,31 @@
                 }
               },
               {
-                "name": "image",
-                "type": "file",
+                "name": "referenceImages",
+                "type": "file_array",
                 "kind": "image",
-                "required": {
-                  "always": true
-                },
-                "maxSize": 52428800,
-                "max": 3840
+                "max": 10,
+                "maxSize": 52428800
+              },
+              {
+                "name": "referenceImages",
+                "type": "file_array",
+                "kind": "image",
+                "max": 10,
+                "maxSize": 52428800
               },
               {
                 "name": "mask",
                 "type": "file",
                 "kind": "image",
-                "maskFrom": "image",
+                "maskFrom": "referenceImages",
                 "description": "PNG, transparent = edit, same size as image"
               },
               {
                 "name": "numOutputs",
                 "type": "number",
                 "min": 1,
-                "max": 4,
+                "max": 10,
                 "step": 1,
                 "default": 1,
                 "costImpact": true
@@ -82,13 +86,32 @@
                 "default": "auto"
               },
               {
-                "name": "inputFidelity",
-                "type": "string",
-                "allowedValues": [
-                  "low",
-                  "high"
-                ],
-                "default": "low"
+                "name": "width",
+                "type": "number",
+                "min": 16,
+                "max": 3840,
+                "step": 16
+              },
+              {
+                "name": "height",
+                "type": "number",
+                "min": 16,
+                "max": 3840,
+                "step": 16
+              },
+              {
+                "name": "width",
+                "type": "number",
+                "min": 16,
+                "max": 3840,
+                "step": 16
+              },
+              {
+                "name": "height",
+                "type": "number",
+                "min": 16,
+                "max": 3840,
+                "step": 16
               }
             ]
           }

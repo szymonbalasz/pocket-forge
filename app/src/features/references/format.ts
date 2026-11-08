@@ -79,6 +79,21 @@ export function imagesLabel(n: number): string {
   return n === 1 ? '1 image' : `${n} images`;
 }
 
+/** A Recently deleted row: the pack, its images, or (not restorable, R61) its `pack.json`. */
+export function trashLabel(t: {
+  kind: 'pack' | 'images';
+  pack_name: string;
+  files: string[];
+  restorable?: boolean;
+}): string {
+  if (t.kind === 'pack') return t.pack_name;
+  if (t.restorable === false)
+    return t.files.length === 1
+      ? `${t.pack_name}’s older pack.json`
+      : `${t.files.length} older pack.json copies of ${t.pack_name}`;
+  return `${imagesLabel(t.files.length)} from ${t.pack_name}`;
+}
+
 export const ROLES: readonly RefRole[] = ['style', 'structure', 'identity'];
 
 export function roleLabel(role: RefRole | null | undefined): string {
@@ -112,8 +127,10 @@ export function headerCount(slots: readonly RefSlot[]): string {
   return slots.map((s) => `${slotName(s)} ${s.on}/${s.max}`).join(' · ');
 }
 
-export function slotName(slot: RefSlot): string {
-  return slot.role ? roleLabel(slot.role) : slot.name;
+/** A slot as the block names it: its role, else "References" (never the provider's input
+ *  name; pf-core `slot_label`). */
+export function slotName(slot: Pick<RefSlot, 'role'>): string {
+  return slot.role ? roleLabel(slot.role) : 'References';
 }
 
 /** Items that can be ticked at all (corrupt or missing ones can't, §11). */

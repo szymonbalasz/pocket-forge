@@ -86,6 +86,26 @@ test('FR-PRV-07 a working connection shows ok and the balance', async ({ page })
   await expect(chip).toHaveText('Scenario · ok · 1,234 CU');
 });
 
+test('FR-PRV-28 the real provider shows a real-credits badge with the spend cap', async ({
+  page,
+}) => {
+  await mockProvider(page, { ...base, stored: 'k-wxyz' });
+  const real = page.getByTestId('prv-status-real');
+  await expect(real).toHaveText('Real credits · no spend cap yet');
+  await expect(real).toHaveAttribute('data-cap-set', 'false');
+});
+
+test('FR-PRV-28 the badge shows the session cap', async ({ page }) => {
+  await mockProvider(page, { ...base, stored: 'k-wxyz', cap: 50 });
+  await expect(page.getByTestId('prv-status-real')).toHaveText('Real credits · cap 0 / 50 CU');
+});
+
+test('FR-PRV-28 fake mode shows no real-credits badge', async ({ page }) => {
+  await mockProvider(page, { ...base, mode: 'fake' });
+  await expect(page.getByTestId('prv-status-chip')).toHaveAttribute('data-state', 'fake');
+  await expect(page.getByTestId('prv-status-real')).toHaveCount(0);
+});
+
 test('FR-PRV-07 the rail Settings entry opens the provider settings; Esc closes them', async ({
   page,
 }) => {

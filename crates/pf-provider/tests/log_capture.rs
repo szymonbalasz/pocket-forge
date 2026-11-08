@@ -24,7 +24,8 @@ use pf_provider::{
 use serde_json::{Value, json};
 
 const BASE: &str = pf_provider::scenario::DEFAULT_BASE_URL;
-const CONTRACT: &str = include_str!("../../../fixtures/provider/model_ideogram-v3/contract.json");
+const CONTRACT: &str =
+    include_str!("../../../fixtures/provider/model_ideogram-v3-balanced/contract.json");
 
 #[derive(Clone, Default)]
 struct Captured(Arc<Mutex<Vec<u8>>>);
@@ -116,7 +117,10 @@ fn fr_prv_08_log_capture_over_a_full_fake_and_replay_job_has_no_credentials() {
 
     // A full Scenario replay job (the contract recording minus its list_models call).
     let rec = Recording::parse(CONTRACT).unwrap();
-    full_job(&scenario(rec.exchanges[1..].to_vec()), "model_ideogram-v3");
+    full_job(
+        &scenario(rec.exchanges[1..].to_vec()),
+        "model_ideogram-v3-balanced",
+    );
 
     // A full fake job, then every fake error case.
     let fake = FakeProvider::default();

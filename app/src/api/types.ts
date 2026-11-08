@@ -794,6 +794,8 @@ export interface RefTrashItem {
   trashed_at: string;
   /** When it will be purged (30 days). */
   purge_at: string;
+  /** False for a trashed `pack.json` (R61): no Restore. */
+  restorable: boolean;
 }
 
 /** The draft's `references` (schema §4.5). Retry (FR-REF-26) marks restored items with

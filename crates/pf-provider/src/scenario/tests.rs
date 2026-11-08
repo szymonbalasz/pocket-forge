@@ -73,7 +73,7 @@ pub(crate) fn get_model(model: &str) -> Exchange {
     fixture_recording(model, "get-model").unwrap().exchanges[0].clone()
 }
 
-const V3: &str = "model_ideogram-v3";
+const V3: &str = "model_ideogram-v3-balanced";
 const GPT: &str = "model_openai-gpt-image-2";
 const CHAR: &str = "model_ideogram-character";
 
@@ -103,7 +103,7 @@ fn fr_prv_25_list_models_returns_masked_edit_models_only() {
         [V3, CHAR],
         "404 skipped; Character's required reference slot no longer blocks it (FR-PRV-32)"
     );
-    assert_eq!(list.models[0].name, "Ideogram V3");
+    assert_eq!(list.models[0].name, "Ideogram V3 Balanced");
     assert_eq!(r.t.remaining(), 0);
     assert!(
         r.t.seen().iter().all(|s| s.authorized),
@@ -250,4 +250,84 @@ fn malformed_model_json_skips_the_model_never_panics() {
     let r = rig_with(vec![bad], &[V3]);
     let list = block_on(r.p.list_models(&ModelFilter::default())).unwrap();
     assert!(list.is_empty());
+}
+
+/// A dry run of a masked edit over `model`'s fixture: the body as sent.
+fn dry_run_body(model: &str) -> serde_json::Map<String, Value> {
+    let r = rig_with(
+        vec![
+            get_model(model),
+            ex(
+                Method::Post,
+                "/assets",
+                200,
+                json!({"asset": {"id": "a_img"}}),
+            ),
+            ex(
+                Method::Post,
+                "/assets",
+                200,
+                json!({"asset": {"id": "a_mask"}}),
+            ),
+            ex(
+                Method::Post,
+                &format!("/generate/custom/{model}?dryRun=true"),
+                269,
+                json!({"creativeUnitsCost": 3}),
+            ),
+        ],
+        &[model],
+    );
+    let request = crate::JobRequest {
+        operation: Operation::EditMasked,
+        model_id: model.into(),
+        final_prompt: "a mossy flagstone floor".into(),
+        controls: BTreeMap::new(),
+        references: vec![],
+        region_png: crate::fixtures::room_png(256),
+        mask_png: crate::fixtures::disc_mask_png(256),
+        candidate_count: 1,
+        seed: Some(7),
+    };
+    let est = block_on(r.p.estimate(&request)).unwrap();
+    assert_eq!(r.t.remaining(), 0);
+    est.provider.0["request"].as_object().unwrap().clone()
+}
+
+/// GPT Image takes the source as the first of `referenceImages` (the mask applies to it) and
+/// gets the sent size as `width`/`height`, which are never controls (FR-PRV-17, R28).
+#[test]
+fn fr_prv_17_gpt_source_is_the_first_reference_image_at_the_sent_size() {
+    let caps = super::normalise::normalise(
+        GPT,
+        &get_model(GPT).response.body,
+        row_in(&SCENARIO_ROWS, GPT),
+    )
+    .unwrap();
+    assert!(caps.capabilities.controls.iter().all(|c| c.name != "width"));
+    assert_eq!(
+        caps.capabilities.input_px.max, 3840,
+        "a list's max is a count"
+    );
+    let body = dry_run_body(GPT);
+    assert_eq!(body["referenceImages"], json!(["a_img"]));
+    assert_eq!(body["mask"], json!("a_mask"));
+    assert_eq!(
+        (&body["width"], &body["height"]),
+        (&json!(256), &json!(256))
+    );
+    assert!(!body.contains_key("image"));
+}
+
+/// Ideogram 4.5: the source goes first in `referenceImages`, and a mask needs
+/// `aspectRatio: "auto"`, which the overlay fixes (no control).
+#[test]
+fn fr_prv_17_ideogram_4_5_fixes_aspect_ratio_auto() {
+    let body = dry_run_body("model_ideogram-v4-5");
+    assert_eq!(body["referenceImages"], json!(["a_img"]));
+    assert_eq!(body["aspectRatio"], json!("auto"));
+    // V3 takes a plain `image` and nothing fixed.
+    let body = dry_run_body(V3);
+    assert_eq!(body["image"], json!("a_img"));
+    assert!(!body.contains_key("aspectRatio") && !body.contains_key("width"));
 }

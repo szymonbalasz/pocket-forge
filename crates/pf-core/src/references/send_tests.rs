@@ -247,6 +247,23 @@ fn fr_ref_18_limits_model_change_and_min() {
             .count(),
         2
     );
+    // Walk R7: messages name the slot as the block does, never the input name.
+    assert_eq!(
+        r.notices[0].message,
+        "b.png was unticked: References takes at most 1"
+    );
+    let r = resolve(&e, &s, &dir, &style_identity()[..1], Some(&r.references));
+    let r = resolve(
+        &e,
+        &s,
+        &dir,
+        &[slot("style_refs", Some(ReferenceRole::Style), 0, 0, true)],
+        Some(&r.references),
+    );
+    assert_eq!(
+        r.notices[0].message,
+        "a.png was unticked: Style takes at most 0"
+    );
     // A required slot under its minimum disables submit and names the slot.
     let mut none = r.references.clone();
     for i in &mut none.items {
@@ -264,6 +281,7 @@ fn fr_ref_18_limits_model_change_and_min() {
     let err = prep(&e, &s, &dir, &req, Some(&none)).unwrap_err();
     assert_eq!(err.code, ErrorCode::ReferencesRequired);
     assert_eq!(err.detail, json!({"slot": "character", "min": 1}));
+    assert_eq!(err.message, "Identity needs at least 1 reference(s)");
     assert_eq!(s.prepared.misses.load(Ordering::Relaxed), 0, "nothing read");
 }
 

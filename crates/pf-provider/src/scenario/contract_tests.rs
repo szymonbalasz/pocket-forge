@@ -1,6 +1,6 @@
 //! Contract tests (spec §13): the **same suite** runs against the fake provider and against
 //! `ScenarioProvider` over replay recordings, plus one test per slice-4 FR over the recordings
-//! in `fixtures/provider/model_ideogram-v3/`.
+//! in `fixtures/provider/model_ideogram-v3-balanced/`.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -21,7 +21,7 @@ use crate::{
     ProviderError, ProviderJobState, block_on,
 };
 
-const V3: &str = "model_ideogram-v3";
+const V3: &str = "model_ideogram-v3-balanced";
 
 fn request(model: &str) -> JobRequest {
     JobRequest {

@@ -42,6 +42,7 @@ import {
   referencesCostKey,
   referencesDraft,
   referencesForSend,
+  refreshReferences,
   reloadReferences,
   restoreReferences,
   settleReferences,
@@ -316,7 +317,9 @@ async function runEstimate(sig: string): Promise<void> {
     });
   } catch (e) {
     if (!isCurrent('estimate', t)) return;
-    set({ estimate: { status: 'error', result: null, error: uiError(e), signature: sig } });
+    const error = uiError(e);
+    set({ estimate: { status: 'error', result: null, error, signature: sig } });
+    if (error.code === 'reference_unavailable') refreshReferences(); // FR-REF-21
   }
 }
 
@@ -958,6 +961,9 @@ export const rgn = {
       }
       set({ submitting: false, confirmOpen: false, submitError: err });
       if (err.code === 'estimate_stale') debouncer.force();
+      // FR-REF-21: a ticked reference is gone; the block shows which, and the next edit or
+      // resolve re-estimates.
+      if (err.code === 'reference_unavailable') refreshReferences();
       void refreshIterations();
     }
   },

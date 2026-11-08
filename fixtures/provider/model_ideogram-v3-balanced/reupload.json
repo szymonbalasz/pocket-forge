@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "provider": "scenario",
-  "model": "model_ideogram-v3",
+  "model": "model_ideogram-v3-balanced",
   "case": "reupload",
   "recorded_on": "2026-11-07",
   "source": "synthetic",
@@ -9,7 +9,7 @@
     {
       "request": {
         "method": "GET",
-        "path": "/models/model_ideogram-v3"
+        "path": "/models/model_ideogram-v3-balanced"
       },
       "response": {
         "status": 200,
@@ -18,7 +18,7 @@
         },
         "body": {
           "model": {
-            "id": "model_ideogram-v3",
+            "id": "model_ideogram-v3-balanced",
             "name": "Ideogram V3",
             "type": "custom",
             "capabilities": [
@@ -178,7 +178,7 @@
     {
       "request": {
         "method": "POST",
-        "path": "/generate/custom/model_ideogram-v3",
+        "path": "/generate/custom/model_ideogram-v3-balanced",
         "body": {
           "image": "<asset-1>",
           "mask": "<asset-2>",
@@ -240,7 +240,7 @@
     {
       "request": {
         "method": "POST",
-        "path": "/generate/custom/model_ideogram-v3",
+        "path": "/generate/custom/model_ideogram-v3-balanced",
         "body": {
           "image": "<asset-3>",
           "mask": "<asset-4>",

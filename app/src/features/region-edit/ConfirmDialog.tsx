@@ -6,6 +6,7 @@ import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { Checkbox, Dialog } from 'radix-ui';
 
 import { IconCheck } from '../../shell/icons';
+import { referencesOnKeys, useReferencesBlock } from '../references';
 import { confirmPlan, initialForm, type ConfirmForm } from './confirm';
 import { amountLabel, errorText } from './format';
 import { rgn, useRgn } from './store';
@@ -29,10 +30,13 @@ function ConfirmBody() {
   const live = { ...est, spend: s.spend?.spend ?? est.spend };
   const [form, setForm] = useState<ConfirmForm>(() => initialForm(live, stored.threshold));
   const trash = trashOnSubmit(s.iterations, s.candidates);
+  // FR-RGN-45: the count follows the block's selection, not the (reused) estimate.
+  const refsBlock = useReferencesBlock();
+  const onKeys = useMemo(() => referencesOnKeys(refsBlock), [refsBlock]);
   const plan = useMemo(
-    () => confirmPlan(live, stored, form, trash),
+    () => confirmPlan(live, stored, form, trash, onKeys),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [est, s.spend, form, trash],
+    [est, s.spend, form, trash, onKeys],
   );
   const okRef = useRef<HTMLButtonElement>(null);
   const capRef = useRef<HTMLInputElement>(null);

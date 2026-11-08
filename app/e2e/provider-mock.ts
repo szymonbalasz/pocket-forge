@@ -10,6 +10,8 @@ export interface ProviderSeed {
   connectivity: 'unknown' | 'ok' | 'offline' | 'auth_error';
   testResult: 'ok' | 'auth' | 'offline';
   testDelayMs: number;
+  /** Session spend cap for `rgn_spend_get` (the real-provider badge); default none. */
+  cap?: number | null;
 }
 
 export async function mockProvider(page: Page, seed: ProviderSeed): Promise<void> {
@@ -51,6 +53,7 @@ export async function mockProvider(page: Page, seed: ProviderSeed): Promise<void
         s.connectivity = 'unknown';
         return {};
       },
+      rgn_spend_get: () => ({ spend: 0, cap: s.cap ?? null, threshold: null }),
       provider_settings_get: () => ({ team_id: s.team, project_id: s.project }),
       provider_settings_set: (input) => {
         s.team = (input.team_id as string | null) ?? null;

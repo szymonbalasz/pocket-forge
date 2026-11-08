@@ -1,0 +1,122 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_openai-gpt-image-2-5-flare",
+  "case": "get-model",
+  "recorded_on": "2026-11-08",
+  "source": "synthetic",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_openai-gpt-image-2-5-flare"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "id": "model_openai-gpt-image-2-5-flare",
+            "name": "GPT Image 2.5 Flare",
+            "type": "custom",
+            "capabilities": [
+              "img2img",
+              "inpaint"
+            ],
+            "inputs": [
+              {
+                "name": "prompt",
+                "type": "string",
+                "label": "Prompt",
+                "required": {
+                  "always": true
+                }
+              },
+              {
+                "name": "referenceImages",
+                "type": "file_array",
+                "kind": "image",
+                "max": 10,
+                "maxSize": 52428800
+              },
+              {
+                "name": "referenceImages",
+                "type": "file_array",
+                "kind": "image",
+                "max": 10,
+                "maxSize": 52428800
+              },
+              {
+                "name": "mask",
+                "type": "file",
+                "kind": "image",
+                "maskFrom": "referenceImages",
+                "description": "PNG, transparent = edit, same size as image"
+              },
+              {
+                "name": "numOutputs",
+                "type": "number",
+                "min": 1,
+                "max": 10,
+                "step": 1,
+                "default": 1,
+                "costImpact": true
+              },
+              {
+                "name": "quality",
+                "type": "string",
+                "allowedValues": [
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "default": "medium",
+                "costImpact": true
+              },
+              {
+                "name": "background",
+                "type": "string",
+                "allowedValues": [
+                  "auto",
+                  "transparent",
+                  "opaque"
+                ],
+                "default": "auto"
+              },
+              {
+                "name": "width",
+                "type": "number",
+                "min": 16,
+                "max": 3840,
+                "step": 16
+              },
+              {
+                "name": "height",
+                "type": "number",
+                "min": 16,
+                "max": 3840,
+                "step": 16
+              },
+              {
+                "name": "width",
+                "type": "number",
+                "min": 16,
+                "max": 3840,
+                "step": 16
+              },
+              {
+                "name": "height",
+                "type": "number",
+                "min": 16,
+                "max": 3840,
+                "step": 16
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -36,6 +36,14 @@ if [[ -n "$emails" ]]; then
   fail=1
 fi
 
+# FR-PRV-28: CI never enables real provider calls (cargo feature `real-call`, PF_REAL_CALL)
+real=$(git grep -I -n -E -e '--all-features|real-call|PF_REAL_CALL' -- .github/workflows || true)
+if [[ -n "$real" ]]; then
+  echo "::error::A workflow enables real provider calls (FR-PRV-28)"
+  echo "$real"
+  fail=1
+fi
+
 if [[ $fail -ne 0 ]]; then
   echo "Hygiene check failed: see AGENTS.md §3.1"
   exit 1

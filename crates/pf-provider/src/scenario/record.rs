@@ -109,6 +109,12 @@ impl Redactor {
                         ("uploadId", Value::String(s)) => self.id(s, "upload"),
                         ("teamId", Value::String(s)) => self.id(s, "team"),
                         ("projectId", Value::String(s)) => self.id(s, "project"),
+                        // People: real model and job bodies may name their owner.
+                        (
+                            "ownerId" | "userId" | "authorId" | "creatorId" | "createdBy"
+                            | "updatedBy",
+                            Value::String(s),
+                        ) => self.id(s, "user"),
                         ("id", Value::String(s)) => match parent {
                             "asset" | "assets" => self.id(s, "asset"),
                             "job" => self.id(s, "job"),
@@ -157,6 +163,7 @@ impl Redactor {
                     .unwrap_or_default();
                 json!({"fixture": fixtures.get(&content_hash(&bytes)).cloned().unwrap_or_else(|| "upload.png".into())})
             }
+            Value::String(s) if looks_like_email(s) => Value::String("<email>".into()),
             Value::String(s) => {
                 if let Some(u) = urls.get(s) {
                     return Value::String(u.clone());
@@ -180,6 +187,14 @@ impl Redactor {
             other => other.clone(),
         }
     }
+}
+
+/// An email address (`name` at `host.tld`) in a short string without spaces.
+fn looks_like_email(s: &str) -> bool {
+    s.len() <= 254
+        && !s.contains(char::is_whitespace)
+        && s.split_once('@')
+            .is_some_and(|(a, b)| !a.is_empty() && b.contains('.') && !b.starts_with('.'))
 }
 
 fn binary_ref(bytes: &[u8], fixtures: &FixtureNames, fallback: String) -> Value {
@@ -321,7 +336,7 @@ mod tests {
                 json!({"asset": {"id": "asset_Zx81", "url": "https://cdn.example.com/a.png?X-Amz-Signature=sig"}}),
             ),
             ok(
-                json!({"job": {"jobId": "job_9Qw", "status": "success", "metadata": {"assetIds": ["asset_Out1"]}}}),
+                json!({"job": {"jobId": "job_9Qw", "status": "success", "ownerId": "user_Pq7", "metadata": {"assetIds": ["asset_Out1"], "contact": "someone@example.com"}}}),
             ),
             HttpResponse {
                 status: 200,
@@ -385,6 +400,8 @@ mod tests {
             "Signature",
             "proj_secret1",
             "set-cookie",
+            "user_Pq7",
+            "someone@",
         ] {
             assert!(!text.contains(leak), "{leak} leaked: {text}");
         }

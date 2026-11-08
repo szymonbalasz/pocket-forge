@@ -123,6 +123,9 @@ export function refMock(
   const fail = (code: string, message: string, field?: string) =>
     Promise.reject(field ? { code, message, field } : { code, message });
   const lc = (s: string) => s.toLowerCase();
+  /** pf-core `resolve::slot_label`: the role, else "References" (walk R7). */
+  const label = (s: { role?: RefRole | null }) =>
+    s.role ? s.role[0]!.toUpperCase() + s.role.slice(1) : 'References';
   const byName = (a: string, b: string) => (lc(a) < lc(b) ? -1 : lc(a) > lc(b) ? 1 : 0);
   const base = (p: string) =>
     p
@@ -273,13 +276,18 @@ export function refMock(
       files,
       trashed_at: seed.now,
       purge_at: addDays(seed.now, 30),
+      restorable: true,
     };
     state.trash.unshift(item);
     return item;
   };
 
   // ── ref_resolve (FR-REF-16..19), mirroring pf-core `references::resolve::reconcile` ──────
+  /** pf-core `Resolved::lost_on` of the last resolve: ticked items now gone or corrupt
+   *  (FR-REF-21; `__ref_prepare` fails on them). */
+  let lostOn: { key: string; reason: 'missing' | 'corrupt' }[] = [];
   const resolve = (modelId: string, prev: DraftReferences | null): RefResolved | Promise<never> => {
+    lostOn = [];
     const slots = seed.slots?.[modelId];
     if (!slots) return fail('unknown_model', `Unknown model ${modelId}`);
     const readOnly = !!seed.readOnly;
@@ -369,6 +377,8 @@ export function refMock(
         badges,
         checkable,
       };
+      if (before?.on && !checkable && a.state === 'corrupt')
+        lostOn.push({ key: a.key, reason: 'corrupt' });
       return { item, slot, kept: before ? before.on && checkable : null };
     });
     const count = slots.map(() => 0);
@@ -380,7 +390,7 @@ export function refMock(
         } else
           notices.push({
             code: 'limit_lowered',
-            message: `${r.item.file} was unticked: ${slots[r.slot]!.name} takes at most ${slots[r.slot]!.max}`,
+            message: `${r.item.file} was unticked: ${label(slots[r.slot]!)} takes at most ${slots[r.slot]!.max}`,
             key: r.item.key,
           });
       }
@@ -415,6 +425,7 @@ export function refMock(
         });
         keptDraft.push({ ...it, key });
       } else if (it.retry_of) {
+        if (it.on) lostOn.push({ key, reason: 'missing' });
         // Restored by Retry (FR-REF-26): a file that can't be found shows as missing.
         const project = key.startsWith('project:');
         const pack = project
@@ -435,12 +446,14 @@ export function refMock(
           checkable: false,
         });
         keptDraft.push({ ...it, key, on: false });
-      } else
+      } else {
+        if (it.on) lostOn.push({ key, reason: 'missing' });
         notices.push({
           code: 'dropped',
           message: `${key.split(':').pop()} is no longer available`,
           key,
         });
+      }
     }
     const outSlots = slots.map((s, i) => ({
       name: s.name,
@@ -482,10 +495,15 @@ export function refMock(
   };
 
   const handlers: Record<string, Handler> = {
-    ref_list_packs: () =>
-      [...[...state.packs.values()].map(card), ...notReady.map(notReadyCard)].sort((a, b) =>
-        byName(a.name, b.name),
-      ),
+    ref_list_packs: () => {
+      const cards = [...[...state.packs.values()].map(card), ...notReady.map(notReadyCard)].sort(
+        (a, b) => byName(a.name, b.name),
+      );
+      // Like pf-core, a listing reports what it did once (adopted, conflict resolved, …).
+      for (const x of extras.values()) x.notices = [];
+      for (const p of notReady) p.notices = [];
+      return cards;
+    },
     ref_pack_get: (input) => {
       const p = getPack(input);
       return p ? packOut(p) : fail('unknown_id', 'Unknown pack');
@@ -582,6 +600,8 @@ export function refMock(
       const id = String(input.id);
       const item = state.trash.find((t) => t.id === id);
       if (!item) return fail('unknown_id', 'Unknown trash item');
+      if (item.restorable === false)
+        return fail('not_restorable', "A trashed pack.json can't be restored");
       const saved = trashed.get(id) ?? {
         pack_id: item.pack_id ?? newId('PACK'),
         name: item.pack_name,
@@ -616,11 +636,22 @@ export function refMock(
         (input.references as DraftReferences | null) ?? null,
       );
       if (!r.visible) return [];
+      // FR-REF-21: a ticked item that is gone or now corrupt is never dropped silently.
+      const lost = lostOn[0];
+      if (lost) {
+        const file = lost.key.split(':').pop();
+        const why = lost.reason === 'missing' ? "it can't be found" : "it can't be read";
+        return Promise.reject({
+          code: 'reference_unavailable',
+          message: `The reference ${file} can't be sent: ${why}`,
+          detail: { key: lost.key, reason: lost.reason },
+        });
+      }
       for (const s of r.slots)
         if (s.on < s.min)
           return Promise.reject({
             code: 'references_required',
-            message: `${s.name} needs at least ${s.min} reference(s)`,
+            message: `${label(s)} needs at least ${s.min} reference(s)`,
             detail: { slot: s.name, min: s.min },
           });
       const seen = new Set<string>();

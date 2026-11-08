@@ -26,6 +26,17 @@ test('FR-REF-07 FR-REF-08 FR-REF-10 FR-REF-12 create → add → rename → dele
 }) => {
   await expect(names(page)).toHaveText(['armour', 'Weapons']);
   await expect(page.getByTestId('prj-rail-references')).toHaveAttribute('aria-current', 'page');
+  // Walk R7: the rail says "References" in full. It fits its 52 px item in Segoe UI, the font
+  // the app ships with on Windows (about 48 px); CI's Linux fallback font is wider (about
+  // 57 px), so the fit is checked on Windows runs only.
+  const item = page.getByTestId('prj-rail-references');
+  const label = item.locator('span');
+  await expect(label).toHaveText('References');
+  if (process.platform === 'win32') {
+    const [text, box] = await Promise.all([label.boundingBox(), item.boundingBox()]);
+    expect(text!.x).toBeGreaterThanOrEqual(box!.x);
+    expect(text!.x + text!.width).toBeLessThanOrEqual(box!.x + box!.width);
+  }
 
   // + New pack "Swords" opens it, empty.
   await page.getByTestId('ref-home-new').click();

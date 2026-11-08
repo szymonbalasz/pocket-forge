@@ -53,7 +53,7 @@ export function Rail() {
         onClick={() => void showReferences()}
       >
         <IconReferences size={20} />
-        <span>Refs</span>
+        <span>References</span>
       </button>
       <span className="pf-spacer" />
       <button
