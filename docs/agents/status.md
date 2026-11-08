@@ -1,32 +1,33 @@
 # Status (scratch board, overwritten as things change)
 
-**Phase:** 3, wave 2 (agent cap 6, #47). Specs complete again (#49).
+**Phase:** 3, wave 3 (agent cap 8, #50). Specs complete, including reference packs (#54).
 
 | Task | Agent | Worktree / branch | State | Blockers |
 |---|---|---|---|---|
-| Specs: asset-project, editor-canvas, region-edit, provider, export | — | merged | complete (#41) | — |
-| Skeleton | — | merged | done (walkthrough passed) | — |
-| Provider slices 2–4 | — | merged | done (walkthrough after RGN UI) | slice 5 needs the owner |
-| Editor-canvas slices 1–4, 6 + UI foundation | — | merged | walkthrough done, D1/D2 fixed | slice 5 waits for PRJ store |
-| Export slices 1–2 | — | merged | done | slices 3–5 wait for PRJ store |
-| Spec revision: folder model (#44) | — | merged | complete (#49) | — |
-| Asset-project core (slices 1–4) | `prj-core` | `build/asset-project-core` | in progress | — |
-| Asset-project UI (rail, home, left panel) | `prj-ui` | `build/asset-project-ui` | in progress | — |
-| Region-edit core (slices 1–2) | `rgn-core` | `build/region-edit-core` | in progress | — |
-| Region-edit UI (slice 6) | `rgn-ui` | `build/region-edit-ui` | in progress | — |
-| Next: RGN 3–5, EXP 3–5, EDT 5, PRJ 5–6 | — | — | waiting | PRJ store API (slice 4) |
+| Specs: asset-project, editor-canvas, region-edit, provider, export, reference-packs | — | merged | complete (#54) | — |
+| Skeleton; provider 2–4; editor-canvas 1–4, 6; export 1–2, 4; region-edit 1–2, 6 | — | merged | done | provider slice 5 needs the owner |
+| Asset-project core + UI (slices 1–4) | — | merged | done | walkthrough pending |
+| Native file dialog (#53) | — | merged | done | — |
+| Backlog: BL-04/06/07/09/11 | `backlog` | `fix/backlog-1` | BL-07 in-app smoke (R46) | — |
+| Region-edit jobs (RGN 3–5) | `rgn-jobs` | `build/region-edit-jobs` | in progress | — |
+| Export commands (EXP 3, 5) | `exp-cmd` | `build/export-commands` | in progress | — |
+| Editor mask hand-off (EDT 5 + BL-10/14/16) | `edt-mask` | `build/editor-mask-handoff` | in progress | — |
+| Asset-project retention + conflicts (PRJ 5–6) | `prj-ret` | `build/asset-project-retention` | in progress | — |
+| Reference packs core (REF 1, 4) | `ref-core` | `build/reference-packs-core` | in progress | REF 4 needs REF 2 |
+| Provider references (REF 2) | `prv-ref` | `build/provider-references` | in progress | — |
+| Packs UI + References block (REF 3, 5) | `ref-ui` | `build/reference-packs-ui` | in progress | — |
+| Next: asset-project walkthrough | — | — | waiting | a free slot |
+| Later: REF 6 (RGN integration) | — | — | waiting | REF 4, 5 and RGN 3 merged |
 
 ## Pending owner decisions
 - OQ-IMG-12: file the image-webp bug upstream? (not urgent)
 - MCP endpoint order within tier A (#36)
 
 ## Integrator rulings (since last gate)
-- R32–R36 (re-pick, corrupt images, original-layer fields, temp sweep, CSP)
-- Skeleton build calls: feature registry at `app/src/shell/features.ts`; `ulid` std feature; schema §4.11 revision file; `PF_FAULT=after_temp|after_rename[:<file>]`
+- R32–R46 (see `rulings-phase1b.md`)
 
 ## Shared-file locks
-- `app/src/shell/{theme.css,Layout.tsx,icons.tsx}`, `app/package.json` (radix-ui), `tauri.conf.json` (CSP, scheme): editor-canvas
-- Root `Cargo.toml` (#32 imaging crates): export
+- _none_
 
 ## Reserved FR ranges
 - _none_
