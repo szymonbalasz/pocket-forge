@@ -65,6 +65,18 @@
                 "min": 0,
                 "max": 18446744073709551615,
                 "step": 1
+              },
+              {
+                "name": "style_refs",
+                "type": "file_array",
+                "kind": "image",
+                "max": 2,
+                "costImpact": true
+              },
+              {
+                "name": "identity_ref",
+                "type": "file",
+                "kind": "image"
               }
             ]
           }

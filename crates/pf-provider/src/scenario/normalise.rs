@@ -6,6 +6,9 @@
 //! Scenario fields read: `inputs[].{name, type, kind, min, max, step, allowedValues, default,
 //! maxSize, maskFrom, costImpact, required.{always, conditional, conditionalValues,
 //! ifDefined, ifNotDefined}}`. Shapes follow the research doc; recordings confirm them.
+//!
+//! Reference inputs (`role: reference`) also become `slots[]` (FR-PRV-31, R31). A required
+//! slot no longer blocks the model; meeting its `min` is the caller's job (FR-PRV-32).
 
 use serde_json::{Map, Value};
 
@@ -141,6 +144,40 @@ fn rule(when: &str, value: Value, then: &str) -> Rule {
     }
 }
 
+/// A reference slot (FR-PRV-31): `file` → max 1; `file_array` → the input's `max`, else the
+/// overlay's `slot_max`, else 1 with a warning. `min` is 1 if the input is required.
+fn slot(
+    name: &str,
+    ty: &str,
+    required: bool,
+    max: Option<f64>,
+    cost_affecting: bool,
+    row: Option<&OverlayRow>,
+    warnings: &mut Vec<String>,
+) -> Slot {
+    let array = matches!(ty, "file_array" | "files" | "image_array");
+    let max = if !array {
+        1
+    } else if let Some(m) = max.filter(|m| *m >= 1.0) {
+        m.min(f64::from(u32::MAX)) as u32
+    } else if let Some(m) = row.and_then(|r| r.slot_max(name)) {
+        m
+    } else {
+        warnings.push(format!(
+            "reference input {name:?} lists no max and the overlay has none; 1 assumed"
+        ));
+        1
+    };
+    Slot {
+        name: name.to_owned(),
+        role: row.and_then(|r| r.slot_role(name)),
+        min: u32::from(required),
+        max,
+        cost_affecting,
+        array,
+    }
+}
+
 /// Normalises a `GET /models/{id}` body (`{"model": {...}}` or the model itself).
 pub fn normalise(
     model_id: &str,
@@ -166,6 +203,7 @@ pub fn normalise(
     let mut warnings = vec![];
     let mut blocked = false;
     let mut controls: Vec<Control> = vec![];
+    let mut slots: Vec<Slot> = vec![];
     let mut rules = vec![];
     let mut max_bytes = row.map_or(50 * 1024 * 1024, |r| r.max_bytes);
     let mut input_px = row.map_or(
@@ -233,6 +271,21 @@ pub fn normalise(
         }
         let is_file = matches!(kind, ControlType::Image | ControlType::Mask);
         let (min, max) = (num(input.get("min")), num(input.get("max")));
+        let cost_affecting = input
+            .get("costImpact")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if role == ControlRole::Reference {
+            slots.push(slot(
+                name,
+                ty,
+                always,
+                max,
+                cost_affecting,
+                row,
+                &mut warnings,
+            ));
+        }
         if is_file {
             if let Some(b) = num(input.get("maxSize")).filter(|b| *b > 0.0) {
                 max_bytes = max_bytes.min(b as u64);
@@ -265,10 +318,7 @@ pub fn normalise(
                 .unwrap_or_default(),
             default: input.get("default").filter(|v| !v.is_null()).cloned(),
             required: always,
-            cost_affecting: input
-                .get("costImpact")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
+            cost_affecting,
         });
     }
 
@@ -283,20 +333,6 @@ pub fn normalise(
         known
     });
 
-    let slots: Vec<Slot> = controls
-        .iter()
-        .filter(|c| c.role == ControlRole::Reference)
-        .map(|c| Slot {
-            name: c.name.clone(),
-            role: None,
-            required: c.required,
-        })
-        .collect();
-    if slots.iter().any(|s| s.required) {
-        warnings
-            .push("a required reference image input isn't supported yet; model not offered".into());
-        blocked = true;
-    }
     let has = |role| controls.iter().any(|c| c.role == role);
     let mask = match row {
         None => {
@@ -350,7 +386,7 @@ pub fn normalise(
 mod tests {
     use super::*;
     use crate::scenario::overlay::{FAKE_ROWS, SCENARIO_ROWS, row_in};
-    use crate::{MaskConvention, SoftRule};
+    use crate::{MaskConvention, ReferenceRole, SoftRule};
     use serde_json::json;
 
     fn row(id: &str) -> Option<&'static OverlayRow> {
@@ -374,7 +410,7 @@ mod tests {
             {"name": "steps", "type": "integer", "min": 1, "max": 50},
             {"name": "style", "type": "string", "allowedValues": ["AUTO", "REALISTIC"], "default": "AUTO"},
             {"name": "magic", "type": "boolean", "default": false},
-            {"name": "refs", "type": "file_array", "kind": "image"},
+            {"name": "refs", "type": "file_array", "kind": "image", "max": 3},
             {"name": "note", "type": "string", "futureField": {"x": 1}}
         ]}});
         let n = normalise("x", &body, row("model_ideogram-v3")).unwrap();
@@ -423,7 +459,10 @@ mod tests {
             [Slot {
                 name: "refs".into(),
                 role: None,
-                required: false
+                min: 0,
+                max: 3,
+                cost_affecting: false,
+                array: true,
             }]
         );
         assert_eq!(c.operations, [Operation::EditMasked]);
@@ -478,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn fr_prv_10_a_required_reference_slot_blocks_the_model() {
+    fn fr_prv_32_a_required_reference_slot_is_offered() {
         let body = json!({"inputs": [
             {"name": "image", "type": "file"}, {"name": "mask", "type": "file", "maskFrom": "image"},
             {"name": "character", "type": "file", "required": {"always": true}}
@@ -486,8 +525,106 @@ mod tests {
         let c = normalise("m", &body, row("model_ideogram-character"))
             .unwrap()
             .capabilities;
-        assert!(c.slots[0].required);
-        assert!(c.operations.is_empty());
+        assert_eq!((c.slots[0].min, c.slots[0].max), (1, 1));
+        assert_eq!(c.operations, [Operation::EditMasked]);
+        assert!(c.warnings.is_empty(), "{:?}", c.warnings);
+        // `evaluate` doesn't ask for a reference value: counts are checked on send.
+        assert!(c.evaluate(&Default::default()).is_valid());
+    }
+
+    fn slot_of(c: &Capabilities, name: &str) -> Slot {
+        c.slots.iter().find(|s| s.name == name).cloned().unwrap()
+    }
+
+    #[test]
+    fn fr_prv_31_slot_min_max_role_and_cost_rules() {
+        let body = json!({"inputs": [
+            {"name": "image", "type": "file"}, {"name": "mask", "type": "file", "maskFrom": "image"},
+            {"name": "one", "type": "file", "max": 4096},
+            {"name": "listed", "type": "file_array", "max": 5, "costImpact": true},
+            {"name": "styleReferenceImages", "type": "file_array"},
+            {"name": "unbounded", "type": "file_array", "required": {"always": true}},
+            {"name": "pick", "type": "file_array", "max": 0}
+        ]});
+        static ROW: std::sync::LazyLock<OverlayRow> = std::sync::LazyLock::new(|| OverlayRow {
+            slot_max: &[("styleReferenceImages", 6)],
+            ..*row_in(&SCENARIO_ROWS, "model_ideogram-v3").unwrap()
+        });
+        let c = normalise("m", &body, Some(&ROW)).unwrap().capabilities;
+        let s = |n| {
+            let s = slot_of(&c, n);
+            (s.role, s.min, s.max, s.cost_affecting, s.array)
+        };
+        use ReferenceRole::Style;
+        // `file` → 1, whatever its (px) max says.
+        assert_eq!(s("one"), (None, 0, 1, false, false));
+        // `file_array` → the input's max; cost from `costImpact`.
+        assert_eq!(s("listed"), (None, 0, 5, true, true));
+        // No max → the overlay's `slot_max`; the role from `slot_roles`.
+        assert_eq!(s("styleReferenceImages"), (Some(Style), 0, 6, false, true));
+        // No max anywhere → 1 with a warning; required → min 1.
+        assert_eq!(s("unbounded"), (None, 1, 1, false, true));
+        assert_eq!(s("pick"), (None, 0, 1, false, true));
+        let lists_no_max: Vec<_> = c
+            .warnings
+            .iter()
+            .filter(|w| w.contains("lists no max"))
+            .collect();
+        assert_eq!(lists_no_max.len(), 2, "{:?}", c.warnings);
+        assert_eq!(c.operations, [Operation::EditMasked]);
+        // The control stays a plain image control: its max is a count, not a size.
+        assert_eq!(control(&c, "listed").max, None);
+        assert_eq!(c.input_px, ROW.input_px);
+    }
+
+    /// One fixture test per overlay row (FR-PRV-31): the slots each committed `get-model`
+    /// fixture gives, with the row's roles.
+    #[test]
+    fn fr_prv_31_slots_per_overlay_row() {
+        use ReferenceRole::{Identity, Style};
+        type Want = &'static [(&'static str, Option<ReferenceRole>, u32, u32, bool)];
+        let style4: Want = &[("styleReferenceImages", Some(Style), 0, 4, false)];
+        let table: [(&str, Want); 9] = [
+            ("model_openai-gpt-image-2", &[]),
+            ("model_openai-gpt-image-2-5", &[]),
+            ("model_ideogram-v4-5", style4),
+            ("model_ideogram-v4-5-precise-edit", style4),
+            ("model_ideogram-v3", style4),
+            (
+                "model_ideogram-character",
+                &[
+                    ("styleReferenceImages", Some(Style), 0, 4, false),
+                    ("characterReferenceImages", Some(Identity), 1, 1, false),
+                ],
+            ),
+            (
+                "fake-white-edit",
+                &[("style_refs", Some(Style), 0, 3, false)],
+            ),
+            (
+                "fake-black-edit",
+                &[
+                    ("style_refs", Some(Style), 0, 2, true),
+                    ("identity_ref", Some(Identity), 0, 1, false),
+                ],
+            ),
+            ("fake-alpha-edit", &[]),
+        ];
+        let rows: Vec<_> = SCENARIO_ROWS.iter().chain(FAKE_ROWS.iter()).collect();
+        assert_eq!(rows.len(), table.len(), "every overlay row is in the table");
+        for (model, want) in table {
+            let row = rows.iter().find(|r| r.model_id == model).unwrap();
+            let rec = crate::scenario::fixture_recording(model, "get-model").unwrap();
+            let c = normalise(model, &rec.exchanges[0].response.body, Some(row))
+                .unwrap()
+                .capabilities;
+            let got: Vec<_> = c
+                .slots
+                .iter()
+                .map(|s| (s.name.as_str(), s.role, s.min, s.max, s.cost_affecting))
+                .collect();
+            assert_eq!(got, want, "{model}");
+        }
     }
 
     #[test]
@@ -552,15 +689,6 @@ mod tests {
             let c = normalise(row.model_id, body, Some(row))
                 .unwrap()
                 .capabilities;
-            if row.model_id == "model_ideogram-character" {
-                // Its character reference is required, and tier S sends no references.
-                assert!(
-                    c.operations.is_empty() && c.slots[0].required,
-                    "{:?}",
-                    c.warnings
-                );
-                continue;
-            }
             assert_eq!(
                 c.operations,
                 [Operation::EditMasked],

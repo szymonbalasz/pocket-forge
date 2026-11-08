@@ -11,6 +11,8 @@ pub mod record;
 #[cfg(test)]
 mod contract_tests;
 #[cfg(test)]
+mod reference_tests;
+#[cfg(test)]
 mod tests;
 
 use std::collections::HashMap;
@@ -110,6 +112,7 @@ const TEST_FIXTURES: &[(&str, &str, &str)] = fixture_table![
     "model_ideogram-v3" / "reupload",
     "model_ideogram-v3" / "fetch-expired-url",
     "model_ideogram-v3" / "cancel",
+    "model_ideogram-character" / "references",
 ];
 
 /// A committed recording by model and case.
