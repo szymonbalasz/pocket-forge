@@ -233,6 +233,42 @@ mod tests {
     }
 
     #[test]
+    fn fr_prj_21_edge_close_after_the_folder_moved_asks_then_force_closes() {
+        let (d, core) = core_with_project();
+        let dir = core.state().project.as_ref().unwrap().dir.clone();
+        std::fs::rename(&dir, dir.with_file_name("Elsewhere")).unwrap();
+        let e = core
+            .dispatch(
+                "project_put_draft",
+                json!({"draft": {"final_prompt": "kept"}}),
+            )
+            .unwrap_err();
+        assert_eq!(
+            (e.code, &e.detail["reason"]),
+            (ErrorCode::NotFound, &json!("folder_moved"))
+        );
+        let snap = core.dispatch("project_get", json!({})).unwrap();
+        assert!(
+            snap["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|w| w["code"] == "folder_moved")
+        );
+        let e = core.dispatch("project_close", json!({})).unwrap_err();
+        assert_eq!(
+            (e.code, &e.detail["reason"]),
+            (ErrorCode::Unsaved, &json!("folder_moved"))
+        );
+        let root = d.path().to_string_lossy().into_owned();
+        assert!(!e.message.contains(&root), "{}", e.message);
+        assert!(core.state().project.is_some(), "still open");
+        core.dispatch("project_close", json!({"force": true}))
+            .unwrap();
+        assert!(core.state().project.is_none());
+    }
+
+    #[test]
     fn fr_prj_21_close_retries_first_and_force_closes() {
         let (_d, core) = core_with_project();
         {

@@ -436,11 +436,24 @@ impl Command for ProjectClose {
             // draft makes closing ask.
             project::retry_pending(&core.ctx, install_id, p);
         }
-        if !input.force && state.project.as_ref().is_some_and(project::has_unsaved) {
-            return Err(CoreError::new(
-                ErrorCode::Unsaved,
-                "a save is still pending (the file is locked); close anyway?",
-            ));
+        if !input.force
+            && let Some(p) = state.project.as_ref().filter(|p| project::has_unsaved(p))
+        {
+            // Says why, without paths (walkthrough D3).
+            let moved = p.warnings.iter().any(|w| w.code == project::FOLDER_MOVED);
+            let (reason, message) = if moved {
+                (
+                    project::FOLDER_MOVED,
+                    "Your latest changes aren't saved: the project folder was moved or renamed. Close anyway?",
+                )
+            } else {
+                (
+                    "locked",
+                    "Your latest changes aren't saved yet: the file is locked. Close anyway?",
+                )
+            };
+            return Err(CoreError::new(ErrorCode::Unsaved, message)
+                .with_detail(serde_json::json!({ "reason": reason })));
         }
         if let Some(p) = state.project.take() {
             p.decoded.release();

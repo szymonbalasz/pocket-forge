@@ -116,11 +116,44 @@ pub struct PendingDraft {
 pub const SAVE_RETRY_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// `project:save-failed{reason, retrying}` (FR-PRJ-21).
-pub(crate) fn emit_save_failed(ctx: &Context, reason: ErrorCode, retrying: bool) {
+pub(crate) fn emit_save_failed(ctx: &Context, reason: &str, retrying: bool) {
     ctx.emit(
         "project:save-failed",
-        serde_json::json!({ "reason": reason.as_str(), "retrying": retrying }),
+        serde_json::json!({ "reason": reason, "retrying": retrying }),
     );
+}
+
+/// `detail.reason` of the error for a project folder moved or renamed while open (§11).
+pub const FOLDER_MOVED: &str = "folder_moved";
+
+/// §11: the folder was moved or renamed in Explorer while open. `not_found` with
+/// `detail.reason = folder_moved`; the message never carries a path.
+pub(crate) fn folder_moved() -> CoreError {
+    CoreError::new(
+        ErrorCode::NotFound,
+        "The project folder was moved or renamed outside Pocket Forge. Reopen it from home.",
+    )
+    .with_detail(serde_json::json!({ "reason": FOLDER_MOVED }))
+}
+
+/// True for [`folder_moved`] errors.
+pub fn is_folder_moved(e: &CoreError) -> bool {
+    e.code == ErrorCode::NotFound && e.detail["reason"] == FOLDER_MOVED
+}
+
+/// §11: refuses with [`folder_moved`] once the folder is gone, and notes it in the warnings
+/// (the panel's "reopen from home" banner). State stays in memory.
+pub(crate) fn require_folder(p: &mut OpenProject) -> CoreResult<()> {
+    if p.dir.is_dir() {
+        return Ok(());
+    }
+    if !p.warnings.iter().any(|w| w.code == FOLDER_MOVED) {
+        p.warnings.push(Warning::new(
+            FOLDER_MOVED,
+            "The project folder was moved or renamed outside Pocket Forge. Reopen it from home.",
+        ));
+    }
+    Err(folder_moved())
 }
 
 /// What `project_open` returns.
@@ -466,6 +499,7 @@ pub(crate) fn commit_with(
     change: impl FnOnce(&Context, &OpenProject, &mut Manifest, &mut CommitPlan) -> CoreResult<()>,
 ) -> CoreResult<u64> {
     p.require_writable()?;
+    require_folder(p)?;
     if !resolving {
         conflict::check_before_commit(ctx, p)?;
     }
@@ -490,11 +524,8 @@ pub(crate) fn commit_with(
     }
     store::trash_superseded_masks(ctx, p, &mut next, &plan);
     if !p.dir.is_dir() {
-        // Renamed or moved in Explorer while open (§11): state stays in memory.
-        return Err(CoreError::new(
-            ErrorCode::NotFound,
-            "the project folder was moved or renamed; reopen it from home",
-        ));
+        // Renamed or moved in Explorer during the change (§11): state stays in memory.
+        return Err(folder_moved());
     }
 
     for (rel, bytes) in &plan.files {
@@ -574,10 +605,7 @@ fn check_commit_unchanged(p: &OpenProject) -> CoreResult<()> {
     let bytes = match std::fs::read(p.manifest_path()) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound && !p.dir.is_dir() => {
-            return Err(CoreError::new(
-                ErrorCode::NotFound,
-                "the project folder was moved or renamed; reopen it from home",
-            ));
+            return Err(folder_moved());
         }
         Err(_) => return Err(conflict()),
     };
@@ -637,6 +665,9 @@ pub fn save_revision(
     label: Option<String>,
 ) -> CoreResult<RevisionEntry> {
     p.require_writable()?;
+    // Before reading the head revision file, so the error is `folder_moved`, not OS text
+    // with an absolute path (walkthrough D3).
+    require_folder(p)?;
     let head = read_revision(p, p.manifest.head_revision)?;
     if head.layers == p.manifest.layers && head.draft == p.manifest.draft {
         return Err(CoreError::new(
@@ -661,6 +692,9 @@ pub fn restore_revision(
     rev_id: Ulid,
 ) -> CoreResult<RevisionEntry> {
     p.require_writable()?;
+    // Before reading the head revision file, so the error is `folder_moved`, not OS text
+    // with an absolute path (walkthrough D3).
+    require_folder(p)?;
     let rev = read_revision(p, rev_id)?;
     for layer in rev.layers.iter().filter(|l| l.kind == LayerKind::Patch) {
         let file = layer.file.as_deref().unwrap_or_default();
@@ -731,11 +765,15 @@ pub fn put_draft(
     let result = put_draft_once(ctx, install_id, p, draft, export_settings);
     match &result {
         Ok(_) => p.pending_draft = None,
-        Err(e) if e.code == ErrorCode::Locked => {
+        Err(e) if keeps_draft(e) => {
             p.pending_draft = Some(keep);
-            emit_save_failed(ctx, ErrorCode::Locked, true);
+            emit_save_failed(ctx, save_failed_reason(e), true);
         }
-        Err(_) => {}
+        // Shown by the read-only and conflict states already.
+        Err(e) if matches!(e.code, ErrorCode::ReadOnly | ErrorCode::Conflict) => {}
+        // Anything else is surfaced too: the UI's debounced draft save doesn't show its errors
+        // (walkthrough D3).
+        Err(e) => emit_save_failed(ctx, save_failed_reason(e), false),
     }
     result
 }
@@ -753,10 +791,11 @@ pub fn retry_pending(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> bo
             pending.draft.clone(),
             pending.export.clone(),
         ) {
-            Ok(_) => {}
-            Err(e) if e.code == ErrorCode::Locked => {
+            // A moved folder that came back: the banner goes too.
+            Ok(_) => p.warnings.retain(|w| w.code != FOLDER_MOVED),
+            Err(e) if keeps_draft(&e) => {
                 p.pending_draft = Some(pending);
-                emit_save_failed(ctx, ErrorCode::Locked, true);
+                emit_save_failed(ctx, save_failed_reason(&e), true);
                 return true;
             }
             Err(e) => {
@@ -765,6 +804,21 @@ pub fn retry_pending(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> bo
         }
     }
     false
+}
+
+/// Failures after which the draft stays in memory and is retried: a lock (FR-PRJ-21) or a
+/// folder moved while open (§11; it commits if the folder comes back).
+fn keeps_draft(e: &CoreError) -> bool {
+    e.code == ErrorCode::Locked || is_folder_moved(e)
+}
+
+/// `project:save-failed` `reason`: the error code, or `folder_moved`.
+fn save_failed_reason(e: &CoreError) -> &'static str {
+    if is_folder_moved(e) {
+        FOLDER_MOVED
+    } else {
+        e.code.as_str()
+    }
 }
 
 /// True if closing would lose state that only lives in memory (FR-PRJ-21: closing asks first).

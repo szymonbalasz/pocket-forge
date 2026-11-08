@@ -48,6 +48,13 @@ export function errorOf(e: unknown): { code: string; message: string } {
     : { code: 'ui', message: String(e) };
 }
 
+/** The save-state code of a failed save: `folder_moved` (§11, `not_found` with that
+ *  `detail.reason`), else the error code. */
+function saveCode(e: unknown): string {
+  const reason = e instanceof ApiError ? (e.detail as { reason?: unknown } | null)?.reason : null;
+  return reason === 'folder_moved' ? 'folder_moved' : errorOf(e).code;
+}
+
 function savedAt(p: ProjectSnapshot): string {
   return p.committed_at ?? p.revisions.at(-1)?.created_at ?? '';
 }
@@ -159,7 +166,7 @@ export const projectStore = {
             ? { kind: 'unchanged', at }
             : err.code === 'conflict'
               ? { kind: 'conflict' }
-              : { kind: 'failed', ...err, retrying: false },
+              : { kind: 'failed', ...err, code: saveCode(e), retrying: false },
       });
     }
     bump();
@@ -174,7 +181,14 @@ export const projectStore = {
       const project = await api.project.get();
       set({ project: project ?? state.project, save: { kind: 'saved', at: rev.created_at } });
     } catch (e) {
-      set({ error: errorOf(e), save: { kind: 'saved', at: savedAt(state.project) } });
+      const code = saveCode(e);
+      set({
+        error: errorOf(e),
+        save:
+          code === 'folder_moved'
+            ? { kind: 'failed', code, message: '', retrying: false }
+            : { kind: 'saved', at: savedAt(state.project) },
+      });
     }
     bump();
   },
