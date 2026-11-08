@@ -15,7 +15,6 @@
 | Asset-project retention + conflicts (PRJ 5–6) | `prj-ret` | `build/asset-project-retention` | in progress | — |
 | Reference packs core (REF 1, 4) | — | merged | done | — |
 | Provider references (REF 2) | — | merged | done | — |
-| Backlog: BL-12/15/19/20 | `backlog2` | `fix/backlog-2` | in progress | — |
 | Packs UI + References block (REF 3, 5) | — | merged | done | — |
 | Asset-project walkthrough (steps 1–6, 9) | `walk-prj` | `test/prj-walk` | in progress | — |
 | REF 6 (RGN integration) | `ref-rgn` | `build/reference-packs-rgn` | in progress | — |
