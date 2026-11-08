@@ -12,9 +12,10 @@ test('FR-PRJ-06 FR-PRJ-08 the creation summary lists created, already in library
       { status: 'skipped', source: 'e', reason: 'too_large' },
       { status: 'skipped', source: 'f', reason: 'animated' },
       { status: 'skipped', source: 'g', reason: 'corrupt' },
+      { status: 'skipped', source: 'h', reason: 'not_available_offline' },
     ]),
   ).toBe(
-    '2 created · 1 already in library · 4 skipped (unsupported, too large, animated, corrupt)',
+    '2 created · 1 already in library · 5 skipped (unsupported, too large, animated, corrupt, not available offline)',
   );
   expect(summarise([])).toBe('No images found');
 });

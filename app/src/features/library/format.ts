@@ -6,8 +6,10 @@ export function iterationsLabel(n: number): string {
   return `${n} iteration${n === 1 ? '' : 's'}`;
 }
 
-/** "Just now", "5 min ago", "3 h ago", "Yesterday", else the date. `now` is injectable. */
-export function editedLabel(at: string, now: number = Date.now()): string {
+/** "Just now", "5 min ago", "3 h ago", "Yesterday", else the date; '' when unknown (R45:
+ *  an unreadable `project.json` has no `commit.at`). `now` is injectable. */
+export function editedLabel(at: string | null, now: number = Date.now()): string {
+  if (!at) return '';
   const t = new Date(at).getTime();
   if (!Number.isFinite(t)) return '';
   const s = Math.max(0, (now - t) / 1000);

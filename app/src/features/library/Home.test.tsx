@@ -261,3 +261,19 @@ test('FR-PRJ-17 a cloud-only project offline shows not available offline with Re
   fireEvent.click(screen.getByTestId('prj-error-retry'));
   await waitFor(() => expect(projectStore.get().project?.name).toBe('Crypt'));
 });
+
+test('FR-PRJ-49 R45 an unreadable project card has no last-edited time, sorts last and shows the badge', async () => {
+  const seed = samplePrjSeed(LIB);
+  seed.projects.push({
+    section: 'maps',
+    name: 'Broken',
+    last_edited: '2026-11-08T11:00:00.000Z',
+    unreadable: true,
+  });
+  setup({ projects: seed.projects });
+  await waitFor(() => expect(cards()).toHaveLength(3));
+  expect(cardNames()).toEqual(['Harbour', 'Crypt', 'Broken']);
+  const broken = cards()[2]!;
+  expect(within(broken).getByTestId('prj-home-card-edited').textContent).toBe('');
+  expect(within(broken).getByTestId('prj-home-card-badge').dataset.badge).toBe('unreadable');
+});

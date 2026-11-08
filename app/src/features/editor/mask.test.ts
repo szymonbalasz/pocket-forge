@@ -3,7 +3,6 @@ import { describe, expect, test } from 'vitest';
 import { dabsAlong, dabSpacing, emptyMask, maskHash, remap, stamp, stampAlpha } from './mask';
 import { MaskController, type MaskView } from './MaskController';
 import { applyDrag, moveRect, rectFromPoints, resizeRect } from './region';
-import { mockRegionFit, RegionError } from './regionFit';
 import type { RegionState } from './store';
 import { UndoStack } from './undo';
 
@@ -97,14 +96,6 @@ describe('region geometry', () => {
       w: 200,
       h: 100,
     });
-  });
-
-  test('FR-EDT-27 the mocked fit validates like FR-RGN-01/02 (margin 128, clamped)', () => {
-    expect(mockRegionFit({ x: 50, y: 60, w: 100, h: 100 }, image)).toEqual({
-      inner: { x: 50, y: 60, w: 100, h: 100 },
-      outer: { x: 0, y: 0, w: 278, h: 288 },
-    });
-    expect(() => mockRegionFit({ x: 0, y: 0, w: 10, h: 100 }, image)).toThrow(RegionError);
   });
 });
 

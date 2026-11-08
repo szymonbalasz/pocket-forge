@@ -16,6 +16,7 @@ pub mod manifest;
 pub mod project;
 mod provider_commands;
 pub mod recent;
+pub mod region_edit;
 pub mod settings;
 pub mod tiles;
 pub mod time;

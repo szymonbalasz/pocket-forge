@@ -31,6 +31,8 @@ export interface PrjMockProject {
   trash?: TrashItem[];
   /** No thumbnail yet (`thumb_url: null`). */
   noThumb?: boolean;
+  /** `project.json` unreadable: the card has no `last_edited` and the `unreadable` badge (R45). */
+  unreadable?: boolean;
 }
 
 export interface PrjMockSeed {
@@ -139,6 +141,7 @@ export function prjMock(
       last_edited: p.last_edited,
       badges: p.badges ?? [],
       thumb: !p.noThumb,
+      unreadable: !!p.unreadable,
       original,
       source: p.source ?? null,
       read_only: p.read_only ?? null,
@@ -169,9 +172,9 @@ export function prjMock(
     name: String(p.name),
     kind: KIND[String(p.section)] as ProjectCard['kind'],
     iterations: Number(p.iterations),
-    last_edited: String(p.last_edited),
+    last_edited: p.unreadable ? null : String(p.last_edited),
     thumb_url: p.thumb ? `http://pf-tiles.localhost/i/lib-${String(p.id)}.jpg` : null,
-    badges: p.badges as CardBadge[],
+    badges: p.unreadable ? [...(p.badges as CardBadge[]), 'unreadable'] : (p.badges as CardBadge[]),
   });
 
   const open = (): Rec | null =>
@@ -260,10 +263,13 @@ export function prjMock(
     },
     library_list_projects: (input) => {
       if (state.config.unavailable) return fail('library_unavailable', 'Library unavailable');
-      return [...state.projects.values()]
-        .filter((p) => p.section === input.section)
-        .map(card)
-        .sort((a, b) => b.last_edited.localeCompare(a.last_edited));
+      return (
+        [...state.projects.values()]
+          .filter((p) => p.section === input.section)
+          .map(card)
+          // Newest first; cards without a time (unreadable) last.
+          .sort((a, b) => (b.last_edited ?? '').localeCompare(a.last_edited ?? ''))
+      );
     },
     project_create: async (input) => {
       if (state.config.unavailable) return fail('library_unavailable', 'Library unavailable');

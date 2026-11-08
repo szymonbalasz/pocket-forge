@@ -10,6 +10,7 @@ import type {
   Commands,
   CoreErrorShape,
   Events,
+  ExportSettingsInput,
   ProjectFolder,
   Section,
 } from './types';
@@ -131,15 +132,48 @@ export const api = {
         ...(rebuild ? { rebuild: true } : {}),
       }),
   },
-  export: { getSettings: () => call('export_get_settings', {}) },
+  export: {
+    getSettings: () => call('export_get_settings', {}),
+    setSettings: (settings: ExportSettingsInput) => call('export_set_settings', { settings }),
+    plan: (settings: ExportSettingsInput) => call('export_plan', { settings }),
+    start: (settings: ExportSettingsInput, replace: boolean) =>
+      call('export_start', { settings, replace }),
+    cancel: (exportId: string) => call('export_cancel', { export_id: exportId }),
+    /** PRJ's command (FR-PRJ-42); EXP calls it when its panel opens (FR-EXP-28). */
+    prefetchOriginal: () => call('project_prefetch_original', {}),
+  },
   region: {
-    iterations: () => call('rgn_iterations_list', {}),
-    fit: (projectId: string, inner: Commands['rgn_region_fit'][0]['inner'], margin?: number) =>
+    fit: (
+      projectId: string,
+      inner: Commands['rgn_region_fit'][0]['inner'],
+      margin?: number,
+      modelId?: string,
+    ) =>
       call('rgn_region_fit', {
         project_id: projectId,
         inner,
         ...(margin === undefined ? {} : { margin }),
+        ...(modelId === undefined ? {} : { model_id: modelId }),
       }),
+    evaluateControls: (modelId: string, values: Record<string, unknown>) =>
+      call('rgn_controls_evaluate', { model_id: modelId, values }),
+    estimate: (projectId: string, draft: Commands['rgn_job_estimate'][0]['draft']) =>
+      call('rgn_job_estimate', { project_id: projectId, draft }),
+    getSpend: () => call('rgn_spend_get', {}),
+    setSpend: (spend: Commands['rgn_spend_set'][0]) => call('rgn_spend_set', spend),
+    submit: (input: Commands['rgn_job_submit'][0]) => call('rgn_job_submit', input),
+    cancel: (jobId: string) => call('rgn_job_cancel', { job_id: jobId }),
+    retryDraft: (jobId: string) => call('rgn_job_retry_draft', { job_id: jobId }),
+    dismiss: (jobId: string) => call('rgn_job_dismiss', { job_id: jobId }),
+    preview: (input: Commands['rgn_candidate_preview'][0]) => call('rgn_candidate_preview', input),
+    accept: (input: Commands['rgn_candidate_accept'][0]) => call('rgn_candidate_accept', input),
+    star: (jobId: string, candidateId: string, starred: boolean) =>
+      call('rgn_candidate_star', { job_id: jobId, candidate_id: candidateId, starred }),
+    discard: (jobId: string, candidateId: string) =>
+      call('rgn_candidate_discard', { job_id: jobId, candidate_id: candidateId }),
+    retune: (layerId: string, blend: Commands['rgn_patch_retune'][0]['blend']) =>
+      call('rgn_patch_retune', { layer_id: layerId, blend }),
+    iterations: () => call('rgn_iterations_list', {}),
   },
   mask: {
     read: (projectId: string, maskId: string) =>

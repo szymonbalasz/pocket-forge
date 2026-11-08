@@ -47,7 +47,7 @@ export function Card({ card }: { card: ProjectCard }) {
                 <span data-testid="prj-home-card-iterations">
                   {iterationsLabel(card.iterations)}
                 </span>
-                <span data-testid="prj-home-card-edited" title={card.last_edited}>
+                <span data-testid="prj-home-card-edited" title={card.last_edited ?? undefined}>
                   {editedLabel(card.last_edited)}
                 </span>
               </span>

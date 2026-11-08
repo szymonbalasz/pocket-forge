@@ -203,6 +203,7 @@ h2 {
 .pf-status {
   flex: 0 0 auto;
   display: flex;
+  flex-wrap: wrap; /* a narrow centre (left + right panels open) wraps instead of overlapping */
   align-items: center;
   gap: var(--pf-space-3);
   min-height: 28px;
@@ -220,7 +221,12 @@ h2 {
 }
 
 .pf-status-grow {
-  flex: 1;
+  /* Grows, but never shrinks below its content, so the bar wraps rather than overlaps. */
+  flex: 1 0 auto;
+}
+
+.pf-status-segment:empty {
+  display: none;
 }
 
 .pf-right {
@@ -279,44 +285,6 @@ h2 {
 .row {
   display: flex;
   gap: 6px;
-}
-
-.dropzone {
-  border: 2px dashed var(--pf-border);
-  border-radius: 6px;
-  padding: 18px 8px;
-  text-align: center;
-  color: var(--pf-text-dim);
-}
-
-.dropzone-over {
-  border-color: var(--pf-accent);
-  color: var(--pf-text);
-}
-
-.recent {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.recent button {
-  width: 100%;
-  text-align: left;
-  background: none;
-  border: none;
-  padding: 4px 6px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.recent button:hover {
-  background: var(--pf-bg-3);
-}
-
-.recent button.active {
-  background: var(--pf-accent-soft);
 }
 
 .banner {

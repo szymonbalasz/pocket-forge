@@ -15,4 +15,5 @@ test('FR-PRJ-49 card meta: iteration count and last edited', () => {
     new Date('2026-10-01T09:00:00Z').toLocaleDateString(),
   );
   expect(editedLabel('garbage', now)).toBe('');
+  expect(editedLabel(null, now)).toBe('');
 });

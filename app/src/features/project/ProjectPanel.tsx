@@ -8,7 +8,7 @@ import {
   api,
   type DiskUsage,
   type FolderFile,
-  type IterationEntry,
+  type RgnIteration,
   type ProjectFolder,
   type ProjectSnapshot,
   type RevisionEntry,
@@ -368,9 +368,13 @@ function AddFiles({
 
 /** Iterations (`results/NNN <slug>/`), from RGN's list; RGN's tracker selects them. */
 function Results({ revision }: { revision: number }) {
-  const [items, setItems] = useState<IterationEntry[]>([]);
+  const [items, setItems] = useState<RgnIteration[]>([]);
   useEffect(() => {
-    api.region.iterations().then(setItems, () => setItems([]));
+    // The active job before it has candidates has no number or folder yet: not a result.
+    api.region.iterations().then(
+      (rows) => setItems(rows.filter((r) => r.n !== null)),
+      () => setItems([]),
+    );
   }, [revision]);
   return (
     <Section id="results" label="Results" count={items.length}>
@@ -384,10 +388,10 @@ function Results({ revision }: { revision: number }) {
               className="prj-file"
               data-testid="prj-panel-results-item"
               data-record-id={it.job_id}
-              title={it.dir}
+              title={it.dir ?? undefined}
             >
               <span className="prj-file-name">
-                {String(it.n).padStart(3, '0')} {it.slug}
+                {String(it.n).padStart(3, '0')} {it.slug ?? ''}
               </span>
               <span className="prj-file-size tabular">
                 {it.kept} / {it.returned}

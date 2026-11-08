@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+image.workspace = true
 pf-imaging.workspace = true
 pf-provider.workspace = true
 serde.workspace = true
@@ -18,7 +19,6 @@ tracing.workspace = true
 ulid.workspace = true
 
 [dev-dependencies]
-image.workspace = true
 png.workspace = true
 tempfile.workspace = true
 

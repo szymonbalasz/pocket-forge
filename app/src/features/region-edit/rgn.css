@@ -1,0 +1,424 @@
+/* Region edit: Generate panel, confirm dialog, iteration tracker (ui-guidelines tokens only). */
+.rgn-panel {
+  border-bottom: 1px solid var(--pf-border);
+}
+
+.rgn-panel-head {
+  width: 100%;
+  display: flex;
+  gap: var(--pf-space-2);
+  align-items: center;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: var(--pf-space-2) var(--pf-space-3);
+  font-weight: 600;
+  text-align: left;
+}
+
+.rgn-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-3);
+  padding: 0 var(--pf-space-3) var(--pf-space-3);
+}
+
+.rgn-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+  padding-top: var(--pf-space-2);
+  border-top: 1px solid var(--pf-border);
+}
+
+.rgn-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pf-space-2);
+}
+
+.rgn-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+  margin-top: var(--pf-space-1);
+}
+
+.rgn-control {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rgn-control-label {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-1);
+  font-size: var(--pf-font-size-meta);
+  color: var(--pf-text-dim);
+}
+
+.rgn-required {
+  color: var(--pf-warn);
+}
+
+.rgn-costly {
+  color: var(--pf-text-dim);
+}
+
+.rgn-slider-row {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.rgn-slider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  height: 18px;
+  touch-action: none;
+  user-select: none;
+}
+
+.rgn-slider-track {
+  position: relative;
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--pf-bg-3);
+}
+
+.rgn-slider-range {
+  position: absolute;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--pf-accent);
+}
+
+.rgn-slider-thumb {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--pf-text);
+}
+
+.rgn-slider-thumb:focus-visible {
+  outline: 2px solid var(--pf-accent);
+}
+
+.rgn-number {
+  width: 72px;
+}
+
+.rgn-text,
+.rgn-prompt {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.rgn-prompt {
+  resize: vertical;
+  font-family: inherit;
+}
+
+.rgn-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pf-space-2);
+  width: 100%;
+  text-align: left;
+}
+
+.rgn-select-icon {
+  color: var(--pf-text-dim);
+}
+
+.rgn-select-content {
+  z-index: 50;
+  min-width: var(--radix-select-trigger-width);
+  max-height: var(--radix-select-content-available-height);
+  overflow: hidden;
+  background: var(--pf-bg-3);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  padding: var(--pf-space-1) 0;
+}
+
+.rgn-select-item {
+  padding: var(--pf-space-1) var(--pf-space-3);
+  cursor: default;
+  outline: none;
+}
+
+.rgn-select-item[data-highlighted] {
+  background: var(--pf-accent-soft);
+}
+
+.rgn-switch {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  padding: 0;
+  border-radius: 8px;
+  background: var(--pf-bg-3);
+  border: 1px solid var(--pf-border);
+}
+
+.rgn-switch[data-state='checked'] {
+  background: var(--pf-accent);
+}
+
+.rgn-switch-thumb {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--pf-text);
+  transform: translateX(1px);
+  transition: transform 100ms;
+}
+
+.rgn-switch-thumb[data-state='checked'] {
+  transform: translateX(13px);
+}
+
+.rgn-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.rgn-checkbox {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rgn-warning {
+  background: var(--pf-warn-soft);
+  border-radius: var(--pf-radius);
+  padding: var(--pf-space-2);
+  font-size: var(--pf-font-size-meta);
+}
+
+.rgn-warning ul {
+  margin: 0;
+  padding-left: var(--pf-space-4);
+}
+
+.rgn-final pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: var(--pf-space-1) 0 0;
+  padding: var(--pf-space-2);
+  background: var(--pf-bg-1);
+  border-radius: var(--pf-radius);
+}
+
+.rgn-submit {
+  width: 100%;
+}
+
+/* Confirm dialog. */
+.rgn-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--pf-overlay);
+  z-index: 40;
+}
+
+.rgn-dialog {
+  position: fixed;
+  z-index: 41;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, 92vw);
+  background: var(--pf-bg-2);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  padding: var(--pf-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+}
+
+.rgn-dialog-title {
+  margin: 0;
+  font-size: 15px;
+}
+
+.rgn-dialog-table {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--pf-space-1) var(--pf-space-3);
+  margin: var(--pf-space-2) 0;
+}
+
+.rgn-dialog-table dt {
+  color: var(--pf-text-dim);
+}
+
+.rgn-dialog-table dd {
+  margin: 0;
+  text-align: right;
+}
+
+.rgn-dialog-setup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+}
+
+.rgn-dialog-setup label,
+.rgn-dialog-warn label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.rgn-dialog-setup input,
+.rgn-dialog-warn input[type='number'] {
+  width: 96px;
+}
+
+.rgn-dialog-warn {
+  background: var(--pf-warn-soft);
+  border-radius: var(--pf-radius);
+  padding: var(--pf-space-2);
+}
+
+.rgn-dialog-warn p {
+  margin: 0 0 var(--pf-space-2);
+}
+
+.rgn-dialog-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--pf-space-2);
+  margin-top: var(--pf-space-2);
+}
+
+/* Iteration tracker: above EDT's picker in the bottom slot (FR-RGN-40, §7 "under it"). */
+.pf-bottom:has(> .rgn-tracker) {
+  display: flex;
+  flex-direction: column;
+}
+
+.rgn-tracker {
+  order: -1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+  padding: var(--pf-space-2) var(--pf-space-3);
+  border-bottom: 1px solid var(--pf-border);
+}
+
+.rgn-tracker-list {
+  display: flex;
+  gap: var(--pf-space-2);
+  overflow-x: auto;
+}
+
+.rgn-tracker-item {
+  flex: 0 0 auto;
+  min-width: 120px;
+  max-width: 280px;
+  padding: var(--pf-space-1) var(--pf-space-2);
+  background: var(--pf-bg-3);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  cursor: pointer;
+}
+
+.rgn-tracker-item[aria-selected='true'] {
+  border-color: var(--pf-accent);
+}
+
+.rgn-tracker-item:focus-visible {
+  outline: 2px solid var(--pf-accent);
+}
+
+.rgn-tracker-head {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.rgn-tracker-n {
+  font-weight: 600;
+}
+
+.rgn-tracker-slug {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.rgn-tracker-check {
+  color: var(--pf-ok);
+}
+
+.rgn-tracker-meta {
+  display: flex;
+  gap: var(--pf-space-2);
+}
+
+.rgn-tracker-notice {
+  display: flex;
+  gap: var(--pf-space-2);
+  align-items: center;
+}
+
+.rgn-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--pf-font-size-meta);
+}
+
+.rgn-strip-line,
+.rgn-strip-buttons {
+  display: flex;
+  gap: var(--pf-space-2);
+  align-items: center;
+}
+
+.rgn-progress {
+  height: 3px;
+  background: var(--pf-bg-1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.rgn-progress > div {
+  height: 100%;
+  background: var(--pf-accent);
+}
+
+.rgn-state-failed,
+.rgn-state-lost {
+  color: var(--pf-danger);
+}
+
+.rgn-state-fetched,
+.rgn-state-succeeded {
+  color: var(--pf-ok);
+}
+
+.rgn-state-unknown,
+.rgn-state-canceled {
+  color: var(--pf-warn);
+}

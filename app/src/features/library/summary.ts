@@ -7,6 +7,7 @@ const REASON: Record<SkipReason, string> = {
   corrupt: 'corrupt',
   not_found: 'not found',
   io: 'read error',
+  not_available_offline: 'not available offline',
 };
 
 export function reasonLabel(reason: SkipReason): string {
