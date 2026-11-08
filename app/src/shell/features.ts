@@ -6,6 +6,7 @@ import { libraryFeature } from '../features/library';
 import { projectFeature } from '../features/project';
 import { providerFeature } from '../features/provider';
 import { regionEditFeature } from '../features/region-edit';
+import { exportFeature } from '../features/export';
 
 export const features: readonly Feature[] = [
   libraryFeature,
@@ -13,4 +14,5 @@ export const features: readonly Feature[] = [
   projectFeature,
   providerFeature,
   regionEditFeature,
+  exportFeature,
 ];

@@ -9,6 +9,12 @@ test('FR-RGN-27 region → controls → prompt → estimate → confirm → prog
 }) => {
   await openRgn(page);
   await expect(page.getByTestId('rgn-panel-empty')).toBeVisible();
+  // ui-guidelines: the right panel holds Generate, then Export.
+  const order = await page
+    .getByTestId('app-slot-right')
+    .locator('[data-testid="rgn-panel"], [data-testid="exp-panel"]')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')));
+  expect(order).toEqual(['rgn-panel', 'exp-panel']);
 
   // Region: EDT's tool emits {inner}; RGN fits it (FR-RGN-01/05).
   await drawRegion(page, [400, 500], [800, 900]);
