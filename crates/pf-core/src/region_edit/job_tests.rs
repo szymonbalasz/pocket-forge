@@ -476,6 +476,36 @@ fn fr_rgn_35_every_transition_is_committed_and_emitted() {
 }
 
 #[test]
+fn fr_rgn_18_long_running_turns_on_at_180_s_on_the_clock_seam() {
+    let lab = Lab::new();
+    lab.set_case("slow(10)");
+    let id = lab.submit("kitchen");
+    let submitted = lab.job(id).state_times["submitted"];
+    let last_long_running = || {
+        lab.events_named(runner::EVENT_JOB_STATE)
+            .iter()
+            .rfind(|e| e["job_id"] == json!(id))
+            .map(|e| e["long_running"].clone())
+            .unwrap()
+    };
+    runner::tick(&lab.core, true);
+    assert_eq!(last_long_running(), json!(false));
+    lab.clock
+        .set(submitted.plus(std::time::Duration::from_secs(179)));
+    runner::tick(&lab.core, true);
+    assert_eq!(lab.job(id).state, JobState::Running);
+    assert_eq!(last_long_running(), json!(false), "179 s is not yet long");
+    lab.clock
+        .set(submitted.plus(std::time::Duration::from_secs(180)));
+    runner::tick(&lab.core, true);
+    assert!(!lab.job(id).state.is_terminal());
+    assert_eq!(last_long_running(), json!(true), "180 s shows the notice");
+    lab.drive();
+    assert_eq!(lab.job(id).state, JobState::Fetched);
+    assert_eq!(last_long_running(), json!(false), "never on a finished job");
+}
+
+#[test]
 fn fr_rgn_35_polling_continues_after_the_project_closes() {
     let lab = Lab::new();
     let id = lab.submit("kitchen");
