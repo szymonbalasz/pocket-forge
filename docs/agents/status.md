@@ -24,7 +24,7 @@
 | REF 6 (RGN integration) | — | merged | done | — |
 | Generate-loop walkthrough (RGN, EDT 5, PRV fake, EXP 3–5) | — | — | passed with defects D1–D7 | — |
 | RGN walk fixes D1–D7 | `fix-rgn` | `fix/walk-rgn` | in progress | — |
-| **Provider real calls (PRV 5)** — priority | `prv-real` | `build/provider-real` | in progress | owner's key for the recording session |
+| **Provider real calls (PRV 5)** | `prv-real` (kept for the session) | merged | ready for the owner | owner runs the first real session |
 | Reference packs walkthrough | — | — | passed with defects R1–R7 | — |
 | REF walk fixes R1–R7 | — | merged | done | BL-34 open |
 
