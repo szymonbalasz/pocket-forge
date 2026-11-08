@@ -2,7 +2,7 @@
 // EDT command handlers per test (window.__pfMockHandlers).
 import { expect, type Page } from '@playwright/test';
 
-import { defaultSeed, mockCore, type MockSeed } from './mock-core';
+import { defaultSeed, mockCore, openFirstCard, type MockSeed } from './mock-core';
 
 export interface EdtMockOptions {
   /** Levels not built yet at open (default: none). */
@@ -69,7 +69,7 @@ export async function openMap(page: Page, opts: EdtMockOptions = {}): Promise<vo
     { ...opts, size: seed.image },
   );
   await page.goto('/');
-  await page.getByTestId('prj-home-recent-item').first().click();
+  await openFirstCard(page);
   await expect(page.getByTestId('edt-canvas-stage')).toHaveAttribute('data-image-loaded', 'true');
   await page.waitForFunction(() => !!window.__pfTest?.view);
 }

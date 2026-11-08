@@ -90,7 +90,7 @@ test('FR-PRV-07 the rail Settings entry opens the provider settings; Esc closes 
   page,
 }) => {
   await mockProvider(page, { ...base, mode: 'fake' });
-  await page.getByTestId('app-rail-settings').click();
+  await page.getByTestId('prj-rail-settings').click();
   await expect(page.getByTestId('prv-settings-panel')).toBeVisible();
   await expect(page.getByTestId('prv-settings-key')).toBeFocused();
   await page.keyboard.press('Escape');

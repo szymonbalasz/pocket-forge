@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from 'react';
 
 import { api, hasCore, onEvent, type Balance, type ProviderStatus } from '../../api';
+import { onSettingsRequested } from '../../shared/settings';
 
 export interface ProviderState {
   status: ProviderStatus | null;
@@ -53,6 +54,9 @@ export const providerStore = {
     set({ settingsOpen: false });
   },
 };
+
+// The section rail's Settings entry (PRJ) opens the provider settings.
+onSettingsRequested(() => providerStore.openSettings());
 
 export function useProviderState(): ProviderState {
   return useSyncExternalStore(providerStore.subscribe, providerStore.get);

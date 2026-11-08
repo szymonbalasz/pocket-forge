@@ -1,26 +1,44 @@
+import type { ReadOnlyReason } from '../../api';
 import type { SaveStatus } from '../../store/project';
 
-const READ_ONLY: Record<string, string> = {
+const READ_ONLY: Record<ReadOnlyReason, string> = {
   newer_version: 'Read-only (made by a newer Pocket Forge)',
   original_changed: 'Read-only (original changed)',
   original_missing: 'Read-only (original missing)',
 };
 
-/** Status bar text (asset-project §7). */
-export function saveLabel(save: SaveStatus, readOnly: string | null): string {
+/** `HH:MM` of an ISO time, or '' when unknown. */
+function timeOf(at: string): string {
+  const d = new Date(at);
+  return at && Number.isFinite(d.getTime())
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : '';
+}
+
+/** The PRJ status-bar segment's state name (`data-state`). */
+export function saveState(save: SaveStatus, readOnly: ReadOnlyReason | null): string {
+  if (readOnly) return 'read_only';
+  return save.kind;
+}
+
+/** Status bar text (asset-project §7): Saved · time / Saving… / Save failed, file locked,
+ *  retrying / Read-only (reason) / Conflict. */
+export function saveLabel(save: SaveStatus, readOnly: ReadOnlyReason | null): string {
   if (readOnly) return READ_ONLY[readOnly] ?? 'Read-only';
   switch (save.kind) {
-    case 'unsaved':
-      return 'Not saved yet';
     case 'saving':
       return 'Saving…';
     case 'saved':
-      return save.at ? `Saved · ${new Date(save.at).toLocaleTimeString()}` : 'Saved';
-    case 'unchanged':
-      return 'Saved · no changes';
+    case 'unchanged': {
+      const t = timeOf(save.at);
+      const base = t ? `Saved · ${t}` : 'Saved';
+      return save.kind === 'unchanged' ? `${base} · no changes` : base;
+    }
     case 'failed':
-      return save.code === 'locked'
-        ? 'Save failed, file locked, retrying'
-        : `Save failed (${save.code})`;
+      if (save.code === 'locked')
+        return save.retrying ? 'Save failed, file locked, retrying' : 'Save failed, file locked';
+      return `Save failed (${save.message || save.code})${save.retrying ? ', retrying' : ''}`;
+    case 'conflict':
+      return 'Conflict';
   }
 }

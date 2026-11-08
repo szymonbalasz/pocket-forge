@@ -5,7 +5,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 
-import type { CommandName, Commands, CoreErrorShape, Events } from './types';
+import type {
+  CommandName,
+  Commands,
+  CoreErrorShape,
+  Events,
+  ProjectFolder,
+  Section,
+} from './types';
 
 export type * from './types';
 
@@ -84,9 +91,8 @@ export const api = {
   appInfo: () => call('app_info', {}),
   library: {
     getConfig: () => call('library_get_config', {}),
-    setRoots: (roots: string[], importDest?: string | null) =>
-      call('library_set_roots', { roots, import_dest: importDest ?? null }),
-    importPaths: (paths: string[]) => call('import_paths', { paths }),
+    setRoots: (roots: string[]) => call('library_set_roots', { roots }),
+    listProjects: (section: Section) => call('library_list_projects', { section }),
   },
   project: {
     open: (path: string) => call('project_open', { path }),
@@ -98,8 +104,19 @@ export const api = {
       call('project_save_revision', label === undefined ? {} : { label }),
     listRevisions: () => call('project_list_revisions', {}),
     restoreRevision: (revId: string) => call('project_restore_revision', { rev_id: revId }),
+    create: (section: Section, paths: string[]) => call('project_create', { section, paths }),
+    createCancel: () => call('project_create_cancel', {}),
+    createFromClipboard: (section: Section, dataB64: string) =>
+      call('project_create_from_clipboard', { section, data_b64: dataB64 }),
+    rename: (path: string, name: string) => call('project_rename', { path, name }),
+    folderList: (folder: ProjectFolder) => call('project_folder_list', { folder }),
+    folderAdd: (folder: ProjectFolder, paths: string[]) =>
+      call('project_folder_add', { folder, paths }),
+    trashList: () => call('project_trash_list', {}),
+    trashRestore: (itemId: string) => call('project_trash_restore', { item_id: itemId }),
+    diskUsage: () => call('project_disk_usage', {}),
+    relinkOriginal: (path: string) => call('project_relink_original', { path }),
   },
-  recent: { list: () => call('recent_list', {}) },
   editor: {
     imageOpen: (projectId: string, imageId: string, maxSide?: number) =>
       call('edt_image_open', {
@@ -116,6 +133,7 @@ export const api = {
   },
   export: { getSettings: () => call('export_get_settings', {}) },
   region: {
+    iterations: () => call('rgn_iterations_list', {}),
     fit: (projectId: string, inner: Commands['rgn_region_fit'][0]['inner'], margin?: number) =>
       call('rgn_region_fit', {
         project_id: projectId,
