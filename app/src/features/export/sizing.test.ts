@@ -55,7 +55,9 @@ describe('export sizing (mirror of sizing.rs)', () => {
 
   test('FR-EXP-06 an empty grid gives no source yet', () => {
     expect(planSize(4200, 5600, { mode: 'cells', cols: null }, null).source).toBeNull();
-    expect(planSize(4200, 5600, { mode: 'px', source_px_per_square: null }, null).source).toBeNull();
+    expect(
+      planSize(4200, 5600, { mode: 'px', source_px_per_square: null }, null).source,
+    ).toBeNull();
   });
 
   test('FR-EXP-07 no target is full resolution', () => {
