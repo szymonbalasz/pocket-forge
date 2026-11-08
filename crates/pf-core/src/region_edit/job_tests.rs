@@ -1491,38 +1491,52 @@ fn fr_rgn_32_no_visible_seam_with_offset_12() {
     lab.drive();
     let c = lab.candidates(id)[0].clone();
     let src = seam_fixture();
-    let edge = inner.x as u32 + inner.w / 2;
+    // Both mask edges: the kept/edited boundary and the edited region's far side (BL-33).
+    let edges = [inner.x as u32 + inner.w / 2, inner.x as u32 + inner.w];
+    let edge = edges[0];
     let (y0, y1) = (inner.y as u32, inner.y as u32 + inner.h);
-    // Mean (out − src) luma per column across the boundary.
-    let profile = |img: &RgbImage| {
+    // The metric (R47, R68): mean (out − src) luma per column over ±16 px of an edge, smoothed
+    // by a 3-px moving average, then the largest step between neighbouring columns. Unsmoothed,
+    // the fake's in-mask noise (0..15) and u8 rounding make the max step a coin flip around 0.5
+    // on either edge (BL-33 sweep: both edges mean 0.52, 32/60 seeds over); smoothed, 0.35–0.39.
+    let step_at = |img: &RgbImage, edge: u32| {
         let luma = |p: &Rgb<u8>| {
             0.299 * f64::from(p.0[0]) + 0.587 * f64::from(p.0[1]) + 0.114 * f64::from(p.0[2])
         };
-        (edge - 16..edge + 16)
+        let profile = (edge - 16..edge + 16)
             .map(|x| {
                 (y0..y1)
                     .map(|y| luma(img.get_pixel(x, y)) - luma(src.get_pixel(x, y)))
                     .sum::<f64>()
                     / f64::from(y1 - y0)
             })
+            .collect::<Vec<f64>>();
+        profile
+            .windows(3)
+            .map(|q| (q[0] + q[1] + q[2]) / 3.0)
             .collect::<Vec<f64>>()
-    };
-    let max_step = |p: &[f64]| {
-        p.windows(2)
+            .windows(2)
             .map(|q| (q[1] - q[0]).abs())
             .fold(0.0, f64::max)
     };
 
-    // A hard edge without colour match shows the seam.
+    // A hard edge without colour match shows the seam, smoothing or not.
     let r0 = snapshot(&lab)["head_revision"].clone();
     accept(&lab, id, c.id, blend(0, false)).unwrap();
-    let hard = max_step(&profile(&flatten(&lab)));
-    assert!(hard > 5.0, "the fixture does produce a seam ({hard})");
+    let out = flatten(&lab);
+    let hard = edges.map(|e| step_at(&out, e));
+    assert!(
+        hard.iter().all(|&h| h > 5.0),
+        "the fixture does produce a seam ({hard:?})"
+    );
     restore(&lab, &r0);
 
     accept(&lab, id, c.id, blend(48, true)).unwrap();
-    let step = max_step(&profile(&flatten(&lab)));
-    assert!(step <= 0.5, "mean edge step {step} levels/px");
+    let out = flatten(&lab);
+    let steps = edges.map(|e| step_at(&out, e));
+    for (e, step) in edges.iter().zip(steps) {
+        assert!(step <= 0.5, "mean edge step {step} levels/px at x = {e}");
+    }
     // The residual offset: the colour-matched candidate against the source on the context.
     let layer = last_layer(&lab);
     let g = &layer["blend"]["colour_match"]["gain"];
@@ -1549,6 +1563,6 @@ fn fr_rgn_32_no_visible_seam_with_offset_12() {
         }
     }
     let residual = (sum / n).abs();
-    eprintln!("FR-RGN-32: hard {hard:.2}, step {step:.3} levels/px, residual {residual:.3}");
+    eprintln!("FR-RGN-32: hard {hard:.2?}, steps {steps:.3?} levels/px, residual {residual:.3}");
     assert!(residual <= 0.1, "residual offset {residual} levels");
 }

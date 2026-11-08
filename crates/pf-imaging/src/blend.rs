@@ -231,6 +231,32 @@ mod tests {
         out
     }
 
+    /// The FR-RGN-32 seam metric (R47, R68): mean (out − base) luma per column over ±16 px of
+    /// the mask edge at column `edge` (the first column on the far side), smoothed by a 3-px
+    /// moving average, then the largest step between neighbouring columns, in levels/px.
+    fn seam_step(out: &RgbImage, base: &RgbImage, edge: u32, rows: std::ops::Range<u32>) -> f64 {
+        let luma = |p: [u8; 3]| {
+            0.299 * f64::from(p[0]) + 0.587 * f64::from(p[1]) + 0.114 * f64::from(p[2])
+        };
+        let n = f64::from(rows.end - rows.start);
+        let profile: Vec<f64> = (edge - 16..edge + 16)
+            .map(|x| {
+                rows.clone()
+                    .map(|y| luma(out.get_pixel(x, y).0) - luma(base.get_pixel(x, y).0))
+                    .sum::<f64>()
+                    / n
+            })
+            .collect();
+        let smooth: Vec<f64> = profile
+            .windows(3)
+            .map(|q| (q[0] + q[1] + q[2]) / 3.0)
+            .collect();
+        smooth
+            .windows(2)
+            .map(|q| (q[1] - q[0]).abs())
+            .fold(0.0, f64::max)
+    }
+
     #[test]
     fn fr_rgn_32_bake_patch_removes_the_offset_and_leaves_no_seam() {
         let (base, cand, mask, w, _) = seam_case();
@@ -261,9 +287,9 @@ mod tests {
     /// BL-33: the feather treats both mask edges alike. An off-centre mask (40 px of context on
     /// the left, 24 on the right, so the outer rect sits closer to one edge) has a ramp on its
     /// right edge that mirrors its left edge exactly. On a mirrored fixture with `offset(12)`-like
-    /// input the column-mean edge steps of the two sides are equal and ≤ 0.5 levels/px. The second
-    /// edge's 0.512 in the walkthrough was the fake's seed noise: over 60 seeds both edges average
-    /// 0.52 (see BL-33).
+    /// input the column-mean profiles of the two edges are mirror images, and the seam metric is
+    /// ≤ 0.5 levels/px on both. The second edge's 0.512 in the walkthrough was the fake's seed
+    /// noise, not an asymmetry (see the ignored sweep below).
     #[test]
     fn fr_rgn_32_feather_and_bake_are_symmetric_on_both_mask_edges() {
         let (w, h) = (200u32, 40u32);
@@ -325,8 +351,70 @@ mod tests {
             .map(|x| mean(x - 1) - mean(x))
             .collect();
         assert_eq!(left, right, "both edges step alike");
-        let max = left.iter().fold(0.0f64, |a, s| a.max(s.abs()));
-        assert!(max <= 0.5, "edge step {max} levels/px on both edges");
+        for edge in [m0, m1] {
+            let step = seam_step(&out, &base, edge, 0..h);
+            assert!(step <= 0.5, "edge step {step} levels/px at x = {edge}");
+        }
+    }
+
+    /// BL-33 evidence for R68: the walkthrough's geometry (a 150 px wide filled region in a
+    /// 560 × 1856 outer rect, 1600 rows measured) with the fake's `offset(12)` candidate over 60
+    /// seeds. Unsmoothed, the max column step is a coin flip around 0.5 on either edge (measured:
+    /// both edges mean 0.52, p90 0.59, 32/60 seeds over 0.5), because the fake's in-mask noise
+    /// (0..15, mean 7.5) ramps through the feather at about 7.5 × 0.048 ≈ 0.36 levels/px and u8
+    /// rounding plus per-column noise add up to ±0.2. With the 3-px smoothing (R68) both edges
+    /// measure 0.354–0.386. Run it with `cargo test -p pf-imaging -- --ignored`.
+    #[test]
+    #[ignore = "seed sweep behind R68"]
+    fn fr_rgn_32_seed_sweep_both_edges_pass_with_smoothing() {
+        // The fake's noise (pf-provider `render_candidate`, `offset` case).
+        fn splitmix(mut z: u64) -> u64 {
+            z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        }
+        let (w, h, ox, oy) = (560u32, 1856u32, 270u32, 72u32);
+        let base = RgbImage::from_fn(w, h, |x, y| {
+            let (x, y) = (x + ox, y + oy);
+            let n = ((x.wrapping_mul(73_856_093) ^ y.wrapping_mul(19_349_663))
+                .wrapping_mul(2_654_435_761)
+                >> 24) as u8
+                % 48;
+            image::Rgb([70 + n, 90 + n / 2, 110 + n / 3])
+        });
+        let (m0, m1) = (550 - ox, 700 - ox);
+        let rows = 200 - oy..1800 - oy;
+        let mask: Vec<u8> = (0..w * h)
+            .map(|i| {
+                let (x, y) = (i % w, i / w);
+                if (m0..m1).contains(&x) && rows.contains(&y) {
+                    255
+                } else {
+                    0
+                }
+            })
+            .collect();
+        let mut worst = [0.0f64; 2];
+        for seed in 0..60u64 {
+            let s = splitmix(seed);
+            let cand = RgbImage::from_fn(w, h, |x, y| {
+                let i = (y * w + x) as usize;
+                let n = if mask[i] > 0 {
+                    (splitmix(s ^ i as u64) & 0x3F) as u8 / 4
+                } else {
+                    0
+                };
+                image::Rgb(base.get_pixel(x, y).0.map(|v| v + 12 + n))
+            });
+            let out = over(&base, &bake_patch(&base, &cand, &mask, 48, true));
+            for (k, edge) in [m0, m1].into_iter().enumerate() {
+                let step = seam_step(&out, &base, edge, rows.clone());
+                assert!(step <= 0.5, "seed {seed}, edge {k}: {step} levels/px");
+                worst[k] = worst[k].max(step);
+            }
+        }
+        eprintln!("BL-33 sweep: worst smoothed step per edge {worst:.3?}");
     }
 
     #[test]
