@@ -15,6 +15,7 @@ import {
   type JobState,
   type Layer,
   type ModelSummary,
+  type ProviderMode,
   type ProjectSnapshot,
   type RectPx,
   type RegionFit,
@@ -80,7 +81,7 @@ export type EstimateStatus = 'idle' | 'waiting' | 'loading' | 'ready' | 'error';
 export interface RgnState {
   projectId: string | null;
   readOnly: string | null;
-  provider: { configured: boolean; connectivity: Connectivity } | null;
+  provider: { configured: boolean; connectivity: Connectivity; mode?: ProviderMode } | null;
   models: ModelSummary[];
   modelsStale: boolean;
   modelsLoading: boolean;
@@ -225,6 +226,16 @@ const sameRect = (a: RectPx | null, b: RectPx | null) =>
 export const isOffline = (s: RgnState): boolean =>
   s.modelsStale || s.provider?.connectivity === 'offline';
 
+/** Walk D7: one unit label for every amount in the panel: the estimate's, else the newest job's,
+ *  else the provider's (the fake reports "fake", Scenario "CU"). */
+export function costUnit(s: RgnState): string {
+  return (
+    s.estimate.result?.cost.unit ??
+    orderRows(s.iterations).find((r) => r.cost)?.cost?.unit ??
+    (s.provider?.mode === 'fake' ? 'fake' : 'CU')
+  );
+}
+
 export const activeJobId = (s: RgnState): string | null =>
   orderRows(s.iterations).find((r) => isActive(r.state))?.job_id ?? null;
 
@@ -342,7 +353,7 @@ function saveDraftSoon(): void {
 async function refreshProvider(): Promise<void> {
   try {
     const st = await api.provider.status();
-    set({ provider: { configured: st.configured, connectivity: st.connectivity } });
+    set({ provider: { configured: st.configured, connectivity: st.connectivity, mode: st.mode } });
   } catch {
     // Unknown provider status: leave submit to the estimate's errors.
   }
@@ -516,6 +527,8 @@ async function refreshIterations(): Promise<void> {
       ...(changed ? { selectedCandidateId: null, preview: null } : {}),
     });
     if (changed) editorBridge.setCompare(null);
+    // The open-time "N job(s) can resume" banner ends with the last running job (walk D7).
+    if (!activeJobId(state)) projectStore.clearWarning('resumable');
     syncPicker();
     schedule();
   } catch {
