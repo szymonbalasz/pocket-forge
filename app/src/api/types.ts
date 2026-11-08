@@ -202,12 +202,46 @@ export interface TilesDescriptor {
   levels: TilesLevel[];
 }
 
-/** EXP's settings as EDT reads them (FR-EXP-26); the rest of the shape is EXP's. */
-export interface ExportSettings {
+/** EXP grid input (manifest-schema §4.10, FR-EXP-06): px per square or cells. */
+export interface ExportGrid {
+  mode: 'px' | 'cells';
+  source_px_per_square?: number | null;
+  cols?: number | null;
+  rows?: number | null;
+}
+
+export type ExportFormat = 'png' | 'jpeg' | 'webp';
+
+/** The export settings the owner edits (EXP §9 `export_set_settings` input). */
+export interface ExportSettingsInput {
+  grid: ExportGrid;
+  target_px_per_square: number | null;
+  format: ExportFormat;
+}
+
+/** `export_get_settings` / `export_set_settings` result: the settings plus the derived source
+ *  px per square. EDT reads the two px-per-square values (FR-EXP-26, FR-EDT-04). */
+export interface ExportSettings extends Partial<ExportSettingsInput> {
   source_px_per_square: number | null;
   target_px_per_square: number | null;
-  [k: string]: unknown;
 }
+
+/** `invalid_settings` limit (`detail.limit`): the bound the field broke. */
+export type ExportLimit = { min: number } | { max: number } | { requires: string };
+
+/** `export_plan` result (FR-EXP-24). `path` is relative to the project folder. */
+export interface ExportPlan {
+  width: number;
+  height: number;
+  scale: number;
+  formats: { format: ExportFormat; available: boolean; reason: string | null }[];
+  path: string;
+  exists: { bytes: number; mtime: string } | null;
+  est_peak_mib: number;
+  warnings: { code: string; message: string }[];
+}
+
+export type ExportPhase = 'compose' | 'resize' | 'encode' | 'write';
 
 /** Integer image-px rectangle. */
 export interface RectPx {
@@ -352,6 +386,11 @@ export interface Commands {
   rgn_spend_get: [Record<string, never>, Spend];
   /** A missing field keeps its value; null clears it. */
   rgn_spend_set: [{ cap?: number | null; threshold?: number | null }, Spend];
+  export_set_settings: [{ settings: ExportSettingsInput }, ExportSettings];
+  export_plan: [{ settings: ExportSettingsInput }, ExportPlan];
+  export_start: [{ settings: ExportSettingsInput; replace: boolean }, { export_id: string }];
+  export_cancel: [{ export_id: string }, Record<string, never>];
+  project_prefetch_original: [Record<string, never>, { ready?: boolean } | null];
 }
 
 export type CommandName = keyof Commands;
@@ -366,4 +405,18 @@ export interface Events {
   'export:settings-changed': { source: number | null; target: number | null };
   'provider:status-changed': { connectivity: Connectivity };
   'rgn:spend': { spend: number; cap: number | null };
+  'project:original-ready': Record<string, never> | null;
+  'export:progress': { export_id: string; phase: ExportPhase; fraction: number };
+  'export:done': {
+    export_id: string;
+    path: string;
+    width: number;
+    height: number;
+    bytes: number;
+    format: ExportFormat;
+    fallback: 'lossless' | null;
+    record_saved: boolean;
+  };
+  'export:failed': { export_id: string; code: string; detail: unknown };
+  'export:canceled': { export_id: string };
 }
