@@ -22,6 +22,14 @@ export interface ProjectState {
   opening: string | null;
   /** Bumped after every commit this UI knows of, so panels reload their lists. */
   revision: number;
+  /** Walk owner-UX L3: the one discard / restore notice, shown next to where the user acted
+   *  (Results, the tracker or Storage); a newer one replaces it wherever it was. */
+  trashNotice: TrashNotice | null;
+}
+
+export interface TrashNotice {
+  at: 'results' | 'tracker' | 'storage';
+  text: string;
 }
 
 const initial: ProjectState = {
@@ -31,6 +39,7 @@ const initial: ProjectState = {
   busy: false,
   opening: null,
   revision: 0,
+  trashNotice: null,
 };
 
 let state: ProjectState = initial;
@@ -173,7 +182,7 @@ async function openNow(path: string): Promise<boolean> {
     if (state.project) await api.project.close().catch(() => undefined);
     const project = await api.project.open(path);
     // A conflict found at open shows as Conflict, not Saved (walk 2 N3).
-    set({ project, save: settled(project), busy: false, opening: null });
+    set({ project, save: settled(project), busy: false, opening: null, trashNotice: null });
     bump();
     return true;
   } catch (e) {
@@ -194,7 +203,7 @@ async function closeNow(force: boolean): Promise<void> {
       return;
     }
   }
-  set({ project: null, save: initial.save, error: null });
+  set({ project: null, save: initial.save, error: null, trashNotice: null });
   bump();
 }
 
@@ -324,6 +333,11 @@ export const projectStore = {
   noteFolderMoved(): void {
     if (!state.project || folderMoved(state)) return;
     set({ save: { kind: 'failed', code: 'folder_moved', message: '', retrying: false } });
+  },
+
+  /** Shows the discard / restore notice where the user acted (replacing any other). */
+  setTrashNotice(notice: TrashNotice | null): void {
+    set({ trashNotice: notice });
   },
 
   /** Drops an open-time warning that no longer applies (RGN: `resumable` once no job is left

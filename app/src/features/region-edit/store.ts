@@ -1247,7 +1247,9 @@ export const rgn = {
         set({ selectedCandidateId: null, preview: null });
         editorBridge.setCompare(null);
       }
-      set({ trackerNotice: { kind: 'info', text: TRASH_NOTICE(1) } });
+      // Walk owner-UX L3: one notice, shown here (Results' and Storage's go).
+      set({ trackerNotice: null });
+      projectStore.setTrashNotice({ at: 'tracker', text: TRASH_NOTICE(1) });
     } catch (e) {
       const err = uiError(e);
       set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
@@ -1266,7 +1268,8 @@ export const rgn = {
         set({ selectedCandidateId: null, preview: null });
         editorBridge.setCompare(null);
       }
-      set({ trackerNotice: { kind: 'info', text: TRASH_NOTICE(trashed) } });
+      set({ trackerNotice: null });
+      projectStore.setTrashNotice({ at: 'tracker', text: TRASH_NOTICE(trashed) });
     } catch (e) {
       const err = uiError(e);
       set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
