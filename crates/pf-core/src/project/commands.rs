@@ -35,9 +35,11 @@ impl Command for ProjectTrashList {
     type Input = NoInput;
     type Output = Vec<TrashRow>;
 
+    /// BL-30: `folder_moved` once the folder is gone, not a list of 0 B items.
     fn run(core: &Core, _: NoInput) -> CoreResult<Vec<TrashRow>> {
-        let state = core.state();
-        let p = state.project.as_ref().ok_or_else(no_project)?;
+        let mut state = core.state();
+        let p = state.project.as_mut().ok_or_else(no_project)?;
+        super::require_folder(p)?;
         Ok(retention::trash_list(p))
     }
 }
@@ -74,10 +76,12 @@ impl Command for ProjectDiskUsage {
     type Input = NoInput;
     type Output = DiskUsage;
 
-    /// FR-PRJ-33: metadata only, never hydrates.
+    /// FR-PRJ-33: metadata only, never hydrates. BL-30: `folder_moved` once the folder is gone
+    /// (the walk would find nothing and report 0 B).
     fn run(core: &Core, _: NoInput) -> CoreResult<DiskUsage> {
-        let state = core.state();
-        let p = state.project.as_ref().ok_or_else(no_project)?;
+        let mut state = core.state();
+        let p = state.project.as_mut().ok_or_else(no_project)?;
+        super::require_folder(p)?;
         Ok(retention::disk_usage(p))
     }
 }
@@ -268,6 +272,26 @@ mod tests {
         core.dispatch("project_close", json!({"force": true}))
             .unwrap();
         assert!(core.state().project.is_none());
+    }
+
+    #[test]
+    fn bl_30_storage_refuses_with_folder_moved_instead_of_zero_bytes() {
+        let (_d, core) = core_with_project();
+        let dir = core.state().project.as_ref().unwrap().dir.clone();
+        assert!(core.dispatch("project_disk_usage", json!({})).is_ok());
+        rename_dir(&dir, &dir.with_file_name("Elsewhere"));
+        for (cmd, input) in [
+            ("project_disk_usage", json!({})),
+            ("project_trash_list", json!({})),
+            ("project_folder_list", json!({"folder": "working"})),
+        ] {
+            let e = core.dispatch(cmd, input).unwrap_err();
+            assert_eq!(
+                (e.code, &e.detail["reason"]),
+                (ErrorCode::NotFound, &json!("folder_moved")),
+                "{cmd}"
+            );
+        }
     }
 
     /// Walk 2 N1: during a conflict a refused draft makes Close ask (reason `conflict`), and

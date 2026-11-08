@@ -262,7 +262,11 @@ function Folder({
         setFiles(f);
         setError(null);
       },
-      (e: unknown) => setError(errorOf(e).message),
+      (e: unknown) => {
+        // BL-30: no stale (or empty) list under the error, e.g. once the folder was moved.
+        setFiles(null);
+        setError(errorOf(e).message);
+      },
     );
   }, [id]);
   useEffect(load, [load, revision]);
@@ -542,6 +546,8 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
   const load = useCallback(() => {
     api.project.diskUsage().then(setUsage, (e: unknown) => {
       const err = errorOf(e);
+      // BL-30: no stale (or 0 B) figures under the error, e.g. once the folder was moved.
+      setUsage(null);
       // `ipc`: the core doesn't register the command yet (PRJ slice 5): say so quietly.
       setError(err.code === 'ipc' ? null : err.message);
       setUnavailable(err.code === 'ipc');
@@ -590,9 +596,9 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
               className="prj-file"
               data-testid="prj-panel-storage-item"
               data-record-id={t.id}
-              title={t.path}
+              title={trashFiles(t).join('\n')}
             >
-              <span className="prj-file-name">{t.path.split('/').pop()}</span>
+              <span className="prj-file-name">{trashLabel(t)}</span>
               <span className="prj-file-size tabular">{bytesLabel(t.bytes)}</span>
               {t.restorable && (
                 <button
@@ -615,6 +621,18 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
       )}
     </Section>
   );
+}
+
+/** Every project path in a trash item (`files`, else the first `path`). */
+function trashFiles(t: TrashItem): string[] {
+  return t.files && t.files.length > 0 ? t.files : [t.path];
+}
+
+/** BL-30: the first file's name, plus how many more the item holds. */
+function trashLabel(t: TrashItem): string {
+  const files = trashFiles(t);
+  const name = files[0]!.split('/').pop();
+  return files.length > 1 ? `${name} +${files.length - 1} more` : (name ?? '');
 }
 
 /** A core message as a sentence for the panel (walk 2 N2: no raw lower-case text). */
