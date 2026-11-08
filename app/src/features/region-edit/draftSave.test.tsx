@@ -1,6 +1,6 @@
 // Walk D3 (RGN part): a failed draft write must not look saved (FR-PRJ-21).
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { Tooltip } from 'radix-ui';
 
 import type { FakeTauri } from '../../api/mocks/tauri';
@@ -15,6 +15,7 @@ beforeEach(() => {
   rgn.detach();
 });
 afterEach(() => {
+  vi.useRealTimers();
   cleanup();
   rgn.detach();
   fake.uninstall();
@@ -34,19 +35,19 @@ test('FR-PRJ-21 a failed draft save shows in the save state; the next commit cle
   await waitFor(() => expect(rgn.get().evaluation).not.toBeNull());
   expect(projectStore.get().save.kind).toBe('saved');
 
+  // BL-28: drive the debounce with fake timers instead of waiting two real 2 s debounces.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   fireEvent.change(screen.getByTestId('rgn-panel-prompt'), { target: { value: 'flooded crypt' } });
-  await waitFor(
-    () => expect(projectStore.get().save).toMatchObject({ kind: 'failed', code: 'not_found' }),
-    {
-      timeout: DRAFT_SAVE_MS + 2000,
-    },
-  );
+  await act(() => vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS - 1));
+  expect(fake.callsOf('project_put_draft')).toHaveLength(0);
+  await act(() => vi.advanceTimersByTimeAsync(1));
+  expect(fake.callsOf('project_put_draft')).toHaveLength(1);
+  expect(projectStore.get().save).toMatchObject({ kind: 'failed', code: 'not_found' });
 
   // The next change saves again (the mock fails once); its commit sets the segment back.
   fireEvent.change(screen.getByTestId('rgn-panel-prompt'), { target: { value: 'flooded hall' } });
-  await waitFor(() => expect(fake.callsOf('project_put_draft')).toHaveLength(2), {
-    timeout: DRAFT_SAVE_MS + 2000,
-  });
+  await act(() => vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS));
+  expect(fake.callsOf('project_put_draft')).toHaveLength(2);
   act(() => fake.emit('project:committed', { seq: 2 }));
   expect(projectStore.get().save.kind).toBe('saved');
 });

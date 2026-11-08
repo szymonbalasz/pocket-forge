@@ -139,3 +139,59 @@ pub fn tree(dir: &Path) -> Vec<String> {
     out.sort();
     out
 }
+
+/// Renames a folder the way Explorer would, waiting out a transient sharing violation (BL-29).
+///
+/// Windows refuses to rename a folder while another process has a file inside it open without
+/// `FILE_SHARE_DELETE` (os error 5). Defender and the search indexer do that to freshly written
+/// files for a moment, more so when the machine is busy, so a bare `fs::rename` right after a
+/// commit fails now and then. Any other error, or one that lasts 10 s, still fails the test.
+pub fn rename_dir(from: &Path, to: &Path) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match std::fs::rename(from, to) {
+            Ok(()) => return,
+            Err(e)
+                if e.kind() == std::io::ErrorKind::PermissionDenied
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => panic!("rename {} -> {}: {e}", from.display(), to.display()),
+        }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::time::Duration;
+
+    use super::rename_dir;
+
+    /// BL-29: a scanner-style handle (no `FILE_SHARE_DELETE`) inside the folder makes a bare
+    /// rename fail with `PermissionDenied`; `rename_dir` waits until it is closed.
+    #[test]
+    fn bl_29_rename_dir_waits_out_a_transient_handle_inside_the_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (from, to) = (tmp.path().join("Crypt"), tmp.path().join("Elsewhere"));
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::write(from.join("project.json"), b"{}").unwrap();
+        // FILE_SHARE_READ | FILE_SHARE_WRITE, like a virus scanner reading the file.
+        let scanner = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x1 | 0x2)
+            .open(from.join("project.json"))
+            .unwrap();
+        let err = std::fs::rename(&from, &to).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied, "{err}");
+
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            drop(scanner);
+        });
+        rename_dir(&from, &to);
+        release.join().unwrap();
+        assert!(to.join("project.json").is_file() && !from.exists());
+    }
+}

@@ -189,7 +189,7 @@ test('FR-PRJ-01 first run asks for the library folder and shows field errors', a
   });
 });
 
-test('FR-PRJ-02 an unavailable root shows Library unavailable with Choose again, and creates nothing', async () => {
+test('FR-PRJ-02 an unavailable root shows Library unavailable with Choose again (prefilled), and creates nothing', async () => {
   setup({ unavailable: true });
   expect((await screen.findByTestId('prj-library-unavailable')).textContent).toContain(LIB);
   expect(screen.getByTestId<HTMLButtonElement>('prj-home-new').disabled).toBe(true);
@@ -197,6 +197,8 @@ test('FR-PRJ-02 an unavailable root shows Library unavailable with Choose again,
   expect(cards()).toHaveLength(0);
   fireEvent.click(screen.getByTestId('prj-library-choose-again'));
   expect(await screen.findByTestId('prj-setup')).toBeTruthy();
+  // It starts from the current root, not an empty field (BL-27).
+  expect(screen.getByTestId<HTMLInputElement>('prj-setup-root-path').value).toBe(LIB);
   mock.setUnavailable(false);
 });
 

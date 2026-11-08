@@ -460,6 +460,7 @@ function Results({ revision }: { revision: number }) {
 function History({ project, revision }: { project: ProjectSnapshot; revision: number }) {
   const [revs, setRevs] = useState<RevisionEntry[]>(project.revisions);
   const [label, setLabel] = useState('');
+  const { save } = useProjectState();
   const readOnly = project.read_only !== null;
   useEffect(() => {
     api.project.listRevisions().then(setRevs, () => undefined);
@@ -491,6 +492,12 @@ function History({ project, revision }: { project: ProjectSnapshot; revision: nu
           Save
         </button>
       </form>
+      {save.kind === 'unchanged' && (
+        // Next to the button, not just in the status bar (BL-27); the next commit clears it.
+        <p className="muted small" data-testid="prj-panel-history-unchanged" role="status">
+          No changes since the last revision
+        </p>
+      )}
       <ul className="prj-files">
         {newestFirst.map((r) => (
           <li

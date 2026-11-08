@@ -1,5 +1,5 @@
 // Labels for the Generate panel, the tracker and the status bar. Pure.
-import type { CostValue, JobState, RegionFit } from '../../api';
+import { sentence, type CostValue, type JobState, type RegionFit } from '../../api';
 
 /** FR-RGN-05: "sent unresampled" or "patch N.N× softer" (outer ÷ sent, one decimal). */
 export function fitLabel(fit: Pick<RegionFit, 'outer' | 'sent_w' | 'sent_h'>): string {
@@ -44,7 +44,8 @@ export const iterationNumber = (n: number): string => String(n).padStart(3, '0')
 export function jobErrorText(e: { code: string; hint?: string; message?: string }): string {
   if (e.code === 'insufficient_balance')
     return 'Not enough provider balance for this job. Top up your Scenario account, then retry.';
-  const base = e.message && e.message !== e.code ? e.message : e.code.replace(/_/g, ' ');
+  // Job rows come from events, not ApiError: sentence case here (BL-27).
+  const base = sentence(e.message && e.message !== e.code ? e.message : e.code.replace(/_/g, ' '));
   return e.hint ? `${base}. ${e.hint}` : base;
 }
 

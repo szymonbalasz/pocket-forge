@@ -317,7 +317,7 @@ fn fr_prj_46_kind_follows_the_folder_at_the_next_commit() {
     let e = env();
     let dir = e.project("Crypt");
     let moved = e.lib().join("Tokens/Crypt");
-    std::fs::rename(&dir, &moved).unwrap();
+    rename_dir(&dir, &moved);
     let mut p = e.open(&moved);
     assert_eq!(p.manifest.kind, Kind::Token);
     assert!(p.warnings.iter().any(|w| w.code == "kind_changed"));
@@ -332,7 +332,7 @@ fn edge_folder_moved_while_open_fails_the_next_commit_with_not_found() {
     let e = env();
     let dir = e.project("Crypt");
     let mut p = e.open(&dir);
-    std::fs::rename(&dir, e.lib().join("Maps/Elsewhere")).unwrap();
+    rename_dir(&dir, &e.lib().join("Maps/Elsewhere"));
     let err = draft(&e, &mut p, "x").unwrap_err();
     assert_eq!(err.code, ErrorCode::NotFound);
 }
@@ -343,7 +343,7 @@ fn fr_prj_21_edge_folder_moved_while_open_keeps_the_draft_and_says_so_without_pa
     let dir = e.project("Crypt");
     let mut p = e.open(&dir);
     let moved = e.lib().join("Maps/Elsewhere");
-    std::fs::rename(&dir, &moved).unwrap();
+    rename_dir(&dir, &moved);
 
     // The background draft save: refused, kept in memory, surfaced (walkthrough D3).
     let err = draft(&e, &mut p, "unsaved prompt").unwrap_err();
@@ -379,7 +379,7 @@ fn fr_prj_21_edge_folder_moved_while_open_keeps_the_draft_and_says_so_without_pa
 
     // Still moved at the 10 s retry; renamed back → the retry commits the kept draft.
     assert!(retry_pending(&e.ctx, e.install(), &mut p));
-    std::fs::rename(&moved, &dir).unwrap();
+    rename_dir(&moved, &dir);
     assert!(!retry_pending(&e.ctx, e.install(), &mut p));
     assert!(!has_unsaved(&p));
     assert!(!p.warnings.iter().any(|w| w.code == FOLDER_MOVED));

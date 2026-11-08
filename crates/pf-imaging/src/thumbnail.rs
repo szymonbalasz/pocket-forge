@@ -35,7 +35,7 @@ pub fn downscaled_png(src: &Path, max_side: u32) -> Result<(Vec<u8>, u32, u32), 
     };
     let mut out = Cursor::new(Vec::new());
     img.write_to(&mut out, Fmt::Png)
-        .map_err(|e| ProbeError::Corrupt(e.to_string()))?;
+        .map_err(ProbeError::encode)?;
     Ok((out.into_inner(), w, h))
 }
 
@@ -89,7 +89,7 @@ pub fn working_thumbnail_jpeg(
     let mut out = Vec::new();
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, quality)
         .encode_image(&rgb)
-        .map_err(|e| ProbeError::Corrupt(e.to_string()))?;
+        .map_err(ProbeError::encode)?;
     Ok((out, w, h))
 }
 
