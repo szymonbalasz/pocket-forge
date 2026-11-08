@@ -114,50 +114,57 @@ fn restorable(p: &OpenProject, c: &Candidate) -> bool {
     }
 }
 
-/// Unstarred candidates of `job_id` in `statuses` that aren't in the trash yet → one trash item.
-fn trash_unkept(ctx: &Context, m: &mut Manifest, job_id: Ulid, reason: &str) {
-    let idx: Vec<usize> = (0..m.candidates.len())
-        .filter(|&i| {
-            let c = &m.candidates[i];
-            c.job_id == job_id
-                && !c.starred
-                && c.trash_id.is_none()
-                && matches!(
-                    c.status,
-                    CandidateStatus::Dismissed
-                        | CandidateStatus::Discarded
-                        | CandidateStatus::Invalid
-                )
-        })
-        .collect();
-    if idx.is_empty() {
-        return;
+/// #56: candidates `idx` become `discarded` (star cleared); the files not in the trash yet go
+/// there as one item. Returns how many files moved.
+fn discard_indices(ctx: &Context, m: &mut Manifest, idx: &[usize], reason: &str) -> usize {
+    let mut files = vec![];
+    for &i in idx {
+        let c = &mut m.candidates[i];
+        c.status = CandidateStatus::Discarded;
+        c.starred = false;
+        if c.trash_id.is_none() {
+            files.push((i, c.file.clone()));
+        }
     }
-    let files = idx.iter().map(|&i| m.candidates[i].file.clone()).collect();
-    let tid = trash_files(ctx, m, TrashKind::Candidates, files, reason);
-    for i in idx {
+    if files.is_empty() {
+        return 0;
+    }
+    let n = files.len();
+    let names = files.iter().map(|(_, f)| f.clone()).collect();
+    let tid = trash_files(ctx, m, TrashKind::Candidates, names, reason);
+    for (i, _) in files {
         m.candidates[i].trash_id = Some(tid);
     }
+    n
 }
 
-/// R9: a job that ends with nothing accepted or starred sends its inputs to the trash.
-fn trash_inputs_if_unkept(ctx: &Context, m: &mut Manifest, job: &JobFile) {
-    let kept = m
-        .candidates
-        .iter()
-        .any(|c| c.job_id == job.id && (c.starred || c.status == CandidateStatus::Accepted));
+/// R9 as amended by #56: a resolved job whose candidates are all discarded (or invalid, or a job
+/// with none) sends its region and mask PNGs to the trash. A candidate counts as kept while it is
+/// accepted, starred, or `new` / `dismissed` and still in `results/`; one trashed before #56
+/// (dismissed, `trash_id` set) doesn't.
+fn trash_inputs_if_all_discarded(ctx: &Context, m: &mut Manifest, job: &JobFile) {
+    if job.resolved_at.is_none() {
+        return;
+    }
+    let kept = m.candidates.iter().any(|c| {
+        c.job_id == job.id
+            && (c.starred
+                || c.status == CandidateStatus::Accepted
+                || (matches!(c.status, CandidateStatus::New | CandidateStatus::Dismissed)
+                    && c.trash_id.is_none()))
+    });
     let inputs: Vec<String> = job.input_files().to_vec();
     let already = m
         .trash
         .iter()
         .any(|t| t.files.iter().any(|f| inputs.contains(f)));
-    if !kept && !already {
+    if !kept && !already && !inputs.is_empty() {
         trash_files(
             ctx,
             m,
             TrashKind::JobInputs,
             inputs,
-            "job ended with nothing kept",
+            "every candidate discarded",
         );
     }
 }
@@ -595,16 +602,16 @@ pub enum ResolveReason {
     NextSubmit,
 }
 
-/// `resolve_job` (FR-RGN-28, R9): dismiss, or the next submit. Remaining `new` candidates become
-/// `dismissed`; unstarred ones go to the trash; a job that ends with nothing accepted or starred
-/// trashes its inputs too. A `fetched` job becomes `closed`; a terminal job only gets
-/// `resolved_at`. Resolving twice is a no-op.
+/// `resolve_job` (FR-RGN-28, R9, #56): dismiss, or the next submit. Remaining `new` candidates
+/// become `dismissed` and stay in `results/`; only a job whose candidates are all discarded (or
+/// that has none) trashes its inputs. A `fetched` job becomes `closed`; a terminal job only gets
+/// `resolved_at`. Resolving twice is a no-op. Both reasons do the same since #56.
 pub fn resolve_job(
     ctx: &Context,
     install_id: Ulid,
     p: &mut OpenProject,
     job_id: Ulid,
-    reason: ResolveReason,
+    _reason: ResolveReason,
 ) -> CoreResult<JobFile> {
     p.require_writable()?;
     let current = job(p, job_id)?.clone();
@@ -626,10 +633,6 @@ pub fn resolve_job(
             .map_err(CoreError::internal)?;
     }
     next.resolved_at = Some(ctx.now());
-    let label = match reason {
-        ResolveReason::Dismiss => "dismissed",
-        ResolveReason::NextSubmit => "resolved by the next submit",
-    };
     let done = next.clone();
     commit(ctx, install_id, p, |ctx, _, m, plan| {
         for c in m.candidates.iter_mut().filter(|c| c.job_id == job_id) {
@@ -637,8 +640,7 @@ pub fn resolve_job(
                 c.status = CandidateStatus::Dismissed;
             }
         }
-        trash_unkept(ctx, m, job_id, label);
-        trash_inputs_if_unkept(ctx, m, &done);
+        trash_inputs_if_all_discarded(ctx, m, &done);
         if let Some(row) = m.jobs.iter_mut().find(|r| r.id == job_id) {
             row.state = done.state;
         }
@@ -657,8 +659,8 @@ fn candidate_index(m: &Manifest, candidate_id: Ulid) -> CoreResult<usize> {
         .ok_or_else(|| unknown("candidate_id", "candidate"))
 }
 
-/// `set_star` (FR-RGN-28): starred candidates are kept forever. Starring a trashed one brings
-/// its file back; unstarring a leftover of a resolved job sends it to the trash.
+/// `set_star` (FR-RGN-28, #56): a favourite marker. Starring a trashed one brings its file back;
+/// unstarring leaves the file where it is.
 pub fn set_star(
     ctx: &Context,
     install_id: Ulid,
@@ -675,25 +677,19 @@ pub fn set_star(
             "the candidate's file was purged from the trash",
         ));
     }
-    let resolved = p
-        .jobs
-        .get(&c.job_id)
-        .is_some_and(|j| j.resolved_at.is_some());
-    commit(ctx, install_id, p, |ctx, _, m, _| {
+    commit(ctx, install_id, p, |_, _, m, _| {
         m.candidates[idx].starred = starred;
         if starred {
             untrash_candidate(m, idx);
-        } else if resolved {
-            let job_id = m.candidates[idx].job_id;
-            trash_unkept(ctx, m, job_id, "unstarred");
         }
         Ok(())
     })?;
     Ok(p.manifest.candidates[idx].clone())
 }
 
-/// `discard_candidate` (FR-RGN-28): `discarded`, its file to the trash. An explicit discard also
-/// clears the star. An accepted candidate can't be discarded.
+/// `discard_candidate` (FR-RGN-28, #56): `discarded`, its file to the trash. An explicit discard
+/// also clears the star. An accepted candidate can't be discarded. A resolved job whose last kept
+/// candidate this was also trashes its inputs.
 pub fn discard_candidate(
     ctx: &Context,
     install_id: Ulid,
@@ -708,18 +704,47 @@ pub fn discard_candidate(
             "an accepted candidate can't be discarded",
         ));
     }
+    let job = p.jobs.get(&p.manifest.candidates[idx].job_id).cloned();
     commit(ctx, install_id, p, |ctx, _, m, _| {
-        let c = &mut m.candidates[idx];
-        c.status = CandidateStatus::Discarded;
-        c.starred = false;
-        if c.trash_id.is_none() {
-            let file = c.file.clone();
-            let tid = trash_files(ctx, m, TrashKind::Candidates, vec![file], "discarded");
-            m.candidates[idx].trash_id = Some(tid);
+        discard_indices(ctx, m, &[idx], "discarded");
+        if let Some(job) = &job {
+            trash_inputs_if_all_discarded(ctx, m, job);
         }
         Ok(())
     })?;
     Ok(p.manifest.candidates[idx].clone())
+}
+
+/// `discard_rest` (#56): one commit that discards every candidate of the job except the accepted
+/// and starred ones; their files go to the trash as one item. Returns how many files moved (0, and
+/// no commit, when there is nothing to discard).
+pub fn discard_rest(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    job_id: Ulid,
+) -> CoreResult<usize> {
+    p.require_writable()?;
+    let job = job(p, job_id)?.clone();
+    let idx: Vec<usize> = (0..p.manifest.candidates.len())
+        .filter(|&i| {
+            let c = &p.manifest.candidates[i];
+            c.job_id == job_id
+                && c.status != CandidateStatus::Accepted
+                && !c.starred
+                && !(c.status == CandidateStatus::Discarded && c.trash_id.is_some())
+        })
+        .collect();
+    if idx.is_empty() {
+        return Ok(0);
+    }
+    let mut moved = 0;
+    commit(ctx, install_id, p, |ctx, _, m, _| {
+        moved = discard_indices(ctx, m, &idx, "discarded the rest");
+        trash_inputs_if_all_discarded(ctx, m, &job);
+        Ok(())
+    })?;
+    Ok(moved)
 }
 
 /// A baked patch to place: the RGBA PNG (cropped to alpha > 0) and its record fields.
@@ -768,8 +793,8 @@ fn newest_job(p: &OpenProject) -> Option<&JobFile> {
 }
 
 /// `accept_candidate` (FR-PRJ-31, FR-RGN-27, R4): one commit with the baked patch layer, the
-/// candidate statuses, the `accept` revision and the rest of the job's unstarred candidates to
-/// the trash; then `job.json` `closed`. Also a **re-pick** (R32, FR-RGN-36): a candidate of the
+/// candidate statuses (the other `new` ones `dismissed`, kept in `results/`, #56) and the
+/// `accept` revision; then `job.json` `closed`. Also a **re-pick** (R32, FR-RGN-36): a candidate of the
 /// newest, `closed` job whose layer is no longer in the stack; a trashed file is restored in the
 /// same commit. Otherwise `repick_unavailable`.
 pub fn accept_candidate(
@@ -840,7 +865,6 @@ pub fn accept_candidate(
                     c.status = CandidateStatus::Dismissed;
                 }
             }
-            trash_unkept(ctx, m, job_id, "not accepted");
             let mut closed = job.clone();
             closed
                 .transition(JobState::Closed, now)

@@ -101,6 +101,7 @@ tauri_commands! {
     export_cancel => c::ExportCancel,
     edt_mask_submit => c::EdtMaskSubmit,
     edt_mask_read => c::EdtMaskRead,
+    rgn_job_discard_rest => c::RgnJobDiscardRest,
     rgn_blend_instruction_get => c::RgnBlendInstructionGet,
     rgn_blend_instruction_set => c::RgnBlendInstructionSet,
 }

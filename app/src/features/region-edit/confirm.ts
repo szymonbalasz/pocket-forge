@@ -29,8 +29,6 @@ export interface ConfirmPlan {
   needsSecond: boolean;
   /** §7: Enter never confirms an over-threshold (or unknown-cost) job. */
   enterConfirms: boolean;
-  /** "N unstarred candidates of the previous job go to the trash". */
-  trashCount: number;
   /** References sent with the job: "with N references" (FR-RGN-45). */
   references: number;
   canConfirm: boolean;
@@ -71,7 +69,6 @@ export function confirmPlan(
   est: JobEstimate,
   stored: { cap: number | null; threshold: number | null },
   form: ConfirmForm,
-  trashCount: number,
   onKeys: string[] | null = null,
 ): ConfirmPlan {
   const setup = est.needs.includes('set_cap') || stored.cap === null || stored.threshold === null;
@@ -115,7 +112,6 @@ export function confirmPlan(
     unknownCost,
     needsSecond,
     enterConfirms: !needsSecond,
-    trashCount,
     references: referencesSent(est, onKeys),
     canConfirm: blocker === null,
     blocker,

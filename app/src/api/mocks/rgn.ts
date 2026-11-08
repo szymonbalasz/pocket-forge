@@ -402,19 +402,12 @@ export function installRgnMock(seed: RgnMockSeed): void {
       error: j.error,
       ...extra,
     });
+  // #56: resolving keeps every result (dismissed, still in results/); only discard trashes.
   const resolve = (j: Job) => {
-    let trashed = 0;
-    for (const c of s.cands)
-      if (c.job_id === j.id && c.status === 'new') {
-        c.status = 'dismissed';
-        if (!c.starred) {
-          c.trash_id = id('T');
-          trashed++;
-        }
-      }
+    for (const c of s.cands) if (c.job_id === j.id && c.status === 'new') c.status = 'dismissed';
     if (j.state === 'fetched') j.state = 'closed';
     j.resolved = true;
-    return trashed;
+    return 0;
   };
 
   Object.assign(handlers, {
@@ -591,11 +584,37 @@ export function installRgnMock(seed: RgnMockSeed): void {
     rgn_candidate_discard: (input: Rec) => {
       const c = s.cands.find((x) => x.id === input.candidate_id && x.job_id === input.job_id);
       if (!c) return fail('not_found', 'no such candidate');
+      if (c.status === 'accepted')
+        return fail('invalid_input', 'An accepted candidate can’t be discarded.');
       c.status = 'discarded';
       c.starred = false;
       c.trash_id = id('T');
       committed();
       return {};
+    },
+    rgn_job_discard_rest: (input: Rec) => {
+      const j = s.jobs.find((x) => x.id === input.job_id);
+      if (!j) return fail('not_found', 'no such job');
+      if (active() === j) return fail('job_active', 'The job is still running.');
+      const rest = s.cands.filter(
+        (c) =>
+          c.job_id === j.id &&
+          c.status !== 'accepted' &&
+          !c.starred &&
+          !(c.status === 'discarded' && c.trash_id),
+      );
+      if (!rest.length) return { trashed: 0 };
+      const tid = id('T');
+      let trashed = 0;
+      for (const c of rest) {
+        c.status = 'discarded';
+        if (!c.trash_id) {
+          c.trash_id = tid;
+          trashed++;
+        }
+      }
+      committed();
+      return { trashed };
     },
     rgn_patch_retune: (input: Rec) => {
       const l = s.layers.find((x) => x.id === input.layer_id);

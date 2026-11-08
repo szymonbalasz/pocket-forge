@@ -664,15 +664,76 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     );
   });
 
-  test('FR-RGN-28 dismiss reports the trashed count', async () => {
+  test('FR-RGN-28 owner #56 dismiss keeps every candidate', async () => {
     await submitted();
     act(() => mockControls().finish(3));
     await waitFor(() => expect(screen.getByTestId('rgn-job-dismiss')).toBeTruthy());
     fireEvent.click(screen.getByTestId('rgn-job-dismiss'));
     await waitFor(() =>
       expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(
-        /3 candidates moved to the trash/,
+        /Its candidates are kept/,
       ),
     );
+    expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(3);
+    expect(rgn.get().candidates.every((c) => c.status === 'dismissed' && !c.trash_id)).toBe(true);
+  });
+
+  test('owner #56 X discards the selected candidate and the selection moves on', async () => {
+    await submitted();
+    act(() => mockControls().finish(3));
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(3));
+    const ids = screen.getAllByTestId('edt-picker-item').map((e) => e.dataset.recordId!);
+    fireEvent.click(screen.getAllByTestId('edt-picker-item')[0]!);
+    await waitFor(() => expect(rgn.get().selectedCandidateId).toBe(ids[0]));
+    fireEvent.keyDown(window, { key: 'x' });
+    await waitFor(() => expect(fake.callsOf('rgn_candidate_discard')).toHaveLength(1));
+    expect(fake.callsOf('rgn_candidate_discard')[0]!.candidate_id).toBe(ids[0]);
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(2));
+    expect(rgn.get().selectedCandidateId).toBe(ids[1]);
+    expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(
+      /in the trash for 30 days/,
+    );
+  });
+
+  test('owner #56 Delete on a focused candidate discards it, not the region; focus moves on', async () => {
+    await submitted();
+    act(() => mockControls().finish(3));
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(3));
+    const items = screen.getAllByTestId('edt-picker-item');
+    const ids = items.map((e) => e.dataset.recordId!);
+    const inner = rgn.get().inner;
+    items[1]!.focus();
+    fireEvent.keyDown(items[1]!, { key: 'Delete' });
+    await waitFor(() => expect(fake.callsOf('rgn_candidate_discard')).toHaveLength(1));
+    expect(fake.callsOf('rgn_candidate_discard')[0]!.candidate_id).toBe(ids[1]);
+    expect(rgn.get().inner).toEqual(inner);
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(2));
+    await waitFor(() =>
+      expect(document.activeElement?.getAttribute('data-record-id')).toBe(ids[2]),
+    );
+  });
+
+  test('owner #56 Discard the rest after an accept: one call, accepted and starred stay', async () => {
+    await submitted();
+    act(() => mockControls().finish(4));
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(4));
+    expect(screen.queryByTestId('edt-picker-discard-rest')).toBeNull();
+    fireEvent.click(screen.getAllByTestId('edt-picker-star')[1]!);
+    await waitFor(() => expect(fake.callsOf('rgn_candidate_star')).toHaveLength(1));
+    fireEvent.click(screen.getAllByTestId('edt-picker-item')[0]!);
+    await waitFor(() => expect(fake.callsOf('rgn_candidate_preview')).toHaveLength(1));
+    fireEvent.click(screen.getByTestId('edt-picker-accept'));
+    await waitFor(() => expect(fake.callsOf('rgn_candidate_accept')).toHaveLength(1));
+    // Accept keeps the rest (#56); the accepted one can't be discarded.
+    await waitFor(() => expect(screen.getByTestId('edt-picker-discard-rest')).toBeTruthy());
+    expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(4);
+    expect((screen.getAllByTestId('edt-picker-discard')[0] as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByTestId('edt-picker-discard-rest'));
+    await waitFor(() => expect(fake.callsOf('rgn_job_discard_rest')).toHaveLength(1));
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(2));
+    expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(/2 candidates discarded/);
+    expect(screen.queryByTestId('edt-picker-discard-rest')).toBeNull();
   });
 });

@@ -337,6 +337,46 @@ impl Command for RgnCandidateDiscard {
     }
 }
 
+/// `rgn_job_discard_rest` (#56): "Discard the rest", one commit that discards every candidate of
+/// the job except the accepted and starred ones. Restore is the trash's, as for a discard.
+pub struct RgnJobDiscardRest;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscardRestInput {
+    pub job_id: Ulid,
+}
+
+impl Validate for DiscardRestInput {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct DiscardRestOutput {
+    /// Candidate files this sent to the trash.
+    pub trashed: usize,
+}
+
+impl Command for RgnJobDiscardRest {
+    const NAME: &'static str = "rgn_job_discard_rest";
+    type Input = DiscardRestInput;
+    type Output = DiscardRestOutput;
+
+    fn run(core: &Core, input: DiscardRestInput) -> CoreResult<DiscardRestOutput> {
+        let mut state = core.state();
+        let install_id = state.settings.install_id;
+        let p = state.project.as_mut().ok_or_else(no_project)?;
+        p.require_writable()?;
+        let job = store::job(p, input.job_id)?;
+        if is_active(job.state) {
+            return Err(CoreError::new(
+                ErrorCode::JobActive,
+                "the job is still running; cancel it first",
+            ));
+        }
+        let trashed = store::discard_rest(&core.ctx, install_id, p, input.job_id)?;
+        Ok(DiscardRestOutput { trashed })
+    }
+}
+
 // ---------------------------------------------------------------- rgn_patch_retune
 
 /// `rgn_patch_retune` (FR-RGN-29, R3): re-bakes from the untouched candidate into a new layer

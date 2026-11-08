@@ -914,7 +914,7 @@ impl Command for EdtMaskRead {
 
 pub use crate::region_edit::candidates::{
     RgnCandidateAccept, RgnCandidateDiscard, RgnCandidatePreview, RgnCandidateStar,
-    RgnIterationsList, RgnPatchRetune,
+    RgnIterationsList, RgnJobDiscardRest, RgnPatchRetune,
 };
 /// Region-edit commands live in their own module (region-edit spec §9).
 pub use crate::region_edit::commands::{
@@ -1028,6 +1028,7 @@ registry![
     ExportCancel,
     EdtMaskSubmit,
     EdtMaskRead,
+    RgnJobDiscardRest,
     RgnBlendInstructionGet,
     RgnBlendInstructionSet,
 ];

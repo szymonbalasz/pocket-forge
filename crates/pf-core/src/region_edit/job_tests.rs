@@ -1268,7 +1268,7 @@ fn fr_rgn_27_accept_is_one_commit_and_leaves_the_original_alone() {
 }
 
 #[test]
-fn fr_rgn_28_statuses_and_the_trash_on_accept() {
+fn fr_rgn_28_owner_56_statuses_on_accept_keep_every_result() {
     let lab = Lab::new();
     let id = lab.run("kitchen");
     let c = lab.candidates(id);
@@ -1284,14 +1284,26 @@ fn fr_rgn_28_statuses_and_the_trash_on_accept() {
     assert_eq!(c[1].status, CandidateStatus::Dismissed);
     assert!(c[1].starred && c[1].trash_id.is_none(), "starred stays");
     assert_eq!(c[2].status, CandidateStatus::Dismissed);
-    assert!(c[2].trash_id.is_some(), "unstarred to the trash");
+    assert!(c[2].trash_id.is_none(), "#56: unstarred stays too");
     let dir = lab.project_dir.join(lab.job(id).iteration.unwrap().dir);
-    let mut names: Vec<String> = std::fs::read_dir(&dir)
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    names.sort();
-    assert_eq!(names, ["01.png", "02.png"]);
+    let names = |dir: &std::path::Path| {
+        let mut n: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        n.sort();
+        n
+    };
+    assert_eq!(names(&dir), ["01.png", "02.png", "03.png"]);
+    // "Discard the rest": one command, accepted and starred stay.
+    let out = lab
+        .core
+        .dispatch("rgn_job_discard_rest", json!({"job_id": id}))
+        .unwrap();
+    assert_eq!(out, json!({"trashed": 1}));
+    assert_eq!(names(&dir), ["01.png", "02.png"]);
+    let c = lab.candidates(id);
+    assert_eq!(c[2].status, CandidateStatus::Discarded);
     let trashed = lab
         .project_dir
         .join(".pforge/trash")
@@ -1346,17 +1358,29 @@ fn fr_rgn_28_discard_and_star_restore() {
 }
 
 #[test]
-fn fr_rgn_28_dismiss_trashes_leftovers_and_unkept_inputs() {
+fn fr_rgn_28_owner_56_dismiss_keeps_leftovers_until_all_are_discarded() {
     let lab = Lab::new();
     let id = lab.run("kitchen");
     let out = lab
         .core
         .dispatch("rgn_job_dismiss", json!({"job_id": id}))
         .unwrap();
-    assert_eq!(out, json!({"trashed": 3}));
+    assert_eq!(out, json!({"trashed": 0}), "#56: nothing trashed");
     let job = lab.job(id);
     assert_eq!(job.state, JobState::Closed);
     assert!(job.resolved_at.is_some());
+    for c in lab.candidates(id) {
+        assert_eq!((c.status, c.trash_id), (CandidateStatus::Dismissed, None));
+        assert!(lab.project_dir.join(&c.file).is_file());
+    }
+    for f in job.input_files() {
+        assert!(lab.project_dir.join(f).is_file(), "inputs kept");
+    }
+    let out = lab
+        .core
+        .dispatch("rgn_job_discard_rest", json!({"job_id": id}))
+        .unwrap();
+    assert_eq!(out, json!({"trashed": 3}));
     for f in job.input_files() {
         assert!(!lab.project_dir.join(f).exists(), "R9: inputs trashed");
     }
@@ -1373,7 +1397,7 @@ fn fr_rgn_28_dismiss_trashes_leftovers_and_unkept_inputs() {
 }
 
 #[test]
-fn fr_rgn_28_the_next_submit_resolves_the_previous_job() {
+fn fr_rgn_28_owner_56_the_next_submit_resolves_the_previous_job_and_keeps_it() {
     let lab = Lab::new();
     let first = lab.run("kitchen");
     let c = lab.candidates(first);
@@ -1389,7 +1413,12 @@ fn fr_rgn_28_the_next_submit_resolves_the_previous_job() {
     assert!(job.resolved_at.is_some());
     let c = lab.candidates(first);
     assert!(c[0].starred && c[0].trash_id.is_none());
-    assert!(c[1].trash_id.is_some() && c[2].trash_id.is_some());
+    assert!(
+        c[1..]
+            .iter()
+            .all(|c| c.status == CandidateStatus::Dismissed && c.trash_id.is_none()),
+        "#56: the rest stays in results/"
+    );
 }
 
 #[test]
@@ -1468,6 +1497,14 @@ fn fr_rgn_36_repick_after_undo_including_a_trashed_candidate() {
     let c = lab.candidates(id);
     let r0 = snapshot(&lab)["head_revision"].clone();
     accept(&lab, id, c[0].id, blend(48, true)).unwrap();
+    // #56: only an explicit discard sends one to the trash.
+    assert!(lab.candidates(id)[2].trash_id.is_none());
+    lab.core
+        .dispatch(
+            "rgn_candidate_discard",
+            json!({"job_id": id, "candidate_id": c[2].id}),
+        )
+        .unwrap();
     assert!(lab.candidates(id)[2].trash_id.is_some());
     let spend = lab.core.dispatch("rgn_spend_get", json!({})).unwrap()["spend"].clone();
     // Not while its patch is in the stack.
@@ -1567,12 +1604,12 @@ fn fr_rgn_40_iterations_list_newest_first_with_the_active_job() {
     assert_eq!(rows[1]["returned"], json!(3));
     assert_eq!(
         rows[1]["kept"],
-        json!(0),
-        "resolved by the third submit, all trashed"
+        json!(3),
+        "resolved by the third submit, all kept (#56)"
     );
     assert_eq!(rows[1]["accepted_in_stack"], json!(false));
     assert_eq!(rows[2]["job_id"], json!(first));
-    assert_eq!(rows[2]["kept"], json!(1));
+    assert_eq!(rows[2]["kept"], json!(3));
     assert_eq!(rows[2]["accepted_in_stack"], json!(true));
     assert_eq!(rows[2]["cost"]["amount"], json!(3.0));
     assert_eq!(rows[2]["references"], json!(0));

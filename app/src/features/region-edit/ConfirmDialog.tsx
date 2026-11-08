@@ -1,5 +1,5 @@
 // The spend confirm dialog (§7, FR-RGN-14/15/16): estimate, spend after this job, cap, threshold
-// or unknown-cost warning, the trash notice, first-submit cap setup and the explicit "raise cap"
+// or unknown-cost warning, first-submit cap setup and the explicit "raise cap"
 // field. The only blocking modal (ui-guidelines). Esc closes; Enter never confirms an
 // over-threshold or unknown-cost job.
 import { useMemo, useRef, useState, type FormEvent } from 'react';
@@ -10,7 +10,6 @@ import { referencesOnKeys, useReferencesBlock } from '../references';
 import { confirmPlan, initialForm, type ConfirmForm } from './confirm';
 import { amountLabel, errorText } from './format';
 import { rgn, useRgn } from './store';
-import { trashOnSubmit } from './tracker';
 
 export function ConfirmDialog() {
   const s = useRgn((x) => x);
@@ -29,14 +28,13 @@ function ConfirmBody() {
   const stored = { cap: s.spend?.cap ?? est.cap, threshold: s.spend?.threshold ?? null };
   const live = { ...est, spend: s.spend?.spend ?? est.spend };
   const [form, setForm] = useState<ConfirmForm>(() => initialForm(live, stored.threshold));
-  const trash = trashOnSubmit(s.iterations, s.candidates);
   // FR-RGN-45: the count follows the block's selection, not the (reused) estimate.
   const refsBlock = useReferencesBlock();
   const onKeys = useMemo(() => referencesOnKeys(refsBlock), [refsBlock]);
   const plan = useMemo(
-    () => confirmPlan(live, stored, form, trash, onKeys),
+    () => confirmPlan(live, stored, form, onKeys),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [est, s.spend, form, trash, onKeys],
+    [est, s.spend, form, onKeys],
   );
   const okRef = useRef<HTMLButtonElement>(null);
   const capRef = useRef<HTMLInputElement>(null);
@@ -175,13 +173,6 @@ function ConfirmBody() {
                 {plan.unknownCost ? 'Yes, submit with an unknown cost' : 'Yes, spend this much'}
               </label>
             </div>
-          )}
-
-          {plan.trashCount > 0 && (
-            <p className="muted small" data-testid="rgn-confirm-trash">
-              {plan.trashCount} unstarred candidate{plan.trashCount === 1 ? '' : 's'} of the
-              previous job go{plan.trashCount === 1 ? 'es' : ''} to the trash.
-            </p>
           )}
 
           {s.confirmError && (

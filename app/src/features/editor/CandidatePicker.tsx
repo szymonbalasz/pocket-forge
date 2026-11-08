@@ -1,7 +1,9 @@
 // The candidate picker (FR-EDT-25, R19): a strip of the candidates it is given, with thumbnail,
 // index, UI status and star. Click, 1–9 or ←/→ select a ready one (onSelect); Enter or Accept
-// accepts (onAccept); star and discard emit onStar / onDiscard. It calls no core command.
-import { useEffect } from 'react';
+// accepts (onAccept); star and discard emit onStar / onDiscard. #56: X discards the selected
+// candidate, Delete or X the focused one, and the selection moves on; "Discard the rest" emits
+// onDiscardRest. It calls no core command.
+import { useEffect, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 import { IconCheck, IconCompare, IconStar, IconTrash } from '../../shell/icons';
 import { dispatchShortcut, noMouseFocus, type ShortcutMap } from './shortcuts';
@@ -27,11 +29,42 @@ function step(dir: 1 | -1): void {
   selectCandidate(ready[next]!.id);
 }
 
+const itemEl = (id: string) =>
+  document.querySelector<HTMLElement>(`[data-testid="edt-picker-item"][data-record-id="${id}"]`);
+
+/** #56: emits onDiscard for `id`; when it was selected (or `focus`), the next ready candidate
+ *  (else the previous one) takes the selection, and keyboard focus too when `focus`. */
+export function discardCandidate(id: string, focus = false): void {
+  const p = editorStore.get().picker;
+  const c = p?.candidates.find((x) => x.id === id);
+  if (!p || !c || c.status === 'pending' || c.accepted) return;
+  const i = p.candidates.indexOf(c);
+  const ready = (x: PickerCandidate) => x.status === 'ready' && x.id !== id;
+  const next =
+    p.candidates.slice(i + 1).find(ready) ?? p.candidates.slice(0, i).reverse().find(ready);
+  p.handlers.onDiscard?.(id);
+  if (!next) return;
+  if (p.selectedId === id || focus) selectCandidate(next.id);
+  if (focus) itemEl(next.id)?.focus();
+}
+
+/** Delete or X on a focused item (no modifiers) discards it; the window's Delete (remove the
+ *  region) and X don't also run. */
+function onItemKey(e: ReactKeyboardEvent, id: string): void {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key !== 'Delete' && e.key.toLowerCase() !== 'x') return;
+  e.preventDefault();
+  e.stopPropagation();
+  discardCandidate(id, true);
+}
+
 function accept(): void {
   const p = editorStore.get().picker;
   if (p?.selectedId) p.handlers.onAccept?.(p.selectedId);
 }
 
+const DISCARD_REST_TIP =
+  'Discard every candidate except the accepted and starred ones (to the trash for 30 days).';
 const COMPARE_TIP = 'Compare mode: split or flip (C). In flip, hold \\ to see before.';
 
 export function EditorPicker() {
@@ -45,6 +78,10 @@ export function EditorPicker() {
       ArrowLeft: () => step(-1),
       ArrowRight: () => step(1),
       Enter: () => accept(),
+      X: () => {
+        const id = editorStore.get().picker?.selectedId;
+        if (id) discardCandidate(id);
+      },
     };
     for (let n = 1; n <= 9; n++)
       map[String(n)] = () => {
@@ -75,7 +112,10 @@ export function EditorPicker() {
           data-testid="edt-picker-item"
           data-record-id={c.id}
           data-status={c.status}
+          data-accepted={c.accepted ? 'true' : undefined}
+          tabIndex={c.status === 'pending' ? -1 : 0}
           onClick={() => selectCandidate(c.id)}
+          onKeyDown={(e) => onItemKey(e, c.id)}
         >
           <div className="edt-picker-thumb">
             {c.status === 'ready' && c.thumbUrl ? (
@@ -118,10 +158,15 @@ export function EditorPicker() {
               className="edt-tool edt-picker-btn"
               data-testid="edt-picker-discard"
               aria-label="Discard"
-              disabled={c.status === 'pending'}
+              title={
+                c.accepted
+                  ? 'The accepted candidate can’t be discarded'
+                  : 'Discard: to the trash for 30 days (X, or Delete on a focused candidate)'
+              }
+              disabled={c.status === 'pending' || c.accepted}
               onClick={(e) => {
                 e.stopPropagation();
-                handlers.onDiscard?.(c.id);
+                discardCandidate(c.id);
               }}
             >
               <IconTrash size={14} />
@@ -130,6 +175,17 @@ export function EditorPicker() {
         </div>
       ))}
       <span className="pf-spacer" />
+      {handlers.onDiscardRest && (
+        <Tip text={DISCARD_REST_TIP} side="top">
+          <button
+            type="button"
+            data-testid="edt-picker-discard-rest"
+            onClick={() => handlers.onDiscardRest?.()}
+          >
+            <IconTrash size={14} /> Discard the rest
+          </button>
+        </Tip>
+      )}
       <Tip text={COMPARE_TIP} side="top">
         <button
           type="button"
