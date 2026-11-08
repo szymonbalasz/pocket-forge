@@ -170,6 +170,8 @@ function Warnings({ project }: { project: ProjectSnapshot }) {
             role="status"
           >
             {WARNING_TEXT[code] ?? w?.message ?? code}
+            {/* A space before the link (walk 2 N4: "machine. Compare versions"). */}
+            {(code === 'folder_moved' || code === 'conflict') && ' '}
             {code === 'original_missing' && <Relink />}
             {code === 'folder_moved' && (
               // §11: closing asks first when the draft couldn't be saved (FR-PRJ-21).

@@ -151,7 +151,7 @@ test('FR-PRJ-33 FR-PRJ-31 FR-PRJ-32 Storage shows disk use, trash count, next pu
   const trash = await screen.findByTestId('prj-panel-storage-trash');
   expect(trash.textContent).toContain('Trash: 1 item, 3.0 MB');
   expect(trash.textContent).toContain(
-    `next purge ${new Date('2026-12-01T00:00:00Z').toLocaleDateString()}`,
+    `next purge ${new Date('2026-12-01T00:00:00Z').toLocaleDateString([], { month: 'short', day: 'numeric' })}`,
   );
   expect(screen.getByTestId('prj-panel-storage-total').textContent).toBe('3.0 MB');
   fireEvent.click(screen.getByTestId('prj-panel-storage-restore'));
@@ -271,6 +271,10 @@ test('FR-PRJ-35 FR-PRJ-36 a conflict found mid-session shows the banner and the 
   p.conflict = { source: 'seq', this: side('this', 'this'), other: side('other', 'other') };
   act(() => core.emit('project:conflict', {}));
   const open = await screen.findByTestId('prj-panel-conflict-open');
+  // Walk 2 N4: the text and its link don't run together.
+  expect(open.closest('[data-code="conflict"]')!.textContent).toBe(
+    'This project was also changed on another machine. Compare versions',
+  );
   fireEvent.click(open);
   fireEvent.click(await screen.findByTestId('prj-conflict-keep-other'));
   await waitFor(() => expect(screen.queryByTestId('prj-conflict')).toBeNull());
