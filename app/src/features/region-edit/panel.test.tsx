@@ -247,6 +247,26 @@ describe('Generate panel (RGN slice 6)', { timeout: 20_000 }, () => {
     expect(sent.blend_instruction).toBe(false);
   });
 
+  test('BL-39 an empty prompt shows as empty with "+ blend instruction at send", not the instruction alone', async () => {
+    await setup();
+    await waitFor(() => expect(rgn.get().blendText).not.toBeNull());
+    const shown = () => screen.getByTestId('rgn-panel-final-prompt');
+    expect(shown().textContent).toBe('—');
+    expect(shown().dataset.empty).toBe('true');
+    expect(screen.getByTestId('rgn-panel-final-blend-note').textContent).toBe(
+      '+ blend instruction at send',
+    );
+    expect(screen.getByTestId('rgn-panel-final').textContent).not.toMatch(/Keep everything/);
+    // Blend off: just the empty prompt.
+    fireEvent.click(screen.getByTestId('rgn-panel-blend-instruction'));
+    expect(screen.queryByTestId('rgn-panel-final-blend-note')).toBeNull();
+    // A typed prompt shows as sent again.
+    fireEvent.click(screen.getByTestId('rgn-panel-blend-instruction'));
+    await typePrompt('a stone well');
+    expect(shown().textContent).toMatch(/^a stone well\n\nKeep everything near the edges/);
+    expect(screen.queryByTestId('rgn-panel-final-blend-note')).toBeNull();
+  });
+
   test('owner-55 blend instruction: on by default, shown once in the final prompt, saved in the draft, Settings text used', async () => {
     await setup();
     const toggle = screen.getByTestId('rgn-panel-blend-instruction');
