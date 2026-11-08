@@ -85,6 +85,10 @@ pub enum ErrorCode {
     Canceled,
     /// A re-pick that's no longer possible (R32, FR-RGN-36).
     RepickUnavailable,
+    /// A candidate that won't decode or doesn't belong to the job (RGN §9).
+    InvalidCandidate,
+    /// A file a re-tune or retry needs is gone (purged from the trash, RGN §9).
+    SourceMissing,
 }
 
 impl ErrorCode {
@@ -136,6 +140,8 @@ impl ErrorCode {
             ErrorCode::HashMismatch => "hash_mismatch",
             ErrorCode::Canceled => "canceled",
             ErrorCode::RepickUnavailable => "repick_unavailable",
+            ErrorCode::InvalidCandidate => "invalid_candidate",
+            ErrorCode::SourceMissing => "source_missing",
         }
     }
 }

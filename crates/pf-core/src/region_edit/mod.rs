@@ -2,19 +2,27 @@
 //!
 //! Slices 1–2: region fit, the mask pipeline and region extraction ([`fit`], [`prepare`]);
 //! capability rules, the estimate and the spend guard ([`controls`], [`estimate`], [`spend`]).
-//! The commands are in [`commands`] and re-exported from [`crate::commands`]. The job runner,
-//! candidates and accept (slices 3–5) need PRJ's store API and come later.
+//! Slice 3: submit, cancel, retry draft, dismiss ([`jobs`]) and the job runner ([`runner`]),
+//! with the interim write spool ([`spool`]). Slices 4–5: candidate preview, accept / re-pick,
+//! star, discard, re-tune and the iteration list ([`candidates`]) over the patch bake
+//! ([`blend`]). Commands are re-exported from [`crate::commands`].
 //!
-//! RGN reads the project through [`pixels::PixelSource`] so it doesn't depend on PRJ internals.
+//! RGN reads pixels through [`pixels::PixelSource`] (PRJ's decoded original and mask store) and
+//! writes only through PRJ's store API (R4).
 
 pub mod commands;
 pub mod controls;
 pub mod estimate;
 pub mod fit;
+pub mod jobs;
 pub mod pixels;
 pub mod prepare;
+pub mod runner;
 pub mod spend;
+pub mod spool;
 
+#[cfg(test)]
+mod job_tests;
 #[cfg(test)]
 mod tests;
 
@@ -32,7 +40,8 @@ pub const EVENT_SPEND: &str = "rgn:spend";
 pub struct RgnState {
     pub ledger: spend::SpendLedger,
     pub estimates: estimate::EstimateCache,
-    pub(crate) original_cache: pixels::OriginalCache,
+    /// The job runner (FR-RGN-35).
+    pub runner: runner::Runner,
     /// Test and fixture seam: replaces the open project's pixels.
     pub source_override: Option<Arc<dyn pixels::PixelSource>>,
 }
@@ -47,7 +56,10 @@ impl std::fmt::Debug for RgnState {
 }
 
 /// The open project's pixels, owned so the caller can drop the state lock.
-pub fn pixel_source(state: &State) -> CoreResult<Arc<dyn pixels::PixelSource>> {
+pub fn pixel_source(
+    ctx: &crate::context::Context,
+    state: &State,
+) -> CoreResult<Arc<dyn pixels::PixelSource>> {
     if let Some(s) = &state.rgn.source_override {
         return Ok(s.clone());
     }
@@ -55,10 +67,7 @@ pub fn pixel_source(state: &State) -> CoreResult<Arc<dyn pixels::PixelSource>> {
         .project
         .as_ref()
         .ok_or_else(|| CoreError::new(ErrorCode::NoProject, "no asset project is open"))?;
-    Ok(Arc::new(pixels::OpenProjectSource::new(
-        p,
-        state.rgn.original_cache.clone(),
-    )))
+    Ok(Arc::new(pixels::OpenProjectSource::new(ctx, p)))
 }
 
 /// The id given must be the open project (a late call from a closed project fails).

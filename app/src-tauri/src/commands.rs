@@ -68,6 +68,10 @@ tauri_commands! {
     project_prefetch_original => c::ProjectPrefetchOriginal,
     project_folder_list => c::ProjectFolderList,
     project_folder_add => c::ProjectFolderAdd,
+    rgn_job_submit => c::RgnJobSubmit,
+    rgn_job_cancel => c::RgnJobCancel,
+    rgn_job_retry_draft => c::RgnJobRetryDraft,
+    rgn_job_dismiss => c::RgnJobDismiss,
 }
 
 #[cfg(test)]

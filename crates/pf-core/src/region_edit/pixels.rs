@@ -1,22 +1,21 @@
 //! What RGN reads from the open asset project: its size, the current layer stack over PRJ's
-//! decoded original (FR-RGN-04, R11) and stored masks (FR-EDT-28).
+//! decoded original (FR-RGN-04, R11, R45) and stored masks (FR-EDT-28, PRJ `put_mask`).
 //!
-//! RGN codes against [`PixelSource`]. [`OpenProjectSource`] is the **interim** adapter over the
-//! skeleton's `OpenProject`: it decodes the original itself on first use and has no mask store.
-//! It is replaced by PRJ's `DecodedOriginal` and store API (`read_project`, masks) when those
-//! land on `main`; nothing else in RGN changes.
+//! RGN codes against [`PixelSource`]. [`OpenProjectSource`] reads PRJ's `decoded_original`
+//! handle and the manifest's mask records; [`MemorySource`] is the test double.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use image::{RgbImage, RgbaImage};
 use pf_imaging::{Layer as ImgLayer, LayerStack, Placement};
 use ulid::Ulid;
 
 use super::fit::RectPx;
+use crate::context::Context;
 use crate::error::{CoreError, CoreResult, ErrorCode};
 use crate::manifest::{Layer, LayerKind};
-use crate::project::OpenProject;
+use crate::project::{OpenProject, store};
 
 /// A stored mask: 8-bit grey, 255 = editable, at its region (inner) rect (schema §4.4).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,54 +72,50 @@ pub fn stack_from_layers(
         .map_err(|e| CoreError::internal(format!("preparing the layer stack: {e}")))
 }
 
-/// The interim decoded-original cache: one project's original, kept until another project's
-/// original is decoded. PRJ's `DecodedOriginal` replaces it (R11).
-pub type OriginalCache = Arc<Mutex<Option<(Ulid, Arc<RgbImage>)>>>;
+/// Reads a patch layer's PNG as RGBA8.
+pub fn decode_layer(path: &std::path::Path, id: Ulid) -> CoreResult<Arc<RgbaImage>> {
+    let img = image::open(path)
+        .map_err(|e| CoreError::new(ErrorCode::Corrupt, format!("decoding layer {id}: {e}")))?
+        .to_rgba8();
+    Ok(Arc::new(img))
+}
 
-/// **Interim** [`PixelSource`] over the skeleton `OpenProject` (see the module docs).
+/// [`PixelSource`] over the open project: PRJ's decoded original (R45) and mask store.
 #[derive(Debug)]
 pub struct OpenProjectSource {
     project_id: Ulid,
     size: (u32, u32),
     read_only: bool,
-    image_path: PathBuf,
+    /// `decoded_original` as it was when the source was taken (starts the decode, R11).
+    original: CoreResult<Arc<RgbImage>>,
     project_dir: PathBuf,
     layers: Vec<Layer>,
-    cache: OriginalCache,
+    /// `(id, inner rect, project path)` of every stored mask.
+    masks: Vec<(Ulid, RectPx, String)>,
 }
 
 impl OpenProjectSource {
-    pub fn new(p: &OpenProject, cache: OriginalCache) -> Self {
+    pub fn new(ctx: &Context, p: &OpenProject) -> Self {
+        let rect = |r: &crate::manifest::Rect| RectPx {
+            x: r.x.max(0) as u32,
+            y: r.y.max(0) as u32,
+            w: r.w,
+            h: r.h,
+        };
         OpenProjectSource {
             project_id: p.manifest.project_id,
             size: (p.manifest.original.width, p.manifest.original.height),
             read_only: p.read_only.is_some(),
-            image_path: p.original_path(),
+            original: store::decoded_original(ctx, p),
             project_dir: p.dir.clone(),
             layers: p.manifest.layers.clone(),
-            cache,
+            masks: p
+                .manifest
+                .masks
+                .iter()
+                .map(|m| (m.id, rect(&m.rect), m.file.clone()))
+                .collect(),
         }
-    }
-
-    fn original(&self) -> CoreResult<Arc<RgbImage>> {
-        let lock = || self.cache.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((id, img)) = lock().as_ref()
-            && *id == self.project_id
-        {
-            return Ok(img.clone());
-        }
-        let img = image::open(&self.image_path)
-            .map_err(|e| CoreError::new(ErrorCode::Corrupt, format!("decoding the original: {e}")))?
-            .to_rgb8();
-        if img.dimensions() != self.size {
-            return Err(CoreError::new(
-                ErrorCode::Corrupt,
-                "the original's size changed since the project was opened",
-            ));
-        }
-        let img = Arc::new(img);
-        *lock() = Some((self.project_id, img.clone()));
-        Ok(img)
     }
 }
 
@@ -138,27 +133,34 @@ impl PixelSource for OpenProjectSource {
     }
 
     fn layer_stack(&self) -> CoreResult<LayerStack> {
-        let original = self.original()?;
+        let original = self.original.clone()?;
+        if original.dimensions() != self.size {
+            return Err(CoreError::new(
+                ErrorCode::Corrupt,
+                "the original's size changed since the project was opened",
+            ));
+        }
         let mut patches = Vec::new();
         for l in self.layers.iter().filter(|l| l.kind == LayerKind::Patch) {
             let Some(file) = &l.file else { continue };
-            let path = self.project_dir.join(file);
-            let img = image::open(&path)
-                .map_err(|e| {
-                    CoreError::new(ErrorCode::Corrupt, format!("decoding layer {}: {e}", l.id))
-                })?
-                .to_rgba8();
-            patches.push((l.clone(), Arc::new(img)));
+            patches.push((l.clone(), decode_layer(&self.project_dir.join(file), l.id)?));
         }
         stack_from_layers(original, &patches)
     }
 
     fn mask(&self, id: Ulid) -> CoreResult<MaskRecord> {
-        // The mask store (PRJ `put_mask`, EDT slice 5) isn't on main yet.
-        Err(CoreError::new(
-            ErrorCode::UnknownId,
-            format!("no stored mask {id} (the mask store isn't built yet)"),
-        ))
+        let (_, rect, file) = self
+            .masks
+            .iter()
+            .find(|m| m.0 == id)
+            .ok_or_else(|| CoreError::new(ErrorCode::UnknownId, format!("no mask {id}")))?;
+        let png = std::fs::read(self.project_dir.join(file))
+            .map_err(|e| CoreError::io(format!("reading mask {id}"), &e))?;
+        Ok(MaskRecord {
+            id,
+            rect: *rect,
+            png,
+        })
     }
 }
 
