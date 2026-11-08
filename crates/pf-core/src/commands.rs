@@ -388,12 +388,15 @@ impl Command for ProjectOpen {
     fn run(core: &Core, input: Self::Input) -> CoreResult<ProjectSnapshot> {
         let mut state = core.state();
         let settings = state.settings.clone();
-        let p = project::open(
+        let mut p = project::open(
             &core.ctx,
             &settings,
             &PathBuf::from(&input.path),
             Some(core.thumbs.clone()),
         )?;
+        let install_id = settings.install_id;
+        // RGN resumes the project's jobs from their job files (FR-RGN-22).
+        crate::region_edit::runner::on_project_open(&core.ctx, install_id, &mut state.rgn, &mut p);
         let snap = p.snapshot();
         if let Some(old) = state.project.take() {
             old.decoded.release();
@@ -800,10 +803,15 @@ impl Command for EdtTilesOpen {
 
 // ---------------------------------------------------------------- region edit
 
+pub use crate::region_edit::candidates::{
+    RgnCandidateAccept, RgnCandidateDiscard, RgnCandidatePreview, RgnCandidateStar,
+    RgnIterationsList, RgnPatchRetune,
+};
 /// Region-edit commands live in their own module (region-edit spec §9).
 pub use crate::region_edit::commands::{
     RgnControlsEvaluate, RgnJobEstimate, RgnRegionFit, RgnSpendGet, RgnSpendSet,
 };
+pub use crate::region_edit::jobs::{RgnJobCancel, RgnJobDismiss, RgnJobRetryDraft, RgnJobSubmit};
 
 /// PRJ retention and conflict commands (asset-project §9, slices 5 and 6).
 pub use crate::project::commands::{
@@ -862,6 +870,16 @@ registry![
     ProjectPrefetchOriginal,
     ProjectFolderList,
     ProjectFolderAdd,
+    RgnJobSubmit,
+    RgnJobCancel,
+    RgnJobRetryDraft,
+    RgnJobDismiss,
+    RgnCandidatePreview,
+    RgnCandidateAccept,
+    RgnCandidateStar,
+    RgnCandidateDiscard,
+    RgnPatchRetune,
+    RgnIterationsList,
     ProjectTrashList,
     ProjectTrashRestore,
     ProjectDiskUsage,

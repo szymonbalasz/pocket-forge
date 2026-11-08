@@ -15,8 +15,8 @@ fn no_project() -> CoreError {
     CoreError::new(ErrorCode::NoProject, "no asset project is open")
 }
 
-/// The 10 s retry tick (FR-PRJ-21, 40): retries a pending draft and replays the spool of the
-/// open project. The app calls it every [`super::SAVE_RETRY_EVERY`]; it is a no-op when
+/// The 10 s retry tick (FR-PRJ-21): retries a pending draft of the open project. (RGN's runner
+/// replays the spool, R48.) The app calls it every [`super::SAVE_RETRY_EVERY`]; it is a no-op when
 /// nothing is pending.
 pub fn retry_pending_saves(core: &Core) {
     let mut state = core.state();
@@ -117,10 +117,15 @@ impl Command for ProjectResolveConflict {
 
     /// FR-PRJ-36, #39: keep one version; the other becomes a `conflict` revision.
     fn run(core: &Core, input: ResolveConflictInput) -> CoreResult<RevisionEntry> {
-        let mut state = core.state();
-        let install_id = state.settings.install_id;
-        let p = state.project.as_mut().ok_or_else(no_project)?;
-        conflict::resolve_conflict(&core.ctx, install_id, p, input.keep)
+        let rev = {
+            let mut state = core.state();
+            let install_id = state.settings.install_id;
+            let p = state.project.as_mut().ok_or_else(no_project)?;
+            conflict::resolve_conflict(&core.ctx, install_id, p, input.keep)?
+        };
+        // R48: replay what the conflict held back at once (the runner emits its events).
+        crate::region_edit::runner::tick(core, false);
+        Ok(rev)
     }
 }
 

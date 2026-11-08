@@ -322,7 +322,8 @@ pub fn conflict_get(p: &OpenProject, install_id: Ulid) -> CoreResult<ConflictVie
 /// writes the other's layers + draft as a `conflict` revision (the head stays the kept one's),
 /// and trashes the conflict copy. Files from both sides stay; the job, revision and trash
 /// indexes are rebuilt from the files. A version with missing files → `files_missing`.
-/// Afterwards the spool is replayed (FR-PRJ-40). Returns the `conflict` revision.
+/// The command then runs RGN's runner tick, which replays the spool at once (FR-PRJ-40, R48).
+/// Returns the `conflict` revision.
 pub fn resolve_conflict(
     ctx: &Context,
     install_id: Ulid,
@@ -434,7 +435,6 @@ pub fn resolve_conflict(
         })
         .cloned()
         .ok_or_else(|| CoreError::internal("no revision after the resolve"))?;
-    super::spool::replay(ctx, install_id, p);
     // A second copy (rare) puts the project straight back in conflict at the next commit.
     Ok(entry)
 }

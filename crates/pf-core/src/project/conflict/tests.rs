@@ -191,51 +191,61 @@ fn fr_prj_35_seq_mismatch_refuses_the_write_and_fires_conflict() {
     assert_eq!(disk["draft"]["final_prompt"], "mine");
 }
 
-#[test]
-fn fr_prj_40_candidates_spooled_during_a_conflict_replay_after_the_resolve() {
-    let mut s = setup();
+fn cand(shade: u8) -> NewCandidate {
+    NewCandidate {
+        bytes: rgba_png(16, 14, [shade, shade, shade, 255]),
+        seed: Some(i64::from(shade)),
+        provider_meta: serde_json::json!({"paid": true}),
+        ..Default::default()
+    }
+}
+
+fn succeeded(s: &mut S) -> crate::job::JobFile {
     let job = s.job("moss");
     for st in [JobState::Submitted, JobState::Running, JobState::Succeeded] {
         s.to(job.id, st);
     }
+    job
+}
+
+#[test]
+fn fr_prj_40_candidates_spooled_during_a_conflict_replay_after_the_resolve() {
+    let mut s = setup();
+    let job = succeeded(&mut s);
     make_copy(&s, "theirs");
-    let cands = vec![NewCandidate {
-        bytes: rgba_png(16, 14, [9, 9, 9, 255]),
-        seed: Some(5),
-        provider_meta: serde_json::json!({"paid": true}),
-        invalid: false,
-    }];
-    let err = add_candidates(&s.e.ctx, s.e.install(), &mut s.p, job.id, cands).unwrap_err();
+    // The store refuses during the conflict with a spoolable code; the runner spools (R48).
+    let err = add_candidates(&s.e.ctx, s.e.install(), &mut s.p, job.id, vec![cand(9)]).unwrap_err();
     assert_eq!(err.code, ErrorCode::Conflict);
-    assert_eq!(err.detail["spooled"], true);
-    let spooled_id: Ulid = err.detail["candidate_ids"][0]
-        .as_str()
-        .unwrap()
-        .parse()
-        .unwrap();
+    assert!(spool::spoolable(&err));
     let pid = s.p.manifest.project_id;
+    spool::push_candidates(&s.e.ctx, pid, job.id, &[cand(9)]).unwrap();
     assert_eq!(spool::pending_count(&s.e.ctx, pid), 1);
+    // Not while the conflict waits for the user.
+    let r = spool::replay(&s.e.ctx, s.e.install(), &mut s.p).unwrap();
+    assert_eq!(r.entries, 0);
     assert!(s.p.manifest.candidates.is_empty());
 
     resolve_conflict(&s.e.ctx, s.e.install(), &mut s.p, Keep::This).unwrap();
+    let r = spool::replay(&s.e.ctx, s.e.install(), &mut s.p).unwrap();
+    assert_eq!((r.entries, r.fetched.clone()), (1, vec![job.id]));
     assert_eq!(
         spool::pending_count(&s.e.ctx, pid),
         0,
         "replayed and deleted"
     );
-    let c = s.cand(spooled_id);
-    assert_eq!(c.seed, Some(5));
+    let c = &s.p.manifest.candidates[0];
+    assert_eq!(c.seed, Some(9));
     assert!(s.dir.join(&c.file).is_file());
     assert_eq!(s.p.jobs[&job.id].state, JobState::Fetched);
     assert!(!spool::spool_dir(&s.e.ctx, pid).exists());
 }
 
 #[test]
-fn fr_prj_40_spool_survives_a_crash_and_replays_on_open() {
+fn fr_prj_40_spool_survives_a_crash_and_replays_in_order_once_writable() {
     let mut s = setup();
     let job = s.job("moss");
     s.to(job.id, JobState::Submitted);
-    // Read-only while the job runs: updates go to the spool, memory keeps the state.
+    // Read-only while the job runs: the store refuses, the runner spools in order.
     s.p.read_only = Some(crate::project::ReadOnlyReason::OriginalChanged);
     let err = update_job(
         &s.e.ctx,
@@ -247,41 +257,30 @@ fn fr_prj_40_spool_survives_a_crash_and_replays_on_open() {
         },
     )
     .unwrap_err();
-    assert_eq!(
-        (err.code, &err.detail["spooled"]),
-        (ErrorCode::ReadOnly, &Value::Bool(true))
-    );
-    assert_eq!(s.p.jobs[&job.id].state, JobState::Running);
-    let err = update_job(
-        &s.e.ctx,
-        &mut s.p,
-        job.id,
-        JobUpdate {
-            state: Some(JobState::Succeeded),
-            ..Default::default()
-        },
-    )
-    .unwrap_err();
     assert_eq!(err.code, ErrorCode::ReadOnly);
-    let err = add_candidates(
-        &s.e.ctx,
-        s.e.install(),
-        &mut s.p,
-        job.id,
-        vec![NewCandidate {
-            bytes: rgba_png(16, 14, [1, 1, 1, 255]),
-            ..Default::default()
-        }],
-    )
-    .unwrap_err();
-    assert_eq!(err.detail["spooled"], true);
     let pid = s.p.manifest.project_id;
+    for st in [JobState::Running, JobState::Succeeded] {
+        let u = spool::SpoolUpdate {
+            state: Some(st),
+            ..Default::default()
+        };
+        spool::push_update(&s.e.ctx, pid, job.id, &u).unwrap();
+    }
+    spool::push_candidates(&s.e.ctx, pid, job.id, &[cand(1)]).unwrap();
     assert_eq!(spool::pending_count(&s.e.ctx, pid), 3);
+    assert_eq!(
+        spool::replay(&s.e.ctx, s.e.install(), &mut s.p)
+            .unwrap()
+            .entries,
+        0
+    );
     let on_disk: crate::job::JobFile = read_json(&s.dir.join(job.dir()).join("job.json")).unwrap();
     assert_eq!(on_disk.state, JobState::Submitted, "nothing written");
 
-    // "Crash": the in-memory state is gone; the next (writable) open replays in order.
+    // "Crash": the in-memory state is gone; the next writable open replays in seq order.
     s.reopen();
+    let r = spool::replay(&s.e.ctx, s.e.install(), &mut s.p).unwrap();
+    assert_eq!(r.entries, 3);
     assert_eq!(spool::pending_count(&s.e.ctx, pid), 0);
     assert_eq!(s.p.jobs[&job.id].state, JobState::Fetched);
     assert_eq!(s.p.manifest.candidates.len(), 1);
@@ -289,37 +288,24 @@ fn fr_prj_40_spool_survives_a_crash_and_replays_on_open() {
 }
 
 #[test]
-fn fr_prj_21_fr_prj_40_locked_candidates_spool_and_the_retry_replays_them() {
+fn fr_prj_21_fr_prj_40_locked_candidates_wait_in_the_spool_until_unlocked() {
     let mut s = setup();
-    let job = s.job("moss");
-    for st in [JobState::Submitted, JobState::Running, JobState::Succeeded] {
-        s.to(job.id, st);
-    }
+    let job = succeeded(&mut s);
+    let pid = s.p.manifest.project_id;
     s.e.ctx.faults = Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap();
-    let err = add_candidates(
-        &s.e.ctx,
-        s.e.install(),
-        &mut s.p,
-        job.id,
-        vec![NewCandidate {
-            bytes: rgba_png(16, 14, [1, 1, 1, 255]),
-            ..Default::default()
-        }],
-    )
-    .unwrap_err();
-    assert_eq!(
-        (err.code, &err.detail["spooled"]),
-        (ErrorCode::Locked, &Value::Bool(true))
-    );
-    assert!(events(&s, "project:save-failed") >= 1);
-    assert!(
-        retry_pending(&s.e.ctx, s.e.install(), &mut s.p),
-        "still locked"
-    );
+    let err = add_candidates(&s.e.ctx, s.e.install(), &mut s.p, job.id, vec![cand(1)]).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Locked);
+    assert!(spool::spoolable(&err));
+    spool::push_candidates(&s.e.ctx, pid, job.id, &[cand(1)]).unwrap();
+    let r = spool::replay(&s.e.ctx, s.e.install(), &mut s.p).unwrap();
+    assert_eq!(r.entries, 0, "still locked: kept");
+    assert_eq!(spool::pending_count(&s.e.ctx, pid), 1);
     s.e.ctx.faults = Faults::none();
-    assert!(!retry_pending(&s.e.ctx, s.e.install(), &mut s.p));
+    let r = spool::replay(&s.e.ctx, s.e.install(), &mut s.p).unwrap();
+    assert_eq!(r.entries, 1);
     assert_eq!(s.p.manifest.candidates.len(), 1);
     assert_eq!(s.p.jobs[&job.id].state, JobState::Fetched);
+    let _ = retry_pending;
 }
 
 #[test]

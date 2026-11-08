@@ -78,6 +78,14 @@ pub fn run() {
             tracing::info!(?ctx, "starting");
             let core = Core::new(ctx).map_err(|e| e.to_string())?;
             app.manage(core);
+            // RGN's job runner polls on its own thread while the app runs (FR-RGN-35).
+            let handle = app.handle().clone();
+            std::thread::Builder::new()
+                .name("pf-rgn-runner".into())
+                .spawn(move || {
+                    let core = handle.state::<Core>();
+                    pf_core::region_edit::runner::run_pump(&core)
+                })?;
             // FR-PRJ-21/40: retry saves that failed with `locked` and replay the spool.
             let handle = app.handle().clone();
             std::thread::spawn(move || {

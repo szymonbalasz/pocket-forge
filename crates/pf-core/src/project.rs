@@ -355,8 +355,6 @@ pub fn open(
         write_recovered(ctx, settings, &mut p)?;
     }
     sweep::on_open(ctx, settings.install_id, &mut p)?;
-    // FR-PRJ-40: what couldn't commit last time.
-    spool::replay(ctx, settings.install_id, &mut p);
     if p.read_only != Some(ReadOnlyReason::NewerVersion)
         && p.read_only != Some(ReadOnlyReason::OriginalMissing)
         && thumb::needs_rebuild(&p.dir)
@@ -710,6 +708,9 @@ pub struct DraftInput {
     pub region: Option<Value>,
     #[serde(default)]
     pub mask_id: Option<Ulid>,
+    /// REF's draft references (#51); `null` = REF's defaults.
+    #[serde(default)]
+    pub references: Option<Value>,
 }
 
 /// `project_put_draft` (FR-PRJ-19): one commit with the draft and, if given, EXP's unsaved export
@@ -739,8 +740,8 @@ pub fn put_draft(
     result
 }
 
-/// Retries what a `locked` failure left behind (FR-PRJ-21): the pending draft, then the spool
-/// (FR-PRJ-40). Called every [`SAVE_RETRY_EVERY`]. Returns true while something is still
+/// Retries what a `locked` failure left behind (FR-PRJ-21): the pending draft. (RGN's runner
+/// replays the spool on every tick, R48.) Called every [`SAVE_RETRY_EVERY`]. Returns true while something is still
 /// pending. A draft that now fails for another reason (`conflict`, `read_only`) is dropped:
 /// the UI saves its draft again on the next change.
 pub fn retry_pending(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> bool {
@@ -763,7 +764,7 @@ pub fn retry_pending(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> bo
             }
         }
     }
-    spool::replay(ctx, install_id, p).remaining > 0
+    false
 }
 
 /// True if closing would lose state that only lives in memory (FR-PRJ-21: closing asks first).
@@ -798,6 +799,7 @@ fn put_draft_once(
             seed: draft.seed,
             region: draft.region,
             mask_id: draft.mask_id,
+            references: draft.references,
             updated_at: ctx.now(),
             extra,
         });
@@ -851,8 +853,6 @@ pub fn relink_original(
     }
     p.warnings.retain(|w| w.code != "original_missing");
     p.decoded = DecodedOriginal::new(p.manifest.project_id, target);
-    // Writable again: what was spooled meanwhile commits now (FR-PRJ-40).
-    spool::replay(ctx, install_id, p);
     Ok(())
 }
 

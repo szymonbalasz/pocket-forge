@@ -1,38 +1,70 @@
-//! The pending-write spool (FR-PRJ-40, R12, schema §4.9): while a write can't commit
-//! (`conflict`, `locked` after 3 s, `read_only`), candidate bytes and job updates go to
-//! `<data-dir>/pending/<project-id>/` and are replayed in `seq` order once the project is
-//! writable (on open, after a resolve or relink, and on the 10 s retry). A crash in between
-//! loses no paid output.
+//! The pending-write spool (FR-PRJ-40, FR-RGN-37, R12, R48; schema §4.9). PRJ owns it; RGN's job
+//! runner is its only writer and replays it on open and on every tick while entries wait.
 //!
-//! An entry is `<seq>.json` (written last: it is the entry) plus `<seq>-<cand-id>.<ext>` bytes.
-//! Each entry is deleted after its commit. An entry that can no longer apply (e.g. its job is
-//! already past that state) moves to `dropped/`, never deleted.
+//! `<data-dir>/pending/<project-id>/` holds `<seq>.json` = `{seq, op, job_id, payload,
+//! created_at}` plus `<seq>-<NN>.<ext>` candidate bytes. The bytes are written before the entry
+//! (the entry's rename is the commit point). Entries are replayed in `seq` order once the project
+//! is writable and out of conflict; each is deleted after its commit. Paid output is never
+//! dropped. Keyed by project id, so candidates for a closed project wait here too.
+//!
+//! Taken over from RGN's interim `region_edit/spool.rs` (R48), which now re-exports this.
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use ulid::Ulid;
 
-use super::OpenProject;
-use super::store::{self, NewCandidate};
 use crate::context::Context;
 use crate::error::{CoreError, CoreResult, ErrorCode};
 use crate::fsx;
-use crate::job::JobFile;
+use crate::job::JobState;
+use crate::manifest::Extra;
+use crate::project::OpenProject;
+use crate::project::store::{self, JobUpdate, NewCandidate};
 use crate::time::Timestamp;
 
-/// The spool folder of a project.
-pub fn spool_dir(ctx: &Context, project_id: Ulid) -> PathBuf {
-    ctx.data_dir.join("pending").join(project_id.to_string())
+/// A job update as spooled: the same fields as PRJ's [`JobUpdate`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SpoolUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<JobState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed_returned: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<Value>,
+    /// `Some(Value::Null)` clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<Value>,
 }
 
-/// Errors that send a write to the spool instead of losing it.
-pub(crate) fn spoolable(code: ErrorCode) -> bool {
-    matches!(
-        code,
-        ErrorCode::Conflict | ErrorCode::Locked | ErrorCode::ReadOnly
-    )
+impl From<SpoolUpdate> for JobUpdate {
+    fn from(u: SpoolUpdate) -> Self {
+        JobUpdate {
+            state: u.state,
+            provider: u.provider,
+            seed_returned: u.seed_returned,
+            estimate: None,
+            cost: u.cost,
+            error: u.error,
+        }
+    }
+}
+
+/// One spooled candidate (its bytes are in the file next to the entry).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SpooledCandidate {
+    file: String,
+    #[serde(default)]
+    seed: Option<i64>,
+    #[serde(default)]
+    provider_meta: Value,
+    #[serde(default)]
+    invalid: bool,
+    #[serde(default)]
+    extra: Extra,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -52,222 +84,209 @@ struct Entry {
     created_at: Timestamp,
 }
 
-/// One spooled candidate (payload of `add_candidates`); its bytes are `<seq>-<id>.<ext>`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct SpooledCandidate {
-    id: Ulid,
-    ext: String,
-    seed: Option<i64>,
-    provider_meta: Value,
-    invalid: bool,
+/// A store error the spool absorbs (FR-RGN-37): the write is retried after the cause is gone.
+pub fn spoolable(e: &CoreError) -> bool {
+    matches!(
+        e.code,
+        ErrorCode::Conflict | ErrorCode::Locked | ErrorCode::ReadOnly | ErrorCode::Io
+    )
 }
 
-fn entry_seqs(dir: &Path) -> Vec<u64> {
-    let mut seqs: Vec<u64> = std::fs::read_dir(dir)
+fn dir(ctx: &Context, project_id: Ulid) -> PathBuf {
+    ctx.data_dir.join("pending").join(project_id.to_string())
+}
+
+fn entries(dir: &Path) -> Vec<(u64, PathBuf)> {
+    let mut out: Vec<(u64, PathBuf)> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
-            name.strip_suffix(".json")?.parse::<u64>().ok()
+            let seq = name.strip_suffix(".json")?.parse().ok()?;
+            Some((seq, e.path()))
         })
         .collect();
-    seqs.sort_unstable();
-    seqs
+    out.sort();
+    out
 }
 
-fn bytes_file(dir: &Path, seq: u64, id: Ulid, ext: &str) -> PathBuf {
-    dir.join(format!("{seq}-{id}.{ext}"))
+/// True if the project has spooled writes waiting.
+pub fn has_pending(ctx: &Context, project_id: Ulid) -> bool {
+    !entries(&dir(ctx, project_id)).is_empty()
 }
 
 /// How many entries wait for the project.
 pub fn pending_count(ctx: &Context, project_id: Ulid) -> usize {
-    entry_seqs(&spool_dir(ctx, project_id)).len()
+    entries(&dir(ctx, project_id)).len()
 }
 
-fn write_entry(
+/// The spool folder of a project.
+pub fn spool_dir(ctx: &Context, project_id: Ulid) -> PathBuf {
+    dir(ctx, project_id)
+}
+
+fn next_seq(dir: &Path) -> u64 {
+    let from_names = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.split(['.', '-']).next()?.parse::<u64>().ok()
+        })
+        .max();
+    from_names.map_or(1, |s| s + 1)
+}
+
+fn write_entry(ctx: &Context, dir: &Path, entry: &Entry) -> CoreResult<()> {
+    fsx::write_json_atomic(ctx, &dir.join(format!("{}.json", entry.seq)), entry)
+}
+
+fn ensure_dir(dir: &Path) -> CoreResult<()> {
+    std::fs::create_dir_all(dir)
+        .map_err(|e| CoreError::io(format!("creating {}", dir.display()), &e))
+}
+
+/// Spools a job update.
+pub fn push_update(
     ctx: &Context,
-    p: &OpenProject,
-    op: Op,
+    project_id: Ulid,
     job_id: Ulid,
-    payload: Value,
-) -> CoreResult<u64> {
-    let dir = spool_dir(ctx, p.manifest.project_id);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| CoreError::io(format!("creating {}", dir.display()), &e))?;
-    let seq = entry_seqs(&dir).last().map_or(1, |s| s + 1);
+    update: &SpoolUpdate,
+) -> CoreResult<()> {
+    let dir = dir(ctx, project_id);
+    ensure_dir(&dir)?;
     let entry = Entry {
-        seq,
-        op,
+        seq: next_seq(&dir),
+        op: Op::UpdateJob,
         job_id,
-        payload,
+        payload: serde_json::to_value(update).map_err(|e| CoreError::internal(e.to_string()))?,
         created_at: ctx.now(),
     };
-    fsx::write_json_atomic(ctx, &dir.join(format!("{seq}.json")), &entry)?;
-    Ok(seq)
+    write_entry(ctx, &dir, &entry)
 }
 
-/// Spools a job update: the whole job file after it (replay writes it unless the job on disk
-/// is already later).
-pub(crate) fn spool_job(ctx: &Context, p: &OpenProject, job: &JobFile) -> CoreResult<u64> {
-    write_entry(ctx, p, Op::UpdateJob, job.id, json!({ "job": job }))
-}
-
-/// Spools candidates with their ids (the bytes first, then the entry).
-pub(crate) fn spool_candidates(
+/// Spools fetched candidates: the bytes first, then the entry.
+pub fn push_candidates(
     ctx: &Context,
-    p: &OpenProject,
+    project_id: Ulid,
     job_id: Ulid,
-    candidates: &[(Ulid, NewCandidate)],
-) -> CoreResult<u64> {
-    let dir = spool_dir(ctx, p.manifest.project_id);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| CoreError::io(format!("creating {}", dir.display()), &e))?;
-    let seq = entry_seqs(&dir).last().map_or(1, |s| s + 1);
-    let mut rows = vec![];
-    for (id, c) in candidates {
+    candidates: &[NewCandidate],
+) -> CoreResult<()> {
+    let dir = dir(ctx, project_id);
+    ensure_dir(&dir)?;
+    let seq = next_seq(&dir);
+    let mut listed = vec![];
+    for (i, c) in candidates.iter().enumerate() {
         let ext = pf_imaging::sniff(&c.bytes).map_or("bin", |f| f.extension());
-        fsx::write_atomic(ctx, &bytes_file(&dir, seq, *id, ext), &c.bytes)?;
-        rows.push(SpooledCandidate {
-            id: *id,
-            ext: ext.into(),
+        let file = format!("{seq}-{:02}.{ext}", i + 1);
+        fsx::write_atomic(ctx, &dir.join(&file), &c.bytes)?;
+        listed.push(SpooledCandidate {
+            file,
             seed: c.seed,
             provider_meta: c.provider_meta.clone(),
             invalid: c.invalid,
+            extra: c.extra.clone(),
         });
     }
     let entry = Entry {
         seq,
         op: Op::AddCandidates,
         job_id,
-        payload: json!({ "candidates": rows }),
+        payload: serde_json::to_value(&listed).map_err(|e| CoreError::internal(e.to_string()))?,
         created_at: ctx.now(),
     };
-    fsx::write_json_atomic(ctx, &dir.join(format!("{seq}.json")), &entry)?;
-    Ok(seq)
+    write_entry(ctx, &dir, &entry)
+}
+
+fn remove_entry(dir: &Path, entry: &Entry, path: &Path) {
+    if let Op::AddCandidates = entry.op
+        && let Ok(list) = serde_json::from_value::<Vec<SpooledCandidate>>(entry.payload.clone())
+    {
+        for c in list {
+            let _ = std::fs::remove_file(dir.join(c.file));
+        }
+    }
+    let _ = std::fs::remove_file(path);
 }
 
 /// What a replay did.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Replayed {
-    pub applied: usize,
-    pub dropped: usize,
-    /// Entries still waiting (the project is still blocked).
-    pub remaining: usize,
+    /// Jobs whose candidates were committed by this replay.
+    pub fetched: Vec<Ulid>,
+    pub entries: usize,
 }
 
-/// Replays the spool in `seq` order while the project is writable. Stops at the first entry
-/// that is blocked again (kept for the next try).
-pub fn replay(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> Replayed {
-    let dir = spool_dir(ctx, p.manifest.project_id);
-    let seqs = entry_seqs(&dir);
+/// Replays the project's spool in `seq` order (FR-RGN-37). Stops at the first entry that still
+/// can't commit (it's retried later). An entry the store refuses for good (a transition the job
+/// already passed, an unknown job) is dropped with a log line.
+pub fn replay(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> CoreResult<Replayed> {
     let mut out = Replayed::default();
-    if seqs.is_empty() {
-        return out;
-    }
+    // Read-only, or a conflict the user hasn't resolved: every store write would refuse.
     if p.read_only.is_some() || p.conflict.is_some() {
-        out.remaining = seqs.len();
-        return out;
+        return Ok(out);
     }
-    for (i, seq) in seqs.iter().enumerate() {
-        let path = dir.join(format!("{seq}.json"));
-        let entry: Option<Entry> = std::fs::read(&path)
+    let dir = dir(ctx, p.manifest.project_id);
+    for (_, path) in entries(&dir) {
+        let entry: Entry = match std::fs::read(&path)
             .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok());
-        let result = match &entry {
-            Some(e) => apply(ctx, install_id, p, &dir, e),
-            None => Err(CoreError::new(ErrorCode::Corrupt, "unreadable spool entry")),
+            .and_then(|b| serde_json::from_slice(&b).ok())
+        {
+            Some(e) => e,
+            None => {
+                tracing::warn!(path = %path.display(), "unreadable spool entry; kept");
+                continue;
+            }
+        };
+        let result = match entry.op {
+            Op::UpdateJob => serde_json::from_value::<SpoolUpdate>(entry.payload.clone())
+                .map_err(|e| CoreError::new(ErrorCode::Corrupt, e.to_string()))
+                .and_then(|u| store::update_job(ctx, p, entry.job_id, u.into()).map(|_| ())),
+            Op::AddCandidates => {
+                let list: Vec<SpooledCandidate> = serde_json::from_value(entry.payload.clone())
+                    .map_err(|e| CoreError::new(ErrorCode::Corrupt, e.to_string()))?;
+                let mut cands = vec![];
+                for c in list {
+                    let bytes = std::fs::read(dir.join(&c.file))
+                        .map_err(|e| CoreError::io("reading a spooled candidate", &e))?;
+                    cands.push(NewCandidate {
+                        bytes,
+                        seed: c.seed,
+                        provider_meta: c.provider_meta,
+                        invalid: c.invalid,
+                        extra: c.extra,
+                    });
+                }
+                store::add_candidates(ctx, install_id, p, entry.job_id, cands).map(|_| {
+                    out.fetched.push(entry.job_id);
+                })
+            }
         };
         match result {
             Ok(()) => {
-                out.applied += 1;
-                remove_entry(&dir, *seq);
+                remove_entry(&dir, &entry, &path);
+                out.entries += 1;
             }
-            Err(e) if spoolable(e.code) => {
-                out.remaining = seqs.len() - i;
-                return out;
+            Err(e) if spoolable(&e) => return Ok(out),
+            Err(e)
+                if entry.op == Op::AddCandidates
+                    && p.jobs.get(&entry.job_id).is_some_and(|j| {
+                        !matches!(j.state, JobState::Fetched | JobState::Closed)
+                    }) =>
+            {
+                // Paid output is never dropped: kept for the next replay.
+                tracing::warn!(seq = entry.seq, error = %e, "spooled candidates refused; kept");
             }
             Err(e) => {
-                tracing::warn!(seq, code = %e.code, "spool entry can't apply; kept in dropped/: {}", e.message);
-                out.dropped += 1;
-                drop_entry(&dir, *seq);
+                tracing::warn!(seq = entry.seq, error = %e, "spool entry refused; dropped");
+                remove_entry(&dir, &entry, &path);
             }
         }
     }
-    if out.applied > 0 {
-        tracing::info!(applied = out.applied, "spool replayed");
+    if entries(&dir).is_empty() {
+        let _ = std::fs::remove_dir(&dir);
     }
-    fsx::remove_dir_if_empty(&dir);
-    out
-}
-
-fn apply(
-    ctx: &Context,
-    install_id: Ulid,
-    p: &mut OpenProject,
-    dir: &Path,
-    e: &Entry,
-) -> CoreResult<()> {
-    match e.op {
-        Op::UpdateJob => {
-            let job: JobFile = serde_json::from_value(e.payload["job"].clone())
-                .map_err(|err| CoreError::new(ErrorCode::Corrupt, format!("spooled job: {err}")))?;
-            store::apply_spooled_job(ctx, p, job)
-        }
-        Op::AddCandidates => {
-            let rows: Vec<SpooledCandidate> =
-                serde_json::from_value(e.payload["candidates"].clone()).map_err(|err| {
-                    CoreError::new(ErrorCode::Corrupt, format!("spooled candidates: {err}"))
-                })?;
-            let mut cands = vec![];
-            for r in rows {
-                let path = bytes_file(dir, e.seq, r.id, &r.ext);
-                let bytes = std::fs::read(&path)
-                    .map_err(|err| CoreError::io("reading spooled candidate bytes", &err))?;
-                cands.push((
-                    r.id,
-                    NewCandidate {
-                        bytes,
-                        seed: r.seed,
-                        provider_meta: r.provider_meta,
-                        invalid: r.invalid,
-                    },
-                ));
-            }
-            store::add_candidates_with_ids(ctx, install_id, p, e.job_id, cands).map(|_| ())
-        }
-    }
-}
-
-/// Files of one entry: `<seq>.json` and its `<seq>-*` bytes.
-fn entry_files(dir: &Path, seq: u64) -> Vec<PathBuf> {
-    let prefix = format!("{seq}-");
-    let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
-        .map(|e| e.path())
-        .collect();
-    files.push(dir.join(format!("{seq}.json")));
-    files
-}
-
-/// Deletes an applied entry: the json first (then it's gone), then its bytes.
-fn remove_entry(dir: &Path, seq: u64) {
-    let _ = std::fs::remove_file(dir.join(format!("{seq}.json")));
-    for f in entry_files(dir, seq) {
-        let _ = std::fs::remove_file(f);
-    }
-}
-
-fn drop_entry(dir: &Path, seq: u64) {
-    let dropped = dir.join("dropped");
-    let _ = std::fs::create_dir_all(&dropped);
-    // Bytes first, the json last, so a crash never leaves an entry without its bytes.
-    for f in entry_files(dir, seq) {
-        if let Some(name) = f.file_name() {
-            let _ = std::fs::rename(&f, dropped.join(name));
-        }
-    }
+    Ok(out)
 }
