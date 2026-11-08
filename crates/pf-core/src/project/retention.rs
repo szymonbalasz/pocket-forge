@@ -198,7 +198,8 @@ pub struct Purged {
 /// FR-PRJ-32: on open, deletes trash items older than 30 days (clock seam). The files go first,
 /// then one commit drops the items, so a crash in between only repeats the purge. Accepted or
 /// starred candidates and files any layer or revision references are never deleted (#18), even
-/// if an item names them. Nothing else is ever deleted.
+/// if an item names them. Nothing else is ever deleted. A candidate whose file is purged keeps
+/// its record and `trash_id`, and gets `purged_at` (BL-23).
 pub fn purge_expired(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> CoreResult<Purged> {
     if p.read_only.is_some() {
         return Ok(Purged::default());
@@ -216,12 +217,14 @@ pub fn purge_expired(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> Co
     }
     let protected = protected_files(p);
     let mut out = Purged::default();
+    let mut purged: HashSet<(Ulid, &str)> = HashSet::new();
     for item in &expired {
         for from in &item.files {
             if protected.contains(from.as_str()) {
                 tracing::warn!(file = %from, "a kept file was in the trash; not purged");
                 continue;
             }
+            purged.insert((item.id, from.as_str()));
             let path = p.path(&item.trashed_path(from));
             let bytes = file_bytes(&path);
             match std::fs::remove_file(&path) {
@@ -238,6 +241,14 @@ pub fn purge_expired(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> Co
     let ids: HashSet<Ulid> = expired.iter().map(|t| t.id).collect();
     commit(ctx, install_id, p, |_, _, m, _| {
         m.trash.retain(|t| !ids.contains(&t.id));
+        for c in m.candidates.iter_mut() {
+            if let Some(tid) = c.trash_id
+                && c.purged_at.is_none()
+                && purged.contains(&(tid, c.file.as_str()))
+            {
+                c.purged_at = Some(now);
+            }
+        }
         Ok(())
     })?;
     ctx.emit(

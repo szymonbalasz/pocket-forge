@@ -529,6 +529,8 @@ export interface CandidateRecord {
   status: 'new' | 'accepted' | 'dismissed' | 'discarded' | 'trashed' | 'invalid';
   starred: boolean;
   trash_id: string | null;
+  /** Set when the 30-day purge deleted the file (BL-23); `trash_id` then names the purged item. */
+  purged_at?: string;
   width?: number;
   height?: number;
   /** Aspect differs from the sent one by > 1 % (FR-RGN-24). */

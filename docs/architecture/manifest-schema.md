@@ -174,7 +174,8 @@ Terminal = `failed | canceled | lost | closed`. A re-pick (RGN FR-RGN-36) accept
 | `provider_meta` | object | opaque (PRV) |
 | `status` | `new\|accepted\|dismissed\|discarded\|trashed\|invalid` | R10 |
 | `starred` | bool | separate from status; starred is never trashed |
-| `trash_id` | ULID \| null | set while the file is in the trash |
+| `trash_id` | ULID \| null | set while the file is in the trash; after a purge it still names the purged item |
+| `purged_at` | timestamp, optional | set when the 30-day purge deleted the file (FR-PRJ-32, BL-23); the record stays |
 
 - `new` = ready to compare · `accepted` · `dismissed` = left over when its job was resolved · `discarded` = the user discarded it · `trashed` = moved by a sweep (orphan, conflict) · `invalid` = won't decode. UI statuses (`pending|ready|invalid`) are EDT/RGN's only.
 - A rebuild (FR-PRJ-24, conflict) adds candidates listed in a job's `candidate_ids[]` but missing here, as `new` (or `invalid` if the file won't decode).

@@ -257,9 +257,13 @@ pub struct Candidate {
     pub status: CandidateStatus,
     #[serde(default)]
     pub starred: bool,
-    /// Set while the file is in the trash.
+    /// Set while the file is in the trash. After a purge it still names the purged item, and
+    /// `purged_at` says the file is gone.
     #[serde(default)]
     pub trash_id: Option<Ulid>,
+    /// When the 30-day purge deleted the file (FR-PRJ-32, BL-23). The record stays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purged_at: Option<Timestamp>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -485,6 +489,7 @@ mod tests {
                 status: CandidateStatus::New,
                 starred: false,
                 trash_id: None,
+                purged_at: None,
                 extra: Extra::new(),
             }],
             revisions: vec![RevisionEntry {

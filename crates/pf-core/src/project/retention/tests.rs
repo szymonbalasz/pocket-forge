@@ -52,8 +52,17 @@ fn fr_prj_32_purge_after_30_days_keeps_starred_and_accepted() {
     assert_eq!(name, "trash:purged");
     assert_eq!(payload["count"], 1);
     assert!(payload["bytes"].as_u64().unwrap() > 0);
-    // The record stays (its file is gone): a re-star can't bring it back.
+    // The record stays (its file is gone) and says so (BL-23): a re-star can't bring it back.
     assert!(s.cand(c[2].id).trash_id.is_some());
+    assert_eq!(s.cand(c[2].id).purged_at, Some(Timestamp(T0 + 31 * DAY_MS)));
+    assert_eq!(s.cand(c[0].id).purged_at, None, "accepted isn't purged");
+    assert_eq!(s.cand(c[1].id).purged_at, None, "starred isn't purged");
+    s.reopen();
+    assert_eq!(
+        s.cand(c[2].id).purged_at,
+        Some(Timestamp(T0 + 31 * DAY_MS)),
+        "persisted"
+    );
     let err = set_star(&s.e.ctx, s.e.install(), &mut s.p, c[2].id, true).unwrap_err();
     assert_eq!(err.code, ErrorCode::NotFound);
 }
