@@ -136,7 +136,7 @@ test('FR-EDT-14 FR-EDT-24 after close and reopen the mask tint and the compare i
   await expect
     .poll(async () => (await hook<{ inner: { w: number } } | null>(page, 'region'))?.inner.w)
     .toBe(200);
-  await page.getByTestId('edt-toolbar-fill').click();
+  await page.getByTestId('edt-toolbar-mask-region').click();
   await expect.poll(() => drawnImage(page, 'mask')).toEqual({ found: true, drawn: true });
 
   // Compare: selecting a candidate draws its after-image.

@@ -796,6 +796,50 @@ mod tests {
         }
     }
 
+    /// Owner decision 2026-11-08: the real single-output models list no `numOutputs`, so their
+    /// capabilities have no count control (RGN shows "1 result per job") and the recorded
+    /// dry-run (the estimate path) asks for no count; the multi-output ones keep theirs.
+    #[test]
+    fn owner_2026_11_08_single_output_models_have_no_count_control() {
+        let single = [
+            "model_ideogram-v3-balanced",
+            "model_ideogram-v3-quality",
+            "model_ideogram-v3-turbo",
+            "model_ideogram-character",
+        ];
+        for row in SCENARIO_ROWS.iter() {
+            let rec = crate::scenario::fixture_recording(row.model_id, "get-model").unwrap();
+            let c = normalise(row.model_id, &rec.exchanges[0].response.body, Some(row))
+                .unwrap()
+                .capabilities;
+            let has_count = c
+                .controls
+                .iter()
+                .any(|x| x.role == ControlRole::CandidateCount);
+            assert_eq!(
+                has_count,
+                !single.contains(&row.model_id),
+                "{}",
+                row.model_id
+            );
+        }
+        for model in single {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fixtures/provider")
+                .join(model)
+                .join("dry-run.json");
+            let rec =
+                crate::replay::Recording::parse(&std::fs::read_to_string(path).unwrap()).unwrap();
+            let generate = rec
+                .exchanges
+                .iter()
+                .find(|e| e.request.path.starts_with("/generate/"))
+                .unwrap_or_else(|| panic!("{model}: no generate call"));
+            let body = generate.request.body.as_ref().unwrap();
+            assert!(body.get("numOutputs").is_none(), "{model}: {body}");
+        }
+    }
+
     #[test]
     fn normalising_is_fast() {
         let rec =

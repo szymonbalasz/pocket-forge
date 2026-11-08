@@ -99,7 +99,7 @@ test('EDT §12 mask stroke and undo timings at a 3840² mask (indicative)', asyn
 
   // Fill region: the worst frame (a full-mask update).
   await startFrames(page);
-  await page.getByTestId('edt-toolbar-fill').click();
+  await page.getByTestId('edt-toolbar-mask-region').click();
   await page.waitForTimeout(200);
   const fill = Math.max(...(await stopFrames(page)));
 

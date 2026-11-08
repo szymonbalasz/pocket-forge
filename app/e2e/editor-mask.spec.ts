@@ -98,7 +98,7 @@ test('FR-EDT-17 painting needs a region; the cursor shows the true and hardness 
   expect(r).toBeCloseTo(32 * v.scale, 3); // default size 64 → r = 32 image px
   const hr = Number(await page.getByTestId('edt-brush-cursor-hard').getAttribute('data-radius'));
   expect(hr).toBeCloseTo(32 * v.scale * 0.5, 3);
-  await expect(page.getByTestId('edt-toolbar-fill')).toBeDisabled();
+  await expect(page.getByTestId('edt-toolbar-mask-region')).toBeDisabled();
 });
 
 test('FR-EDT-14 FR-EDT-15 FR-EDT-21 a stroke is one undo step; undo then redo is byte-identical', async ({
@@ -173,7 +173,7 @@ test('FR-EDT-16 fill region and clear mask, one undo step each', async ({ page }
   await page.keyboard.press('r');
   await dragImage(page, [100, 100], [300, 200]);
   await expect.poll(async () => (await region(page))?.inner.w).toBe(200);
-  await page.getByTestId('edt-toolbar-fill').click();
+  await page.getByTestId('edt-toolbar-mask-region').click();
   expect((await mask(page))!.full).toBe(200 * 100);
   await page.getByTestId('edt-toolbar-clear').click();
   expect((await mask(page))!.sum).toBe(0);

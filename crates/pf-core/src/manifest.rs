@@ -210,6 +210,9 @@ pub struct Draft {
     /// REF's `{packs, items}` (#51, FR-RGN-41); `null` = REF's defaults (FR-REF-17).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub references: Option<Value>,
+    /// #55: append the blend instruction at submit; absent = on (the default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend_instruction: Option<bool>,
     pub updated_at: Timestamp,
     #[serde(flatten)]
     pub extra: Extra,

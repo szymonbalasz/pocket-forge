@@ -2,7 +2,7 @@
 // iteration tracker on the mocked core (`src/api/mocks/rgn.ts`). No provider, no spend.
 import { expect, test } from '@playwright/test';
 
-import { choose, drawRegion, drive, inputsOf, openRgn } from './rgn-mock';
+import { choose, drawMaskedRegion, drive, inputsOf, openRgn } from './rgn-mock';
 
 test('FR-RGN-27 region → controls → prompt → estimate → confirm → progress → pick → accept', async ({
   page,
@@ -17,7 +17,7 @@ test('FR-RGN-27 region → controls → prompt → estimate → confirm → prog
   expect(order).toEqual(['rgn-panel', 'exp-panel']);
 
   // Region: EDT's tool emits {inner}; RGN fits it (FR-RGN-01/05).
-  await drawRegion(page, [400, 500], [800, 900]);
+  await drawMaskedRegion(page, [400, 500], [800, 900]);
   await expect(page.getByTestId('rgn-panel-size')).toHaveText('400 × 400 px');
   await expect(page.getByTestId('rgn-panel-fit')).toHaveText('sent unresampled');
 
@@ -84,7 +84,7 @@ test('FR-RGN-21 R62 Retry is offered on the newest job once it is closed by an a
   page,
 }) => {
   await openRgn(page);
-  await drawRegion(page, [400, 500], [800, 900]);
+  await drawMaskedRegion(page, [400, 500], [800, 900]);
   await page.getByTestId('rgn-panel-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await page.getByTestId('rgn-panel-submit').click();
@@ -104,7 +104,7 @@ test('FR-RGN-28 a job closed by the next submit shows Closed on its chip (walk D
   page,
 }) => {
   await openRgn(page);
-  await drawRegion(page, [400, 500], [800, 900]);
+  await drawMaskedRegion(page, [400, 500], [800, 900]);
   await page.getByTestId('rgn-panel-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await page.getByTestId('rgn-panel-submit').click();
@@ -124,7 +124,7 @@ test('FR-RGN-24 a candidate in another aspect shows the warning badge in the pic
   page,
 }) => {
   await openRgn(page);
-  await drawRegion(page, [400, 500], [800, 900]);
+  await drawMaskedRegion(page, [400, 500], [800, 900]);
   await page.getByTestId('rgn-panel-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await page.getByTestId('rgn-panel-submit').click();
@@ -141,7 +141,7 @@ test('FR-RGN-14 over-cap dialog: spend, estimate and cap; an explicit raise, the
   page,
 }) => {
   await openRgn(page, { spend: { cap: 1, threshold: 10 } });
-  await drawRegion(page, [400, 500], [800, 900]);
+  await drawMaskedRegion(page, [400, 500], [800, 900]);
   await page.getByTestId('rgn-panel-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await page.getByTestId('rgn-panel-submit').click();
@@ -161,7 +161,7 @@ test('FR-RGN-14 over-cap dialog: spend, estimate and cap; an explicit raise, the
 
 test('FR-RGN-15 above the threshold Enter never confirms', async ({ page }) => {
   await openRgn(page, { spend: { cap: 100, threshold: 1 } });
-  await drawRegion(page, [400, 500], [800, 900]);
+  await drawMaskedRegion(page, [400, 500], [800, 900]);
   await page.getByTestId('rgn-panel-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await page.getByTestId('rgn-panel-submit').click();
@@ -179,7 +179,7 @@ test('FR-RGN-15 above the threshold Enter never confirms', async ({ page }) => {
 
 test('FR-RGN-19 cancel a running job', async ({ page }) => {
   await openRgn(page);
-  await drawRegion(page, [400, 500], [800, 900]);
+  await drawMaskedRegion(page, [400, 500], [800, 900]);
   await page.getByTestId('rgn-panel-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await page.getByTestId('rgn-panel-submit').click();

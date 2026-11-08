@@ -10,6 +10,7 @@ use ulid::Ulid;
 
 use super::commands::{DraftRegion, JobDraft, prepare_job};
 use super::fit::RectIn;
+use super::instruction;
 use super::runner::{self, commit_job_update, emit_spend, emit_state, provider_raw};
 use super::spend::{self, Confirmations, Need};
 use super::spool::SpoolUpdate;
@@ -140,7 +141,10 @@ impl Command for RgnJobSubmit {
             .sent
             .seed
             .or_else(|| prepared.caps.seed.then(|| random_seed(core)));
-        let mut request = prepared.request(&draft.model_id, &draft.final_prompt);
+        // #55: the prompt as sent; the estimate (cost) never depends on it.
+        let final_prompt =
+            instruction::sent_prompt(core, &draft.final_prompt, draft.blend_instruction);
+        let mut request = prepared.request(&draft.model_id, &final_prompt);
         request.seed = seed;
 
         // Spend guard, active-job check and the `requested` record: one lock (FR-RGN-14–17).
@@ -175,12 +179,15 @@ impl Command for RgnJobSubmit {
             let fit = &prepared.fit;
             let mut extra = Extra::new();
             extra.insert("seed_pinned".into(), json!(draft.seed.is_some()));
+            // #55: whether the instruction was appended, and the prompt as typed (Retry, names).
+            extra.insert("blend_instruction".into(), json!(draft.blend_instruction));
+            extra.insert("typed_prompt".into(), json!(draft.final_prompt));
             let new = NewJob {
                 operation: "edit_masked".into(),
                 model_id: draft.model_id.trim().to_owned(),
                 capability_snapshot: serde_json::to_value(&prepared.caps)
                     .map_err(|e| CoreError::internal(e.to_string()))?,
-                final_prompt: draft.final_prompt.clone(),
+                final_prompt: final_prompt.clone(),
                 controls: prepared.sent.controls.clone(),
                 candidate_count: prepared.sent.candidate_count,
                 seed_requested: seed.map(|s| s as i64),
@@ -408,7 +415,7 @@ impl Command for RgnJobRetryDraft {
             region: draft_region(&job)?,
             mask_id,
             model_id: job.model_id.clone(),
-            final_prompt: job.final_prompt.clone(),
+            final_prompt: job.typed_prompt().to_owned(),
             controls: job.controls.clone(),
             seed: if pinned {
                 job.seed.requested.map(|s| s as u64)
@@ -416,6 +423,9 @@ impl Command for RgnJobRetryDraft {
                 None
             },
             references,
+            // #55: as the job had it; a job from before #55 sent no instruction.
+            blend_instruction: job.extra.get("blend_instruction").and_then(Value::as_bool)
+                == Some(true),
         })
     }
 }

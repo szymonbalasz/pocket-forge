@@ -7,7 +7,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import type { Capabilities } from '../src/api';
 import { mockRefs, refSeed } from './ref-mock';
-import { drawRegion, inputsOf, openRgn } from './rgn-mock';
+import { drawMaskedRegion, inputsOf, openRgn } from './rgn-mock';
 
 const REFS = JSON.parse(
   readFileSync(
@@ -101,7 +101,7 @@ test('FR-REF-18 a required slot under its min disables submit and names the slot
     models: [{ id: 'fake-required', name: 'Required' }],
     capabilities: { 'fake-required': REQUIRED },
   });
-  await drawRegion(page, [400, 500], [800, 900]);
+  await drawMaskedRegion(page, [400, 500], [800, 900]);
   await expect(page.getByTestId('ref-block-under')).toHaveText('Identity needs at least 1');
   await expect(page.getByTestId('rgn-panel-submit')).toBeDisabled();
   await expect(page.getByTestId('rgn-panel-submit-reason')).toContainText(
@@ -124,7 +124,7 @@ test('FR-REF-21 FR-RGN-45 walk R1/R2: the confirm counts the current ticks; a ti
     models: [{ id: 'fake-refs', name: 'Refs' }],
     capabilities: { 'fake-refs': REFS },
   });
-  await drawRegion(page, [400, 500], [800, 900]);
+  await drawMaskedRegion(page, [400, 500], [800, 900]);
   await page.getByTestId('rgn-panel-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-submit')).toBeEnabled();
   const estimates = (await inputsOf(page, 'rgn_job_estimate')).length;
@@ -180,7 +180,7 @@ test('FR-REF-21 BL-34 with the default selection, a default-ticked file gone bef
     models: [{ id: 'fake-refs', name: 'Refs' }],
     capabilities: { 'fake-refs': REFS },
   });
-  await drawRegion(page, [400, 500], [800, 900]);
+  await drawMaskedRegion(page, [400, 500], [800, 900]);
   await page.getByTestId('rgn-panel-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-submit')).toBeEnabled();
   // REF's defaults (FR-REF-17): both project files ticked, nothing saved as a selection.

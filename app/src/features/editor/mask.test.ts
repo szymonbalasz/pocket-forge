@@ -1,12 +1,35 @@
 import { describe, expect, test } from 'vitest';
 
-import { dabsAlong, dabSpacing, emptyMask, maskHash, remap, stamp, stampAlpha } from './mask';
+import {
+  dabsAlong,
+  dabSpacing,
+  emptyMask,
+  hasPaint,
+  maskHash,
+  remap,
+  stamp,
+  stampAlpha,
+} from './mask';
 import { MaskController, type MaskView } from './MaskController';
 import { applyDrag, moveRect, rectFromPoints, resizeRect } from './region';
 import type { RegionState } from './store';
 import { UndoStack } from './undo';
 
 const image = { w: 2000, h: 1500 };
+
+describe('painted mask (owner 2026-11-08)', () => {
+  test('FR-RGN-03 owner-2026-11-08 hasPaint finds any byte > 0, aligned or not', () => {
+    const m = emptyMask({ x: 0, y: 0, w: 37, h: 5 });
+    expect(hasPaint(m.data)).toBe(false);
+    for (const i of [0, 3, 4, 100, 37 * 5 - 1]) {
+      m.data[i] = 1;
+      expect(hasPaint(m.data)).toBe(true);
+      expect(hasPaint(m.data.subarray(1))).toBe(i !== 0);
+      m.data[i] = 0;
+    }
+    expect(hasPaint(new Uint8Array(0))).toBe(false);
+  });
+});
 
 describe('brush stamp', () => {
   test('FR-EDT-15 alpha is 1 inside h·r and falls linearly to 0 at r', () => {

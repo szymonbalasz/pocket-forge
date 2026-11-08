@@ -194,6 +194,13 @@ pub struct JobDraft {
     /// Resolved and prepared inside [`prepare_job`].
     #[serde(default)]
     pub references: Option<DraftReferences>,
+    /// #55: append the blend instruction to the prompt at submit. Absent = on (the default).
+    #[serde(default = "blend_on")]
+    pub blend_instruction: bool,
+}
+
+fn blend_on() -> bool {
+    true
 }
 
 impl Validate for JobDraft {

@@ -24,6 +24,10 @@ export interface RgnMockSeed {
   cancel?: 'canceled' | 'not_cancellable';
   /** Commands that fail with this error once called (code → {message}). */
   failures?: Record<string, { code: string; message: string; field?: string }>;
+  /** #55: the stored blend instruction text (absent = the default). */
+  blendInstruction?: string | null;
+  /** #55: the open project's kind (Maps add the view sentence); default `map`. */
+  kind?: 'map' | 'token' | 'item';
 }
 
 export function installRgnMock(seed: RgnMockSeed): void {
@@ -87,6 +91,25 @@ export function installRgnMock(seed: RgnMockSeed): void {
     cancel: seed.cancel ?? 'canceled',
     failures: { ...(seed.failures ?? {}) },
     connectivity: 'ok',
+    // #55 (pf-core `region_edit::instruction`).
+    blendDefault:
+      'Keep everything near the edges of the edited area consistent with the surrounding map: ' +
+      'continue the existing walls, floor tiles, paths, lighting, scale and line style across ' +
+      'the boundary so there is no visible seam. Place the new content toward the centre of the ' +
+      'edited area.',
+    blendText: seed.blendInstruction ?? null,
+  };
+  /** `rgn_blend_instruction_get` / `_set` output. */
+  const blendOut = () => {
+    const text = s.blendText ?? s.blendDefault;
+    const t = text.trim();
+    const kind = seed.kind ?? 'map';
+    return {
+      text,
+      default_text: s.blendDefault,
+      is_default: s.blendText === null,
+      for_project: t ? (kind === 'map' ? `${t} Top-down battlemap view.` : t) : '',
+    };
   };
   snap.read_only = seed.readOnly ? 'newer_version' : null;
   snap.draft = {
@@ -622,6 +645,17 @@ export function installRgnMock(seed: RgnMockSeed): void {
       return { seq: s.nextId++ };
     },
     rgn_spend_get: () => ({ spend: s.spend, cap: s.cap, threshold: s.threshold }),
+    rgn_blend_instruction_get: () => blendOut(),
+    rgn_blend_instruction_set: (input: Rec) => {
+      const t = input.text;
+      if (t !== null && typeof t !== 'string') return fail('invalid_input', 'text');
+      if (typeof t === 'string' && t.length > 2000)
+        return fail('invalid_input', 'the instruction is at most 2000 characters', 'text');
+      s.blendText = t === s.blendDefault ? null : t;
+      const out = blendOut();
+      emit('rgn:blend-instruction', out);
+      return out;
+    },
     // A missing field keeps its value; null clears it (pf-core `rgn_spend_set`).
     rgn_spend_set: (input: Rec) => {
       const next = { cap: s.cap, threshold: s.threshold };

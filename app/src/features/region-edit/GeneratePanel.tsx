@@ -6,7 +6,7 @@ import { Collapsible, Select, Slider, Switch } from 'radix-ui';
 
 import { useSlotIdle } from '../../shared/slot';
 import { useProjectState } from '../../store/project';
-import { useEditorRegion, useEditorRegionRestored } from '../editor';
+import { useEditorMaskPainted, useEditorRegion, useEditorRegionRestored } from '../editor';
 import { openProviderSettings } from '../provider';
 import { ReferencesBlock } from '../references';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -16,7 +16,9 @@ import { amountLabel, costLabel, errorText, fitLabel } from './format';
 import {
   currentDraft,
   costUnit,
+  finalPrompt,
   isOffline,
+  MASK_HINT,
   missing,
   rgn,
   selectedLayer,
@@ -33,6 +35,7 @@ function useRgnSession(): void {
   const { project } = useProjectState();
   const region = useEditorRegion();
   const restoredFor = useEditorRegionRestored();
+  const painted = useEditorMaskPainted();
   const pid = project?.project_id ?? null;
   useEffect(() => {
     if (project) void rgn.attach(project);
@@ -44,6 +47,8 @@ function useRgnSession(): void {
     if (pid && restoredFor === pid && rgn.get().projectId === pid)
       rgn.editorRegion(region?.inner ?? null);
   }, [pid, restoredFor, region?.inner]);
+  // Owner 2026-11-08: Generate waits for paint in the region.
+  useEffect(() => rgn.setMaskPainted(painted), [pid, painted]);
 }
 
 function RegionSection({ s }: { s: RgnState }) {
@@ -198,6 +203,12 @@ function ModelSection({ s }: { s: RgnState }) {
                 onChange={(v) => rgn.setValue(c.name, v)}
               />
             ))}
+          {!s.caps.controls.some((c) => c.role === 'candidate_count') && (
+            // Owner 2026-11-08: no count control → one result per job, never N jobs.
+            <p className="muted small" data-testid="rgn-panel-count-single">
+              1 result per job (this model)
+            </p>
+          )}
         </div>
       )}
       {warnings.length > 0 && (
@@ -241,11 +252,23 @@ function PromptSection({ s }: { s: RgnState }) {
         placeholder="Describe the change, e.g. turn this room into a kitchen"
         onChange={(e) => rgn.setPrompt(e.target.value)}
       />
+      <label className="rgn-check" title="Appends the blend instruction (Settings) to the prompt">
+        <Switch.Root
+          className="rgn-switch"
+          aria-label="Blend with surroundings"
+          data-testid="rgn-panel-blend-instruction"
+          checked={s.blendInstruction}
+          onCheckedChange={(v) => rgn.setBlendInstruction(v)}
+        >
+          <Switch.Thumb className="rgn-switch-thumb" />
+        </Switch.Root>
+        Blend with surroundings
+      </label>
       {draft && (
         <details className="rgn-final" data-testid="rgn-panel-final">
-          <summary className="muted small">Final prompt (sent exactly as typed)</summary>
+          <summary className="muted small">Final prompt (as sent)</summary>
           <pre className="small" data-testid="rgn-panel-final-prompt">
-            {draft.final_prompt || '—'}
+            {finalPrompt(s) || '—'}
           </pre>
         </details>
       )}
@@ -348,10 +371,22 @@ function SubmitSection({ s }: { s: RgnState }) {
           Generate
         </button>
       )}
-      {blocker && s.inner && (
-        <p className="muted small" data-testid="rgn-panel-submit-reason" data-missing={m.join(',')}>
-          {blocker}
+      {blocker === MASK_HINT && s.inner ? (
+        // Owner 2026-11-08: what to do when the region has no painted mask.
+        <p className="muted small" data-testid="rgn-panel-mask-hint">
+          {MASK_HINT}
         </p>
+      ) : (
+        blocker &&
+        s.inner && (
+          <p
+            className="muted small"
+            data-testid="rgn-panel-submit-reason"
+            data-missing={m.join(',')}
+          >
+            {blocker}
+          </p>
+        )
       )}
       {s.submitError && (
         <p className="error small" data-testid="rgn-panel-submit-error">

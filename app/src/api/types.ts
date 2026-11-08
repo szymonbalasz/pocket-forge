@@ -144,6 +144,8 @@ export interface Draft {
   mask_id: string | null;
   /** REF's selection (schema §4.5, #51); null = REF's defaults (FR-REF-17). */
   references?: DraftReferences | null;
+  /** #55: append the blend instruction at submit; absent/null = on (the default). */
+  blend_instruction?: boolean | null;
   updated_at: string;
 }
 
@@ -229,6 +231,8 @@ export interface DraftInput {
   mask_id?: string | null;
   /** REF's selection (FR-REF-20, FR-PRJ-54). Sent only once the user changed it. */
   references?: DraftReferences | null;
+  /** #55: append the blend instruction at submit; absent/null = on (the default). */
+  blend_instruction?: boolean | null;
 }
 
 export interface ImageOpen {
@@ -438,6 +442,18 @@ export interface JobDraft {
   seed: number | null;
   /** REF's selection (FR-RGN-41, schema §4.5); null/absent = REF's defaults (FR-REF-17). */
   references?: DraftReferences | null;
+  /** #55: append the blend instruction at submit; absent = on (the default). */
+  blend_instruction?: boolean;
+}
+
+/** `rgn_blend_instruction_get` / `_set` result (#55). */
+export interface BlendInstruction {
+  /** The text in use (the setting, or the default). */
+  text: string;
+  default_text: string;
+  is_default: boolean;
+  /** What the open project appends (text + kind sentence); null without one. */
+  for_project: string | null;
 }
 
 export type SpendNeed = 'threshold' | 'unknown_cost' | 'set_cap';
@@ -606,6 +622,9 @@ export interface Commands {
   ];
   rgn_job_cancel: [{ job_id: string }, { result: 'canceled' | 'not_cancellable' }];
   rgn_job_retry_draft: [{ job_id: string }, JobDraft];
+  rgn_blend_instruction_get: [Record<string, never>, BlendInstruction];
+  /** null resets to the default. */
+  rgn_blend_instruction_set: [{ text: string | null }, BlendInstruction];
   rgn_job_dismiss: [{ job_id: string }, { trashed: number }];
   rgn_candidate_preview: [{ job_id: string; candidate_id: string; blend: RgnBlend }, RgnPreview];
   rgn_candidate_accept: [
@@ -683,6 +702,7 @@ export interface Events {
   };
   'rgn:candidate-ready': { job_id: string; candidate_id: string; status: 'ready' | 'invalid' };
   'rgn:spend': { spend: number; cap: number | null };
+  'rgn:blend-instruction': BlendInstruction;
   'project:original-ready': Record<string, never> | null;
   'export:progress': { export_id: string; phase: ExportPhase; fraction: number };
   'export:done': {

@@ -157,7 +157,7 @@ test('BL-10 a missing original: a readable message, no Rebuild, no tiles, tools 
   await expect(page.getByTestId('edt-build-error')).toHaveCount(0);
   await expect(page.getByText('Rebuild')).toHaveCount(0);
   await expect(page.getByTestId('edt-loading')).toHaveCount(0);
-  for (const t of ['pan', 'region', 'brush', 'eraser', 'fill', 'clear'])
+  for (const t of ['pan', 'region', 'brush', 'eraser', 'mask-region', 'clear'])
     await expect(page.getByTestId(`edt-toolbar-${t}`)).toBeDisabled();
   expect((await calls(page)).some((c) => c.cmd === 'edt_tiles_open')).toBe(false);
   await page.keyboard.press('b');
@@ -173,7 +173,7 @@ test('BL-14 FR-EDT-27 a margin change in Generate redraws the outer rect; the ma
   await expect
     .poll(async () => (await hook<Region>(page, 'region'))?.outer)
     .toEqual({ x: 272, y: 372, w: 656, h: 656 });
-  await page.getByTestId('edt-toolbar-fill').click();
+  await page.getByTestId('edt-toolbar-mask-region').click();
   const depth = (await hook<{ depth: number }>(page, 'undoDepth')).depth;
   const margin = page.getByTestId('rgn-panel-margin');
   await margin.fill('64');
@@ -199,7 +199,7 @@ test('OQ-EDT-14 FR-EDT-23 a History restore keeps EDT’s live region and mask; 
   await expect
     .poll(async () => (await region())?.inner)
     .toEqual({ x: 400, y: 500, w: 400, h: 400 });
-  await page.getByTestId('edt-toolbar-fill').click();
+  await page.getByTestId('edt-toolbar-mask-region').click();
   const drafts = async () =>
     (await calls(page)).filter((c) => c.cmd === 'project_put_draft').length;
   await expect.poll(drafts).toBeGreaterThan(0); // the new region's own draft save (FR-PRJ-19)
@@ -239,7 +239,7 @@ test('OQ-EDT-14 FR-EDT-23 a History restore keeps EDT’s live region and mask; 
     outer: { x: 272, y: 372, w: 656, h: 656 },
   });
   expect((await hook<{ full: number }>(page, 'mask')).full).toBe(400 * 400);
-  expect((await hook<{ label: string | null }>(page, 'undoDepth')).label).toBe('fill region');
+  expect((await hook<{ label: string | null }>(page, 'undoDepth')).label).toBe('mask whole region');
   // One save: the restored prompt with the live region, margin and stored mask (R55).
   await expect.poll(drafts).toBe(before + 1);
   const put = (await calls(page)).filter((c) => c.cmd === 'project_put_draft').at(-1)!;

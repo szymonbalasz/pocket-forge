@@ -920,6 +920,7 @@ pub use crate::region_edit::candidates::{
 pub use crate::region_edit::commands::{
     RgnControlsEvaluate, RgnJobEstimate, RgnRegionFit, RgnSpendGet, RgnSpendSet,
 };
+pub use crate::region_edit::instruction::{RgnBlendInstructionGet, RgnBlendInstructionSet};
 pub use crate::region_edit::jobs::{RgnJobCancel, RgnJobDismiss, RgnJobRetryDraft, RgnJobSubmit};
 
 // ---------------------------------------------------------------- reference packs
@@ -1027,6 +1028,8 @@ registry![
     ExportCancel,
     EdtMaskSubmit,
     EdtMaskRead,
+    RgnBlendInstructionGet,
+    RgnBlendInstructionSet,
 ];
 
 #[cfg(test)]

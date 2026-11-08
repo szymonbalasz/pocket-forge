@@ -747,6 +747,9 @@ pub struct DraftInput {
     /// REF's draft references (#51); `null` = REF's defaults.
     #[serde(default)]
     pub references: Option<Value>,
+    /// #55: the blend instruction setting; absent or `null` = on (the default).
+    #[serde(default)]
+    pub blend_instruction: Option<bool>,
 }
 
 /// Tells an absent field (`None`, via `default`) from an explicit `null` (`Some(None)`).
@@ -891,6 +894,7 @@ pub(crate) fn apply_draft(
         region: draft.region,
         mask_id: draft.mask_id.unwrap_or(kept_mask),
         references: draft.references,
+        blend_instruction: draft.blend_instruction,
         updated_at: ctx.now(),
         extra,
     });

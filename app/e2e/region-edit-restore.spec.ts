@@ -13,13 +13,12 @@ const region = async (page: Page) =>
   (await hook<{ inner: Rect } | null>(page, 'region'))?.inner ?? null;
 const maskFull = async (page: Page) => (await hook<{ full: number } | null>(page, 'mask'))?.full;
 const undo = (page: Page) => hook<Undo>(page, 'undoDepth');
-const reason = (page: Page) => page.getByTestId('rgn-panel-submit-reason');
 
 /** A region with the whole mask filled, saved to the store (FR-EDT-28). */
 async function regionAndFill(page: Page, from: [number, number], to: [number, number]) {
   await drawRegion(page, from, to);
   await expect.poll(() => region(page)).not.toBeNull();
-  await page.getByTestId('edt-toolbar-fill').click();
+  await page.getByTestId('edt-toolbar-mask-region').click();
   await expect(page.getByTestId('edt-mask-status')).toHaveText('Mask saved', { timeout: 6000 });
 }
 
@@ -91,7 +90,7 @@ test('FR-RGN-01 a region drawn after Delete reaches the Generate panel (walk D2)
 }) => {
   await openRgn(page, { maskId: null });
   await regionAndFill(page, [400, 500], [800, 900]);
-  await expect(reason(page)).not.toHaveText('Paint a mask inside the region first.');
+  await expect(page.getByTestId('rgn-panel-mask-hint')).toBeHidden();
   await page.keyboard.press('Delete');
   await expect(page.getByTestId('rgn-panel-empty')).toBeVisible();
   await regionAndFill(page, [1000, 500], [1300, 800]);
