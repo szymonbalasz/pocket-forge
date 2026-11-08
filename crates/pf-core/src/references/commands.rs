@@ -3,7 +3,7 @@
 //! longer than it takes to copy the settings.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use pf_provider::ReferenceRole;
 use serde::{Deserialize, Serialize};
@@ -72,9 +72,17 @@ fn changed(core: &Core) {
     core.ctx.emit("ref:packs-changed", json!({}));
 }
 
+/// Image thumbnails in the pack view and the References block: ≤ 256 px from EDT's `library`
+/// key space (FR-REF-14, R61). The packs-home mosaic keeps the 512 px library key.
+pub const IMAGE_THUMB_MAX_SIDE: u32 = 256;
+
+fn image_thumb(core: &Core, path: &Path) -> Option<String> {
+    tiles::register_library_image_sized(core, path, IMAGE_THUMB_MAX_SIDE)
+}
+
 fn with_urls(core: &Core, mut v: PackView) -> PackView {
     for img in &mut v.images {
-        img.thumb_url = tiles::register_library_image(core, &img.path);
+        img.thumb_url = image_thumb(core, &img.path);
     }
     v
 }
@@ -467,7 +475,7 @@ impl Command for RefResolve {
             if let Some(url) = item
                 .path
                 .as_deref()
-                .and_then(|p| tiles::register_library_image(core, p))
+                .and_then(|p| image_thumb(core, p))
             {
                 item.thumb_key = url
                     .rsplit_once("/i/")
