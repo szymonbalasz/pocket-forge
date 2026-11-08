@@ -59,7 +59,8 @@ pub fn prepare_override(ctx: &Context) -> CoreResult<()> {
     Ok(())
 }
 
-/// Creates any missing `Maps/`, `Tokens/`, `Items/` in an existing root (FR-PRJ-01).
+/// Creates any missing `Maps/`, `Tokens/`, `Items/` in an existing root (FR-PRJ-01), and a
+/// missing `References/` (FR-PRJ-51; not a section).
 pub fn ensure_sections(root: &Path) -> CoreResult<()> {
     if !root.is_dir() {
         return Err(unavailable(root));
@@ -71,6 +72,7 @@ pub fn ensure_sections(root: &Path) -> CoreResult<()> {
                 .map_err(|e| CoreError::io(format!("creating {}", dir.display()), &e))?;
         }
     }
+    crate::references::ensure_references_dir(root)?;
     Ok(())
 }
 

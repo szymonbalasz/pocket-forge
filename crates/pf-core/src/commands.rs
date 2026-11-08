@@ -780,6 +780,14 @@ pub use crate::region_edit::commands::{
     RgnControlsEvaluate, RgnJobEstimate, RgnRegionFit, RgnSpendGet, RgnSpendSet,
 };
 
+// ---------------------------------------------------------------- reference packs
+
+/// Reference-pack commands live in their own module (reference-packs spec §9).
+pub use crate::references::commands::{
+    RefListPacks, RefPackAddImages, RefPackCreate, RefPackDelete, RefPackGet, RefPackRemoveImages,
+    RefPackRename, RefPackUpdate, RefTrashList, RefTrashRestore,
+};
+
 // ---------------------------------------------------------------- registry (append-only)
 
 /// A registry row: command name → JSON adapter.
@@ -831,6 +839,16 @@ registry![
     ProjectPrefetchOriginal,
     ProjectFolderList,
     ProjectFolderAdd,
+    RefListPacks,
+    RefPackGet,
+    RefPackCreate,
+    RefPackRename,
+    RefPackUpdate,
+    RefPackAddImages,
+    RefPackRemoveImages,
+    RefPackDelete,
+    RefTrashList,
+    RefTrashRestore,
 ];
 
 #[cfg(test)]

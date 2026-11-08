@@ -68,6 +68,16 @@ tauri_commands! {
     project_prefetch_original => c::ProjectPrefetchOriginal,
     project_folder_list => c::ProjectFolderList,
     project_folder_add => c::ProjectFolderAdd,
+    ref_list_packs => c::RefListPacks,
+    ref_pack_get => c::RefPackGet,
+    ref_pack_create => c::RefPackCreate,
+    ref_pack_rename => c::RefPackRename,
+    ref_pack_update => c::RefPackUpdate,
+    ref_pack_add_images => c::RefPackAddImages,
+    ref_pack_remove_images => c::RefPackRemoveImages,
+    ref_pack_delete => c::RefPackDelete,
+    ref_trash_list => c::RefTrashList,
+    ref_trash_restore => c::RefTrashRestore,
 }
 
 #[cfg(test)]
