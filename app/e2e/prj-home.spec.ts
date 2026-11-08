@@ -6,6 +6,7 @@ import {
   calls,
   defaultSeed,
   dropFiles,
+  emit,
   FIXTURE_SIZE,
   mockCore,
   openFirstCard,
@@ -213,6 +214,23 @@ test('R40 the provider chip is a status-bar segment next to the PRJ save state; 
   ).toBeVisible();
   await expect(page.getByTestId('prv-status-mode')).toHaveCount(0);
   await expect(page.getByTestId('app-slot-rail').getByTestId('prv-status-chip')).toHaveCount(0);
+});
+
+test('BL-38 a long save-state text never wraps the provider chip to a second line', async ({
+  page,
+}) => {
+  // A typical window, both panels open: room for the segments, not for the full save text.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openFirstCard(page);
+  await emit(page, 'project:save-failed', { reason: 'folder_moved', retrying: true });
+  const save = page.getByTestId('prj-status-save');
+  await expect(save).toContainText('Save failed, project folder moved, retrying');
+  const chip = page.locator('[data-segment="provider:chip"]');
+  const top = async (l: typeof chip) => (await l.boundingBox())!.y;
+  const height = async (l: typeof chip) => (await l.boundingBox())!.height;
+  // One line: the chip sits level with the save segment, and the bar stays one row high.
+  expect(Math.abs((await top(chip)) - (await top(save)))).toBeLessThan(8);
+  expect(await height(page.getByTestId('app-status-bar'))).toBeLessThan(40);
 });
 
 test('FR-PRJ-03 #53 + New uses the native image dialog when it is available', async ({ page }) => {

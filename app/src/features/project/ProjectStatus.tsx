@@ -22,6 +22,7 @@ export function ProjectStatus() {
 
   if (!project) return null;
   const state = saveState(save, project.read_only);
+  const label = saveLabel(save, project.read_only);
   return (
     <span
       className={`prj-status prj-status-${state}`}
@@ -30,7 +31,10 @@ export function ProjectStatus() {
       title={project.project_dir}
     >
       <span className="prj-status-name">{project.name}</span>
-      <span className="prj-status-label">{saveLabel(save, project.read_only)}</span>
+      {/* BL-38: may ellipsise in a narrow bar; the full text stays readable to AT. */}
+      <span className="prj-status-label" aria-label={label}>
+        {label}
+      </span>
     </span>
   );
 }

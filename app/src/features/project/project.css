@@ -217,6 +217,8 @@
   display: inline-flex;
   gap: var(--pf-space-2);
   white-space: nowrap;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .prj-status-name {
@@ -225,6 +227,9 @@
 
 .prj-status-label {
   color: var(--pf-text-dim);
+  /* BL-38: shortened, not wrapped, in a narrow status bar. */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .prj-status-failed .prj-status-label,
