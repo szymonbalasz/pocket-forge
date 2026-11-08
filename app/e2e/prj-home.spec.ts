@@ -54,7 +54,7 @@ test('FR-PRJ-49 section switching: the rail picks the section; Items is empty; t
   await expect(page.getByTestId('prj-home-card-name')).toHaveText(['Goblin']);
 
   await page.getByTestId('prj-rail-items').click();
-  await expect(page.getByTestId('prj-home-empty')).toContainText('Drop an image to start a item');
+  await expect(page.getByTestId('prj-home-empty')).toContainText('Drop an image to start an item');
   await expect(cards(page)).toHaveCount(0);
 
   await page.getByTestId('prj-rail-maps').click();
