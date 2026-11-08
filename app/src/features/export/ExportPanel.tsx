@@ -157,7 +157,9 @@ export function ExportPanel() {
       const el = body.current?.querySelector<HTMLElement>(
         '[data-testid="exp-panel-grid-mode"] [data-state="on"], input:not(:disabled)',
       );
-      el?.focus();
+      // A modifier chord doesn't count as keyboard modality in Chromium, so ask for the ring
+      // (ui-guidelines: focus ring always visible).
+      el?.focus({ focusVisible: true });
     });
     return () => cancelAnimationFrame(id);
   }, [s.focusTick]);

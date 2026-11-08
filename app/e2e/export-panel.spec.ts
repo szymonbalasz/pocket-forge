@@ -23,6 +23,13 @@ test('FR-EXP-06 FR-EXP-07 FR-EXP-08 FR-EXP-26 grid + target → plan line, and E
   // Ctrl+E focuses the section (EXP §7).
   await expect(page.getByTestId('exp-panel-grid-mode-px')).toBeFocused();
   await expect(plan(page)).toHaveText('4200×5600 · Full resolution · exports/Crypt.png');
+  // After mouse use, Ctrl+E still shows the focus ring (ui-guidelines; walkthrough D4).
+  await page.getByTestId('edt-view-fit').click();
+  await page.keyboard.press('Control+e');
+  await expect(page.getByTestId('exp-panel-grid-mode-px')).toBeFocused();
+  expect(
+    await page.getByTestId('exp-panel-grid-mode-px').evaluate((el) => el.matches(':focus-visible')),
+  ).toBe(true);
   await expect(page.getByTestId('exp-panel-target-ppsq')).toBeDisabled();
   await expect(page.getByTestId('edt-view-display')).toBeDisabled();
 
