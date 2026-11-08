@@ -1,5 +1,27 @@
-//! Standard base64 decoding for pasted image data (`project_create_from_clipboard.data_b64`).
-//! A few lines in-crate instead of a new dependency (AGENTS §3.5).
+//! Standard base64 for binary bodies over IPC (`project_create_from_clipboard.data_b64`, EDT
+//! mask bytes). A few lines in-crate instead of a new dependency (AGENTS §3.5).
+
+const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// Encodes standard base64 with padding.
+pub fn encode(bytes: &[u8]) -> String {
+    let mut out = Vec::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk.len();
+        let v = u32::from(chunk[0]) << 16
+            | u32::from(*chunk.get(1).unwrap_or(&0)) << 8
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        for i in 0..4 {
+            out.push(if i <= n {
+                ALPHABET[(v >> (18 - 6 * i) & 63) as usize]
+            } else {
+                b'='
+            });
+        }
+    }
+    // Only ASCII from the alphabet and '=' was pushed.
+    String::from_utf8(out).unwrap_or_default()
+}
 
 fn value(c: u8) -> Option<u32> {
     Some(match c {
@@ -46,7 +68,18 @@ pub fn decode(text: &str) -> Option<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use super::decode;
+    use super::{decode, encode};
+
+    #[test]
+    fn fr_edt_18_encode_round_trips() {
+        assert_eq!(encode(b"hello"), "aGVsbG8=");
+        assert_eq!(encode(b"hello!"), "aGVsbG8h");
+        assert_eq!(encode(b""), "");
+        let all: Vec<u8> = (0..=255).cycle().take(1000).collect();
+        for n in [0, 1, 2, 3, 4, 999, 1000] {
+            assert_eq!(decode(&encode(&all[..n])).unwrap(), &all[..n]);
+        }
+    }
 
     #[test]
     fn fr_prj_10_decodes_base64_variants() {

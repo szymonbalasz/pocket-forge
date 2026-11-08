@@ -6,7 +6,7 @@ import type { CoreErrorShape, TilesDescriptor } from '../../api';
 
 export class TileEventLog {
   private readonly built = new Map<string, Set<number>>();
-  private readonly failed = new Map<string, string>();
+  private readonly failed = new Map<string, CoreErrorShape>();
 
   progress(key: string, level: number): void {
     let s = this.built.get(key);
@@ -14,10 +14,15 @@ export class TileEventLog {
     s.add(level);
   }
 
-  fail(key: string, error: CoreErrorShape | string): string {
-    const msg = typeof error === 'string' ? error : error.message;
-    this.failed.set(key, msg);
-    return msg;
+  /** Records a failure; a bare message gets the code `error`. Returns it as `{code, message}`
+   *  (D6: the code picks the wording and whether Rebuild can help). */
+  fail(key: string, error: CoreErrorShape | string): CoreErrorShape {
+    const e =
+      typeof error === 'string'
+        ? { code: 'error', message: error }
+        : { code: error.code, message: error.message };
+    this.failed.set(key, e);
+    return e;
   }
 
   /** Levels reported built for `key`. */
@@ -25,7 +30,7 @@ export class TileEventLog {
     return [...(this.built.get(key) ?? [])];
   }
 
-  failure(key: string): string | null {
+  failure(key: string): CoreErrorShape | null {
     return this.failed.get(key) ?? null;
   }
 

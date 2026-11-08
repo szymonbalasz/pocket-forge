@@ -16,7 +16,7 @@ import {
   type MaskBuffer,
   type StampMode,
 } from './mask';
-import type { RegionState } from './store';
+import type { Rect, RegionState } from './store';
 import type { UndoEntry, UndoStack } from './undo';
 import type { Pt } from './view';
 
@@ -44,7 +44,7 @@ export interface MaskControllerDeps {
   view: MaskView;
   /** Sets the region in the editor state (no fit: the stored validated region). */
   setRegion: (r: RegionState | null) => void;
-  /** Called after every change of mask content (debounced submit, slice 5). */
+  /** Called after every change of mask content and at every stroke end (debounced submit). */
   onChange?: () => void;
 }
 
@@ -69,6 +69,11 @@ export class MaskController {
 
   get currentRegion(): RegionState | null {
     return this.region;
+  }
+
+  /** A stroke is in progress (the debounced submit waits for its end, FR-EDT-28). */
+  get stroking(): boolean {
+    return this.stroke !== null;
   }
 
   /** Sets the region without an undo step (open, reopen). */
@@ -105,6 +110,25 @@ export class MaskController {
     });
   }
 
+  /** BL-14: another feature's validated region (RGN's fit after a margin change, a model change
+   *  or Retry). Same inner rect → only the outline follows (no undo step, mask untouched); a new
+   *  inner rect is a region change (FR-EDT-20: overlap kept, one undo step). */
+  applyValidated(next: RegionState | null): void {
+    const cur = this.region;
+    if (!next) {
+      if (cur) this.changeRegion(null);
+      return;
+    }
+    const same = (a: Rect, b: Rect) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+    if (cur && same(cur.inner, next.inner)) {
+      if (same(cur.outer, next.outer)) return;
+      this.region = { inner: { ...next.inner }, outer: { ...next.outer } };
+      this.deps.setRegion(this.region);
+      return;
+    }
+    this.changeRegion({ inner: { ...next.inner }, outer: { ...next.outer } });
+  }
+
   /** FR-EDT-15: starts a stroke at image point p. False when there is no region (FR-EDT-17). */
   beginStroke(p: Pt, mode: StampMode, size: number, hardness: number): boolean {
     if (!this.mask) return false;
@@ -135,6 +159,8 @@ export class MaskController {
     const s = this.stroke;
     const m = this.mask;
     this.stroke = null;
+    // The submit debounce counts from the stroke end (R7).
+    if (s) this.deps.onChange?.();
     if (!s || !m || !s.box) return;
     const box = s.box;
     const w = m.rect.w;

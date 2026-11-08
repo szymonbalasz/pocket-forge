@@ -167,7 +167,9 @@ impl Lab {
     /// Quits the app: a new core on the same data dir and library. The fake provider moves over,
     /// like a provider's server that still knows the job.
     pub fn restart(mut self) -> Lab {
-        let provider = std::mem::replace(&mut self.core.ctx.provider, AnyProvider::fake());
+        // The context is shared (`Arc`) with background threads; none run in these tests.
+        let ctx = std::sync::Arc::get_mut(&mut self.core.ctx).expect("the context is not shared");
+        let provider = std::mem::replace(&mut ctx.provider, AnyProvider::fake());
         self.generation += 1;
         let events = Arc::new(RecordedEvents::default());
         // The app is restarted an hour later.

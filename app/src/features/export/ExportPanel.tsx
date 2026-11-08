@@ -346,6 +346,30 @@ export function ExportPanel() {
             </div>
           )}
 
+          {run && s.closeAsk && (
+            <div
+              className="banner small exp-close-ask"
+              role="alert"
+              data-testid="exp-panel-close-ask"
+            >
+              <span>Cancel the export and close?</span>
+              <button
+                type="button"
+                data-testid="exp-panel-close-confirm"
+                onClick={() => void exportStore.confirmClose()}
+              >
+                Cancel export and close
+              </button>
+              <button
+                type="button"
+                data-testid="exp-panel-close-keep"
+                onClick={() => exportStore.keepExporting()}
+              >
+                Keep exporting
+              </button>
+            </div>
+          )}
+
           {run ? (
             <div className="exp-progress-row">
               <div

@@ -4,6 +4,8 @@
 //
 //   corepack pnpm fixtures                       → the default set into fixtures/generated/
 //   corepack pnpm fixtures -- --size 4200x5600   → one extra map
+//   corepack pnpm fixtures -- --size 4200x5600 --cell 140  → with 140 px cells (EXP walkthrough:
+//                                                    30×40 cells)
 //   corepack pnpm fixtures -- --committed        → rewrite the small committed fixtures
 //
 // Committed fixtures (< 1 MB each, AGENTS §9) live in fixtures/images/; everything else goes to
@@ -125,7 +127,10 @@ if (args.includes('--committed')) {
   write(join(root, 'images', 'grid-map-1024x1280.png'), gridMap(1024, 1280, { cell: 128 }));
 } else if (args.includes('--size')) {
   const [w, h] = parseSize(args[args.indexOf('--size') + 1]);
-  write(join(root, 'generated', `grid-map-${w}x${h}.png`), gridMap(w, h));
+  const cell = args.includes('--cell') ? Number(args[args.indexOf('--cell') + 1]) : undefined;
+  if (cell !== undefined && !(Number.isInteger(cell) && cell >= 8))
+    throw new Error(`--cell needs a whole number of px (>= 8), got ${cell}`);
+  write(join(root, 'generated', `grid-map-${w}x${h}.png`), gridMap(w, h, { cell }));
 } else {
   // Typical map (#30): 30×40 cells at 70 px.
   write(join(root, 'generated', 'grid-map-2100x2800.png'), gridMap(2100, 2800));

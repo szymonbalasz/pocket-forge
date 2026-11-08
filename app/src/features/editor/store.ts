@@ -3,6 +3,7 @@
 // inputs. Session-only (KQ-16, OQ-EDT-11): nothing here is persisted.
 import { useSyncExternalStore } from 'react';
 
+import type { MaskStatus } from './maskHandoff';
 import type { Size, View } from './view';
 
 export type Tool = 'pan' | 'region' | 'brush' | 'eraser';
@@ -89,6 +90,10 @@ export interface EditorState {
   /** `\` held in flip mode: show "before". */
   flipBefore: boolean;
   picker: PickerState | null;
+  /** The mask hand-off state (`edt-mask-status`, FR-EDT-28/29). */
+  maskStatus: MaskStatus;
+  /** The original is missing (BL-10): no tiles, tools disabled until PRJ relinks it. */
+  originalMissing: boolean;
 }
 
 const initial: EditorState = {
@@ -109,6 +114,8 @@ const initial: EditorState = {
   split: 0.5,
   flipBefore: false,
   picker: null,
+  maskStatus: { kind: 'none' },
+  originalMissing: false,
 };
 
 let state: EditorState = initial;
