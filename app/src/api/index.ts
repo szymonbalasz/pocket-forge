@@ -132,7 +132,7 @@ export const api = {
   },
   project: {
     open: (path: string) => call('project_open', { path }),
-    close: () => call('project_close', {}),
+    close: (force = false) => call('project_close', force ? { force: true } : {}),
     get: () => call('project_get', {}),
     putDraft: (draft: Commands['project_put_draft'][0]['draft']) =>
       call('project_put_draft', { draft }),
@@ -152,6 +152,8 @@ export const api = {
     trashRestore: (itemId: string) => call('project_trash_restore', { item_id: itemId }),
     diskUsage: () => call('project_disk_usage', {}),
     relinkOriginal: (path: string) => call('project_relink_original', { path }),
+    conflictGet: () => call('project_conflict_get', {}),
+    resolveConflict: (keep: 'this' | 'other') => call('project_resolve_conflict', { keep }),
   },
   editor: {
     imageOpen: (projectId: string, imageId: string, maxSide?: number) =>

@@ -20,8 +20,12 @@ Small items for idle slots (see [process.md](../process.md)). The planned work a
 | BL-14 | EDT doesn't redraw the region outline when the margin changes, or when Retry fills in a job's region: add an EDT bridge setter | S | `features/editor` bridge, `features/region-edit` | — | in progress, EDT mask hand-off |
 | BL-15 | The right panel is empty on Home: show a hint or collapse it | XS | shell | PRJ UI merge | done |
 | BL-16 | EDT `library` keys serve user-folder images at full size: add a `max_side` copy (OQ-PRJ-16 said ≤ 512 px) | XS | `pf-core` tiles.rs | — | in progress, EDT mask hand-off |
-| BL-17 | Flaky: `fr_prj_15_changed_original_opens_read_only` depends on an mtime tick (seen by the PRJ UI builder after the racily-clean fix) | XS | `pf-core` project tests | PRJ retention build | offered to PRJ retention |
-| BL-18 | FR-PRJ-21: closing with `unsaved` shows the error but doesn't ask first | XS | `features/project` | PRJ retention build | offered to PRJ retention |
+| BL-17 | Flaky: `fr_prj_15_changed_original_opens_read_only` depends on an mtime tick (seen by the PRJ UI builder after the racily-clean fix) | XS | `pf-core` project tests | PRJ retention build | done (PRJ retention: hash until the first commit, R45) |
+| BL-18 | FR-PRJ-21: closing with `unsaved` shows the error but doesn't ask first | XS | `features/project` | PRJ retention build | done (PRJ retention: Close anyway) |
 | BL-19 | Move the feather/colour-match bake from `pf-core` `region_edit/blend.rs` into `pf-imaging` (ADR 0004 puts blend there) | S | `pf-imaging`, `pf-core` region_edit | RGN, REF 6 builds | done |
 | BL-20 | FR-RGN-18 `long_running` at 180 s has no test (clock seam) | XS | `pf-core` region_edit tests | RGN builds | done |
 | BL-21 | `cargo clippy --release -D warnings` fails on an unused field (`Faults.rule`, `pf-core` context.rs); CI runs only debug clippy | XS | `pf-core` context.rs | — | open |
+| BL-22 | Conflict view draws each layer stack as text (OQ-PRJ-11 B fallback): EDT has no read-only "draw this layer stack" component yet; swap it into `ConflictView.tsx` panes when EDT exposes one (OQ-PRJ-11 A) | S | `features/editor` export, `features/project/ConflictView.tsx` | EDT build | open |
+| BL-23 | A purged candidate keeps a `trash_id` that points at nothing | XS | `pf-core` project retention | — | open |
+| BL-24 | Restore only `candidates`, `job_inputs` and `conflict_copy` trash items (R51): restoring an orphan or mask item is undone by the next sweep | XS | `pf-core` project, `features/project` | — | open |
+| BL-25 | RGN spool replay drops an entry the store refuses for good, after logging it: surface it to the user | XS | `pf-core` region_edit runner | — | open |

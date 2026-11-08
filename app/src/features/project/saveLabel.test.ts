@@ -17,9 +17,20 @@ test('FR-PRJ-21 a locked file shows Save failed, file locked, retrying', () => {
   const failed = { kind: 'failed', code: 'locked', message: 'locked', retrying: true } as const;
   expect(saveLabel(failed, null)).toBe('Save failed, file locked, retrying');
   expect(saveLabel({ ...failed, retrying: false }, null)).toBe('Save failed, file locked');
-  expect(saveLabel({ ...failed, code: 'not_found', message: 'folder moved' }, null)).toBe(
-    'Save failed (folder moved), retrying',
+});
+
+test('FR-PRJ-21 walkthrough D3: a moved folder and other failures show a reason, never the raw message', () => {
+  const raw = 'reading C:/x/Maps/hall/.pforge/revisions/r.json: (os error 3)';
+  const failed = { kind: 'failed', code: 'folder_moved', message: raw, retrying: true } as const;
+  expect(saveLabel(failed, null)).toBe('Save failed, project folder moved, retrying');
+  expect(saveLabel({ ...failed, code: 'not_found', retrying: false }, null)).toBe(
+    'Save failed, file missing',
   );
+  expect(saveLabel({ ...failed, code: 'disk_full', retrying: false }, null)).toBe(
+    'Save failed, disk full',
+  );
+  for (const code of ['folder_moved', 'not_found', 'io', 'x'])
+    expect(saveLabel({ ...failed, code }, null)).not.toContain('os error');
 });
 
 test('FR-PRJ-26 FR-PRJ-15 FR-PRJ-41 read-only shows its reason; FR-PRJ-35 a conflict shows Conflict', () => {

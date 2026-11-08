@@ -409,14 +409,52 @@ impl Command for ProjectOpen {
 
 pub struct ProjectClose;
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectCloseInput {
+    /// Close even with a save still pending (FR-PRJ-21: the UI asked first).
+    #[serde(default)]
+    pub force: bool,
+}
+
+impl Validate for ProjectCloseInput {}
+
 impl Command for ProjectClose {
     const NAME: &'static str = "project_close";
-    type Input = NoInput;
+    type Input = ProjectCloseInput;
     type Output = Ok_;
 
-    /// Releases the decoded original (R11) and the served images.
-    fn run(core: &Core, _: NoInput) -> CoreResult<Ok_> {
+    /// Releases the decoded original (R11) and the served images. A save still pending after
+    /// `locked` → `unsaved`, unless `force` (FR-PRJ-21).
+    fn run(core: &Core, input: ProjectCloseInput) -> CoreResult<Ok_> {
         let mut state = core.state();
+        let install_id = state.settings.install_id;
+        if !input.force
+            && let Some(p) = state.project.as_mut()
+        {
+            // One last try. Spooled writes are on disk already (FR-PRJ-40); only an in-memory
+            // draft makes closing ask.
+            project::retry_pending(&core.ctx, install_id, p);
+        }
+        if !input.force
+            && let Some(p) = state.project.as_ref().filter(|p| project::has_unsaved(p))
+        {
+            // Says why, without paths (walkthrough D3).
+            let moved = p.warnings.iter().any(|w| w.code == project::FOLDER_MOVED);
+            let (reason, message) = if moved {
+                (
+                    project::FOLDER_MOVED,
+                    "Your latest changes aren't saved: the project folder was moved or renamed. Close anyway?",
+                )
+            } else {
+                (
+                    "locked",
+                    "Your latest changes aren't saved yet: the file is locked. Close anyway?",
+                )
+            };
+            return Err(CoreError::new(ErrorCode::Unsaved, message)
+                .with_detail(serde_json::json!({ "reason": reason })));
+        }
         if let Some(p) = state.project.take() {
             p.decoded.release();
         }
@@ -796,6 +834,12 @@ pub use crate::references::commands::{
     RefPackRename, RefPackUpdate, RefResolve, RefTrashList, RefTrashRestore,
 };
 
+/// PRJ retention and conflict commands (asset-project §9, slices 5 and 6).
+pub use crate::project::commands::{
+    ProjectConflictGet, ProjectDiskUsage, ProjectResolveConflict, ProjectTrashList,
+    ProjectTrashRestore,
+};
+
 // ---------------------------------------------------------------- registry (append-only)
 
 /// A registry row: command name → JSON adapter.
@@ -868,6 +912,11 @@ registry![
     RefTrashList,
     RefTrashRestore,
     RefResolve,
+    ProjectTrashList,
+    ProjectTrashRestore,
+    ProjectDiskUsage,
+    ProjectConflictGet,
+    ProjectResolveConflict,
 ];
 
 #[cfg(test)]

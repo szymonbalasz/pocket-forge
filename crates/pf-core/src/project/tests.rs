@@ -338,6 +338,83 @@ fn edge_folder_moved_while_open_fails_the_next_commit_with_not_found() {
 }
 
 #[test]
+fn fr_prj_21_edge_folder_moved_while_open_keeps_the_draft_and_says_so_without_paths() {
+    let e = env();
+    let dir = e.project("Crypt");
+    let mut p = e.open(&dir);
+    let moved = e.lib().join("Maps/Elsewhere");
+    std::fs::rename(&dir, &moved).unwrap();
+
+    // The background draft save: refused, kept in memory, surfaced (walkthrough D3).
+    let err = draft(&e, &mut p, "unsaved prompt").unwrap_err();
+    assert!(is_folder_moved(&err), "{err:?}");
+    assert!(has_unsaved(&p), "closing must ask");
+    let failed = e
+        .events
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|(n, _)| n == "project:save-failed")
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        failed.1,
+        serde_json::json!({"reason": "folder_moved", "retrying": true})
+    );
+    assert!(p.warnings.iter().any(|w| w.code == FOLDER_MOVED), "banner");
+
+    // Manual Save and Restore: the same error, never the OS text or an absolute path.
+    let root = e.dir.path().to_string_lossy().into_owned();
+    let head = p.manifest.head_revision;
+    for err in [
+        save_revision(&e.ctx, e.install(), &mut p, None).unwrap_err(),
+        restore_revision(&e.ctx, e.install(), &mut p, head).unwrap_err(),
+    ] {
+        assert!(is_folder_moved(&err), "{err:?}");
+        assert!(!err.message.contains(&root), "{}", err.message);
+        assert!(!err.message.contains("os error"), "{}", err.message);
+    }
+
+    // Still moved at the 10 s retry; renamed back → the retry commits the kept draft.
+    assert!(retry_pending(&e.ctx, e.install(), &mut p));
+    std::fs::rename(&moved, &dir).unwrap();
+    assert!(!retry_pending(&e.ctx, e.install(), &mut p));
+    assert!(!has_unsaved(&p));
+    assert!(!p.warnings.iter().any(|w| w.code == FOLDER_MOVED));
+    assert_eq!(
+        e.open(&dir).manifest.draft.unwrap().final_prompt,
+        "unsaved prompt"
+    );
+}
+
+#[test]
+fn fr_prj_21_other_draft_save_failures_are_surfaced_not_retried() {
+    let mut e = env();
+    let dir = e.project("Crypt");
+    let mut p = e.open(&dir);
+    e.ctx.faults = Faults::parse("after_temp:project.json", FaultAction::Error).unwrap();
+    let err = draft(&e, &mut p, "x").unwrap_err();
+    assert_eq!(err.code, ErrorCode::Io);
+    assert!(!has_unsaved(&p));
+    let failed = e
+        .events
+        .0
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|(n, _)| n == "project:save-failed")
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        failed.1,
+        serde_json::json!({"reason": "io", "retrying": false})
+    );
+}
+
+#[test]
 fn fr_prj_24_a_deleted_manifest_is_rebuilt_from_the_history() {
     let e = env();
     let dir = e.project("Crypt");

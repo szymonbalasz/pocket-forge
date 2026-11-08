@@ -89,6 +89,11 @@ tauri_commands! {
     ref_trash_list => c::RefTrashList,
     ref_trash_restore => c::RefTrashRestore,
     ref_resolve => c::RefResolve,
+    project_trash_list => c::ProjectTrashList,
+    project_trash_restore => c::ProjectTrashRestore,
+    project_disk_usage => c::ProjectDiskUsage,
+    project_conflict_get => c::ProjectConflictGet,
+    project_resolve_conflict => c::ProjectResolveConflict,
 }
 
 #[cfg(test)]

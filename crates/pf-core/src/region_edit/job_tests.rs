@@ -798,9 +798,12 @@ fn fr_rgn_37_a_conflict_spools_the_candidates_and_replays_after_resolution() {
         code(lab.core.dispatch("rgn_job_dismiss", json!({"job_id": id}))),
         ErrorCode::JobActive
     );
-    // Resolved: the next tick replays.
-    std::fs::write(&path, &ours).unwrap();
-    runner::tick(&lab.core, false);
+    // Resolved by the user (FR-PRJ-36): the resolve runs the runner tick, which replays (R48).
+    let rev = lab
+        .core
+        .dispatch("project_resolve_conflict", json!({"keep": "this"}))
+        .unwrap();
+    assert_eq!(rev["reason"], "conflict");
     assert_eq!(lab.job(id).state, JobState::Fetched);
     assert_eq!(lab.candidates(id).len(), 3);
     assert!(!spool.exists());
