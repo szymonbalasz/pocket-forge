@@ -763,6 +763,70 @@ fn fr_exp_18_locked_for_too_long_fails_locked_and_removes_the_temp() {
     assert!(t.exports().is_empty(), "no temp, no final file");
 }
 
+#[test]
+fn fr_exp_19_lock_retry_keeps_reporting_write_progress() {
+    let t = setup();
+    let first = Arc::new(std::sync::Mutex::new(None::<std::time::Instant>));
+    let f = first.clone();
+    t.seams(ExportSeams {
+        // Locked for 700 ms from the first try, then free.
+        rename: Box::new(move |from, to| {
+            let at = *f
+                .lock()
+                .unwrap()
+                .get_or_insert_with(std::time::Instant::now);
+            if at.elapsed() < Duration::from_millis(700) {
+                return Err(locked_error());
+            }
+            std::fs::rename(from, to)
+        }),
+        is_locked: Box::new(is_test_lock),
+        ..ExportSeams::default()
+    });
+    t.start(settings(None, None, "png"), false).unwrap();
+    let waiting = t
+        .events("export:progress")
+        .iter()
+        .filter(|p| p["phase"] == "write" && p["fraction"].as_f64() == Some(0.5))
+        .count();
+    // Nominally 3–4 (every 200 ms); before the heartbeat there were none.
+    assert!(waiting >= 2, "{waiting} write reports during a 700 ms lock");
+    assert_eq!(t.exports(), ["Crypt.png"]);
+}
+
+#[test]
+fn fr_exp_20_cancel_ends_the_lock_retry() {
+    let t = setup();
+    let tried = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let tr = tried.clone();
+    t.seams(ExportSeams {
+        rename: Box::new(move |_, _| {
+            tr.store(true, Ordering::SeqCst);
+            Err(locked_error())
+        }),
+        is_locked: Box::new(is_test_lock),
+        lock_retry_for: Duration::from_secs(20),
+        ..ExportSeams::default()
+    });
+    let canceled_in = std::thread::scope(|s| {
+        let run = s.spawn(|| t.start(settings(None, None, "png"), false).unwrap());
+        while !tried.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        let id = t.events("export:progress")[0]["export_id"].clone();
+        let at = std::time::Instant::now();
+        t.core
+            .dispatch("export_cancel", json!({"export_id": id}))
+            .unwrap();
+        run.join().unwrap();
+        at.elapsed()
+    });
+    assert!(canceled_in < Duration::from_secs(1), "{canceled_in:?}");
+    assert_eq!(t.events("export:canceled").len(), 1);
+    assert!(t.events("export:failed").is_empty());
+    assert!(t.exports().is_empty(), "no temp, no final file");
+}
+
 /// A WebP encoder that overflows lossy encodes, or fails with a given error.
 struct FakeWebp {
     lossy: fn() -> EncodeError,

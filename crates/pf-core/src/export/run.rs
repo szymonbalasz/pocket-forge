@@ -6,6 +6,7 @@ use std::io::{self, BufWriter, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -33,6 +34,9 @@ const LOCK_RETRY_FOR: Duration = Duration::from_secs(3);
 const STALE_TEMP_AGE: Duration = Duration::from_secs(3600);
 /// Progress events are at most this frequent (and at least once per strip, FR-EXP-19).
 const PROGRESS_EVERY: Duration = Duration::from_millis(100);
+/// A step with no progress hook (Lanczos, the lock retry) still reports this often (FR-EXP-19:
+/// at least every 500 ms).
+const HEARTBEAT: Duration = Duration::from_millis(200);
 
 type RenameFn = dyn Fn(&Path, &Path) -> io::Result<()> + Send + Sync;
 type LockedFn = dyn Fn(&io::Error) -> bool + Send + Sync;
@@ -275,7 +279,14 @@ fn sweep_stale_temps(dir: &Path) -> usize {
 }
 
 /// The rename with FR-EXP-18's lock retry: backoff for up to `lock_retry_for`, then the error.
-fn rename_retrying(seams: &ExportSeams, from: &Path, to: &Path) -> io::Result<()> {
+/// Each wait is at most `HEARTBEAT` and is followed by a `write` report (FR-EXP-19), which also
+/// lets a cancel end the retry (FR-EXP-20).
+fn rename_retrying(
+    seams: &ExportSeams,
+    from: &Path,
+    to: &Path,
+    r: &mut Reporter<'_>,
+) -> Result<(), Stop> {
     let start = Instant::now();
     let mut delay = Duration::from_millis(25);
     loop {
@@ -283,11 +294,38 @@ fn rename_retrying(seams: &ExportSeams, from: &Path, to: &Path) -> io::Result<()
             Ok(()) => return Ok(()),
             Err(e) if (seams.is_locked)(&e) && start.elapsed() < seams.lock_retry_for => {
                 std::thread::sleep(delay);
-                delay = (delay * 2).min(Duration::from_millis(500));
+                delay = (delay * 2).min(HEARTBEAT);
+                r.check(Phase::Write, 0.5)?;
             }
-            Err(e) => return Err(e),
+            Err(e) => return Err(io_stop(seams, "replacing the export", &e)),
         }
     }
+}
+
+/// Runs `work` on a scoped thread and calls `tick` every `every` until it ends: the heartbeat
+/// for a step with no progress hook (FR-EXP-19). `work` can't be stopped, so a cancel (`tick`
+/// breaks) is kept and returned as `Break` once `work` has ended.
+fn with_heartbeat<T: Send>(
+    every: Duration,
+    mut tick: impl FnMut() -> ControlFlow<()>,
+    work: impl FnOnce() -> T + Send,
+) -> ControlFlow<(), T> {
+    std::thread::scope(|s| {
+        let (tx, rx) = mpsc::channel();
+        s.spawn(move || {
+            let _ = tx.send(work());
+        });
+        let mut canceled = false;
+        loop {
+            match rx.recv_timeout(every) {
+                Ok(out) if !canceled => return ControlFlow::Continue(out),
+                Ok(_) => return ControlFlow::Break(()),
+                Err(RecvTimeoutError::Timeout) => canceled = canceled || tick().is_break(),
+                // `work` panicked; the scope re-raises the panic.
+                Err(RecvTimeoutError::Disconnected) => return ControlFlow::Break(()),
+            }
+        }
+    })
 }
 
 /// Encodes into the open temp file.
@@ -323,8 +361,16 @@ fn encode_into(
             if progress(Phase::Resize, 0.0).is_break() {
                 return Err(Stop::Canceled);
             }
-            let small =
-                resize_lanczos3(&full, job.width, job.height).map_err(|e| encode_stop(seams, e))?;
+            let (w, h) = (job.width, job.height);
+            let resized = with_heartbeat(
+                HEARTBEAT,
+                || progress(Phase::Resize, 0.0),
+                || resize_lanczos3(&full, w, h),
+            );
+            let ControlFlow::Continue(small) = resized else {
+                return Err(Stop::Canceled);
+            };
+            let small = small.map_err(|e| encode_stop(seams, e))?;
             drop(full);
             if progress(Phase::Resize, 1.0).is_break() {
                 return Err(Stop::Canceled);
@@ -415,8 +461,7 @@ fn export(ctx: &Context, job: &ExportJob) -> Result<Done, Stop> {
             .hit(FaultPoint::AfterTemp, &dest)
             .map_err(|e| io_stop(seams, "writing the export", &e))?;
         r.check(Phase::Write, 0.5)?;
-        rename_retrying(seams, &tmp, &dest)
-            .map_err(|e| io_stop(seams, "replacing the export", &e))?;
+        rename_retrying(seams, &tmp, &dest, &mut r)?;
         Ok(fallback)
     })();
     let fallback = match result {
@@ -518,5 +563,49 @@ pub(crate) fn run(ctx: &Context, state: &Mutex<State>, job: ExportJob) {
                 json!({ "export_id": job.id, "code": e.code, "detail": detail }),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod heartbeat_tests {
+    use super::*;
+
+    #[test]
+    fn fr_exp_19_heartbeat_ticks_while_a_hookless_step_runs() {
+        let mut ticks = 0;
+        let out = with_heartbeat(
+            Duration::from_millis(50),
+            || {
+                ticks += 1;
+                ControlFlow::Continue(())
+            },
+            || {
+                std::thread::sleep(Duration::from_millis(600));
+                7
+            },
+        );
+        assert_eq!(out, ControlFlow::Continue(7));
+        // Nominally 11; a loaded runner may skip some, but never most.
+        assert!(ticks >= 4, "{ticks} ticks in 600 ms at 50 ms");
+    }
+
+    #[test]
+    fn fr_exp_20_heartbeat_keeps_a_cancel_until_the_step_ends() {
+        let ended = AtomicBool::new(false);
+        let mut ticks = 0;
+        let out = with_heartbeat(
+            Duration::from_millis(20),
+            || {
+                ticks += 1;
+                ControlFlow::Break(())
+            },
+            || {
+                std::thread::sleep(Duration::from_millis(150));
+                ended.store(true, Ordering::SeqCst);
+            },
+        );
+        assert_eq!(out, ControlFlow::Break(()));
+        assert!(ended.load(Ordering::SeqCst));
+        assert_eq!(ticks, 1, "no ticks after the cancel");
     }
 }
