@@ -5,10 +5,12 @@ import { editorFeature } from '../features/editor';
 import { libraryFeature } from '../features/library';
 import { projectFeature } from '../features/project';
 import { providerFeature } from '../features/provider';
+import { regionEditFeature } from '../features/region-edit';
 
 export const features: readonly Feature[] = [
   libraryFeature,
   editorFeature,
   projectFeature,
   providerFeature,
+  regionEditFeature,
 ];
