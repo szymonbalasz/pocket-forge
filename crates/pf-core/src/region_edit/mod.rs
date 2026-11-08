@@ -17,6 +17,7 @@ pub mod commands;
 pub mod controls;
 pub mod estimate;
 pub mod fit;
+pub mod instruction;
 pub mod jobs;
 pub mod pixels;
 pub mod prepare;
@@ -38,6 +39,8 @@ use crate::error::{CoreError, CoreResult, ErrorCode};
 
 /// Event names (R21, spec §9).
 pub const EVENT_SPEND: &str = "rgn:spend";
+/// The blend instruction text changed (#55).
+pub const EVENT_BLEND_INSTRUCTION: &str = "rgn:blend-instruction";
 
 /// RGN's in-memory state (spec §8 "memory only"): session spend, estimates, the interim
 /// decoded original. Reset per app session.

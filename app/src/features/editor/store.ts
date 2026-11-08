@@ -98,6 +98,9 @@ export interface EditorState {
   picker: PickerState | null;
   /** The mask hand-off state (`edt-mask-status`, FR-EDT-28/29). */
   maskStatus: MaskStatus;
+  /** The live mask has a pixel > 0 (null = no live mask controller). Updated when a change
+   *  settles (stroke end, fill, clear, undo, region change), not per dab. */
+  maskPainted: boolean | null;
   /** The original is missing (BL-10): no tiles, tools disabled until PRJ relinks it. */
   originalMissing: boolean;
 }
@@ -121,6 +124,7 @@ const initial: EditorState = {
   flipBefore: false,
   picker: null,
   maskStatus: { kind: 'none' },
+  maskPainted: null,
   originalMissing: false,
 };
 

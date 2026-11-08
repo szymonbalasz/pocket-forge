@@ -7,7 +7,7 @@ import { api, onEvent, type ProjectSnapshot } from '../../api';
 import { projectStore } from '../../store/project';
 import { bindActions } from './actions';
 import { bindRegionSink, setActiveMaskSync } from './bridge';
-import { maskHash, type MaskBuffer } from './mask';
+import { hasPaint, maskHash, type MaskBuffer } from './mask';
 import { MaskController } from './MaskController';
 import { coreHandoff, MaskSync } from './maskHandoff';
 import { konvaMaskView } from './maskView';
@@ -54,7 +54,13 @@ export function useMaskTools({
         undo: undoStack,
         view: mv,
         setRegion: (r) => editorStore.set({ region: r }),
-        onChange: () => sync.current?.changed(),
+        onChange: () => {
+          sync.current?.changed();
+          // RGN's empty-mask hint (owner 2026-11-08): once the change settles, not per dab.
+          if (c.stroking) return;
+          const painted = c.buffer ? hasPaint(c.buffer.data) : false;
+          if (editorStore.get().maskPainted !== painted) editorStore.set({ maskPainted: painted });
+        },
       });
       ctl.current = c;
       // FR-EDT-28: the hand-off for this project (debounce, job submit, close).
@@ -168,7 +174,7 @@ export function useMaskTools({
       sync.current?.dispose();
       sync.current = null;
       setActiveMaskSync(null);
-      editorStore.set({ maskStatus: { kind: 'none' } });
+      editorStore.set({ maskStatus: { kind: 'none' }, maskPainted: null });
       undoStack.clear(); // KQ-16: history is per session.
       // The region left behind is this session's; a reopen restores it again first.
       editorStore.set({ regionFor: null });

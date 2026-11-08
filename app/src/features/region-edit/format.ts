@@ -57,7 +57,8 @@ export function errorText(code: string, message: string): string {
     case 'out_of_bounds':
       return message;
     case 'mask_invalid':
-      return 'Paint a mask inside the region first.';
+      // Owner 2026-11-08 (MASK_HINT in store.ts; not imported: store imports this module).
+      return 'Paint a mask inside the region to choose what changes.';
     case 'original_unavailable':
       return 'The original is still loading. Try again in a moment.';
     case 'offline':

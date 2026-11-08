@@ -75,6 +75,12 @@ export function useEditorRegion(): RegionState | null {
   return useEditor((s) => s.region);
 }
 
+/** Owner 2026-11-08: the live mask has paint (true), is empty (false), or EDT has no live mask
+ *  (null: no canvas). RGN disables Generate with a hint while it is empty. */
+export function useEditorMaskPainted(): boolean | null {
+  return useEditor((s) => s.maskPainted);
+}
+
 /** The project whose saved region EDT has restored (null before): until it is the open project,
  *  `useEditorRegion` is not that project's region and must not be saved into its draft. */
 export function useEditorRegionRestored(): string | null {

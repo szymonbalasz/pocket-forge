@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { Tooltip } from 'radix-ui';
 
+import { api, type Capabilities } from '../../api';
 import type { FakeTauri } from '../../api/mocks/tauri';
 import type { RgnMockSeed } from '../../api/mocks/rgn';
 import { projectStore } from '../../store/project';
@@ -10,7 +11,7 @@ import { GeneratePanel } from './GeneratePanel';
 import { IterationTracker } from './IterationTracker';
 import { JobStatus } from './JobStatus';
 import { rgn } from './store';
-import { mockControls, mockCore, polyfillRadix } from './testUtils';
+import { mockControls, mockCore, polyfillRadix, SIMPLE } from './testUtils';
 
 const Picker = editorFeature.slots.bottom!;
 const REGION = { x: 400, y: 400, w: 512, h: 512 };
@@ -228,20 +229,118 @@ describe('Generate panel (RGN slice 6)', { timeout: 20_000 }, () => {
     });
   });
 
-  test('FR-RGN-09 the final prompt is sent byte for byte; submit disabled while empty', async () => {
+  test('FR-RGN-09 owner-55 blend off: the final prompt is sent byte for byte; submit disabled while empty', async () => {
     await setup({ spend: { cap: 100, threshold: 10 } });
     await estimated();
     expect(screen.getByTestId('rgn-panel-submit-reason').textContent).toBe('Required: prompt.');
     const prompt = '  Turn this room into a kitchen,\nwith copper pots  ';
     await typePrompt(prompt);
+    fireEvent.click(screen.getByTestId('rgn-panel-blend-instruction'));
+    expect(rgn.get().blendInstruction).toBe(false);
     expect(screen.getByTestId('rgn-panel-final-prompt').textContent).toBe(prompt);
     expect((screen.getByTestId('rgn-panel-submit') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('rgn-panel-submit'));
     fireEvent.click(await screen.findByTestId('rgn-confirm-ok'));
     await waitFor(() => expect(fake.callsOf('rgn_job_submit')).toHaveLength(1));
-    expect(
-      (fake.callsOf('rgn_job_submit')[0]!.draft as { final_prompt: string }).final_prompt,
-    ).toBe(prompt);
+    const sent = fake.callsOf('rgn_job_submit')[0]!.draft as Record<string, unknown>;
+    expect(sent.final_prompt).toBe(prompt);
+    expect(sent.blend_instruction).toBe(false);
+  });
+
+  test('owner-55 blend instruction: on by default, shown once in the final prompt, saved in the draft, Settings text used', async () => {
+    await setup();
+    const toggle = screen.getByTestId('rgn-panel-blend-instruction');
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    await typePrompt('a stone well');
+    await waitFor(() => expect(rgn.get().blendText).not.toBeNull());
+    expect(screen.getByTestId('rgn-panel-final').textContent).toMatch(/^Final prompt \(as sent\)/);
+    const shown = () => screen.getByTestId('rgn-panel-final-prompt').textContent ?? '';
+    expect(shown()).toMatch(/^a stone well\n\nKeep everything near the edges/);
+    expect(shown()).toMatch(/toward the centre of the edited area\. Top-down battlemap view\.$/);
+    expect(shown().match(/battlemap/g)).toHaveLength(1);
+    // Not cost-affecting: toggling never re-estimates.
+    await estimated();
+    const n = fake.callsOf('rgn_job_estimate').length;
+    fireEvent.click(toggle);
+    expect(shown()).toBe('a stone well');
+    await waitFor(
+      () =>
+        expect(fake.callsOf('project_put_draft').at(-1)?.draft).toMatchObject({
+          blend_instruction: false,
+        }),
+      { timeout: 4000 },
+    );
+    fireEvent.click(toggle);
+    await wait(600);
+    expect(fake.callsOf('rgn_job_estimate').length).toBe(n);
+    // A new Settings text reaches the preview (`rgn:blend-instruction`).
+    await act(() => api.region.setBlendInstruction('Match the ink.'));
+    await waitFor(() =>
+      expect(shown()).toBe('a stone well\n\nMatch the ink. Top-down battlemap view.'),
+    );
+    fireEvent.click(screen.getByTestId('rgn-panel-submit'));
+    fireEvent.click(await screen.findByTestId('rgn-confirm-ok'));
+    await waitFor(() => expect(fake.callsOf('rgn_job_submit')).toHaveLength(1));
+    // The core appends at submit; the panel sends the typed prompt and the setting.
+    expect(fake.callsOf('rgn_job_submit')[0]!.draft).toMatchObject({
+      final_prompt: 'a stone well',
+      blend_instruction: true,
+    });
+  });
+
+  test('FR-RGN-08 owner-2026-11-08 a model without a count control shows 1 result per job', async () => {
+    const one: Capabilities = {
+      ...SIMPLE,
+      model_id: 'fake-one',
+      controls: SIMPLE.controls.filter((c) => c.role !== 'candidate_count'),
+    };
+    await setup({
+      models: [
+        { id: 'fake-simple', name: 'Simple' },
+        { id: 'fake-one', name: 'One' },
+      ],
+      capabilities: { 'fake-simple': SIMPLE, 'fake-one': one },
+    });
+    await waitFor(() => expect(ids('rgn-control-input')).toEqual(['num_samples']));
+    expect(screen.queryByTestId('rgn-panel-count-single')).toBeNull();
+    await chooseOption(screen.getByTestId('rgn-panel-model'), 'One');
+    await waitFor(() => expect(screen.queryByTestId('rgn-panel-count-single')).not.toBeNull());
+    expect(ids('rgn-control-input')).toEqual([]);
+    expect(screen.getByTestId('rgn-panel-count-single').textContent).toBe(
+      '1 result per job (this model)',
+    );
+    await typePrompt('a well');
+    await estimated();
+    expect(rgn.get().estimate.result?.candidate_count).toBe(1);
+    expect(fake.callsOf('rgn_job_estimate').at(-1)!.draft).toMatchObject({ controls: {} });
+  });
+
+  test('FR-RGN-03 owner-2026-11-08 no painted mask: Generate disabled with the mask hint', async () => {
+    await setup({ maskId: null });
+    await typePrompt('a well');
+    const hint = () => screen.queryByTestId('rgn-panel-mask-hint');
+    const submit = () => screen.getByTestId('rgn-panel-submit') as HTMLButtonElement;
+    expect(hint()?.textContent).toBe('Paint a mask inside the region to choose what changes.');
+    expect(submit().disabled).toBe(true);
+    expect(screen.queryByTestId('rgn-panel-submit-reason')).toBeNull();
+    // EDT reports paint before the hand-off: no hint, waiting for the mask save.
+    act(() => rgn.setMaskPainted(true));
+    expect(hint()).toBeNull();
+    expect(screen.getByTestId('rgn-panel-submit-reason').textContent).toBe('Saving the mask…');
+  });
+
+  test('FR-RGN-03 owner-2026-11-08 a stored mask that EDT reports empty (cleared) shows the hint, no estimate', async () => {
+    await setup();
+    await typePrompt('a well');
+    await estimated();
+    const n = fake.callsOf('rgn_job_estimate').length;
+    act(() => rgn.setMaskPainted(false));
+    expect(screen.getByTestId('rgn-panel-mask-hint')).toBeTruthy();
+    expect((screen.getByTestId('rgn-panel-submit') as HTMLButtonElement).disabled).toBe(true);
+    await wait(600);
+    expect(fake.callsOf('rgn_job_estimate').length).toBe(n);
+    act(() => rgn.setMaskPainted(true));
+    expect(screen.queryByTestId('rgn-panel-mask-hint')).toBeNull();
   });
 
   test('FR-RGN-10 the seed is random (null) or pinned, and the pinned value is sent', async () => {

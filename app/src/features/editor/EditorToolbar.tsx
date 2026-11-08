@@ -71,12 +71,13 @@ export function EditorToolbar() {
         </span>
       </Tip>
       <hr />
-      <Tip text="Fill region">
+      {/* Owner 2026-11-08: FR-EDT-16's Fill region, named for what it does to the edit. */}
+      <Tip text="Mask whole region">
         <button
           type="button"
           className="edt-tool"
-          data-testid="edt-toolbar-fill"
-          aria-label="Fill region"
+          data-testid="edt-toolbar-mask-region"
+          aria-label="Mask whole region"
           disabled={!canPaint}
           onClick={actions.fill}
         >

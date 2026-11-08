@@ -102,6 +102,12 @@ export interface RgnState {
   /** The region's inner rect: EDT's (R18), or a retried job's until the region changes. */
   inner: RectPx | null;
   maskId: string | null;
+  /** EDT's live mask has a painted pixel (null = EDT has no live mask to ask). */
+  maskPainted: boolean | null;
+  /** #55: append the blend instruction at submit (per project, in the draft; on by default). */
+  blendInstruction: boolean;
+  /** #55: what this project appends (the Settings text + kind sentence); null until loaded. */
+  blendText: string | null;
   fit: RegionFit | null;
   fitError: UiError | null;
   estimate: {
@@ -162,6 +168,9 @@ const initial: RgnState = {
   margin: DEFAULT_MARGIN,
   inner: null,
   maskId: null,
+  maskPainted: null,
+  blendInstruction: true,
+  blendText: null,
   fit: null,
   fitError: null,
   estimate: { status: 'idle', result: null, error: null, signature: null },
@@ -253,6 +262,25 @@ export const activeJobId = (s: RgnState): string | null =>
 export const missing = (s: RgnState): string[] =>
   s.caps ? missingRequired(s.caps, s.evaluation, s.values, s.prompt) : [];
 
+/** Owner 2026-11-08: the hint while the region has no painted mask (`rgn-panel-mask-hint`). */
+export const MASK_HINT = 'Paint a mask inside the region to choose what changes.';
+
+/** No painted mask in the region: EDT says so, or no mask was handed off and EDT hasn't said it
+ *  has paint. */
+export const maskUnpainted = (s: RgnState): boolean =>
+  s.maskPainted === false || (!s.maskId && s.maskPainted !== true);
+
+/** #55: the prompt as the core will send it (same rule as pf-core `instruction::compose`). */
+export function finalPrompt(s: RgnState): string {
+  const text = s.blendText?.trim() ?? '';
+  if (!s.blendInstruction || !text) return s.prompt;
+  const suffix = `
+
+${text}`;
+  if (s.prompt.endsWith(suffix)) return s.prompt;
+  return s.prompt ? s.prompt + suffix : text;
+}
+
 /** Why submit is disabled (null = enabled). FR-RGN-09/17/33/38, §7 states. */
 export function submitBlocker(s: RgnState): string | null {
   if (!s.projectId) return 'Open an asset project.';
@@ -264,7 +292,8 @@ export function submitBlocker(s: RgnState): string | null {
   if (!s.fit)
     return s.fitError ? errorText(s.fitError.code, s.fitError.message) : 'Fitting the region…';
   if (!s.caps) return 'Pick a model.';
-  if (!s.maskId) return 'Paint a mask inside the region first.';
+  if (maskUnpainted(s)) return MASK_HINT;
+  if (!s.maskId) return 'Saving the mask…';
   const refs = referencesBlocker(); // FR-REF-18: a slot under its min
   if (refs) return refs;
   const m = missing(s);
@@ -286,12 +315,15 @@ export function currentDraft(s: RgnState): JobDraft | null {
     controls: sentValues(s.caps, s.evaluation, s.values, s.touched),
     seed: s.seedMode === 'pinned' ? s.seed : null,
     references: referencesForSend(), // REF's selection (FR-RGN-41)
+    blend_instruction: s.blendInstruction, // #55
   };
 }
 
 function signatureOf(s: RgnState): string | null {
   if (!s.projectId || s.readOnly || isOffline(s) || !s.fit || !s.caps || !s.modelId || !s.maskId)
     return null;
+  // An empty mask can't be estimated (`mask_invalid`); the hint says what to do.
+  if (s.maskPainted === false) return null;
   // Required controls (not the prompt) must be filled before an estimate makes sense.
   if (missing(s).some((n) => n !== 'prompt')) return null;
   const controls = sentValues(s.caps, s.evaluation, s.values, s.touched);
@@ -346,6 +378,7 @@ function putDraft(mask?: { mask_id: string | null }): void {
       seed: s.seedMode === 'pinned' ? s.seed : null,
       region: s.inner ? { inner: s.inner, margin: s.margin } : null,
       ...referencesDraft(), // REF's selection (FR-REF-20)
+      blend_instruction: s.blendInstruction, // #55
       // No region, no mask (FR-EDT-20): the draft must not keep the removed region's mask.
       ...(mask ?? (s.inner ? {} : { mask_id: null })),
     })
@@ -402,6 +435,17 @@ async function probe(): Promise<void> {
 
 const reloadModels = () =>
   loadModels(Object.fromEntries(state.touched.map((n) => [n, state.values[n]])));
+
+/** #55: the instruction this project appends (shown in the final-prompt preview). */
+async function loadBlendText(): Promise<void> {
+  const pid = state.projectId;
+  try {
+    const b = await api.region.getBlendInstruction();
+    if (state.projectId === pid) set({ blendText: b.for_project });
+  } catch {
+    // The preview shows the typed prompt only; the core still appends at submit.
+  }
+}
 
 async function loadSpend(): Promise<void> {
   try {
@@ -469,6 +513,7 @@ function applyRestoredDraft(d: ProjectSnapshot['draft'], why: 'restore' | 'kept'
     prompt: d?.final_prompt ?? '',
     seedMode: d?.seed !== null && d?.seed !== undefined ? 'pinned' : 'random',
     seed: d?.seed ?? null,
+    blendInstruction: d?.blend_instruction !== false,
   });
   const model = d?.model_id ?? state.modelId;
   let loaded = Promise.resolve();
@@ -746,6 +791,8 @@ function subscribe(): void {
       void refreshProject();
       void refreshIterations();
     }),
+    // #55: the Settings text changed.
+    onEventSafe('rgn:blend-instruction', (p) => set({ blendText: p.for_project })),
     onEventSafe('provider:status-changed', () =>
       // Back online: the stale or missing list and a failed capability load reload at once.
       refreshProvider().then(() => {
@@ -818,6 +865,7 @@ export const rgn = {
       prompt: d?.final_prompt ?? '',
       seedMode: d?.seed !== null && d?.seed !== undefined ? 'pinned' : 'random',
       seed: d?.seed ?? null,
+      blendInstruction: d?.blend_instruction !== false,
       margin: region?.margin ?? DEFAULT_MARGIN,
       maskId: d?.mask_id ?? null,
       modelId: d?.model_id ?? null,
@@ -831,6 +879,7 @@ export const rgn = {
       refreshIterations(),
       refreshProject(),
       loadModels(d?.controls ?? null),
+      loadBlendText(),
     ]);
   },
 
@@ -854,7 +903,7 @@ export const rgn = {
     thumbsInFlight.clear();
     for (const k of Object.keys(tokens)) nextToken(k);
     if (state.projectId) editorBridge.setCandidates(null);
-    state = initial;
+    state = { ...initial, maskPainted: state.maskPainted }; // EDT's, not the project's
     for (const l of listeners) l();
   },
 
@@ -894,6 +943,20 @@ export const rgn = {
     saveDraftSoon();
     schedule();
     void evaluate();
+  },
+
+  /** #55: the "Blend with surroundings" toggle (saved in the draft). */
+  setBlendInstruction(on: boolean): void {
+    set({ blendInstruction: on });
+    saveDraftSoon();
+  },
+
+  /** EDT's live mask has paint (true), is empty (false), or EDT has none (null). */
+  setMaskPainted(painted: boolean | null): void {
+    if (painted !== state.maskPainted) {
+      set({ maskPainted: painted });
+      schedule();
+    }
   },
 
   setPrompt(prompt: string): void {
@@ -1041,6 +1104,7 @@ export const rgn = {
         prompt: d.final_prompt,
         seedMode: d.seed === null ? 'random' : 'pinned',
         seed: d.seed,
+        blendInstruction: d.blend_instruction !== false,
         margin: d.region.margin,
         inner: d.region.inner,
         maskId: d.mask_id,

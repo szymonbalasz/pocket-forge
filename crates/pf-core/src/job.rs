@@ -167,6 +167,15 @@ pub struct JobFile {
 }
 
 impl JobFile {
+    /// The prompt as the user typed it: `typed_prompt` (#55, the prompt before the blend
+    /// instruction), else the prompt as sent (jobs from before #55).
+    pub fn typed_prompt(&self) -> &str {
+        self.extra
+            .get("typed_prompt")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(&self.final_prompt)
+    }
+
     /// Project path of the job folder.
     pub fn dir(&self) -> String {
         crate::manifest::job_dir(self.id)

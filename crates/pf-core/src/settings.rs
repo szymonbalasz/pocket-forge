@@ -56,6 +56,16 @@ impl ProviderSettings {
     }
 }
 
+/// `region_edit` section (meaning owned by RGN, #55).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct RegionEditSettings {
+    /// The blend instruction text; `None` = the built-in default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blend_instruction: Option<String>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
 /// The whole settings file. Unknown sections and fields are kept (written after known ones).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
@@ -67,6 +77,8 @@ pub struct Settings {
     pub spend: SpendSettings,
     #[serde(default)]
     pub provider: ProviderSettings,
+    #[serde(default)]
+    pub region_edit: RegionEditSettings,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -79,6 +91,7 @@ impl Settings {
             library: LibrarySettings::default(),
             spend: SpendSettings::default(),
             provider: ProviderSettings::default(),
+            region_edit: RegionEditSettings::default(),
             extra: BTreeMap::new(),
         }
     }
@@ -156,7 +169,7 @@ pub fn save(ctx: &Context, settings: &Settings) -> CoreResult<()> {
 }
 
 /// The sections other features read and write through PRJ (R4, R8).
-pub const SECTIONS: [&str; 3] = ["library", "spend", "provider"];
+pub const SECTIONS: [&str; 4] = ["library", "spend", "provider", "region_edit"];
 
 fn unknown_section(name: &str) -> CoreError {
     CoreError::invalid(
@@ -171,6 +184,7 @@ pub fn section_get(settings: &Settings, name: &str) -> CoreResult<Value> {
         "library" => serde_json::to_value(&settings.library),
         "spend" => serde_json::to_value(&settings.spend),
         "provider" => serde_json::to_value(&settings.provider),
+        "region_edit" => serde_json::to_value(&settings.region_edit),
         other => return Err(unknown_section(other)),
     };
     v.map_err(|e| CoreError::internal(format!("serialising settings: {e}")))
@@ -191,6 +205,7 @@ pub fn section_put(
         "library" => next.library = serde_json::from_value(value).map_err(bad)?,
         "spend" => next.spend = serde_json::from_value(value).map_err(bad)?,
         "provider" => next.provider = serde_json::from_value(value).map_err(bad)?,
+        "region_edit" => next.region_edit = serde_json::from_value(value).map_err(bad)?,
         other => return Err(unknown_section(other)),
     }
     save(ctx, &next)?;
@@ -228,7 +243,8 @@ mod tests {
                 "install_id",
                 "library",
                 "spend",
-                "provider"
+                "provider",
+                "region_edit"
             ]
         );
     }

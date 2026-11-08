@@ -257,6 +257,7 @@ pub fn put_mask(
             region: None,
             mask_id: None,
             references: None,
+            blend_instruction: None,
             updated_at: ctx.now(),
             extra: Extra::new(),
         });
@@ -517,7 +518,7 @@ pub fn add_candidates(
         return Err(CoreError::invalid("candidates", "no candidates"));
     }
     if job.iteration.is_none() {
-        job.iteration = Some(next_iteration(p, &job.final_prompt));
+        job.iteration = Some(next_iteration(p, job.typed_prompt()));
         job.updated_at = ctx.now();
         write_job(ctx, p, &job)?;
         p.jobs.insert(job_id, job.clone());
@@ -849,7 +850,7 @@ pub fn accept_candidate(
     let layer_id = ctx.new_id();
     let layer = patch_layer(layer_id, &patch, &job, candidate_id)?;
     let label = label.or_else(|| {
-        let l: String = job.final_prompt.chars().take(40).collect();
+        let l: String = job.typed_prompt().chars().take(40).collect();
         (!l.is_empty()).then_some(l)
     });
     let now = ctx.now();

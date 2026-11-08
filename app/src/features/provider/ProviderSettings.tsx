@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Dialog } from 'radix-ui';
 
 import { api, ApiError } from '../../api';
+import { settingsSections } from '../../shared/settings';
 import { providerStore, useProviderState } from './store';
 
 type Result = { state: 'ok' | 'error'; text: string } | null;
@@ -193,6 +194,12 @@ export function ProviderSettings() {
             <Dialog.Title className="prv-title">Scenario provider</Dialog.Title>
           </header>
           <SettingsForm />
+          {settingsSections().map(({ id, title, Component }) => (
+            <section key={id} className="prv-section" data-section={id}>
+              <h3 className="prv-title">{title}</h3>
+              <Component />
+            </section>
+          ))}
           <Dialog.Close asChild>
             <button type="button" className="link prv-close" data-testid="prv-settings-close">
               Close

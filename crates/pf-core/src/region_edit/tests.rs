@@ -649,6 +649,26 @@ fn fr_rgn_34_sent_values_are_required_or_user_set_and_visible_only() {
     assert_eq!(sent.candidate_count, 3, "the count control's default");
 }
 
+/// Owner decision 2026-11-08: a model without a `candidate_count` control (real Ideogram V3 /
+/// Character) gives exactly one result per job. Estimate and submit share this check, so both
+/// ask for 1; a count sent anyway is an unknown control, never a silent fan-out.
+#[test]
+fn fr_rgn_08_owner_2026_11_08_no_count_control_means_one_result_per_job() {
+    let mut caps = fake_caps("fake-white-edit");
+    caps.controls
+        .retain(|c| c.role != ControlRole::CandidateCount);
+    for require_prompt in [false, true] {
+        let sent = check_controls(&caps, &BTreeMap::new(), "p", None, require_prompt).unwrap();
+        assert_eq!(sent.candidate_count, 1);
+        assert!(sent.cost_inputs.is_empty(), "no count in the estimate id");
+    }
+    let e = check_controls(&caps, &vals(json!({"num_samples": 3})), "p", None, true).unwrap_err();
+    assert_eq!(
+        (e.code, e.detail["reason"].as_str()),
+        (ErrorCode::InvalidControl, Some("unknown_control"))
+    );
+}
+
 #[test]
 fn fr_rgn_09_prompt_is_required_at_submit_but_not_for_an_estimate() {
     let caps = fake_caps("fake-white-edit");

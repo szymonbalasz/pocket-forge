@@ -175,7 +175,7 @@ export class MaskController {
     this.boxEntry(s.mode === 'paint' ? 'brush stroke' : 'eraser stroke', m, box, before, after);
   }
 
-  /** FR-EDT-16: Fill region (255) / Clear mask (0). One undo step each. */
+  /** FR-EDT-16: Mask whole region (255, owner 2026-11-08) / Clear mask (0). One undo step each. */
   fillAll(value: 0 | 255): void {
     const m = this.mask;
     if (!m) return;
@@ -185,7 +185,7 @@ export class MaskController {
     const after = m.data.slice();
     this.deps.view.update(m, box);
     this.changed();
-    this.boxEntry(value ? 'fill region' : 'clear mask', m, box, before, after);
+    this.boxEntry(value ? 'mask whole region' : 'clear mask', m, box, before, after);
   }
 
   private boxEntry(label: string, m: MaskBuffer, box: Box, before: Uint8Array, after: Uint8Array) {

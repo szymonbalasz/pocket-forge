@@ -27,6 +27,17 @@ export const emptyMask = (rect: Rect): MaskBuffer => ({
   data: new Uint8Array(rect.w * rect.h),
 });
 
+/** True if any mask byte is > 0 (early exit; 4 bytes per step when aligned). */
+export function hasPaint(d: Uint8Array): boolean {
+  const words = d.byteOffset % 4 === 0 ? d.length >>> 2 : 0;
+  if (words) {
+    const w = new Uint32Array(d.buffer, d.byteOffset, words);
+    for (let i = 0; i < words; i++) if (w[i]) return true;
+  }
+  for (let i = words * 4; i < d.length; i++) if (d[i]) return true;
+  return false;
+}
+
 /** Stamp alpha (0–1) at distance d for radius r and hardness h (FR-EDT-15). */
 export function stampAlpha(d: number, r: number, h: number): number {
   if (r <= 0) return 0;

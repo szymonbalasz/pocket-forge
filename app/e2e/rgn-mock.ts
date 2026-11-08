@@ -57,6 +57,19 @@ export async function drawRegion(
   await page.mouse.up();
 }
 
+/** A region with its whole mask painted (EDT's Mask whole region): Generate needs paint
+ *  (owner 2026-11-08). */
+export async function drawMaskedRegion(
+  page: Page,
+  from: [number, number],
+  to: [number, number],
+): Promise<void> {
+  await drawRegion(page, from, to);
+  await expect(page.getByTestId('rgn-panel-mask-hint')).toBeVisible();
+  await page.getByTestId('edt-toolbar-mask-region').click();
+  await expect(page.getByTestId('rgn-panel-mask-hint')).toBeHidden();
+}
+
 type Driver = 'run' | 'finish' | 'fail' | 'setCancel';
 
 /** Calls a `window.__pfRgnMock` driver (run, finish, fail, setCancel). */

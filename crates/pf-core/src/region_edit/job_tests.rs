@@ -406,13 +406,141 @@ fn fr_rgn_15_unknown_cost_needs_its_confirmation() {
 }
 
 #[test]
-fn fr_rgn_09_the_provider_receives_the_typed_prompt_byte_for_byte() {
+fn fr_rgn_09_owner_55_with_the_blend_instruction_off_the_typed_prompt_is_sent_byte_for_byte() {
     let lab = Lab::new();
     let prompt = "  Turn this room into a kitchen — ünïcode, trailing  ";
-    let id = lab.submit(prompt);
+    let mut d = lab.draft(prompt);
+    d["blend_instruction"] = json!(false);
+    let id = lab.submit_draft(d).unwrap();
     let job = lab.job(id);
     assert_eq!(job.final_prompt, prompt);
     assert_eq!(job.provider["request"]["prompt"], json!(prompt));
+    assert_eq!(job.extra["blend_instruction"], json!(false));
+}
+
+/// What a Maps project appends with the default text (#55).
+fn map_instruction() -> String {
+    format!(
+        "{} Top-down battlemap view.",
+        super::instruction::DEFAULT_BLEND_INSTRUCTION
+    )
+}
+
+#[test]
+fn owner_55_on_by_default_appended_once_and_recorded_on_the_job() {
+    let lab = Lab::new();
+    // No `blend_instruction` in the draft: on.
+    let id = lab.submit("a stone well");
+    let job = lab.job(id);
+    let sent = format!(
+        "a stone well
+
+{}",
+        map_instruction()
+    );
+    assert_eq!(job.final_prompt, sent, "the prompt as sent");
+    assert_eq!(job.provider["request"]["prompt"], json!(sent));
+    assert_eq!(job.extra["blend_instruction"], json!(true));
+    assert_eq!(job.extra["typed_prompt"], json!("a stone well"));
+    assert_eq!(job.final_prompt.matches("battlemap").count(), 1);
+    lab.drive();
+
+    // Retry prefills the typed prompt, so a resubmit appends the instruction once.
+    let retry = lab
+        .core
+        .dispatch("rgn_job_retry_draft", json!({"job_id": id}))
+        .unwrap();
+    assert_eq!(retry["final_prompt"], "a stone well");
+    assert_eq!(retry["blend_instruction"], json!(true));
+    // The iteration is named after the typed prompt, not the instruction.
+    let dir = lab.job(id).iteration.unwrap().dir;
+    assert_eq!(dir, "results/001 a stone well");
+    let id2 = lab.submit_draft(retry).unwrap();
+    assert_eq!(lab.job(id2).final_prompt, sent);
+    // A prompt that already ends with the instruction is not extended again.
+    let id3 = {
+        lab.drive();
+        lab.submit(&sent)
+    };
+    assert_eq!(lab.job(id3).final_prompt, sent);
+}
+
+#[test]
+fn owner_55_the_estimate_does_not_depend_on_the_blend_instruction() {
+    let lab = Lab::new();
+    let on = lab.estimate(&lab.draft("a well"));
+    let mut d = lab.draft("a well");
+    d["blend_instruction"] = json!(false);
+    let off = lab.estimate(&d);
+    assert_eq!(on["estimate_id"], off["estimate_id"]);
+    assert_eq!(on["cost"], off["cost"]);
+}
+
+#[test]
+fn owner_55_settings_text_is_used_and_reset_to_default() {
+    let lab = Lab::new();
+    let got = lab
+        .core
+        .dispatch("rgn_blend_instruction_get", json!({}))
+        .unwrap();
+    assert_eq!(got["is_default"], json!(true));
+    assert_eq!(got["for_project"], json!(map_instruction()));
+    let set = lab
+        .core
+        .dispatch(
+            "rgn_blend_instruction_set",
+            json!({"text": "Match the ink."}),
+        )
+        .unwrap();
+    assert_eq!(set["text"], "Match the ink.");
+    assert_eq!(set["is_default"], json!(false));
+    assert_eq!(lab.events_named("rgn:blend-instruction").len(), 1);
+    // Stored per machine in settings.json `region_edit`.
+    let file: Value = serde_json::from_slice(
+        &std::fs::read(lab.dir.path().join("data").join("settings.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(file["region_edit"]["blend_instruction"], "Match the ink.");
+
+    let id = lab.submit("a well");
+    assert_eq!(
+        lab.job(id).final_prompt,
+        "a well
+
+Match the ink. Top-down battlemap view."
+    );
+    let reset = lab
+        .core
+        .dispatch("rgn_blend_instruction_set", json!({"text": null}))
+        .unwrap();
+    assert_eq!(reset["is_default"], json!(true));
+    assert_eq!(
+        reset["text"],
+        json!(super::instruction::DEFAULT_BLEND_INSTRUCTION)
+    );
+    let e = lab
+        .core
+        .dispatch(
+            "rgn_blend_instruction_set",
+            json!({"text": "x".repeat(2001)}),
+        )
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidInput);
+}
+
+#[test]
+fn owner_55_the_draft_keeps_the_setting_per_project() {
+    let lab = Lab::new();
+    lab.core
+        .dispatch(
+            "project_put_draft",
+            json!({"draft": {"final_prompt": "x", "blend_instruction": false}}),
+        )
+        .unwrap();
+    assert_eq!(lab.manifest()["draft"]["blend_instruction"], json!(false));
+    lab.close();
+    let snap = lab.open();
+    assert_eq!(snap["draft"]["blend_instruction"], json!(false));
 }
 
 #[test]

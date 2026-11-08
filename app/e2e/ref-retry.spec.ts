@@ -9,7 +9,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import type { Capabilities, DraftReferences } from '../src/api';
 import { mockRefs, refSeed } from './ref-mock';
-import { drawRegion, drive, inputsOf, openRgn } from './rgn-mock';
+import { drawMaskedRegion, drive, inputsOf, openRgn } from './rgn-mock';
 
 const REFS = JSON.parse(
   readFileSync(
@@ -44,7 +44,7 @@ test('FR-RGN-41 FR-RGN-42 FR-RGN-45 FR-REF-26 references go with the job and com
     models: [{ id: 'fake-refs', name: 'Refs' }],
     capabilities: { 'fake-refs': REFS },
   });
-  await drawRegion(page, [400, 500], [800, 900]);
+  await drawMaskedRegion(page, [400, 500], [800, 900]);
   await page.getByTestId('rgn-panel-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await expect(check(page, 'project:mood-a.png')).toBeChecked();

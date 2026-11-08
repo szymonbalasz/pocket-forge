@@ -239,6 +239,8 @@ export const api = {
     retune: (layerId: string, blend: Commands['rgn_patch_retune'][0]['blend']) =>
       call('rgn_patch_retune', { layer_id: layerId, blend }),
     iterations: () => call('rgn_iterations_list', {}),
+    getBlendInstruction: () => call('rgn_blend_instruction_get', {}),
+    setBlendInstruction: (text: string | null) => call('rgn_blend_instruction_set', { text }),
   },
   mask: {
     /** FR-EDT-18: the mask's w·h bytes for `rect` → `MaskRef` (base64 over IPC). */
