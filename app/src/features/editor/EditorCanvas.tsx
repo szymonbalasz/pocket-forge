@@ -65,12 +65,14 @@ type Drag = { kind: 'pan'; x: number; y: number; pointerId: number };
 export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
-  const tilesLayerRef = useRef<Konva.Layer>(null);
+  // The layers are state (callback refs), not refs: the Stage remounts when the viewport drops
+  // to 0 (the store resets on open), and every controller must rebind to the new layer (D1).
+  const [tilesLayer, setTilesLayer] = useState<Konva.Layer | null>(null);
   const tilesRef = useRef<TileManager | null>(null);
-  const patchesLayerRef = useRef<Konva.Layer>(null);
+  const [patchesLayer, setPatchesLayer] = useState<Konva.Layer | null>(null);
   const patchesRef = useRef<PatchLayers | null>(null);
-  const maskLayerRef = useRef<Konva.Layer>(null);
-  const compareLayerRef = useRef<Konva.Layer>(null);
+  const [maskLayer, setMaskLayer] = useState<Konva.Layer | null>(null);
+  const [compareLayer, setCompareLayer] = useState<Konva.Layer | null>(null);
   const compareRef = useRef<CompareLayer | null>(null);
   const [compareError, setCompareError] = useState<string | null>(null);
   const [stack, setStack] = useState<ManifestLayer[]>(project.layers);
@@ -82,7 +84,7 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   const drag = useRef<Drag | null>(null);
   const { view, viewport, dpr, tool, image, maskVisible } = useEditor((s) => s);
   const { compare, compareMode, split, flipBefore } = useEditor((s) => s);
-  const tools = useMaskTools({ project, maskLayer: maskLayerRef, container: containerRef });
+  const tools = useMaskTools({ project, maskLayer, container: containerRef });
 
   useElementSize(containerRef);
   useDevicePixelRatio(stageRef);
@@ -151,38 +153,34 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   }, [project.project_id, project.layers]);
 
   useEffect(() => {
-    const layer = patchesLayerRef.current;
-    if (!layer) return;
-    if (!patchesRef.current) {
-      patchesRef.current = new PatchLayers(layer, project.project_id, (_id, msg) =>
-        setLayerError(msg),
-      );
-    }
-    patchesRef.current.setStack(stack);
-  }, [stack, project.project_id, viewport.w]);
-  useEffect(
-    () => () => {
-      patchesRef.current?.destroy();
-      patchesRef.current = null;
-    },
-    [],
-  );
+    if (!patchesLayer) return;
+    const p = new PatchLayers(patchesLayer, project.project_id, (_id, msg) => setLayerError(msg));
+    patchesRef.current = p;
+    return () => {
+      p.destroy();
+      if (patchesRef.current === p) patchesRef.current = null;
+    };
+  }, [patchesLayer, project.project_id]);
+  useEffect(() => {
+    patchesRef.current?.setStack(stack);
+  }, [stack, patchesLayer, project.project_id]);
 
   // FR-EDT-24: compare follows the store (set by the picker selection or RGN).
   useEffect(() => {
-    const layer = compareLayerRef.current;
-    if (!layer) return;
-    compareRef.current ??= new CompareLayer(layer, setCompareError);
-    compareRef.current.update(compare, compareMode, split, flipBefore);
-  }, [compare, compareMode, split, flipBefore, viewport.w]);
-  useEffect(
-    () => () => {
-      compareRef.current?.destroy();
-      compareRef.current = null;
-      editorBridge.setCandidates(null);
-    },
-    [],
-  );
+    if (!compareLayer) return;
+    const c = new CompareLayer(compareLayer, setCompareError);
+    compareRef.current = c;
+    const s = editorStore.get();
+    c.update(s.compare, s.compareMode, s.split, s.flipBefore);
+    return () => {
+      c.destroy();
+      if (compareRef.current === c) compareRef.current = null;
+    };
+  }, [compareLayer]);
+  useEffect(() => {
+    compareRef.current?.update(compare, compareMode, split, flipBefore);
+  }, [compare, compareMode, split, flipBefore]);
+  useEffect(() => () => editorBridge.setCandidates(null), []);
 
   // Export's px-per-square values for Display size (FR-EDT-04, FR-EXP-26).
   useEffect(() => {
@@ -207,17 +205,26 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
     };
   }, [project.project_id]);
 
-  // Tile manager lifetime follows the descriptor key.
+  // Tile manager lifetime follows the descriptor key and the tiles layer instance.
+  const tilesBoundTo = useRef<Konva.Layer | null>(null);
   useEffect(() => {
-    const layer = tilesLayerRef.current;
-    if (!desc || !layer) return;
-    if (tilesRef.current?.descriptor.key === desc.key) return;
+    if (!tilesLayer) {
+      // The Stage unmounted: its layer is gone, so drop the manager drawing into it.
+      tilesRef.current?.destroy();
+      tilesRef.current = null;
+      tilesBoundTo.current = null;
+      return;
+    }
+    if (!desc) return;
+    if (tilesRef.current?.descriptor.key === desc.key && tilesBoundTo.current === tilesLayer)
+      return;
     tilesRef.current?.destroy();
-    const tm = new TileManager(konvaSink(layer), desc, setTileStats);
+    const tm = new TileManager(konvaSink(tilesLayer), desc, setTileStats);
     tilesRef.current = tm;
+    tilesBoundTo.current = tilesLayer;
     const s = editorStore.get();
     tm.update(s.view, s.viewport, s.dpr);
-  }, [desc, viewport.w]);
+  }, [desc, tilesLayer]);
   useEffect(
     () => () => {
       tilesRef.current?.destroy();
@@ -402,20 +409,20 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
             listening={false}
           >
             <Layer
-              ref={tilesLayerRef}
+              ref={setTilesLayer}
               name="tiles"
               listening={false}
               imageSmoothingEnabled={view.scale * dpr < 1}
             />
-            <Layer ref={patchesLayerRef} name="patches" listening={false} />
+            <Layer ref={setPatchesLayer} name="patches" listening={false} />
             <Layer
-              ref={maskLayerRef}
+              ref={setMaskLayer}
               name="mask"
               listening={false}
               visible={maskVisible}
               imageSmoothingEnabled={false}
             />
-            <Layer ref={compareLayerRef} name="compare" listening={false} />
+            <Layer ref={setCompareLayer} name="compare" listening={false} />
           </Stage>
         )}
         {tools.overlay}

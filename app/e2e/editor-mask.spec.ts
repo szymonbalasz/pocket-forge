@@ -138,9 +138,16 @@ test('FR-EDT-14 FR-EDT-15 FR-EDT-21 a stroke is one undo step; undo then redo is
     new RegExp(`${depth} steps left`),
   );
 
-  // M toggles the 50 % tint.
+  // M toggles the 50 % tint. The tint is the Image named "mask", not the Layer of that name.
   const visible = () =>
-    page.evaluate(() => window.__pfTest!.stage!().findOne('.mask')?.isVisible());
+    page.evaluate(() =>
+      window.__pfTest!.stage!()
+        .findOne(
+          (n: { getClassName: () => string; hasName: (s: string) => boolean }) =>
+            n.getClassName() === 'Image' && n.hasName('mask'),
+        )
+        ?.isVisible(),
+    );
   expect(await visible()).toBe(true);
   await page.keyboard.press('m');
   expect(await visible()).toBe(false);

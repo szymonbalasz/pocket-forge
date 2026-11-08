@@ -54,6 +54,12 @@ export class MaskController {
 
   constructor(private readonly deps: MaskControllerDeps) {}
 
+  /** Draws the current mask on a new view: the Stage remounted with a new mask layer (D1). */
+  setView(view: MaskView): void {
+    this.deps.view = view;
+    view.reset(this.mask);
+  }
+
   get buffer(): MaskBuffer | null {
     return this.mask;
   }

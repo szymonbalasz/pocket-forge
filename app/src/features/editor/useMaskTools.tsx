@@ -26,12 +26,12 @@ export function useMaskTools({
   container,
 }: {
   project: ProjectSnapshot;
-  maskLayer: React.RefObject<Konva.Layer | null>;
+  /** The mounted mask layer (state, so a remounted Stage rebinds the view). */
+  maskLayer: Konva.Layer | null;
   container: React.RefObject<HTMLDivElement | null>;
 }) {
-  const { view, tool, brushSize, hardness, region, image, viewport } = useEditor((s) => s);
+  const { view, tool, brushSize, hardness, region, image } = useEditor((s) => s);
   const ctl = useRef<MaskController | null>(null);
-  const viewRef = useRef<ReturnType<typeof konvaMaskView> | null>(null);
   const drag = useRef<{ d: RegionDrag; pointerId: number } | null>(null);
   const stroking = useRef<number | null>(null);
   const [preview, setPreview] = useState<Rect | null>(null);
@@ -39,20 +39,29 @@ export function useMaskTools({
   const [regionError, setRegionError] = useState<{ code: string; message: string } | null>(null);
   const [maskWarning, setMaskWarning] = useState<string | null>(null);
 
-  // One controller per project (and per mask layer instance).
+  // One controller per project; its view follows the mask layer instance. The Stage can remount
+  // (the viewport drops to 0 when the store resets on open), so a new layer gets a new view
+  // that redraws the current mask, and the old view is destroyed (D1).
   useEffect(() => {
-    const layer = maskLayer.current;
-    if (!layer || ctl.current) return;
-    const mv = konvaMaskView(layer);
-    viewRef.current = mv;
-    const c = new MaskController({
-      undo: undoStack,
-      view: mv,
-      setRegion: (r) => editorStore.set({ region: r }),
-    });
-    ctl.current = c;
+    if (!maskLayer) return;
+    const mv = konvaMaskView(maskLayer);
+    if (ctl.current) ctl.current.setView(mv);
+    else
+      ctl.current = new MaskController({
+        undo: undoStack,
+        view: mv,
+        setRegion: (r) => editorStore.set({ region: r }),
+      });
+    return () => mv.destroy();
+  }, [maskLayer]);
 
-    // FR-EDT-19: reopen loads the draft's mask; a different draft region keeps the overlap.
+  // FR-EDT-19: reopen loads the draft's mask once per controller, when the image size is known;
+  // a different draft region keeps the overlap.
+  const draftLoadedFor = useRef<MaskController | null>(null);
+  useEffect(() => {
+    const c = ctl.current;
+    if (!c || !image || draftLoadedFor.current === c) return;
+    draftLoadedFor.current = c;
     const draft = project.draft as {
       mask_id?: string | null;
       region?: { inner?: Rect; margin?: number } | null;
@@ -81,7 +90,7 @@ export function useMaskTools({
       })();
     }
     return undefined;
-  }, [maskLayer, project.project_id, project.draft, image, viewport.w]);
+  }, [maskLayer, project.project_id, project.draft, image]);
 
   useEffect(
     () => () => {
