@@ -301,23 +301,29 @@ async function runEstimate(sig: string): Promise<void> {
   }
 }
 
+/** Writes the panel's draft now. `mask_id` absent keeps the draft's mask (EDT owns it, R55). */
+function putDraft(mask?: { mask_id: string | null }): void {
+  const s = state;
+  if (!s.projectId || s.readOnly) return;
+  api.project
+    .putDraft({
+      final_prompt: s.prompt,
+      model_id: s.modelId,
+      controls: Object.fromEntries(s.touched.map((n) => [n, s.values[n]])),
+      seed: s.seedMode === 'pinned' ? s.seed : null,
+      region: s.inner ? { inner: s.inner, margin: s.margin } : null,
+      ...referencesDraft(), // REF's selection (FR-REF-20)
+      ...(mask ?? {}),
+    })
+    // Shown in the save segment (walk D3); the next change saves again.
+    .catch((e) => projectStore.draftSaveFailed(e));
+}
+
 function saveDraftSoon(): void {
   if (draftTimer) clearTimeout(draftTimer);
   draftTimer = setTimeout(() => {
     draftTimer = null;
-    const s = state;
-    if (!s.projectId || s.readOnly) return;
-    api.project
-      .putDraft({
-        final_prompt: s.prompt,
-        model_id: s.modelId,
-        controls: Object.fromEntries(s.touched.map((n) => [n, s.values[n]])),
-        seed: s.seedMode === 'pinned' ? s.seed : null,
-        region: s.inner ? { inner: s.inner, margin: s.margin } : null,
-        ...referencesDraft(), // REF's selection (FR-REF-20)
-      })
-      // Shown in the save segment (walk D3); the next change saves again.
-      .catch((e) => projectStore.draftSaveFailed(e));
+    putDraft();
   }, DRAFT_SAVE_MS);
 }
 
@@ -357,35 +363,45 @@ async function refreshProject(): Promise<void> {
       layers: p.layers,
       headRevision: p.head_revision,
       readOnly: p.read_only,
+      // A restore keeps EDT's live mask (OQ-EDT-14 A), not the restored draft's.
       maskId:
-        state.inner && !sameRect(state.inner, editorInner)
+        restored || (state.inner && !sameRect(state.inner, editorInner))
           ? state.maskId
           : (p.draft?.mask_id ?? state.maskId),
     });
-    if (restored) applyRestoredDraft(p.draft);
+    if (restored) applyRestoredDraft(p.draft, 'restore');
     syncPicker();
   } catch {
     // Keep the last snapshot; the next commit event retries.
   }
 }
 
+type DraftRegion = { inner?: RectPx; margin?: number } | null | undefined;
+
 /** Shows a restored revision's draft (walk D4), or the kept version's after a conflict is
- *  resolved (walk 2 N1). No draft save: the core already wrote it, and a save still waiting
- *  would write the replaced draft back. BL-26: its region goes back to EDT, validated (`refit` →
- *  `editorBridge.setRegion`); EDT keeps the overlapping mask and hands it off again. */
-function applyRestoredDraft(d: ProjectSnapshot['draft']): void {
+ *  resolved (walk 2 N1). A save still waiting would write the replaced draft back, so it is
+ *  dropped.
+ *  - `restore` (History, undo/redo of an accept or re-tune): EDT's live region and mask stay
+ *    (OQ-EDT-14 A) and nothing goes onto EDT's undo stack, so Redo stays available (FR-RGN-30,
+ *    walk D1). The draft is pointed back at them when the restored one differs.
+ *  - `kept` (Keep other, R60): the kept region goes back to EDT, validated (`refit` →
+ *    `editorBridge.setRegion`, BL-26); EDT keeps the overlapping mask and hands it off again. */
+function applyRestoredDraft(d: ProjectSnapshot['draft'], why: 'restore' | 'kept'): void {
   if (draftTimer) clearTimeout(draftTimer);
   draftTimer = null;
+  const t = nextToken('restore');
   reloadReferences(d?.references ?? null);
-  const region = d?.region as { inner?: RectPx; margin?: number } | null | undefined;
-  const inner = region?.inner ?? null;
-  const margin = region?.margin ?? state.margin;
-  if (!sameRect(inner, state.inner) || margin !== state.margin) {
-    // EDT's echo of this region is not an edit (no draft save, no prompt reset).
-    editorInner = inner;
-    set({ inner, margin });
-    if (!inner) editorBridge.setRegion(null);
-    void refit();
+  const region = d?.region as DraftRegion;
+  if (why === 'kept') {
+    const inner = region?.inner ?? null;
+    const margin = region?.margin ?? state.margin;
+    if (!sameRect(inner, state.inner) || margin !== state.margin) {
+      // EDT's echo of this region is not an edit (no draft save, no prompt reset).
+      editorInner = inner;
+      set({ inner, margin });
+      if (!inner) editorBridge.setRegion(null);
+      void refit();
+    }
   }
   set({
     prompt: d?.final_prompt ?? '',
@@ -393,8 +409,33 @@ function applyRestoredDraft(d: ProjectSnapshot['draft']): void {
     seed: d?.seed ?? null,
   });
   const model = d?.model_id ?? state.modelId;
-  if (model) void selectModel(model, d?.controls ?? null);
+  let loaded = Promise.resolve();
+  if (model) loaded = selectModel(model, d?.controls ?? null);
   else schedule();
+  if (why === 'restore')
+    void loaded.then(() => (isCurrent('restore', t) ? keepLiveRegion(d, t) : undefined));
+}
+
+/** OQ-EDT-14 A after a restore: the draft points at EDT's live region and stored mask again
+ *  (one save, after the restored model and controls loaded), so a reopen shows what the DM
+ *  sees. Nothing is written when the restored draft already matches. */
+async function keepLiveRegion(d: ProjectSnapshot['draft'], t: number): Promise<void> {
+  let mask: { mask_id: string | null } | undefined;
+  try {
+    // Submits the live mask first if it changed; null = no region (or nothing painted).
+    mask = { mask_id: (await flushMask())?.mask_id ?? null };
+  } catch {
+    mask = undefined; // EDT keeps it unsaved and retries; its own submit re-points the draft.
+  }
+  if (!isCurrent('restore', t) || draftTimer) return; // an edit since then saves it all
+  const region = d?.region as DraftRegion;
+  const sameRegion =
+    sameRect(region?.inner ?? null, state.inner) &&
+    (!state.inner || (region?.margin ?? DEFAULT_MARGIN) === state.margin);
+  const sameMask = !mask || (d?.mask_id ?? null) === mask.mask_id;
+  if (sameRegion && sameMask) return;
+  if (mask?.mask_id) set({ maskId: mask.mask_id });
+  putDraft(mask);
 }
 
 async function refreshIterations(): Promise<void> {
@@ -623,7 +664,7 @@ function subscribe(): void {
       projectStore.onResolved((p, keep) => {
         if (p.project_id !== state.projectId || keep !== 'other') return;
         set({ headRevision: p.head_revision, maskId: p.draft?.mask_id ?? null });
-        applyRestoredDraft(p.draft);
+        applyRestoredDraft(p.draft, 'kept');
       }),
     ),
   ];

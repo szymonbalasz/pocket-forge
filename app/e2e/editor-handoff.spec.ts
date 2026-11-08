@@ -189,7 +189,7 @@ test('BL-14 FR-EDT-27 a margin change in Generate redraws the outer rect; the ma
   expect((await hook<{ full: number }>(page, 'mask')).full).toBe(400 * 400);
 });
 
-test('BL-26 a restored draft region reaches EDT through the region setter; the overlap is kept', async ({
+test('OQ-EDT-14 FR-EDT-23 a History restore keeps EDT’s live region and mask; the draft points at them again (walk RGN D1)', async ({
   page,
 }) => {
   await openRgn(page);
@@ -232,18 +232,24 @@ test('BL-26 a restored draft region reaches EDT through the region setter; the o
     };
     w.__pfMock.emit('project:committed', { seq: 99 });
   });
-  await expect
-    .poll(async () => await region())
-    .toEqual({
-      inner: { x: 600, y: 500, w: 400, h: 400 },
-      outer: { x: 536, y: 436, w: 528, h: 528 },
-    });
-  // FR-EDT-20: the overlap (x 600..800) keeps its paint; the rest starts empty.
-  expect((await hook<{ full: number }>(page, 'mask')).full).toBe(200 * 400);
   await expect(page.getByTestId('rgn-panel-prompt')).toHaveValue('old prompt');
-  // The restore wrote the draft already: EDT's echo of the region is not an edit.
+  // The live region and mask stay; no editor undo entry for the restore.
+  expect(await region()).toEqual({
+    inner: { x: 400, y: 500, w: 400, h: 400 },
+    outer: { x: 272, y: 372, w: 656, h: 656 },
+  });
+  expect((await hook<{ full: number }>(page, 'mask')).full).toBe(400 * 400);
+  expect((await hook<{ label: string | null }>(page, 'undoDepth')).label).toBe('fill region');
+  // One save: the restored prompt with the live region, margin and stored mask (R55).
+  await expect.poll(drafts).toBe(before + 1);
+  const put = (await calls(page)).filter((c) => c.cmd === 'project_put_draft').at(-1)!;
+  expect((put.args as { input: { draft: unknown } }).input.draft).toMatchObject({
+    final_prompt: 'old prompt',
+    region: { inner: { x: 400, y: 500, w: 400, h: 400 }, margin: 128 },
+    mask_id: expect.stringMatching(/^01JMASK/),
+  });
   await page.waitForTimeout(2500);
-  expect(await drafts()).toBe(before);
+  expect(await drafts()).toBe(before + 1);
 });
 
 test('FR-PRJ-36 walk 2 N1 Keep other loads the kept mask; this machine’s unsaved mask is not submitted over it', async ({
