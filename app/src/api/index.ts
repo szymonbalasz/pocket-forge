@@ -5,13 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 
-import type {
-  CommandName,
-  Commands,
-  CoreErrorShape,
-  Events,
-  ExportSettingsInput,
-} from './types';
+import type { CommandName, Commands, CoreErrorShape, Events, ExportSettingsInput } from './types';
 
 export type * from './types';
 
