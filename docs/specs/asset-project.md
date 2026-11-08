@@ -114,14 +114,14 @@ Full tree and field tables: [manifest-schema](../architecture/manifest-schema.md
 | `project_folder_list` / `project_folder_add` | folder (`working\|references\|structure\|parts\|exports`) / folder, `paths[]` → files `[{name, bytes, mtime, image}]` | `unknown_folder`, `read_only` (add) |
 | `project_put_draft` | draft (+ EXP's unsaved export settings, R30) → `seq` | `read_only`, `locked`, `conflict` |
 | `project_list_revisions` / `project_save_revision` / `project_restore_revision` | — / label? / `rev_id` → `[{id, seq, created_at, reason, label}]` / revision | `unchanged`, `unknown_id`, `read_only` |
-| `project_trash_list` / `project_trash_restore` | — / item id → items / ok | `unknown_id`, `read_only` |
+| `project_trash_list` / `project_trash_restore` | — / item id → items / ok | `unknown_id`, `read_only`, `not_restorable` (kinds other than `candidates`, `job_inputs`, `conflict_copy`; R51) |
 | `project_disk_usage` / `project_relink_original` | — / path → bytes per category + next purge date / ok | — / `hash_mismatch` |
 | `project_prefetch_original` | — → ok (decode starts) | `corrupt`, `not_available_offline` |
 | `project_conflict_get` / `project_resolve_conflict` | — / `keep: this \| other` → both versions / revision | `no_conflict`, `files_missing` |
 
 - Retired (#44): `import_paths`, `import_clipboard_image`, `import_cancel` (→ `project_create*`), `recent_list` (OQ-PRJ-14).
 - **Store API** (Rust, one commit each, `read_only`/`locked`/`conflict` as above, R4): `read_project` (current layer stack, R6), `record_job`, `update_job`, `add_candidates` (assigns the iteration folder, FR-RGN-39), `put_mask`, `accept_candidate` (also restores a trashed candidate file for a re-pick, FR-RGN-36), `set_star`, `discard_candidate`, `resolve_job`, `replace_patch_layer` (re-tune), `put_export` (export settings + `last`), `settings_get` / `settings_put(section)`, `decoded_original`, `resolve_image(image_id)` (original, layer or candidate → file, for EDT). User-facing job and candidate commands are RGN's (`rgn_*`).
-- **Events:** `import:progress{done, total}`, `import:done`, `project:committed{seq}`, `project:save-failed{reason, retrying}`, `project:conflict`, `project:recovered`, `project:original-ready`, `project:thumb-updated{project_id}`, `trash:purged{count, bytes}` (R21).
+- **Events:** `import:progress{done, total}`, `import:done`, `project:committed{seq}`, `project:save-failed{reason, retrying}`, `project:conflict`, `project:recovered`, `project:original-ready`, `project:thumb-updated{project_id}`, `trash:purged{count, bytes}` (R21), `project:spool-dropped{project_id, job_id, seq, op, code}` (a spooled write refused for good; BL-25).
 
 ## 10. Provider interaction
 N/A: no provider calls. PRJ persists the job record ADR 0001 requires (KQ-17) and keeps the opaque `provider{}` as a cache (#20).

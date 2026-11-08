@@ -141,9 +141,10 @@ test('FR-PRJ-33 FR-PRJ-31 FR-PRJ-32 Storage shows disk use, trash count, next pu
       {
         id: 'T1',
         path: 'results/001 kitchen/02.png',
-        kind: 'candidate',
+        kind: 'candidates',
         bytes: 3 * 1024 * 1024,
         trashed_at: '2026-11-01T00:00:00Z',
+        restorable: true,
       },
     ],
   });
@@ -158,6 +159,61 @@ test('FR-PRJ-33 FR-PRJ-31 FR-PRJ-32 Storage shows disk use, trash count, next pu
   expect(core.calls.find((c) => c.cmd === 'project_trash_restore')?.input).toEqual({
     item_id: 'T1',
   });
+});
+
+test('FR-PRJ-31 Restore is offered only for restorable trash items (R51)', async () => {
+  await openCrypt({
+    trash: [
+      {
+        id: 'T1',
+        path: 'results/001 kitchen/02.png',
+        kind: 'candidates',
+        bytes: 1024,
+        trashed_at: '2026-11-01T00:00:00Z',
+        restorable: true,
+      },
+      {
+        id: 'T2',
+        path: '.pforge/stray.bin',
+        kind: 'orphan',
+        bytes: 1024,
+        trashed_at: '2026-11-02T00:00:00Z',
+        restorable: false,
+      },
+    ],
+  });
+  const items = await screen.findAllByTestId('prj-panel-storage-item');
+  const row = (id: string) => items.find((i) => i.dataset.recordId === id)!;
+  expect(within(row('T1')).queryByTestId('prj-panel-storage-restore')).not.toBeNull();
+  expect(within(row('T2')).queryByTestId('prj-panel-storage-restore')).toBeNull();
+});
+
+test('FR-PRJ-40 a spooled write refused for good shows a banner (BL-25)', async () => {
+  await openCrypt();
+  const pid = projectStore.get().project!.project_id;
+  act(() =>
+    core.emit('project:spool-dropped', {
+      project_id: 'another-project',
+      job_id: 'J1',
+      seq: 3,
+      op: 'update_job',
+      code: 'invalid_input',
+    }),
+  );
+  expect(screen.queryByTestId('prj-error')).toBeNull();
+  act(() =>
+    core.emit('project:spool-dropped', {
+      project_id: pid,
+      job_id: 'J1',
+      seq: 4,
+      op: 'add_candidates',
+      code: 'invalid_input',
+    }),
+  );
+  const banner = await screen.findByTestId('prj-error');
+  expect(banner.dataset.code).toBe('spool_dropped');
+  expect(banner.textContent).toContain('Results of a job');
+  expect(banner.textContent).toContain('discarded (invalid input)');
 });
 
 test('FR-PRJ-21 closing with a save still pending asks first; Close anyway closes', async () => {

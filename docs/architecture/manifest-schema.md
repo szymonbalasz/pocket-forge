@@ -174,7 +174,8 @@ Terminal = `failed | canceled | lost | closed`. A re-pick (RGN FR-RGN-36) accept
 | `provider_meta` | object | opaque (PRV) |
 | `status` | `new\|accepted\|dismissed\|discarded\|trashed\|invalid` | R10 |
 | `starred` | bool | separate from status; starred is never trashed |
-| `trash_id` | ULID \| null | set while the file is in the trash |
+| `trash_id` | ULID \| null | set while the file is in the trash; after a purge it still names the purged item |
+| `purged_at` | timestamp, optional | set when the 30-day purge deleted the file (FR-PRJ-32, BL-23); the record stays |
 
 - `new` = ready to compare · `accepted` · `dismissed` = left over when its job was resolved · `discarded` = the user discarded it · `trashed` = moved by a sweep (orphan, conflict) · `invalid` = won't decode. UI statuses (`pending|ready|invalid`) are EDT/RGN's only.
 - A rebuild (FR-PRJ-24, conflict) adds candidates listed in a job's `candidate_ids[]` but missing here, as `new` (or `invalid` if the file won't decode).
@@ -183,7 +184,7 @@ Terminal = `failed | canceled | lost | closed`. A re-pick (RGN FR-RGN-36) accept
 `id`, `kind` (`candidates|job_inputs|mask|layer|manifest|orphan|conflict_copy`), `files[]` (from → `.pforge/trash/<id>/<from>`; a restore moves it back to `<from>`, recreating its folder), `trashed_at`, `reason`. The manifest records the item first; the file moves follow the commit and are rolled forward on open. Purged when `trashed_at` + 30 days < now (at open).
 
 ### 4.9 Spool entry (`<data-dir>/pending/<project-id>/`)
-`<seq>.json` = `{seq, op: add_candidates|update_job, job_id, payload, created_at}`, plus `<seq>-<cand-id>.<ext>` bytes. Replayed in `seq` order once the project is writable; each entry is deleted after its commit.
+`<seq>.json` = `{seq, op: add_candidates|update_job, job_id, payload, created_at}`, plus `<seq>-<cand-id>.<ext>` bytes. Replayed in `seq` order once the project is writable; each entry is deleted after its commit. One the store refuses for good is deleted too, and `project:spool-dropped` tells the user (BL-25).
 
 ### 4.10 Export (manifest `export`, EXP owns the meaning)
 | Field | Type | Notes |

@@ -422,6 +422,7 @@ export function prjMock(
       const trash = p.trash as TrashItem[];
       const i = trash.findIndex((t) => t.id === input.item_id);
       if (i < 0) return fail('unknown_id', 'Unknown trash item');
+      if (!trash[i]?.restorable) return fail('not_restorable', "This trash item can't be restored");
       trash.splice(i, 1);
       return {};
     },

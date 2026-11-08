@@ -97,6 +97,8 @@ export interface TrashItem {
   /** `trashed_at` + 30 days (FR-PRJ-32). */
   purge_at?: string;
   reason?: string;
+  /** Restore is offered only when true: `candidates`, `job_inputs`, `conflict_copy` (R51). */
+  restorable: boolean;
 }
 
 export type DiskCategory =
@@ -527,6 +529,8 @@ export interface CandidateRecord {
   status: 'new' | 'accepted' | 'dismissed' | 'discarded' | 'trashed' | 'invalid';
   starred: boolean;
   trash_id: string | null;
+  /** Set when the 30-day purge deleted the file (BL-23); `trash_id` then names the purged item. */
+  purged_at?: string;
   width?: number;
   height?: number;
   /** Aspect differs from the sent one by > 1 % (FR-RGN-24). */
@@ -674,6 +678,14 @@ export interface Events {
   'export:canceled': { export_id: string };
   'import:progress': { done: number; total: number };
   'project:save-failed': { reason: string; retrying: boolean };
+  /** A spooled job write the store refused for good was deleted (BL-25). */
+  'project:spool-dropped': {
+    project_id: string;
+    job_id: string;
+    seq: number;
+    op: 'update_job' | 'add_candidates';
+    code: string;
+  };
   'project:conflict': Record<string, never>;
   'project:recovered': Record<string, never>;
   'project:thumb-updated': { project_id: string };
