@@ -502,6 +502,14 @@ async function previewSelected(): Promise<void> {
     const p = await api.region.preview({ job_id: jobId, candidate_id: candId, blend: s.blend });
     if (!isCurrent('preview', t) || state.selectedCandidateId !== candId) return;
     set({ preview: p });
+    if (p.notices?.includes('colour_match_skipped')) {
+      set({
+        trackerNotice: {
+          kind: 'info',
+          text: 'Colour match skipped: less than 1 % of the region is unmasked.',
+        },
+      });
+    }
     editorBridge.setCompare({ url: p.url, rect: p.rect });
   } catch (e) {
     if (!isCurrent('preview', t)) return;

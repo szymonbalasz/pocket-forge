@@ -469,6 +469,8 @@ export interface RgnPreview {
   key: string;
   url: string;
   rect: RectPx;
+  /** `colour_match_skipped`: under 1 % of the outer rect is unmasked (FR-RGN-26). */
+  notices?: string[];
 }
 
 /** A manifest candidate (schema §4.7) as `project_get` returns it. */
