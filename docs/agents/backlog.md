@@ -36,3 +36,4 @@ Small items for idle slots (see [process.md](../process.md)). The planned work a
 | BL-30 | A 2-file trash item shows only the first name; Storage shows "Working 0 / Total 0 B" while the folder is moved | XS | `features/project` | — | open |
 | BL-31 | EDT reload after Keep other races its 2 s mask-retry timer (no hard cancel) | XS | `features/editor` MaskSync | — | open |
 | BL-32 | PRJ's open-time crash sweep deletes even a fresh `.pf-tmp` in `exports/` (EXP's own FR-EXP-17 sweep keeps fresh ones); align the age rule | XS | `pf-core` project sweep | — | open |
+| BL-33 | FR-RGN-32: the second mask edge of the seam fixture measured 0.512 levels/px (limit 0.5 on the spec's edge, 0.459 there); check whether feather/colour match is asymmetric | S | `pf-imaging` blend | — | open |
