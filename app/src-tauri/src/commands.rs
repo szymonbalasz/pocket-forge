@@ -99,6 +99,8 @@ tauri_commands! {
     export_plan => c::ExportPlan,
     export_start => c::ExportStart,
     export_cancel => c::ExportCancel,
+    edt_mask_submit => c::EdtMaskSubmit,
+    edt_mask_read => c::EdtMaskRead,
 }
 
 #[cfg(test)]

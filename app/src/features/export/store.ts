@@ -72,12 +72,14 @@ let syncSeq = 0;
 let prefetched: string | null = null;
 let listening: Promise<void> | null = null;
 let proceedClose: (() => void) | null = null;
+let cancelClose: (() => void) | null = null;
 let guarding = false;
 
 /** PRJ close guard: hold the close while an export runs and ask first (OQ-EXP-09). */
-function closeGuard(proceed: () => void): boolean {
+function closeGuard(proceed: () => void, cancel: () => void): boolean {
   if (!state.run) return true;
   proceedClose = proceed;
+  cancelClose = cancel;
   set({ closeAsk: true, expanded: true });
   return false;
 }
@@ -128,6 +130,7 @@ export const exportStore = {
     syncSeq = 0;
     prefetched = null;
     proceedClose = null;
+    cancelClose = null;
     set(initial);
   },
 
@@ -319,6 +322,7 @@ export const exportStore = {
   async confirmClose(): Promise<void> {
     const proceed = proceedClose;
     proceedClose = null;
+    cancelClose = null;
     set({ closeAsk: false });
     await exportStore.cancel();
     proceed?.();
@@ -326,8 +330,11 @@ export const exportStore = {
 
   /** "Keep exporting": the close is dropped. */
   keepExporting(): void {
+    const cancel = cancelClose;
     proceedClose = null;
+    cancelClose = null;
     set({ closeAsk: false });
+    cancel?.();
   },
 };
 

@@ -215,15 +215,18 @@ describe('export store', () => {
     await bound();
     await exportStore.start();
     h.prj.close.mockReset();
-    await projectStore.close();
+    // `close` resolves once the guard's answer is in (R55).
+    const kept = projectStore.close();
     expect(exportStore.get().closeAsk).toBe(true);
     exportStore.keepExporting();
+    await kept;
     expect(exportStore.get().closeAsk).toBe(false);
     expect(h.exp.cancel).not.toHaveBeenCalled();
     expect(h.prj.close).not.toHaveBeenCalled();
     // PRJ's "Close anyway" (force past `unsaved`) is guarded too, and keeps its force.
-    await projectStore.close(true);
+    const closing = projectStore.close(true);
     await exportStore.confirmClose();
+    await closing;
     expect(h.exp.cancel).toHaveBeenCalledWith('e1');
     expect(h.prj.close).toHaveBeenCalledTimes(1);
     expect(h.prj.close).toHaveBeenLastCalledWith(true);

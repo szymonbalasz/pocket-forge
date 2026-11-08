@@ -214,7 +214,10 @@ describe('labels', () => {
 
   test('FR-RGN-20 the normalised error and hint; insufficient_balance has its own message', () => {
     expect(jobErrorText({ code: 'provider_error', hint: 'Try again later.' })).toBe(
-      'provider error. Try again later.',
+      'Provider error. Try again later.',
+    );
+    expect(jobErrorText({ code: 'x', message: 'the provider refused the mask' })).toBe(
+      'The provider refused the mask',
     );
     expect(jobErrorText({ code: 'insufficient_balance' })).toMatch(/Not enough provider balance/);
   });

@@ -1,8 +1,8 @@
 // FR-EDT-19: on reopen the draft's mask is loaded, pixel-identical; a different draft region keeps
-// the overlap. edt_mask_read is mocked (the real one lands with EDT slice 5).
+// the overlap. edt_mask_read is mocked here (base64 bytes, as the core returns them).
 import { expect, test, type Page } from '@playwright/test';
 
-import { hook, openMap } from './edt-mock';
+import { b64, hook, openMap } from './edt-mock';
 import { openFirstCard } from './mock-core';
 
 const W = 64;
@@ -11,7 +11,7 @@ const bytes = Array.from({ length: W * H }, (_, i) => (i * 7) % 256);
 
 test('FR-EDT-19 reopen restores the draft mask pixel-identically', async ({ page }) => {
   await page.addInitScript(
-    ({ bytes, W, H }) => {
+    ({ data, W, H }) => {
       const w = window as unknown as Record<string, unknown>;
       w.__pfMockSnapshot = {
         draft: {
@@ -25,9 +25,9 @@ test('FR-EDT-19 reopen restores the draft mask pixel-identically', async ({ page
         },
       };
       const h = (w.__pfMockHandlers ??= {}) as Record<string, () => unknown>;
-      h.edt_mask_read = () => ({ rect: { x: 200, y: 300, w: W, h: H }, bytes });
+      h.edt_mask_read = () => ({ rect: { x: 200, y: 300, w: W, h: H }, data_b64: data });
     },
-    { bytes, W, H },
+    { data: b64(bytes), W, H },
   );
   await openMap(page);
   await expect
@@ -42,7 +42,7 @@ test('FR-EDT-19 a different draft region keeps the overlap, the rest is 0; a cor
   page,
 }) => {
   await page.addInitScript(
-    ({ bytes, W, H }) => {
+    ({ data, W, H }) => {
       const w = window as unknown as Record<string, unknown>;
       w.__pfMockSnapshot = {
         draft: {
@@ -56,9 +56,9 @@ test('FR-EDT-19 a different draft region keeps the overlap, the rest is 0; a cor
         },
       };
       const h = (w.__pfMockHandlers ??= {}) as Record<string, () => unknown>;
-      h.edt_mask_read = () => ({ rect: { x: 200, y: 300, w: W, h: H }, bytes });
+      h.edt_mask_read = () => ({ rect: { x: 200, y: 300, w: W, h: H }, data_b64: data });
     },
-    { bytes, W, H },
+    { data: b64(bytes), W, H },
   );
   await openMap(page);
   await expect

@@ -35,7 +35,7 @@ pub(crate) fn decode_whole(path: &Path) -> Result<image::DynamicImage, ProbeErro
     reader.limits(limits());
     reader.decode().map_err(|e| match e {
         image::ImageError::IoError(io) => ProbeError::Io(io),
-        other => ProbeError::Corrupt(other.to_string()),
+        other => ProbeError::data(other),
     })
 }
 
@@ -46,7 +46,7 @@ pub fn decode_rgb8(path: &Path) -> Result<image::RgbImage, ProbeError> {
     let (w, h) = (src.width, src.height);
     let mut buf = Vec::new();
     buf.try_reserve_exact(w as usize * h as usize * 3)
-        .map_err(|_| ProbeError::Corrupt("out of memory".into()))?;
+        .map_err(|_| ProbeError::data("out of memory"))?;
     src.for_each_band::<ProbeError>(512, |_, rows| {
         buf.extend_from_slice(rows);
         Ok(())
@@ -109,7 +109,9 @@ impl RgbSource {
                 let mut buf = Vec::with_capacity(stride * band as usize);
                 let mut y0 = 0;
                 loop {
-                    let row = reader.next_row().map_err(png_error)?;
+                    let row = reader
+                        .next_row()
+                        .map_err(|e| png_error(e, ProbeError::data))?;
                     let Some(row) = row else { break };
                     push_rgb(&mut buf, row.data(), color)?;
                     if buf.len() == stride * band as usize {
@@ -137,13 +139,15 @@ fn png_reader(path: &Path) -> Result<png::Reader<BufReader<File>>, ProbeError> {
     dec.set_limits(png::Limits {
         bytes: MAX_ALLOC as usize,
     });
-    dec.read_info().map_err(png_error)
+    dec.read_info()
+        .map_err(|e| png_error(e, ProbeError::header))
 }
 
-fn png_error(e: png::DecodingError) -> ProbeError {
+/// `part` says whether the header or the data failed (BL-27: a broken body is not a header error).
+fn png_error(e: png::DecodingError, part: fn(png::DecodingError) -> ProbeError) -> ProbeError {
     match e {
         png::DecodingError::IoError(io) => ProbeError::Io(io),
-        other => ProbeError::Corrupt(other.to_string()),
+        other => part(other),
     }
 }
 
@@ -162,7 +166,54 @@ fn push_rgb(out: &mut Vec<u8>, row: &[u8], color: png::ColorType) -> Result<(), 
             .0
             .iter()
             .for_each(|p| out.extend_from_slice(&[p[0], p[0], p[0]])),
-        C::Indexed => return Err(ProbeError::Corrupt("unexpanded palette row".into())),
+        C::Indexed => return Err(ProbeError::data("unexpanded palette row")),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A valid PNG whose `IDAT` body is broken: the header and `IEND` are intact (walk D5).
+    fn body_corrupt_png(path: &Path) {
+        let mut bytes = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut bytes, 16, 8);
+            enc.set_color(png::ColorType::Rgb);
+            let mut w = enc.write_header().unwrap();
+            w.write_image_data(&[90; 16 * 8 * 3]).unwrap();
+        }
+        let idat = bytes.windows(4).position(|w| w == b"IDAT").unwrap() + 4;
+        bytes[idat..idat + 6].copy_from_slice(&[0xFF; 6]);
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    /// BL-27: a broken body says the image data is unreadable, not the header.
+    #[test]
+    fn bl_27_a_broken_png_body_is_a_data_error_not_a_header_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("broken.png");
+        body_corrupt_png(&path);
+        assert!(
+            crate::probe_file_complete(&path).is_ok(),
+            "the header is fine"
+        );
+        let err = decode_rgb8(&path).unwrap_err();
+        assert!(matches!(err, ProbeError::Corrupt(_)), "{err:?}");
+        let text = err.to_string();
+        assert!(text.starts_with("image data is unreadable: "), "{text}");
+        assert!(!text.contains("header"), "{text}");
+    }
+
+    #[test]
+    fn bl_27_a_broken_png_header_is_a_header_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("broken.png");
+        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+        bytes.extend_from_slice(&[0, 0, 0, 13, b'I', b'H', b'D', b'R', 0xFF, 0xFF]);
+        std::fs::write(&path, bytes).unwrap();
+        let text = crate::probe_file(&path).unwrap_err().to_string();
+        assert!(text.starts_with("image header is unreadable: "), "{text}");
+    }
 }

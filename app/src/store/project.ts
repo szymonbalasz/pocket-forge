@@ -36,11 +36,10 @@ const initial: ProjectState = {
 let state: ProjectState = initial;
 const listeners = new Set<() => void>();
 let listening = false;
-
 /** A feature's say before the open project closes, ahead of PRJ's own `unsaved` check (EXP's
- *  "Cancel the export and close?"). Returns true to allow it now; false to hold the close and
- *  call `proceed` later. */
-export type CloseGuard = (proceed: () => void) => boolean;
+ *  "Cancel the export and close?", EDT's last mask submit, R55). Returns true to allow it now;
+ *  false to hold the close and later call `proceed` (once) or `cancel`. */
+export type CloseGuard = (proceed: () => void, cancel: () => void) => boolean;
 const closeGuards = new Set<CloseGuard>();
 
 /** Called with the snapshot after a sync conflict is resolved (FR-PRJ-36): features that keep
@@ -49,9 +48,17 @@ const closeGuards = new Set<CloseGuard>();
 export type ResolvedListener = (project: ProjectSnapshot) => void;
 const resolvedListeners = new Set<ResolvedListener>();
 
-function guardsAllow(proceed: () => void): boolean {
-  for (const g of closeGuards) if (!g(proceed)) return false;
-  return true;
+/** Asks the guards in turn; a held guard's `proceed` asks the ones after it. Runs `go` once all
+ *  allowed it, `cancel` if one cancels. */
+function askGuards(go: () => void, cancel: () => void): void {
+  const list = [...closeGuards];
+  const from = (start: number): void => {
+    for (const [i, guard] of list.entries()) {
+      if (i >= start && !guard(() => from(i + 1), cancel)) return;
+    }
+    go();
+  };
+  from(0);
 }
 
 function set(patch: Partial<ProjectState>): void {
@@ -184,15 +191,20 @@ export const projectStore = {
 
   /** Opens a project folder (FR-PRJ-14). Closing the open one asks the close guards first. */
   async open(path: string): Promise<boolean> {
-    if (state.project && !guardsAllow(() => void openNow(path))) return false;
-    return openNow(path);
+    if (!state.project) return openNow(path);
+    return new Promise((resolve) =>
+      askGuards(
+        () => void openNow(path).then(resolve),
+        () => resolve(false),
+      ),
+    );
   },
 
   /** Back to the home grid. The close guards are asked first; `force` closes although a save is
-   *  still pending (FR-PRJ-21). */
+   *  still pending (FR-PRJ-21). Resolves once closed, refused or cancelled (callers check
+   *  whether a project is still open). */
   async close(force = false): Promise<void> {
-    if (!guardsAllow(() => void closeNow(force))) return;
-    await closeNow(force);
+    return new Promise((resolve) => askGuards(() => void closeNow(force).then(resolve), resolve));
   },
 
   /** Re-reads the open project (after a restore, relink, …). */

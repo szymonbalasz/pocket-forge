@@ -32,8 +32,12 @@ describe('TileEventLog (D1: events before the descriptor)', () => {
 
   test('FR-EDT-07 a failure before the descriptor is kept for its key', () => {
     const log = new TileEventLog();
-    expect(log.fail('k', { code: 'corrupt', message: 'bad body' })).toBe('bad body');
-    expect(log.failure('k')).toBe('bad body');
+    expect(log.fail('k', { code: 'corrupt', message: 'bad body' })).toEqual({
+      code: 'corrupt',
+      message: 'bad body',
+    });
+    expect(log.failure('k')).toEqual({ code: 'corrupt', message: 'bad body' });
+    expect(log.fail('s', 'plain')).toEqual({ code: 'error', message: 'plain' });
     expect(log.failure('other')).toBeNull();
     log.clear();
     expect(log.failure('k')).toBeNull();

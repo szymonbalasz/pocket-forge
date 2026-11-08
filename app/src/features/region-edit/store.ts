@@ -29,6 +29,7 @@ import {
 import { projectStore } from '../../store/project';
 import {
   editorBridge,
+  flushMask,
   pushUndo,
   revisionUndoEntry,
   thumbnailUrl,
@@ -370,11 +371,22 @@ async function refreshProject(): Promise<void> {
 
 /** Shows a restored revision's draft (walk D4), or the kept version's after a conflict is
  *  resolved (walk 2 N1). No draft save: the core already wrote it, and a save still waiting
- *  would write the replaced draft back. EDT keeps its region and mask. */
+ *  would write the replaced draft back. BL-26: its region goes back to EDT, validated (`refit` →
+ *  `editorBridge.setRegion`); EDT keeps the overlapping mask and hands it off again. */
 function applyRestoredDraft(d: ProjectSnapshot['draft']): void {
   if (draftTimer) clearTimeout(draftTimer);
   draftTimer = null;
   reloadReferences(d?.references ?? null);
+  const region = d?.region as { inner?: RectPx; margin?: number } | null | undefined;
+  const inner = region?.inner ?? null;
+  const margin = region?.margin ?? state.margin;
+  if (!sameRect(inner, state.inner) || margin !== state.margin) {
+    // EDT's echo of this region is not an edit (no draft save, no prompt reset).
+    editorInner = inner;
+    set({ inner, margin });
+    if (!inner) editorBridge.setRegion(null);
+    void refit();
+  }
   set({
     prompt: d?.final_prompt ?? '',
     seedMode: d?.seed !== null && d?.seed !== undefined ? 'pinned' : 'random',
@@ -473,6 +485,8 @@ async function refit(): Promise<void> {
     const fit = await api.region.fit(s.projectId, s.inner, s.margin, s.modelId ?? undefined);
     if (!isCurrent('fit', t)) return;
     set({ fit, fitError: null });
+    // BL-14: EDT draws the region RGN validated (margin, model, Retry's region).
+    editorBridge.setRegion({ inner: fit.inner, outer: fit.outer });
   } catch (e) {
     if (!isCurrent('fit', t)) return;
     set({ fit: null, fitError: uiError(e) });
@@ -791,8 +805,11 @@ export const rgn = {
         const spend = await api.region.setSpend(plan.saveSpend);
         set({ spend });
       }
+      // R7: EDT submits the live mask first, so the job sends exactly what the DM sees.
+      const ref = await flushMask();
+      if (ref) set({ maskId: ref.mask_id });
       const { job_id } = await api.region.submit({
-        draft,
+        draft: ref ? { ...draft, mask_id: ref.mask_id } : draft,
         estimate_id: est.estimate_id,
         confirmations: plan.confirmations,
       });

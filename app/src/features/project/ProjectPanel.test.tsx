@@ -135,6 +135,18 @@ test('FR-PRJ-23 Ctrl+S with nothing changed reports no changes', async () => {
   expect(core.names()).toContain('project_save_revision');
 });
 
+test('FR-PRJ-23 History Save with nothing changed says so next to the button', async () => {
+  await openCrypt();
+  expect(screen.queryByTestId('prj-panel-history-unchanged')).toBeNull();
+  fireEvent.click(screen.getByTestId('prj-panel-history-save'));
+  expect((await screen.findByTestId('prj-panel-history-unchanged')).textContent).toBe(
+    'No changes since the last revision',
+  );
+  // The next commit (a draft save) clears it.
+  act(() => core.emit('project:committed', { seq: 9 }));
+  expect(screen.queryByTestId('prj-panel-history-unchanged')).toBeNull();
+});
+
 test('FR-PRJ-33 FR-PRJ-31 FR-PRJ-32 Storage shows disk use, trash count, next purge, and restores a trashed item', async () => {
   await openCrypt({
     trash: [

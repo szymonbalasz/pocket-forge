@@ -174,7 +174,7 @@ impl PyramidFile {
 static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Temp + rename in the same folder (the cache is local, so no lock retries are needed).
-fn write_atomic(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) fn write_atomic(target: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
     let name = target
         .file_name()
@@ -704,23 +704,33 @@ pub fn image_open(
 /// next listing).
 pub const LIBRARY_MAX_KEYS: usize = 20_000;
 
-/// OQ-PRJ-16 A, minimal: registers a PNG/JPEG/WebP file outside the open project under
-/// `/i/l-<16 hex>.<ext>` and returns its URL. The key covers path, size and mtime, so it changes
-/// when the file does. Reads metadata only (nothing is hydrated until the image is viewed,
-/// FR-PRJ-17). `None` for a missing file or another extension.
+/// BL-16 (OQ-PRJ-16 said ≤ 512 px): the long side of a `library` image as served.
+pub const LIBRARY_MAX_SIDE: u32 = 512;
+
+/// OQ-PRJ-16 A: registers a PNG/JPEG/WebP file outside the open project under
+/// `/i/l-<16 hex>.png`, served at most [`LIBRARY_MAX_SIDE`] px on the long side (BL-16), and
+/// returns its URL.
 pub fn register_library_image(core: &Core, path: &Path) -> Option<String> {
+    register_library_image_sized(core, path, LIBRARY_MAX_SIDE)
+}
+
+/// [`register_library_image`] with another size limit (REF's pack thumbnails use 256,
+/// FR-REF-14). The key covers path, size, mtime, `max_side` and the builder version, so it changes
+/// when any of them does. Registration reads metadata only: nothing is hydrated until the image
+/// is viewed (FR-PRJ-17). The copy is made on the first request and cached in the tile cache.
+/// `None` for a missing file, another extension or `max_side` 0.
+pub fn register_library_image_sized(core: &Core, path: &Path, max_side: u32) -> Option<String> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    let (mime, ext) = match ext.as_str() {
-        "png" => ("image/png", "png"),
-        "jpg" | "jpeg" => ("image/jpeg", "jpg"),
-        "webp" => ("image/webp", "webp"),
-        _ => return None,
-    };
+    if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp") || max_side == 0 {
+        return None;
+    }
     let meta = std::fs::symlink_metadata(path).ok()?;
     let h = fnv1a64(&[
         path.to_string_lossy().as_bytes(),
         &meta.len().to_le_bytes(),
         &mtime_ns(&meta).to_le_bytes(),
+        &max_side.to_le_bytes(),
+        &BUILDER_VERSION.to_le_bytes(),
     ]);
     let key = format!("l-{h:016x}");
     let mut s = lock(&core.served);
@@ -728,12 +738,69 @@ pub fn register_library_image(core: &Core, path: &Path) -> Option<String> {
         if s.library.keys().count() >= LIBRARY_MAX_KEYS {
             s.library.clear();
         }
+        let dst = cache_root(&core.ctx.data_dir).join(&key).join(COPY_FILE);
         s.library.register(
             key.clone(),
-            ServedImage::file(path.to_path_buf(), mime, ext),
+            ServedImage {
+                body: ImageBody::Copy {
+                    src: path.to_path_buf(),
+                    dst,
+                    max_side,
+                },
+                mime: "image/png",
+                ext: "png",
+            },
         );
     }
-    Some(format!("{}/i/{key}.{ext}", core.ctx.tiles_base_url))
+    Some(format!("{}/i/{key}.png", core.ctx.tiles_base_url))
+}
+
+/// One copy is made at a time: a large original decodes whole (pf-imaging), and a folder listing
+/// can ask for many at once.
+static COPY_GEN: Mutex<()> = Mutex::new(());
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
+}
+
+/// Serves a `library` copy (BL-16): the cached copy, else the source if it already fits, else a
+/// new copy (written to the cache). Any failure is a 404 (logged); the app keeps running.
+pub(crate) fn serve_copy(key: &str, src: &Path, dst: &Path, max_side: u32) -> SchemeResponse {
+    if let Ok(body) = std::fs::read(dst) {
+        return images::ok("image/png", body);
+    }
+    let _one = COPY_GEN.lock().unwrap_or_else(|e| e.into_inner());
+    if let Ok(body) = std::fs::read(dst) {
+        return images::ok("image/png", body);
+    }
+    let fail = |what: &str, e: &dyn std::fmt::Display| {
+        tracing::warn!(key, error = %e, "pf-tiles: library image {what}");
+        SchemeResponse::status(404)
+    };
+    let info = match pf_imaging::probe_file(src) {
+        Ok(i) => i,
+        Err(e) => return fail("unreadable", &e),
+    };
+    if info.width.max(info.height) <= max_side {
+        // Already small (e.g. a project card's thumb.jpg): as it is, with its own type.
+        return match std::fs::read(src) {
+            Ok(body) => images::ok(info.format.mime(), body),
+            Err(e) => fail("unreadable", &e),
+        };
+    }
+    let png = match pf_imaging::thumbnail::downscaled_png(src, max_side) {
+        Ok((png, _, _)) => png,
+        Err(e) => return fail("not decodable", &e),
+    };
+    if let Some(dir) = dst.parent() {
+        match std::fs::create_dir_all(dir).and_then(|()| write_atomic(dst, &png)) {
+            Ok(()) => touch_opened(dir, now_ms()),
+            Err(e) => tracing::debug!(key, error = %e, "tile cache: library copy not cached"),
+        }
+    }
+    images::ok("image/png", png)
 }
 
 // ---------------------------------------------------------------- transient images
