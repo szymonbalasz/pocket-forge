@@ -8,8 +8,8 @@ test('FR-PRJ-03 a pasted file list: Explorer "Copy as path" lines and file:// UR
     'C:\\maps\\Sewer.webp',
   ]);
   expect(parsePastedPaths('file:///D:/art/My%20Map.png')).toEqual(['D:/art/My Map.png']);
-  expect(parsePastedPaths('/home/x/a.png\n\\\\nas\\share\\b.jpg')).toEqual([
-    '/home/x/a.png',
+  expect(parsePastedPaths('/srv/maps/a.png\n\\\\nas\\share\\b.jpg')).toEqual([
+    '/srv/maps/a.png',
     '\\\\nas\\share\\b.jpg',
   ]);
 });

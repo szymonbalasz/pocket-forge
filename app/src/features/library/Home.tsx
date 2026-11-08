@@ -22,7 +22,7 @@ export function Home() {
 
 function HomeView() {
   const lib = useLibraryState();
-  const { error, busy } = useProjectState();
+  const { error, busy, opening } = useProjectState();
   const [over, setOver] = useState(false);
   const section = SECTIONS.find((s) => s.id === lib.section)!;
 
@@ -109,8 +109,20 @@ function HomeView() {
       )}
       {error && (
         <div className="banner banner-error" data-testid="prj-error" data-code={error.code}>
-          {error.message}
+          {error.code === 'not_available_offline'
+            ? 'Not available offline: this project is still in the cloud.'
+            : error.message}
           <span className="pf-spacer" />
+          {error.code === 'not_available_offline' && opening && (
+            <button
+              type="button"
+              className="link"
+              data-testid="prj-error-retry"
+              onClick={() => void projectStore.open(opening)}
+            >
+              Retry
+            </button>
+          )}
           <button type="button" className="link" onClick={() => projectStore.clearError()}>
             Dismiss
           </button>
@@ -136,6 +148,11 @@ function HomeView() {
             <Card key={c.id} card={c} />
           ))}
         </ul>
+      )}
+      {busy && opening && (
+        <div className="prj-toast" data-testid="prj-home-opening" role="status">
+          Opening {fileName(opening)}… (cloud files download first)
+        </div>
       )}
       <CreationToast />
       {over && (

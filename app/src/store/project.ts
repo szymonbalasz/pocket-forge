@@ -18,6 +18,8 @@ export interface ProjectState {
   /** Last command error worth showing in a banner. */
   error: { code: string; message: string } | null;
   busy: boolean;
+  /** The project folder being opened, or the last one that failed to open (Retry). */
+  opening: string | null;
   /** Bumped after every commit this UI knows of, so panels reload their lists. */
   revision: number;
 }
@@ -27,6 +29,7 @@ const initial: ProjectState = {
   save: { kind: 'saved', at: '' },
   error: null,
   busy: false,
+  opening: null,
   revision: 0,
 };
 
@@ -94,11 +97,11 @@ export const projectStore = {
 
   /** Opens a project folder (FR-PRJ-14). */
   async open(path: string): Promise<boolean> {
-    set({ busy: true, error: null });
+    set({ busy: true, error: null, opening: path });
     try {
       if (state.project) await api.project.close().catch(() => undefined);
       const project = await api.project.open(path);
-      set({ project, save: { kind: 'saved', at: savedAt(project) }, busy: false });
+      set({ project, save: { kind: 'saved', at: savedAt(project) }, busy: false, opening: null });
       bump();
       return true;
     } catch (e) {

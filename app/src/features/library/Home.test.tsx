@@ -239,3 +239,25 @@ test('FR-PRJ-45 rename from the card: Enter renames the folder, a taken name sho
   ]);
   expect(mock.projects.has(`${LIB}/Maps/Old Crypt`)).toBe(true);
 });
+
+test('FR-PRJ-17 a cloud-only project offline shows not available offline with Retry, which opens it once online', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  let offline = true;
+  const handlers = prjMock(samplePrjSeed(LIB), { emit: core.emit }).handlers;
+  core.useHandlers({
+    ...handlers,
+    project_open: (input) =>
+      offline
+        ? Promise.reject({ code: 'not_available_offline', message: 'offline' })
+        : handlers.project_open!(input),
+  });
+  const crypt = cards().find((c) => c.dataset.path?.endsWith('/Crypt'))!;
+  fireEvent.click(within(crypt).getByRole('button'));
+  const banner = await screen.findByTestId('prj-error');
+  expect(banner.dataset.code).toBe('not_available_offline');
+  expect(banner.textContent).toContain('Not available offline');
+  offline = false;
+  fireEvent.click(screen.getByTestId('prj-error-retry'));
+  await waitFor(() => expect(projectStore.get().project?.name).toBe('Crypt'));
+});
