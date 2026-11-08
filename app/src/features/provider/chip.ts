@@ -1,5 +1,5 @@
 // The provider status chip's label and state (provider spec §7). Pure, so it is unit tested.
-import type { Balance, ProviderStatus } from '../../api';
+import type { Balance, ProviderStatus, Spend } from '../../api';
 
 export type ChipState = 'fake' | 'ok' | 'offline' | 'auth_error' | 'not_configured' | 'configured';
 
@@ -16,6 +16,25 @@ const units = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 export function balanceLabel(balance: Balance | null): string {
   if (!balance || balance.kind === 'unknown') return 'unknown';
   return `${units.format(balance.remaining)} ${balance.unit}`;
+}
+
+/** The always-visible real-provider badge (FR-PRV-28): real credits, and the spend cap. */
+export interface RealBadge {
+  label: string;
+  /** No session cap yet: the first submit asks for one (FR-RGN-16). */
+  capSet: boolean;
+}
+
+/** `null` in fake mode; otherwise `Real credits · cap 12 / 50 CU` or `… · no spend cap yet`. */
+export function realBadgeOf(status: ProviderStatus, spend: Spend | null): RealBadge | null {
+  if (status.mode !== 'scenario') return null;
+  if (spend?.cap == null) {
+    return { label: 'Real credits · no spend cap yet', capSet: false };
+  }
+  return {
+    label: `Real credits · cap ${units.format(spend.spend)} / ${units.format(spend.cap)} CU`,
+    capSet: true,
+  };
 }
 
 export function chipOf(status: ProviderStatus, balance: Balance | null): Chip {

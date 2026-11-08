@@ -12,6 +12,7 @@
     "e2e": "corepack pnpm --filter ./app e2e",
     "env:init": "node scripts/env-init.mjs",
     "dev": "node scripts/dev.mjs",
+    "dev:real": "node scripts/dev.mjs --real",
     "tauri:smoke": "node scripts/tauri-smoke.mjs",
     "fixtures": "node fixtures/gen/gen-fixtures.mjs",
     "check:crates": "node scripts/check-crate-deps.mjs"

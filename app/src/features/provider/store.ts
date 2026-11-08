@@ -2,16 +2,18 @@
 // command; the store keeps the results and refreshes on `provider:status-changed`.
 import { useSyncExternalStore } from 'react';
 
-import { api, hasCore, onEvent, type Balance, type ProviderStatus } from '../../api';
+import { api, hasCore, onEvent, type Balance, type ProviderStatus, type Spend } from '../../api';
 import { onSettingsRequested } from '../../shared/settings';
 
 export interface ProviderState {
   status: ProviderStatus | null;
   balance: Balance | null;
+  /** Session spend and cap, shown on the real-provider badge (scenario mode only). */
+  spend: Spend | null;
   settingsOpen: boolean;
 }
 
-let state: ProviderState = { status: null, balance: null, settingsOpen: false };
+let state: ProviderState = { status: null, balance: null, spend: null, settingsOpen: false };
 const listeners = new Set<() => void>();
 let listening = false;
 
@@ -38,6 +40,16 @@ export const providerStore = {
     } catch {
       // The chip keeps its last state; the next status change retries.
     }
+    if (state.status?.mode === 'scenario') await providerStore.refreshSpend();
+  },
+
+  /** Reloads the session spend and cap for the real-provider badge. */
+  async refreshSpend(): Promise<void> {
+    try {
+      set({ spend: await api.region.getSpend() });
+    } catch {
+      // The badge keeps "no spend cap yet" until the next refresh.
+    }
   },
 
   /** Subscribes to status changes once. */
@@ -45,6 +57,9 @@ export const providerStore = {
     if (listening || !hasCore()) return;
     listening = true;
     await onEvent('provider:status-changed', () => void providerStore.refresh());
+    await onEvent('rgn:spend', (e) =>
+      set({ spend: { spend: e.spend, cap: e.cap, threshold: state.spend?.threshold ?? null } }),
+    );
   },
 
   openSettings(): void {

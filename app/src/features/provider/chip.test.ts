@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import type { ProviderStatus } from '../../api';
-import { balanceLabel, chipOf } from './chip';
+import { balanceLabel, chipOf, realBadgeOf } from './chip';
 
 const scenario = (patch: Partial<ProviderStatus>): ProviderStatus => ({
   mode: 'scenario',
@@ -42,6 +42,21 @@ describe('provider chip (spec §7)', () => {
     expect(chipOf(scenario({}), { kind: 'unknown' }).label).toBe(
       'Scenario · configured …abcd · unknown',
     );
+  });
+
+  test('FR-PRV-28 the real-provider badge shows real credits and the spend cap', () => {
+    expect(realBadgeOf({ ...scenario({}), mode: 'fake' }, null)).toBeNull();
+    expect(realBadgeOf(scenario({}), null)).toEqual({
+      label: 'Real credits · no spend cap yet',
+      capSet: false,
+    });
+    expect(
+      realBadgeOf(scenario({ configured: false }), { spend: 0, cap: null, threshold: 5 }),
+    ).toMatchObject({ capSet: false });
+    expect(realBadgeOf(scenario({}), { spend: 12.4, cap: 50, threshold: 5 })).toEqual({
+      label: 'Real credits · cap 12 / 50 CU',
+      capSet: true,
+    });
   });
 
   test('FR-PRV-22 balance label', () => {
