@@ -128,6 +128,12 @@ export const api = {
         ...(margin === undefined ? {} : { margin }),
         ...(modelId === undefined ? {} : { model_id: modelId }),
       }),
+    evaluateControls: (modelId: string, values: Record<string, unknown>) =>
+      call('rgn_controls_evaluate', { model_id: modelId, values }),
+    estimate: (projectId: string, draft: Commands['rgn_job_estimate'][0]['draft']) =>
+      call('rgn_job_estimate', { project_id: projectId, draft }),
+    getSpend: () => call('rgn_spend_get', {}),
+    setSpend: (spend: Commands['rgn_spend_set'][0]) => call('rgn_spend_set', spend),
   },
   mask: {
     read: (projectId: string, maskId: string) =>

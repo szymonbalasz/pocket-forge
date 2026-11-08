@@ -1,17 +1,22 @@
-//! RGN slice 1 through the core: commands with the fake provider and an in-memory project.
+//! RGN slices 1–2 through the core: commands with the fake provider and an in-memory project.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use image::{Rgb, RgbImage, Rgba, RgbaImage};
-use pf_provider::fake::FakeProvider;
-use pf_provider::{Capabilities, InputPx, Provider};
+use pf_provider::fake::{FakeCase, FakeProvider};
+use pf_provider::{
+    Capabilities, Control, ControlRole, ControlType, CostAmount, InputPx, Provider, Rule,
+    RuleCondition, RuleEffect, RuleOp,
+};
 use serde_json::{Value, json};
 use ulid::Ulid;
 
+use super::controls::{check_controls, evaluate_controls};
 use super::fit::{RectPx, region_fit};
 use super::pixels::{MaskRecord, MemorySource};
 use super::prepare::{prepare, sent_mask, sent_region};
-use crate::context::Context;
+use crate::context::{Context, RecordedEvents};
 use crate::core::Core;
 use crate::error::ErrorCode;
 use crate::manifest::{Layer, LayerKind};
@@ -75,23 +80,133 @@ fn source() -> MemorySource {
 struct Fixture {
     _dir: tempfile::TempDir,
     core: Core,
+    events: Arc<RecordedEvents>,
 }
 
 fn fixture_with(src: MemorySource) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = Context::deterministic(dir.path().join("data"), Timestamp(1_800_000_000_000));
     ctx.library_override = Some(dir.path().join("lib"));
+    let events = Arc::new(RecordedEvents::default());
+    ctx.events = events.clone();
     let core = Core::new(ctx).unwrap();
     core.state().rgn.source_override = Some(Arc::new(src));
-    Fixture { _dir: dir, core }
+    Fixture {
+        _dir: dir,
+        core,
+        events,
+    }
 }
 
 fn fixture() -> Fixture {
     fixture_with(source())
 }
 
+fn fake(core: &Core) -> &FakeProvider {
+    core.ctx.provider.as_fake().unwrap()
+}
+
 fn fake_caps(model: &str) -> Capabilities {
     pf_provider::block_on(FakeProvider::default().get_capabilities(model)).unwrap()
+}
+
+fn draft(prompt: &str) -> Value {
+    json!({
+        "region": {"inner": {"x": 400, "y": 300, "w": 300, "h": 200}, "margin": 128},
+        "mask_id": mask_id(),
+        "model_id": "fake-white-edit",
+        "final_prompt": prompt,
+        "controls": {},
+        "seed": null,
+    })
+}
+
+fn estimate(core: &Core, draft: Value) -> Result<Value, crate::CoreError> {
+    core.dispatch("rgn_job_estimate", json!({ "draft": draft }))
+}
+
+fn ctl(name: &str, kind: ControlType, role: ControlRole) -> Control {
+    Control {
+        name: name.into(),
+        kind,
+        role,
+        min: None,
+        max: None,
+        step: None,
+        allowed: vec![],
+        default: None,
+        required: false,
+        cost_affecting: false,
+    }
+}
+
+/// A model with every control type and a `hidden` / `allowed` / `required` rule each.
+fn rule_caps() -> Capabilities {
+    let mut caps = fake_caps("fake-white-edit");
+    let mut mode = ctl("mode", ControlType::Enum, ControlRole::Other);
+    mode.allowed = vec![json!("edit"), json!("inpaint"), json!("remix")];
+    mode.default = Some(json!("edit"));
+    let mut strength = ctl("strength", ControlType::Float, ControlRole::Other);
+    (strength.min, strength.max, strength.step) = (Some(0.0), Some(1.0), Some(0.25));
+    strength.default = Some(json!(0.5));
+    let mut quality = ctl("quality", ControlType::Enum, ControlRole::Other);
+    quality.allowed = vec![json!("low"), json!("mid"), json!("high")];
+    quality.default = Some(json!("mid"));
+    quality.cost_affecting = true;
+    let style = ctl("style", ControlType::String, ControlRole::Other);
+    let mut magic = ctl("magic", ControlType::Bool, ControlRole::Other);
+    magic.default = Some(json!(false));
+    caps.controls
+        .extend([mode, strength, quality, style, magic]);
+    let when = |control: &str, op, value: Value, then| Rule {
+        when: RuleCondition {
+            control: control.into(),
+            op,
+            value,
+        },
+        then,
+    };
+    let effect = |control: &str| RuleEffect {
+        control: control.into(),
+        required: None,
+        allowed: None,
+        hidden: None,
+    };
+    caps.rules = vec![
+        when(
+            "mode",
+            RuleOp::Eq,
+            json!("inpaint"),
+            RuleEffect {
+                hidden: Some(true),
+                ..effect("strength")
+            },
+        ),
+        when(
+            "mode",
+            RuleOp::Eq,
+            json!("remix"),
+            RuleEffect {
+                allowed: Some(vec![json!("low")]),
+                ..effect("quality")
+            },
+        ),
+        when(
+            "magic",
+            RuleOp::Eq,
+            json!(true),
+            RuleEffect {
+                required: Some(true),
+                ..effect("style")
+            },
+        ),
+    ];
+    caps.warnings = vec!["input \"lora\" has an unknown type and is omitted".into()];
+    caps
+}
+
+fn vals(v: Value) -> BTreeMap<String, Value> {
+    serde_json::from_value(v).unwrap()
 }
 
 // ---------------------------------------------------------------- slice 1
@@ -316,8 +431,8 @@ fn fr_rgn_04_region_pixels_compose_the_current_layer_stack() {
 fn fr_rgn_04_original_not_ready_is_original_unavailable() {
     let mut src = source();
     src.original = None;
-    let fit = region_fit(INNER.into(), 128, W, H, None).unwrap();
-    let e = sent_region(&src, &fit).unwrap_err();
+    let f = fixture_with(src);
+    let e = estimate(&f.core, draft("a kitchen")).unwrap_err();
     assert_eq!(e.code, ErrorCode::OriginalUnavailable);
 }
 
@@ -355,4 +470,414 @@ fn fr_rgn_06_sent_bytes_are_checked_against_max_bytes() {
     let e = prepare(&src, &fit, &src.masks[0], &caps).unwrap_err();
     assert_eq!(e.code, ErrorCode::InputTooLarge);
     assert_eq!(e.detail, json!({"field": "image", "limit": 1000}));
+}
+
+// ---------------------------------------------------------------- slice 2: controls
+
+#[test]
+fn fr_rgn_08_controls_follow_the_fake_models_capabilities() {
+    let f = fixture();
+    for model in pf_provider::fake::FAKE_MODEL_IDS {
+        let caps = fake_caps(model);
+        let out = f
+            .core
+            .dispatch(
+                "rgn_controls_evaluate",
+                json!({"model_id": model, "values": {}}),
+            )
+            .unwrap();
+        let names: Vec<&str> = out["controls"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["name"].as_str().unwrap())
+            .collect();
+        let expected: Vec<&str> = caps
+            .controls
+            .iter()
+            .filter(|c| {
+                !matches!(
+                    c.role,
+                    ControlRole::Source | ControlRole::Mask | ControlRole::Reference
+                )
+            })
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(
+            names, expected,
+            "{model}: exactly the capability controls, no image inputs"
+        );
+        assert_eq!(out["warnings"], json!(caps.warnings));
+        assert_eq!(out["prompt_required"], caps.prompt_required);
+    }
+    let e = f
+        .core
+        .dispatch(
+            "rgn_controls_evaluate",
+            json!({"model_id": "nope", "values": {}}),
+        )
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::UnknownModel);
+}
+
+#[test]
+fn fr_rgn_33_rules_hide_narrow_and_require() {
+    let caps = rule_caps();
+    let by_name = |e: &super::controls::ControlsEvaluation, n: &str| {
+        e.controls.iter().find(|c| c.name == n).cloned().unwrap()
+    };
+    // Defaults: everything visible, defaults prefilled.
+    let e = evaluate_controls(&caps, &vals(json!({"prompt": "a kitchen"})));
+    assert!(by_name(&e, "strength").visible);
+    assert_eq!(by_name(&e, "strength").value, Some(json!(0.5)));
+    assert_eq!(e.warnings, caps.warnings);
+    assert!(e.required_missing.is_empty(), "{:?}", e.required_missing);
+
+    // hidden: strength disappears and carries no value.
+    let e = evaluate_controls(
+        &caps,
+        &vals(json!({"prompt": "p", "mode": "inpaint", "strength": 0.75})),
+    );
+    let s = by_name(&e, "strength");
+    assert!(!s.visible);
+    assert_eq!(s.value, None);
+
+    // allowed: quality narrows to low; a remembered "high" resets to the default with a notice.
+    let e = evaluate_controls(
+        &caps,
+        &vals(json!({"prompt": "p", "mode": "remix", "quality": "high"})),
+    );
+    let q = by_name(&e, "quality");
+    assert_eq!(q.allowed, vec![json!("low")]);
+    assert!(q.reset);
+    assert_eq!(
+        q.value,
+        Some(json!("low")),
+        "the default isn't allowed either: first allowed"
+    );
+    assert!(q.error.is_none());
+    // Without the narrowing rule the reset lands on the default.
+    let e = evaluate_controls(&caps, &vals(json!({"prompt": "p", "quality": "ultra"})));
+    let q = by_name(&e, "quality");
+    assert_eq!((q.value, q.reset), (Some(json!("mid")), true));
+
+    // required: style becomes required when magic is on; submit is disabled naming it.
+    let e = evaluate_controls(&caps, &vals(json!({"prompt": "p", "magic": true})));
+    assert!(by_name(&e, "style").required);
+    assert_eq!(e.required_missing, vec!["style".to_owned()]);
+    // An empty prompt is missing too (FR-RGN-09).
+    let e = evaluate_controls(&caps, &vals(json!({"prompt": ""})));
+    assert_eq!(e.required_missing, vec!["prompt".to_owned()]);
+    // A value for a control the model doesn't have (another model's draft) is dropped.
+    let e = evaluate_controls(&caps, &vals(json!({"prompt": "p", "lora": 1})));
+    assert_eq!(e.unknown, vec!["lora".to_owned()]);
+}
+
+#[test]
+fn fr_rgn_33_boundary_check_rejects_invalid_controls() {
+    let caps = rule_caps();
+    let check = |c: Value| check_controls(&caps, &vals(c), "a kitchen", None, true);
+    let reason = |e: crate::CoreError| {
+        (
+            e.code,
+            e.detail["name"].as_str().unwrap().to_owned(),
+            e.detail["reason"].as_str().unwrap().to_owned(),
+        )
+    };
+    assert_eq!(
+        reason(check(json!({"strength": 2.0})).unwrap_err()),
+        (
+            ErrorCode::InvalidControl,
+            "strength".into(),
+            "out_of_range".into()
+        )
+    );
+    assert_eq!(
+        reason(check(json!({"mode": "remix", "quality": "high"})).unwrap_err()),
+        (
+            ErrorCode::InvalidControl,
+            "quality".into(),
+            "not_allowed".into()
+        )
+    );
+    assert_eq!(
+        reason(check(json!({"magic": true})).unwrap_err()),
+        (ErrorCode::InvalidControl, "style".into(), "required".into())
+    );
+    assert_eq!(
+        reason(check(json!({"lora": 1})).unwrap_err()).2,
+        "unknown_control"
+    );
+    assert_eq!(
+        reason(check(json!({"image": "x"})).unwrap_err()).2,
+        "bound_by_role"
+    );
+    assert_eq!(
+        reason(check(json!({"prompt": "x"})).unwrap_err()).2,
+        "bound_by_role"
+    );
+}
+
+#[test]
+fn fr_rgn_34_sent_values_are_required_or_user_set_and_visible_only() {
+    let caps = rule_caps();
+    let sent = check_controls(
+        &caps,
+        &vals(json!({"mode": "inpaint", "strength": 0.25, "num_samples": 2})),
+        "p",
+        None,
+        true,
+    )
+    .unwrap();
+    // mode was set; strength is hidden by the rule → dropped; untouched quality/magic omitted.
+    assert_eq!(sent.controls, vals(json!({"mode": "inpaint"})));
+    assert_eq!(sent.candidate_count, 2);
+    assert_eq!(
+        sent.cost_inputs,
+        vals(json!({"num_samples": 2, "quality": "mid"}))
+    );
+    // Required with a default → sent with the default.
+    let mut caps2 = caps.clone();
+    caps2
+        .controls
+        .iter_mut()
+        .find(|c| c.name == "magic")
+        .unwrap()
+        .required = true;
+    let sent = check_controls(&caps2, &BTreeMap::new(), "p", None, true).unwrap();
+    assert_eq!(sent.controls, vals(json!({"magic": false})));
+    assert_eq!(sent.candidate_count, 3, "the count control's default");
+}
+
+#[test]
+fn fr_rgn_09_prompt_is_required_at_submit_but_not_for_an_estimate() {
+    let caps = fake_caps("fake-white-edit");
+    let e = check_controls(&caps, &BTreeMap::new(), "  ", None, true).unwrap_err();
+    assert_eq!(
+        (e.code, e.detail["reason"].as_str()),
+        (ErrorCode::InvalidControl, Some("required"))
+    );
+    assert!(check_controls(&caps, &BTreeMap::new(), "", None, false).is_ok());
+    // The estimate works before a prompt is typed.
+    let f = fixture();
+    assert!(estimate(&f.core, draft("")).is_ok());
+}
+
+#[test]
+fn fr_rgn_10_seed_is_pinned_or_random() {
+    let caps = fake_caps("fake-white-edit");
+    let sent = check_controls(&caps, &BTreeMap::new(), "p", None, true).unwrap();
+    assert_eq!(sent.seed, None);
+    if caps.seed {
+        let sent = check_controls(&caps, &BTreeMap::new(), "p", Some(1234), true).unwrap();
+        assert_eq!(sent.seed, Some(1234));
+    }
+    let mut no_seed = caps.clone();
+    no_seed.seed = false;
+    let e = check_controls(&no_seed, &BTreeMap::new(), "p", Some(1), true).unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidControl);
+}
+
+// ---------------------------------------------------------------- slice 2: estimate + spend
+
+#[test]
+fn fr_rgn_12_estimate_reuses_the_cost_until_a_cost_input_changes() {
+    let f = fixture();
+    let first = estimate(&f.core, draft("a kitchen")).unwrap();
+    assert_eq!(
+        first["cost"],
+        json!({"amount": 3.0, "unit": "fake"}),
+        "num_samples default 3"
+    );
+    assert_eq!(first["candidate_count"], 3);
+    let id = first["estimate_id"].as_str().unwrap().to_owned();
+
+    // From now on the provider would answer "unknown": a reused estimate proves no call.
+    fake(&f.core).set_case(FakeCase::EstimateUnknown);
+    let mut other_prompt = draft("a pantry");
+    other_prompt["region"]["inner"]["x"] = json!(401);
+    let again = estimate(&f.core, other_prompt).unwrap();
+    assert_eq!(
+        again["estimate_id"],
+        json!(id),
+        "prompt and position don't change the id"
+    );
+    assert_eq!(again["cost"]["amount"], 3.0, "no new provider estimate");
+
+    let mut more = draft("a kitchen");
+    more["controls"] = json!({"num_samples": 4});
+    let changed = estimate(&f.core, more).unwrap();
+    assert_ne!(changed["estimate_id"], json!(id));
+    assert_eq!(changed["cost"]["amount"], "unknown");
+    assert!(
+        changed["needs"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("unknown_cost"))
+    );
+}
+
+#[test]
+fn fr_rgn_13_estimate_id_follows_model_and_sent_size() {
+    let f = fixture();
+    let a = estimate(&f.core, draft("p")).unwrap();
+    let mut wider = draft("p");
+    wider["region"]["inner"]["w"] = json!(340);
+    let b = estimate(&f.core, wider).unwrap();
+    assert_ne!(a["estimate_id"], b["estimate_id"]);
+    assert_ne!(a["fit"]["sent_w"], b["fit"]["sent_w"]);
+    let mut model = draft("p");
+    model["model_id"] = json!("fake-black-edit");
+    assert_ne!(
+        estimate(&f.core, model).unwrap()["estimate_id"],
+        a["estimate_id"]
+    );
+}
+
+#[test]
+fn fr_rgn_14_16_estimate_reports_spend_cap_and_needs() {
+    let f = fixture();
+    let out = estimate(&f.core, draft("p")).unwrap();
+    assert_eq!(out["spend"], 0.0);
+    assert_eq!(out["cap"], Value::Null);
+    assert_eq!(out["needs"], json!(["set_cap"]));
+
+    let set = f
+        .core
+        .dispatch("rgn_spend_set", json!({"cap": 2.5, "threshold": 2.0}))
+        .unwrap();
+    assert_eq!(set, json!({"spend": 0.0, "cap": 2.5, "threshold": 2.0}));
+    let saved: Value =
+        serde_json::from_slice(&std::fs::read(f.core.ctx.data_dir.join("settings.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        saved["spend"],
+        json!({"cap": 2.5, "threshold": 2.0}),
+        "PRJ's settings section spend (R8)"
+    );
+    assert_eq!(
+        f.events.names().last().map(String::as_str),
+        Some("rgn:spend")
+    );
+
+    let out = estimate(&f.core, draft("p")).unwrap();
+    assert_eq!(out["needs"], json!(["threshold"]));
+    assert_eq!(out["over_cap"], true, "0 + 3 > 2.5");
+
+    // Session spend counts submitted jobs (the ledger slice 3's submit feeds).
+    f.core
+        .state()
+        .rgn
+        .ledger
+        .record_submit(Ulid::from_parts(1, 2), CostAmount::Known(1.5));
+    assert_eq!(
+        f.core.dispatch("rgn_spend_get", json!({})).unwrap()["spend"],
+        1.5
+    );
+    f.core
+        .dispatch("rgn_spend_set", json!({"cap": 10, "threshold": 5}))
+        .unwrap();
+    let out = estimate(&f.core, draft("p")).unwrap();
+    assert_eq!(
+        (out["spend"].as_f64(), out["over_cap"].as_bool()),
+        (Some(1.5), Some(false))
+    );
+    assert_eq!(out["needs"], json!([]));
+}
+
+#[test]
+fn fr_rgn_16_spend_set_validates_values() {
+    let f = fixture();
+    let e = f
+        .core
+        .dispatch("rgn_spend_set", json!({"cap": -1, "threshold": 1}))
+        .unwrap_err();
+    assert_eq!(
+        (e.code, e.field.as_deref()),
+        (ErrorCode::InvalidValue, Some("cap"))
+    );
+    assert_eq!(
+        f.core.dispatch("rgn_spend_get", json!({})).unwrap()["cap"],
+        Value::Null
+    );
+    // A missing field keeps its value ("raise cap" sends only the cap); null clears it.
+    f.core
+        .dispatch("rgn_spend_set", json!({"cap": 4, "threshold": 2}))
+        .unwrap();
+    let out = f.core.dispatch("rgn_spend_set", json!({"cap": 6})).unwrap();
+    assert_eq!(
+        (out["cap"].as_f64(), out["threshold"].as_f64()),
+        (Some(6.0), Some(2.0))
+    );
+    let out = f
+        .core
+        .dispatch("rgn_spend_set", json!({"threshold": null}))
+        .unwrap();
+    assert_eq!(
+        (out["cap"].as_f64(), out["threshold"].clone()),
+        (Some(6.0), Value::Null)
+    );
+}
+
+#[test]
+fn fr_rgn_31_estimate_errors_are_normalised_and_change_nothing() {
+    let f = fixture();
+    let settings_before = std::fs::read(f.core.ctx.data_dir.join("settings.json")).unwrap();
+    let mut no_mask = draft("p");
+    no_mask["mask_id"] = json!(Ulid::from_parts(5, 5));
+    assert_eq!(
+        estimate(&f.core, no_mask).unwrap_err().code,
+        ErrorCode::UnknownId
+    );
+    let mut bad_control = draft("p");
+    bad_control["controls"] = json!({"num_samples": 9});
+    let e = estimate(&f.core, bad_control).unwrap_err();
+    assert_eq!(
+        (e.code, e.detail["reason"].as_str()),
+        (ErrorCode::InvalidControl, Some("out_of_range"))
+    );
+    let mut model = draft("p");
+    model["model_id"] = json!("nope");
+    assert_eq!(
+        estimate(&f.core, model).unwrap_err().code,
+        ErrorCode::UnknownModel
+    );
+    fake(&f.core).set_case(FakeCase::InsufficientBalance);
+    let e = estimate(&f.core, draft("p")).unwrap_err();
+    assert_eq!(
+        (e.code, e.detail["provider"]["code"].as_str()),
+        (ErrorCode::Provider, Some("insufficient_balance"))
+    );
+    let e = f
+        .core
+        .dispatch(
+            "rgn_job_estimate",
+            json!({"project_id": Ulid::from_parts(1, 1), "draft": draft("p")}),
+        )
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::UnknownId);
+    assert_eq!(
+        std::fs::read(f.core.ctx.data_dir.join("settings.json")).unwrap(),
+        settings_before
+    );
+}
+
+#[test]
+fn fr_rgn_38_read_only_project_requests_no_estimates() {
+    let mut src = source();
+    src.read_only = true;
+    let f = fixture_with(src);
+    assert_eq!(
+        estimate(&f.core, draft("p")).unwrap_err().code,
+        ErrorCode::ReadOnly
+    );
+    // Region fit still works (view, region and mask painting do).
+    assert!(
+        f.core
+            .dispatch(
+                "rgn_region_fit",
+                json!({"project_id": project_id(), "inner": {"x": 0, "y": 0, "w": 50, "h": 50}})
+            )
+            .is_ok()
+    );
 }

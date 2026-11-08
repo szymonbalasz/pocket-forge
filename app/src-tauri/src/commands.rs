@@ -56,6 +56,10 @@ tauri_commands! {
     provider_balance => c::ProviderBalance,
     provider_fake_set_case => c::ProviderFakeSetCase,
     rgn_region_fit => c::RgnRegionFit,
+    rgn_controls_evaluate => c::RgnControlsEvaluate,
+    rgn_job_estimate => c::RgnJobEstimate,
+    rgn_spend_get => c::RgnSpendGet,
+    rgn_spend_set => c::RgnSpendSet,
 }
 
 #[cfg(test)]
