@@ -31,3 +31,4 @@ Small items for idle slots (see [process.md](../process.md)). The planned work a
 | BL-25 | RGN spool replay drops an entry the store refuses for good, after logging it: surface it to the user | XS | `pf-core` region_edit runner | — | open |
 | BL-26 | A restored draft's region isn't pushed back into EDT (EDT owns the region); needs the BL-14 bridge setter | XS | `features/region-edit`, `features/editor` bridge | EDT mask hand-off | open |
 | BL-27 | Walkthrough polish: the "¤" cost marker (design call), Choose again's empty field, no feedback on an unchanged Save, lower-case error text, corrupt-body error wording, double `tiles_open` in dev StrictMode | S | `features/*` | — | open |
+| BL-28 | Flaky by design: `draftSave.test.tsx` waits two 2 s debounces inside a 5 s timeout; use fake timers | XS | `features/region-edit` tests | — | open |
