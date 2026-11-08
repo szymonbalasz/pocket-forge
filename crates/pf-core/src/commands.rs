@@ -849,6 +849,62 @@ impl Command for EdtTilesOpen {
     }
 }
 
+// ---------------------------------------------------------------- editor: masks
+
+/// EDT `edt_mask_submit` (FR-EDT-18, 28, 29): the inner-rect mask's w·h bytes (base64) → PRJ
+/// `put_mask`, which writes the PNG and points the draft at it in one commit (R7).
+pub struct EdtMaskSubmit;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EdtMaskSubmitInput {
+    pub project_id: Ulid,
+    pub rect: crate::manifest::Rect,
+    /// `rect.w × rect.h` bytes, row-major, 255 = editable, base64.
+    pub data_b64: String,
+}
+
+impl Validate for EdtMaskSubmitInput {
+    fn validate(&self) -> CoreResult<()> {
+        crate::masks::check_rect_size(&self.rect)
+    }
+}
+
+pub use crate::masks::{MaskReadOutput, MaskRef};
+
+impl Command for EdtMaskSubmit {
+    const NAME: &'static str = "edt_mask_submit";
+    type Input = EdtMaskSubmitInput;
+    type Output = MaskRef;
+
+    fn run(core: &Core, input: Self::Input) -> CoreResult<MaskRef> {
+        crate::masks::submit(core, input.project_id, input.rect, &input.data_b64)
+    }
+}
+
+/// EDT `edt_mask_read` (FR-EDT-18, 19): a stored mask's rect and bytes (base64), byte-identical
+/// to the submit.
+pub struct EdtMaskRead;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EdtMaskReadInput {
+    pub project_id: Ulid,
+    pub mask_id: Ulid,
+}
+
+impl Validate for EdtMaskReadInput {}
+
+impl Command for EdtMaskRead {
+    const NAME: &'static str = "edt_mask_read";
+    type Input = EdtMaskReadInput;
+    type Output = MaskReadOutput;
+
+    fn run(core: &Core, input: Self::Input) -> CoreResult<MaskReadOutput> {
+        crate::masks::read(core, input.project_id, input.mask_id)
+    }
+}
+
 // ---------------------------------------------------------------- region edit
 
 pub use crate::region_edit::candidates::{
@@ -964,6 +1020,8 @@ registry![
     ExportPlan,
     ExportStart,
     ExportCancel,
+    EdtMaskSubmit,
+    EdtMaskRead,
 ];
 
 #[cfg(test)]

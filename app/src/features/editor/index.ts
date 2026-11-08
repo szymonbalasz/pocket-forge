@@ -14,7 +14,7 @@ export const editorFeature: Feature = {
 // Shared with other features (FR-EDT-23, R19): the session undo stack and the candidate picker.
 export { pushUndo, revisionUndoEntry } from './session';
 export type { UndoEntry } from './undo';
-export { editorBridge, thumbnailUrl } from './bridge';
+export { editorBridge, flushMask, thumbnailUrl } from './bridge';
 export type { CompareSource, PickerCandidate, PickerHandlers } from './store';
 // Read-only for RGN (R18): the validated region the region tool holds, or null.
 export { useEditorRegion, useEditorRegionRestored } from './bridge';
