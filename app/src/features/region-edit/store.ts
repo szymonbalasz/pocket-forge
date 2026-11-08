@@ -195,6 +195,8 @@ let unsubscribe: (() => void) | null = null;
 const thumbsInFlight = new Set<string>();
 /** EDT's region inner as last seen, so a retried region is kept until EDT's changes. */
 let editorInner: RectPx | null = null;
+/** EDT's restored region was taken for this attach (`editorRegion`); later changes are edits. */
+let regionTaken = false;
 
 const sameRect = (a: RectPx | null, b: RectPx | null) =>
   a === b || (!!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h);
@@ -613,10 +615,12 @@ export const rgn = {
     }
     rgn.detach();
     const d = project.draft;
-    const region = d?.region as { margin?: number } | null | undefined;
+    const region = d?.region as { inner?: RectPx; margin?: number } | null | undefined;
     set({
       projectId: project.project_id,
       readOnly: project.read_only,
+      // Opening never writes the draft (walk D2): the saved region stands until EDT restores it.
+      inner: region?.inner ?? null,
       prompt: d?.final_prompt ?? '',
       seedMode: d?.seed !== null && d?.seed !== undefined ? 'pinned' : 'random',
       seed: d?.seed ?? null,
@@ -650,11 +654,23 @@ export const rgn = {
     if (previewTimer) clearTimeout(previewTimer);
     draftTimer = previewTimer = null;
     editorInner = null;
+    regionTaken = false;
     thumbsInFlight.clear();
     for (const k of Object.keys(tokens)) nextToken(k);
     if (state.projectId) editorBridge.setCandidates(null);
     state = initial;
     for (const l of listeners) l();
+  },
+
+  /** EDT's region for the attached project, once EDT has restored it (FR-EDT-19). The first value
+   *  is the reopened region: taken without a draft save or a prompt reset (walk D2); every later
+   *  one is an edit (`setRegion`). */
+  editorRegion(inner: RectPx | null): void {
+    if (regionTaken) return rgn.setRegion(inner);
+    regionTaken = true;
+    editorInner = inner;
+    set({ inner });
+    void refit();
   },
 
   /** EDT's validated region changed (R18). Null = the region was removed. */
