@@ -80,6 +80,12 @@ function ConfirmBody() {
             <dt>Estimate</dt>
             <dd data-testid="rgn-confirm-estimate">
               {plan.cost === 'unknown' ? 'unknown' : amountLabel(plan.cost, unit)}
+              {plan.references > 0 && (
+                <span data-testid="rgn-confirm-references">
+                  {' '}
+                  with {plan.references} reference{plan.references === 1 ? '' : 's'}
+                </span>
+              )}
             </dd>
             <dt>Session spend after this job</dt>
             <dd data-testid="rgn-confirm-spend">

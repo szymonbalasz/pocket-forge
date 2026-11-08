@@ -371,6 +371,15 @@
   color: var(--pf-ok);
 }
 
+/* FR-RGN-45: "N refs"; the tooltip lists one file per line. */
+.rgn-tracker-refs {
+  flex: none;
+}
+
+.rgn-refs-tooltip {
+  white-space: pre-line;
+}
+
 .rgn-tracker-meta {
   display: flex;
   gap: var(--pf-space-2);

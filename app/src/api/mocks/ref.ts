@@ -57,12 +57,31 @@ export interface RefMockSeed {
   sources?: Record<string, { hash?: string; reason?: SkipReason }>;
   /** Folder path → the image paths found in it, recursively (a folder drop, FR-REF-07). */
   dirs?: Record<string, string[]>;
-  /** The open project's `references/` images (FR-REF-16). */
-  projectRefs?: { file: string; state?: 'ok' | 'cloud_only' | 'corrupt' }[];
+  /** The open project's `references/` images (FR-REF-16); `hash` defaults to the file name. */
+  projectRefs?: ProjectRef[];
   /** Model id → its reference slots (FR-PRV-31). Unknown model → `unknown_model`. */
   slots?: Record<string, RefMockSlot[]>;
   /** The open project is read-only (FR-REF-27). */
   readOnly?: boolean;
+}
+
+export interface ProjectRef {
+  file: string;
+  state?: 'ok' | 'cloud_only' | 'corrupt';
+  hash?: string;
+}
+
+/** A job's `references[]` row (schema §4.6) as the RGN mock records it (sent = content). */
+export interface RefMockRow {
+  source: 'project' | 'pack';
+  pack_id: string | null;
+  pack_name: string | null;
+  path: string;
+  content_hash: string;
+  slot: string;
+  role: RefRole | null;
+  /** Mock-only: the slot is cost-affecting (FR-REF-24). */
+  cost_affecting: boolean;
 }
 
 export interface RefMockEnv {
@@ -84,7 +103,7 @@ export interface RefMockState {
   /** Simulates a file copied into a pack folder in Explorer (FR-REF-09). */
   addUserFile(packId: string, image: RefMockImage): void;
   /** The project's `references/` files (FR-REF-16), editable by a test. */
-  projectRefs: { file: string; state?: 'ok' | 'cloud_only' | 'corrupt' }[];
+  projectRefs: ProjectRef[];
 }
 
 type Rec = Record<string, unknown>;
@@ -159,6 +178,17 @@ export function refMock(
     for (let n = 2; ; n++) if (!has(`${stem} (${n})${ext}`)) return `${stem} (${n})${ext}`;
   };
   const sorted = (p: MockPack) => [...p.images].sort((a, b) => byName(a.file, b.file));
+  /** An item's current content hash (default: its file name); null when it can't be read. */
+  const hashOf = (key: string): string | null => {
+    if (key.startsWith('project:')) {
+      const f = state.projectRefs.find((x) => `project:${x.file}` === key);
+      return f && (f.state ?? 'ok') !== 'corrupt' ? (f.hash ?? f.file) : null;
+    }
+    const [, packId, ...rest] = key.split(':');
+    const i = state.packs.get(packId!)?.images.find((x) => x.file === rest.join(':'));
+    const st = i?.state ?? 'ok';
+    return i && (st === 'ok' || st === 'cloud_only') ? (i.hash ?? i.file) : null;
+  };
   const url = (key: string) => `http://pf-tiles.localhost/i/${key}.png`;
   const packOut = (p: MockPack): Pack => ({
     pack_id: p.pack_id,
@@ -330,6 +360,7 @@ export function refMock(
       if (a.state === 'cloud_only') badges.push('cloud');
       if (a.state === 'corrupt') badges.push('corrupt');
       if (a.state === 'missing') badges.push('missing');
+      if (before?.changed && before.retry_of) badges.push(`changed_since:${before.retry_of}`);
       const item: RefItem = {
         ...a,
         role,
@@ -383,6 +414,27 @@ export function refMock(
           checkable: false,
         });
         keptDraft.push({ ...it, key });
+      } else if (it.retry_of) {
+        // Restored by Retry (FR-REF-26): a file that can't be found shows as missing.
+        const project = key.startsWith('project:');
+        const pack = project
+          ? null
+          : (picked.find((x) => x.found && key.startsWith(`pack:${x.found.pack_id}:`))?.found ??
+            null);
+        missingRows.push({
+          key,
+          source: project ? 'project' : 'pack',
+          pack_id: pack?.pack_id ?? null,
+          pack_name: pack?.name ?? null,
+          file: key.split(':').pop()!,
+          role: it.role,
+          slot: slots[slotIndex(it.role)]!.name,
+          on: false,
+          state: 'missing',
+          badges: ['missing'],
+          checkable: false,
+        });
+        keptDraft.push({ ...it, key, on: false });
       } else
         notices.push({
           code: 'dropped',
@@ -408,7 +460,20 @@ export function refMock(
         packs: picked.map(({ want, found }) =>
           found ? { pack_id: found.pack_id, name: found.name } : want,
         ),
-        items: [...items.map((i) => ({ key: i.key, on: i.on, role: i.role })), ...keptDraft],
+        items: [
+          // Retry's flags are kept, as pf-core keeps an item's other fields.
+          ...items.map((i) => {
+            const p = prevItems.get(i.key);
+            return {
+              key: i.key,
+              on: i.on,
+              role: i.role,
+              ...(p?.retry_of !== undefined ? { retry_of: p.retry_of } : {}),
+              ...(p?.changed ? { changed: true } : {}),
+            };
+          }),
+          ...keptDraft,
+        ],
       },
       ready: outSlots.every((s) => s.on >= s.min),
       read_only: readOnly,
@@ -541,6 +606,94 @@ export function refMock(
       if (env.hasProject && !env.hasProject())
         return fail('no_project', 'no asset project is open');
       return resolve(String(input.model_id), (input.references as DraftReferences | null) ?? null);
+    },
+    // Mock-only hooks for the RGN mock (not commands): pf-core's `prepare_for_send` rows
+    // (FR-REF-21/25) and the Retry draft (`references::retry`, FR-REF-26).
+    __ref_prepare: async (input) => {
+      const r = await resolve(
+        String(input.model_id),
+        (input.references as DraftReferences | null) ?? null,
+      );
+      if (!r.visible) return [];
+      for (const s of r.slots)
+        if (s.on < s.min)
+          return Promise.reject({
+            code: 'references_required',
+            message: `${s.name} needs at least ${s.min} reference(s)`,
+            detail: { slot: s.name, min: s.min },
+          });
+      const seen = new Set<string>();
+      const rows: RefMockRow[] = [];
+      for (const i of r.items.filter((x) => x.on)) {
+        const hash = hashOf(i.key);
+        if (hash === null || seen.has(hash)) continue;
+        seen.add(hash);
+        rows.push({
+          source: i.source,
+          pack_id: i.pack_id,
+          pack_name: i.pack_name,
+          path:
+            i.source === 'project' ? `references/${i.file}` : `References/${i.pack_name}/${i.file}`,
+          content_hash: hash,
+          slot: i.slot,
+          role: i.role,
+          cost_affecting: !!r.slots.find((s) => s.name === i.slot)?.cost_affecting,
+        });
+      }
+      return rows;
+    },
+    __ref_retry: (input) => {
+      const rows = (input.rows ?? []) as RefMockRow[];
+      const label = String(input.label);
+      if (!input.has_slots && !rows.length) return null;
+      const packs: DraftReferences['packs'] = [];
+      for (const r of rows)
+        if (r.source === 'pack' && r.pack_id && !packs.some((p) => p.pack_id === r.pack_id))
+          packs.push({ pack_id: r.pack_id, name: r.pack_name ?? '' });
+      const found = (p: { pack_id: string; name: string }) =>
+        state.packs.get(p.pack_id) ??
+        [...state.packs.values()].find((x) => lc(x.name) === lc(p.name)) ??
+        null;
+      const avail: string[] = [
+        ...[...state.projectRefs]
+          .sort((a, b) => byName(a.file, b.file))
+          .map((f) => `project:${f.file}`),
+        ...packs.flatMap((p) => {
+          const f = found(p);
+          return f
+            ? sorted(f)
+                .filter((i) => (i.state ?? 'ok') !== 'unsupported')
+                .map((i) => `pack:${f.pack_id}:${i.file}`)
+            : [];
+        }),
+      ];
+      const items: DraftReferences['items'] = [];
+      for (const r of rows) {
+        const file = r.path.split('/').pop()!;
+        const p = packs.find((x) => x.pack_id === r.pack_id);
+        const key =
+          r.source === 'project'
+            ? `project:${file}`
+            : `pack:${(p && found(p)?.pack_id) ?? r.pack_id}:${file}`;
+        if (items.some((i) => i.key === key)) continue;
+        const now = avail.includes(key) ? hashOf(key) : null;
+        items.push({
+          key,
+          on: avail.includes(key),
+          role: r.role,
+          retry_of: label,
+          ...(now !== null && now !== r.content_hash ? { changed: true } : {}),
+        });
+      }
+      for (const k of avail)
+        if (!items.some((i) => i.key === k)) items.push({ key: k, on: false, role: null });
+      return {
+        packs: packs.map((p) => {
+          const f = found(p);
+          return f ? { pack_id: f.pack_id, name: f.name } : p;
+        }),
+        items,
+      };
     },
   };
   return { handlers, state };
