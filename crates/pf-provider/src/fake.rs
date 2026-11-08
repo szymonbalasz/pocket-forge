@@ -4,6 +4,11 @@
 //!   fixtures (`fixtures/provider/fake-*/get-model.json`) run through the real normaliser.
 //! - Every Appendix D case, set by `PF_FAKE_CASE` or `provider_fake_set_case`.
 //! - It has no transport at all, so it can't open a network connection (FR-PRV-05).
+//! - Reference slots (FR-PRV-35): `fake-white-edit` has `style_refs` (≤ 3, free);
+//!   `fake-black-edit` has `style_refs` (≤ 2, +1 unit each in the estimate) and `identity_ref`
+//!   (one, optional); `fake-alpha-edit` has none. Candidates mix the ordered reference hashes
+//!   into the pattern; with none they are byte-identical to before. Tests read the last
+//!   request's references with [`FakeProvider::last_reference_hashes`].
 //!
 //! Like a provider's server, it keeps jobs and uploads in memory; job progress lives in the
 //! opaque record (`fake.polls`), so RGN's persisted record drives the state machine.
@@ -143,6 +148,8 @@ struct FakeJob {
     mask_png: Vec<u8>,
     candidate_count: u32,
     seed: u64,
+    /// Content hashes of the references, in request order (FR-PRV-35).
+    reference_hashes: Vec<String>,
     case: FakeCase,
 }
 
@@ -158,6 +165,8 @@ struct FakeState {
     upload_count: u64,
     jobs: HashMap<String, FakeJob>,
     canceled: HashSet<String>,
+    /// `(slot, hash)` of the last estimate or submit that passed validation.
+    last_references: Vec<(String, String)>,
 }
 
 /// The deterministic stand-in provider.
@@ -208,6 +217,21 @@ impl FakeProvider {
         self.lock().case
     }
 
+    /// `(slot, hash)` of each reference of the last estimate or submit that passed
+    /// validation, in request order, with the caller's hash string (FR-PRV-35). Empty before
+    /// any such call.
+    pub fn last_reference_hashes(&self) -> Vec<(String, String)> {
+        self.lock().last_references.clone()
+    }
+
+    fn note_references(&self, request: &JobRequest) {
+        self.lock().last_references = request
+            .references
+            .iter()
+            .map(|r| (r.slot.clone(), r.hash.clone()))
+            .collect();
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, FakeState> {
         // A panic while holding the lock can't leave the fake's maps inconsistent; keep going.
         self.state.lock().unwrap_or_else(|e| e.into_inner())
@@ -256,16 +280,31 @@ impl FakeProvider {
             return Err(invalid("num_samples"));
         }
         crate::limits::check(&caps, request)?;
+        crate::limits::check_references(&caps, request)?;
         let region = decode_rgb8(&request.region_png).ok_or_else(|| invalid("image"))?;
         let mask = decode_grey8(&request.mask_png).ok_or_else(|| invalid("mask"))?;
         Ok((caps, region, mask))
     }
 
-    fn cost(candidate_count: u32) -> Cost {
+    /// One unit per candidate, plus one per reference in a cost-affecting slot (FR-PRV-35).
+    fn cost(candidate_count: u32, ref_units: u32) -> Cost {
         Cost {
-            amount: CostAmount::Known(f64::from(candidate_count)),
+            amount: CostAmount::Known(f64::from(candidate_count + ref_units)),
             unit: FAKE_UNIT.into(),
         }
+    }
+
+    /// References in cost-affecting slots: only these change the estimate (FR-REF-24).
+    fn ref_units(caps: &Capabilities, request: &JobRequest) -> u32 {
+        request
+            .references
+            .iter()
+            .filter(|r| {
+                caps.slots
+                    .iter()
+                    .any(|s| s.name == r.slot && s.cost_affecting)
+            })
+            .count() as u32
     }
 
     /// Uploads by content hash, at most once per session (R15).
@@ -287,6 +326,7 @@ impl FakeProvider {
         request: &JobRequest,
         job_handle: Option<&str>,
         case: FakeCase,
+        ref_units: u32,
     ) -> ProviderRecord {
         let mut rec = json!({
             "v": 1,
@@ -305,15 +345,39 @@ impl FakeProvider {
         if let Some(handle) = job_handle {
             rec["job_handle"] = json!(handle);
         }
+        if !request.references.is_empty() {
+            rec["request"]["references"] = request
+                .references
+                .iter()
+                .map(|r| json!({"slot": r.slot, "hash": r.hash}))
+                .collect();
+            rec["fake"]["ref_units"] = json!(ref_units);
+        }
         ProviderRecord(rec)
+    }
+
+    /// Uploads every reference once per hash (FR-PRV-34): `(slot, caller's hash, ref)`.
+    fn upload_references(&self, request: &JobRequest, force: bool) -> Vec<Value> {
+        let mut forced = HashSet::new();
+        request
+            .references
+            .iter()
+            .map(|r| {
+                let again = force && forced.insert(sha256_hex(&r.bytes));
+                let (asset, _) = self.upload_once(&r.bytes, again);
+                json!({"slot": r.slot, "hash": r.hash, "ref": asset})
+            })
+            .collect()
     }
 
     fn do_submit(&self, request: &JobRequest) -> ProviderResult<ProviderRecord> {
         self.gate()?;
-        Self::validate(request)?;
+        let (caps, _, _) = Self::validate(request)?;
+        self.note_references(request);
         let case = self.case();
         let (mut image, mut hash_image) = self.upload_once(&request.region_png, false);
         let (mut mask, mut hash_mask) = self.upload_once(&request.mask_png, false);
+        let mut references = self.upload_references(request, false);
         let mut reuploads = 0;
         {
             let mut s = self.lock();
@@ -323,6 +387,7 @@ impl FakeProvider {
                 drop(s);
                 (image, hash_image) = self.upload_once(&request.region_png, true);
                 (mask, hash_mask) = self.upload_once(&request.mask_png, true);
+                references = self.upload_references(request, true);
                 reuploads = 1;
             }
         }
@@ -345,15 +410,24 @@ impl FakeProvider {
                 mask_png: request.mask_png.clone(),
                 candidate_count: request.candidate_count,
                 seed,
+                reference_hashes: request
+                    .references
+                    .iter()
+                    .map(|r| sha256_hex(&r.bytes))
+                    .collect(),
                 case,
             },
         );
         drop(s);
-        let mut rec = self.record(request, Some(&handle), case);
+        let ref_units = Self::ref_units(&caps, request);
+        let mut rec = self.record(request, Some(&handle), case, ref_units);
         rec.0["request"]["seed"] = json!(seed);
         rec.0["asset_refs"] = json!({
             "image": image, "mask": mask, "hash_image": hash_image, "hash_mask": hash_mask,
         });
+        if !references.is_empty() {
+            rec.0["asset_refs"]["references"] = Value::Array(references);
+        }
         rec.0["fake"]["reuploads"] = json!(reuploads);
         Ok(rec)
     }
@@ -374,6 +448,7 @@ impl FakeProvider {
         let handle = handle_of(job)?;
         let polls = job.0["fake"]["polls"].as_u64().unwrap_or(0);
         let count = job.0["request"]["num_samples"].as_u64().unwrap_or(1) as u32;
+        let ref_units = job.0["fake"]["ref_units"].as_u64().unwrap_or(0) as u32;
         let (canceled, case) = {
             let s = self.lock();
             let case = s.jobs.get(&handle).map_or(s.case, |j| j.case);
@@ -412,7 +487,7 @@ impl FakeProvider {
         Ok(JobStatus {
             state,
             progress: progress.clamp(0.0, 1.0),
-            cost: (state == ProviderJobState::Succeeded).then(|| Self::cost(count)),
+            cost: (state == ProviderJobState::Succeeded).then(|| Self::cost(count, ref_units)),
             error,
             provider: rec,
         })
@@ -431,15 +506,17 @@ impl FakeProvider {
         let images = (0..fake_job.candidate_count)
             .map(|i| {
                 let seed = fake_job.seed.wrapping_add(u64::from(i));
+                // The references change the pattern, not the reported seed (FR-PRV-35).
+                let pattern = pattern_seed(seed, &fake_job.reference_hashes);
                 let bytes = match fake_job.case {
                     FakeCase::BadCandidate if i == 0 => b"this is not an image".to_vec(),
                     FakeCase::AspectMismatch(pct) => {
-                        widen(&render_candidate(&region, &mask, seed, 0), pct)
+                        widen(&render_candidate(&region, &mask, pattern, 0), pct)
                     }
                     FakeCase::Offset(levels) => {
-                        encode(&render_candidate(&region, &mask, seed, levels))
+                        encode(&render_candidate(&region, &mask, pattern, levels))
                     }
-                    _ => encode(&render_candidate(&region, &mask, seed, 0)),
+                    _ => encode(&render_candidate(&region, &mask, pattern, 0)),
                 };
                 CandidateImage {
                     bytes,
@@ -501,20 +578,25 @@ impl Provider for FakeProvider {
         &self,
         request: &JobRequest,
     ) -> impl Future<Output = ProviderResult<Estimate>> + Send {
-        let out = self.gate().and_then(|()| Self::validate(request)).map(|_| {
-            let case = self.case();
-            Estimate {
-                cost: if case == FakeCase::EstimateUnknown {
-                    Cost {
-                        amount: CostAmount::Unknown,
-                        unit: FAKE_UNIT.into(),
-                    }
-                } else {
-                    Self::cost(request.candidate_count)
-                },
-                provider: self.record(request, None, case),
-            }
-        });
+        let out = self
+            .gate()
+            .and_then(|()| Self::validate(request))
+            .map(|(caps, _, _)| {
+                self.note_references(request);
+                let case = self.case();
+                let ref_units = Self::ref_units(&caps, request);
+                Estimate {
+                    cost: if case == FakeCase::EstimateUnknown {
+                        Cost {
+                            amount: CostAmount::Unknown,
+                            unit: FAKE_UNIT.into(),
+                        }
+                    } else {
+                        Self::cost(request.candidate_count, ref_units)
+                    },
+                    provider: self.record(request, None, case, ref_units),
+                }
+            });
         self.done(out)
     }
 
@@ -577,6 +659,22 @@ fn splitmix(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
     z ^ (z >> 31)
+}
+
+/// The pattern seed: the candidate's seed, with the ordered reference hashes mixed in. With
+/// no references it is the seed itself, so those candidates don't change (FR-PRV-35).
+fn pattern_seed(seed: u64, reference_hashes: &[String]) -> u64 {
+    if reference_hashes.is_empty() {
+        return seed;
+    }
+    let mut h = Sha256::new();
+    h.update(seed.to_le_bytes());
+    for hash in reference_hashes {
+        h.update(hash.as_bytes());
+        h.update([0]);
+    }
+    let d = h.finalize();
+    u64::from_le_bytes([d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]])
 }
 
 /// Masked pixels get a seed-derived pattern, blended by the mask value; unmasked pixels
@@ -727,6 +825,216 @@ mod tests {
         assert_eq!(a.images, b.images);
         let c = run_job(&FakeProvider::default(), &request(Some(8)));
         assert_ne!(a.images[0].bytes, c.images[0].bytes);
+    }
+
+    /// The candidates of a request with no references, pinned before references existed
+    /// (FR-PRV-35: "byte-identical to before").
+    #[test]
+    fn fr_prv_35_no_references_keeps_the_pre_reference_candidates() {
+        let c = run_job(&FakeProvider::default(), &request(Some(7)));
+        // Decoded pixels, not PNG bytes (OQ-IMG-07): an encoder update can't break this.
+        let digest: Vec<String> = c
+            .images
+            .iter()
+            .map(|i| sha256_hex(&decode_rgb8(&i.bytes).unwrap().data))
+            .collect();
+        assert_eq!(
+            digest,
+            [
+                "5d022c9b7f8f2f690897ff9b2f9e31b1c62fb63f35b6a5f5beaa17913e3b4144",
+                "630bb631f3be46d3c03800121b4d5576ed9b20174e7efd05be97a3f5b79ee520",
+                "08e55fe6cb7cd1d3499f068350978ed1e418b5fb6f6f27bf36fdbbfa44389cf6",
+            ]
+        );
+    }
+
+    /// A tiny PNG reference whose content depends on `n`.
+    fn ref_png(n: u8) -> Vec<u8> {
+        encode_png(2, 2, png::ColorType::Rgb, &[n; 12])
+    }
+
+    fn reference(slot: &str, bytes: Vec<u8>) -> crate::ReferenceImage {
+        crate::ReferenceImage {
+            slot: slot.into(),
+            role: None,
+            hash: format!("sha256:{}", sha256_hex(&bytes)),
+            bytes,
+        }
+    }
+
+    fn black(references: Vec<crate::ReferenceImage>) -> JobRequest {
+        JobRequest {
+            model_id: "fake-black-edit".into(),
+            references,
+            ..request(Some(7))
+        }
+    }
+
+    #[test]
+    fn fr_prv_35_fake_models_have_their_reference_slots() {
+        use crate::ReferenceRole::{Identity, Style};
+        let p = FakeProvider::default();
+        let slots = |id: &str| -> Vec<_> {
+            run(p.get_capabilities(id))
+                .unwrap()
+                .slots
+                .into_iter()
+                .map(|s| (s.name, s.role, s.min, s.max, s.cost_affecting, s.array))
+                .collect()
+        };
+        assert_eq!(
+            slots("fake-white-edit"),
+            [("style_refs".into(), Some(Style), 0, 3, false, true)]
+        );
+        assert_eq!(
+            slots("fake-black-edit"),
+            [
+                ("style_refs".into(), Some(Style), 0, 2, true, true),
+                ("identity_ref".into(), Some(Identity), 0, 1, false, false),
+            ]
+        );
+        assert!(slots("fake-alpha-edit").is_empty());
+        assert_eq!(
+            run(p.list_models(&ModelFilter::default())).unwrap().len(),
+            3
+        );
+    }
+
+    #[test]
+    fn fr_prv_35_references_change_candidates_deterministically() {
+        let refs = |a: u8, b: u8| {
+            black(vec![
+                reference("style_refs", ref_png(a)),
+                reference("style_refs", ref_png(b)),
+            ])
+        };
+        let none = run_job(&FakeProvider::default(), &black(vec![]));
+        let ab = run_job(&FakeProvider::default(), &refs(1, 2));
+        assert_eq!(
+            ab.images,
+            run_job(&FakeProvider::default(), &refs(1, 2)).images
+        );
+        for other in [refs(1, 3), refs(2, 1)] {
+            let c = run_job(&FakeProvider::default(), &other);
+            assert_ne!(
+                c.images[0].bytes, ab.images[0].bytes,
+                "other or reordered refs"
+            );
+        }
+        assert_ne!(ab.images[0].bytes, none.images[0].bytes);
+        // The reported seeds stay the request's; unmasked pixels stay unchanged.
+        let seeds = |c: &Candidates| c.images.iter().map(|i| i.seed).collect::<Vec<_>>();
+        assert_eq!(seeds(&ab), seeds(&none));
+        let original = decode_rgb8(&black(vec![]).region_png).unwrap();
+        let cand = decode_rgb8(&ab.images[0].bytes).unwrap();
+        let w = original.width as usize;
+        for i in (0..w * original.height as usize).filter(|i| i % w >= w / 2) {
+            assert_eq!(cand.data[i * 3..i * 3 + 3], original.data[i * 3..i * 3 + 3]);
+        }
+    }
+
+    #[test]
+    fn fr_prv_35_only_cost_affecting_references_change_the_estimate() {
+        let p = FakeProvider::default();
+        let cost = |req: &JobRequest| run(p.estimate(req)).unwrap().cost.amount;
+        // fake-white-edit: style refs are free.
+        let mut white = request(Some(7));
+        assert_eq!(cost(&white), CostAmount::Known(3.0));
+        white.references = (1..=3)
+            .map(|n| reference("style_refs", ref_png(n)))
+            .collect();
+        assert_eq!(cost(&white), CostAmount::Known(3.0));
+        // fake-black-edit: +1 per style ref; the identity ref is free.
+        let style = |n| reference("style_refs", ref_png(n));
+        assert_eq!(cost(&black(vec![style(1)])), CostAmount::Known(4.0));
+        let full = black(vec![
+            style(1),
+            style(2),
+            reference("identity_ref", ref_png(9)),
+        ]);
+        assert_eq!(cost(&full), CostAmount::Known(5.0));
+        // The charge on success matches the estimate.
+        let (_, rec) = states(&p, &full, 2);
+        assert_eq!(
+            run(p.status(&rec)).unwrap().cost.unwrap().amount,
+            CostAmount::Known(5.0)
+        );
+    }
+
+    #[test]
+    fn fr_prv_35_the_fake_exposes_the_last_reference_hashes() {
+        let p = FakeProvider::default();
+        assert!(p.last_reference_hashes().is_empty());
+        let req = black(vec![
+            reference("identity_ref", ref_png(9)),
+            reference("style_refs", ref_png(1)),
+        ]);
+        let want: Vec<_> = req
+            .references
+            .iter()
+            .map(|r| (r.slot.clone(), r.hash.clone()))
+            .collect();
+        run(p.estimate(&req)).unwrap();
+        assert_eq!(p.last_reference_hashes(), want);
+        run(p.submit(&black(vec![]))).unwrap();
+        assert!(p.last_reference_hashes().is_empty());
+        run(p.submit(&req)).unwrap();
+        // A refused request doesn't overwrite it.
+        let mut bad = req.clone();
+        bad.references[0].slot = "nope".into();
+        run(p.submit(&bad)).unwrap_err();
+        assert_eq!(p.last_reference_hashes(), want);
+    }
+
+    #[test]
+    fn fr_prv_33_the_fake_backstops_references() {
+        let p = FakeProvider::default();
+        let bad = invalid("reference");
+        let style = |n| reference("style_refs", ref_png(n));
+        let mut wrong_hash = style(1);
+        wrong_hash.hash = format!("sha256:{}", sha256_hex(b"other"));
+        for refs in [
+            vec![reference("moodBoard", ref_png(1))],
+            vec![style(1), style(2), style(3)],
+            vec![
+                reference("identity_ref", ref_png(1)),
+                reference("identity_ref", ref_png(2)),
+            ],
+            vec![reference("style_refs", b"not an image".to_vec())],
+            vec![wrong_hash],
+        ] {
+            assert_eq!(run(p.estimate(&black(refs.clone()))).unwrap_err(), bad);
+            assert_eq!(run(p.submit(&black(refs))).unwrap_err(), bad);
+        }
+    }
+
+    #[test]
+    fn fr_prv_34_the_fake_uploads_references_once_per_hash_and_reuploads_them() {
+        let p = case("asset_missing_once");
+        let req = black(vec![
+            reference("style_refs", ref_png(1)),
+            reference("identity_ref", ref_png(1)),
+        ]);
+        let refs_of = |rec: &ProviderRecord| -> Vec<String> {
+            rec.0["asset_refs"]["references"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x["ref"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        let before = run(p.upload(&ref_png(1), UploadPurpose::Reference)).unwrap();
+        let first = run(p.submit(&req)).unwrap();
+        assert_eq!(first.0["fake"]["reuploads"], 1);
+        let first_refs = refs_of(&first);
+        assert_eq!(first_refs[0], first_refs[1], "identical bytes: one upload");
+        assert_ne!(first_refs[0], before.0, "re-uploaded with the rest");
+        let second = run(p.submit(&req)).unwrap();
+        assert_eq!(refs_of(&second), first_refs, "new refs are cached");
+        assert_eq!(
+            second.0["asset_refs"]["references"][1],
+            json!({"slot": "identity_ref", "hash": req.references[1].hash, "ref": first_refs[1]})
+        );
     }
 
     #[test]
