@@ -267,7 +267,7 @@ fn read_with_retry(path: &Path) -> std::io::Result<Vec<u8>> {
     }
 }
 
-fn sha256(bytes: &[u8]) -> String {
+pub(crate) fn sha256(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     let mut s = String::with_capacity(7 + 64);
     s.push_str("sha256:");

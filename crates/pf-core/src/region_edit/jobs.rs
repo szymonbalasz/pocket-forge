@@ -19,6 +19,7 @@ use crate::job::{JobFile, JobState};
 use crate::manifest::{CandidateStatus, Extra};
 use crate::project::OpenProject;
 use crate::project::store::{self, NewJob, ResolveReason};
+use crate::references::{self, prepare::JobReference};
 
 /// A job blocks the next submit until it's `fetched` or terminal (#40).
 pub fn is_active(state: JobState) -> bool {
@@ -188,8 +189,14 @@ impl Command for RgnJobSubmit {
                 mask_id: Some(draft.mask_id),
                 estimate: serde_json::to_value(&estimate).unwrap_or(Value::Null),
                 provider: Value::Null,
-                // FR-RGN-43: REF fills these in REF slice 6; `[]` = no references sent.
-                references: vec![],
+                // FR-RGN-43 / FR-REF-25: the files sent, in this `requested` commit; `[]` = none.
+                references: prepared
+                    .references
+                    .rows()
+                    .iter()
+                    .map(serde_json::to_value)
+                    .collect::<Result<_, _>>()
+                    .map_err(|e| CoreError::internal(e.to_string()))?,
                 extra,
             };
             let job = store::record_job(
@@ -380,19 +387,23 @@ impl Command for RgnJobRetryDraft {
     type Output = JobDraft;
 
     fn run(core: &Core, input: JobIdInput) -> CoreResult<JobDraft> {
-        let state = core.state();
-        let (_, _, job) = find_job(&state, input.job_id)?;
-        let p = state.project.as_ref().ok_or_else(no_project)?;
-        let mask_id = job
-            .mask_id
-            .filter(|id| p.manifest.masks.iter().any(|m| m.id == *id))
-            .ok_or_else(|| {
-                CoreError::new(
-                    ErrorCode::SourceMissing,
-                    "the job's mask is gone; paint the mask again",
-                )
-            })?;
+        let (job, mask_id, dir, settings) = {
+            let state = core.state();
+            let (_, _, job) = find_job(&state, input.job_id)?;
+            let p = state.project.as_ref().ok_or_else(no_project)?;
+            let mask_id = job
+                .mask_id
+                .filter(|id| p.manifest.masks.iter().any(|m| m.id == *id))
+                .ok_or_else(|| {
+                    CoreError::new(
+                        ErrorCode::SourceMissing,
+                        "the job's mask is gone; paint the mask again",
+                    )
+                })?;
+            (job, mask_id, p.dir.clone(), state.settings.clone())
+        };
         let pinned = job.extra.get("seed_pinned").and_then(Value::as_bool) == Some(true);
+        let references = retry_references(core, &job, &dir, &settings);
         Ok(JobDraft {
             region: draft_region(&job)?,
             mask_id,
@@ -404,10 +415,42 @@ impl Command for RgnJobRetryDraft {
             } else {
                 None
             },
-            // FR-RGN-44: REF restores the job's references in REF slice 6.
-            references: None,
+            references,
         })
     }
+}
+
+/// FR-RGN-44 / FR-REF-26: the job's references as a draft selection (runs without the state
+/// lock; it lists folders and hashes the job's local files). The model's slots come from the
+/// job's capability snapshot, so a Retry needs no provider call.
+fn retry_references(
+    core: &Core,
+    job: &JobFile,
+    dir: &std::path::Path,
+    settings: &crate::settings::Settings,
+) -> Option<references::DraftReferences> {
+    let rows: Vec<JobReference> = job
+        .references
+        .iter()
+        .filter_map(|v| serde_json::from_value(v.clone()).ok())
+        .collect();
+    let has_slots = job.capability_snapshot["slots"]
+        .as_array()
+        .is_some_and(|s| !s.is_empty());
+    let label = match &job.iteration {
+        Some(it) => format!("{:03}", it.n),
+        None => "the job".to_owned(),
+    };
+    references::retry::retry_references(
+        &core.ctx,
+        settings,
+        &core.refs.probes,
+        dir,
+        has_slots,
+        &rows,
+        &label,
+        |p| references::retry::current_hash(core, p),
+    )
 }
 
 // ---------------------------------------------------------------- rgn_job_dismiss
