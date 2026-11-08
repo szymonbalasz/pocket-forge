@@ -511,7 +511,8 @@ fn fr_exp_16_27_png_export_equals_the_original_and_records_last() {
     assert_eq!(done["record_saved"], true);
     assert_eq!(done["fallback"], Value::Null);
     let abs = t.project.join("exports").join("Crypt.png");
-    assert_eq!(PathBuf::from(done["path"].as_str().unwrap()), abs);
+    // Absolute, with the platform's separators only.
+    assert_eq!(done["path"].as_str(), abs.to_str());
     assert_eq!(
         t.decode("exports/Crypt.png"),
         img,

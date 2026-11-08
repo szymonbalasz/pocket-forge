@@ -143,7 +143,7 @@ impl Command for ExportStart {
         settings::check_destination(&p.dir)?;
         let rel_path = settings::rel_path(&folder_name(&p.dir), s.target_px_per_square, s.format);
         if !input.replace
-            && let Some(existing) = settings::existing(&p.dir.join(&rel_path))
+            && let Some(existing) = settings::existing(&settings::abs_path(&p.dir, &rel_path))
         {
             return Err(
                 CoreError::new(ErrorCode::Exists, format!("{rel_path} exists"))

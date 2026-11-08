@@ -220,6 +220,13 @@ pub fn rel_path(project: &str, target: Option<i64>, format: ExportFormat) -> Str
     format!("{EXPORTS_DIR}/{}", file_name(project, target, format))
 }
 
+/// The absolute path of a project-relative `/` path, with the platform's separators (so
+/// `export:done.path` reads as one path on Windows).
+pub fn abs_path(dir: &Path, rel: &str) -> std::path::PathBuf {
+    rel.split('/')
+        .fold(dir.to_path_buf(), |p, part| p.join(part))
+}
+
 /// `exists{bytes, mtime}` of a destination file, or `None`.
 pub fn existing(path: &Path) -> Option<Value> {
     let meta = std::fs::metadata(path).ok().filter(|m| m.is_file())?;
@@ -337,7 +344,7 @@ pub fn plan(
                 }
             })
             .collect(),
-        exists: existing(&dir.join(&path)),
+        exists: existing(&abs_path(dir, &path)),
         path,
         est_peak_mib: est,
         warnings,

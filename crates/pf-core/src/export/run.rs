@@ -386,7 +386,7 @@ fn export(ctx: &Context, job: &ExportJob) -> Result<Done, Stop> {
         reports: AtomicUsize::new(0),
     };
     r.check(Phase::Compose, 0.0)?;
-    let dest = job.project_dir.join(&job.rel_path);
+    let dest = super::settings::abs_path(&job.project_dir, &job.rel_path);
     let dir = dest
         .parent()
         .ok_or_else(|| failure(ErrorCode::Internal, "no destination folder"))?;
