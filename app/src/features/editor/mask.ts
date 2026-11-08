@@ -39,6 +39,16 @@ export function stampAlpha(d: number, r: number, h: number): number {
 /** Dab spacing: max(1, 0.25 r) image px (FR-EDT-15). */
 export const dabSpacing = (r: number): number => Math.max(1, 0.25 * r);
 
+/** The box one dab of radius r at (cx, cy) touches (mask px, clipped), or null. */
+export function dabBox(m: MaskBuffer, cx: number, cy: number, r: number): Box | null {
+  const { w, h } = m.rect;
+  const x0 = Math.max(0, Math.floor(cx - r));
+  const y0 = Math.max(0, Math.floor(cy - r));
+  const x1 = Math.min(w, Math.ceil(cx + r));
+  const y1 = Math.min(h, Math.ceil(cy + r));
+  return x1 <= x0 || y1 <= y0 ? null : { x0, y0, x1, y1 };
+}
+
 /** Applies one dab centred at (cx, cy) in **mask** px. Paint = source-over on alpha, erase =
  *  destination-out. Returns the touched box (clipped to the mask), or null. */
 export function stamp(
@@ -49,12 +59,10 @@ export function stamp(
   hardness: number,
   mode: StampMode,
 ): Box | null {
-  const { w, h } = m.rect;
-  const x0 = Math.max(0, Math.floor(cx - r));
-  const y0 = Math.max(0, Math.floor(cy - r));
-  const x1 = Math.min(w, Math.ceil(cx + r));
-  const y1 = Math.min(h, Math.ceil(cy + r));
-  if (x1 <= x0 || y1 <= y0) return null;
+  const box = dabBox(m, cx, cy, r);
+  if (!box) return null;
+  const { x0, y0, x1, y1 } = box;
+  const w = m.rect.w;
   const d = m.data;
   for (let y = y0; y < y1; y++) {
     const dy = y + 0.5 - cy;
@@ -68,7 +76,7 @@ export function stamp(
       d[i] = Math.round(out * 255);
     }
   }
-  return { x0, y0, x1, y1 };
+  return box;
 }
 
 /** Dab centres along a segment, `carry` = distance travelled since the last dab. Returns the

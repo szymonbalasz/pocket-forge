@@ -235,3 +235,66 @@
 .prj-status-read_only .prj-status-label {
   color: var(--pf-warn);
 }
+
+/* Conflict view (FR-PRJ-36): two panes, Keep this / Keep other. */
+.prj-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--pf-overlay);
+  z-index: 40;
+}
+
+.prj-conflict {
+  position: fixed;
+  z-index: 41;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(720px, 94vw);
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--pf-bg-2);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  padding: var(--pf-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+}
+
+.prj-conflict-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.prj-conflict-panes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--pf-space-3);
+}
+
+.prj-conflict-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  padding: var(--pf-space-3);
+}
+
+.prj-conflict-pane h3 {
+  margin: 0;
+  font-size: var(--pf-font-size-meta);
+}
+
+.prj-conflict-layers {
+  margin: 0;
+  padding-left: var(--pf-space-4);
+  font-size: var(--pf-font-size-meta);
+  color: var(--pf-text-dim);
+}
+
+.prj-conflict-actions {
+  display: flex;
+  justify-content: flex-end;
+}

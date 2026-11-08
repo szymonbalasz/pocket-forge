@@ -87,11 +87,16 @@ export interface FolderFile {
 
 export interface TrashItem {
   id: string;
-  /** Project-relative path the item came from. */
+  /** Project-relative path the item came from (the first of `files`). */
   path: string;
   kind: string;
   bytes: number;
   trashed_at: string;
+  /** Every project path in the item (core, PRJ slice 5). */
+  files?: string[];
+  /** `trashed_at` + 30 days (FR-PRJ-32). */
+  purge_at?: string;
+  reason?: string;
 }
 
 export type DiskCategory =
@@ -111,6 +116,8 @@ export interface DiskUsage {
   trash_count: number;
   /** When the oldest trash item is purged (30 days, FR-PRJ-32), or null with an empty trash. */
   next_purge: string | null;
+  /** Sum of `bytes` (core). */
+  total?: number;
 }
 
 export interface Layer {
@@ -148,6 +155,33 @@ export interface RevisionEntry {
 }
 
 export type ReadOnlyReason = 'newer_version' | 'original_changed' | 'original_missing';
+
+/** `project_resolve_conflict` `keep` (FR-PRJ-36). */
+export type ConflictKeep = 'this' | 'other';
+
+/** One version in the conflict view (FR-PRJ-36). */
+export interface ConflictSide {
+  side: ConflictKeep;
+  /** `project.json`, the conflict copy's name, or null for this machine's state in memory. */
+  file: string | null;
+  readable: boolean;
+  committed_at: string | null;
+  seq: number | null;
+  machine: 'this' | 'other';
+  layers: Layer[];
+  newest_revision: RevisionEntry | null;
+  /** Files that version needs but haven't synced yet ("Still syncing"). */
+  missing_files: string[];
+  can_keep: boolean;
+}
+
+/** `project_conflict_get`. */
+export interface ConflictView {
+  /** `copy`: a `project.json` conflict copy; `seq`: changed on disk while open. */
+  source: 'copy' | 'seq';
+  this: ConflictSide;
+  other: ConflictSide;
+}
 
 /** `project_open` warning codes (asset-project §9): read-only reasons, `conflict`, `recovered`,
  *  `resumable`, `lost`, `original_missing` (Relink). */
@@ -515,7 +549,8 @@ export interface Commands {
   library_get_config: [Record<string, never>, LibraryConfig];
   library_set_roots: [{ roots: string[] }, LibraryConfig];
   project_open: [{ path: string }, ProjectSnapshot];
-  project_close: [Record<string, never>, Record<string, never>];
+  /** `force`: close although a save is still pending (FR-PRJ-21, `unsaved` otherwise). */
+  project_close: [{ force?: boolean }, Record<string, never>];
   project_get: [Record<string, never>, ProjectSnapshot | null];
   project_put_draft: [{ draft: DraftInput }, { seq: number }];
   project_save_revision: [{ label?: string }, RevisionEntry];
@@ -607,6 +642,8 @@ export interface Commands {
   ref_trash_list: [Record<string, never>, RefTrashItem[]];
   ref_trash_restore: [{ id: string }, { path: string }];
   ref_resolve: [{ model_id: string; references: DraftReferences | null }, RefResolved];
+  project_conflict_get: [Record<string, never>, ConflictView];
+  project_resolve_conflict: [{ keep: ConflictKeep }, RevisionEntry];
 }
 
 export type CommandName = keyof Commands;
