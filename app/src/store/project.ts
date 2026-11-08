@@ -293,6 +293,14 @@ export const projectStore = {
     set({ save: { kind: 'failed', ...errorOf(e), code: saveCode(e), retrying: false } });
   },
 
+  /** Drops an open-time warning that no longer applies (RGN: `resumable` once no job is left
+   *  running, walk D7). The core's list is computed at open only. */
+  clearWarning(code: string): void {
+    const p = state.project;
+    if (!p || !p.warnings.some((w) => w.code === code)) return;
+    set({ project: { ...p, warnings: p.warnings.filter((w) => w.code !== code) } });
+  },
+
   setError(error: { code: string; message: string } | null): void {
     set({ error });
   },

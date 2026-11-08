@@ -56,6 +56,7 @@ export function installRgnMock(seed: RgnMockSeed): void {
     trash_id: string | null;
     width: number;
     height: number;
+    aspect_warning?: boolean;
   }
 
   const w = window as unknown as Rec;
@@ -323,6 +324,20 @@ export function installRgnMock(seed: RgnMockSeed): void {
       model_id: draft.model_id,
     })) as Rec;
     if (!draft.mask_id) return fail('mask_invalid', 'The mask is empty.', 'empty');
+    // pf-core pads the stored mask to the outer rect: one outside it is empty there (e2e only,
+    // where edt-mock keeps the submitted masks).
+    const stored = (w.__pfEdtMasks as Record<string, { rect: Rect }> | undefined)?.[
+      String(draft.mask_id)
+    ];
+    const o = f.outer as Rect;
+    if (
+      stored &&
+      (stored.rect.x >= o.x + o.w ||
+        stored.rect.y >= o.y + o.h ||
+        stored.rect.x + stored.rect.w <= o.x ||
+        stored.rect.y + stored.rect.h <= o.y)
+    )
+      return fail('mask_invalid', 'paint the area to change inside the region first', 'empty');
     const values: Rec = { ...((draft.controls ?? {}) as Rec) };
     const promptCtl = c.controls.find((x) => x.role === 'prompt');
     const seedCtl = c.controls.find((x) => x.role === 'seed');
@@ -670,8 +685,9 @@ export function installRgnMock(seed: RgnMockSeed): void {
       j.progress = progress;
       jobEvent(j, extra);
     },
-    /** → succeeded → fetched with `n` candidates (index `invalid` ones won't decode). */
-    finish(count?: number, invalid: number[] = []) {
+    /** → succeeded → fetched with `n` candidates (index `invalid` ones won't decode, index
+     *  `odd` ones came back in another aspect, FR-RGN-24). */
+    finish(count?: number, invalid: number[] = [], odd: number[] = []) {
       const j = active();
       if (!j) return;
       j.state = 'succeeded';
@@ -693,6 +709,7 @@ export function installRgnMock(seed: RgnMockSeed): void {
           trash_id: null,
           width: j.outer.w,
           height: j.outer.h,
+          ...(odd.includes(i) ? { aspect_warning: true } : {}),
         };
         s.cands.push(cand);
       }

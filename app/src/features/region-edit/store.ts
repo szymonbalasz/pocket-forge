@@ -15,6 +15,7 @@ import {
   type JobState,
   type Layer,
   type ModelSummary,
+  type ProviderMode,
   type ProjectSnapshot,
   type RectPx,
   type RegionFit,
@@ -27,6 +28,7 @@ import {
   type Spend,
 } from '../../api';
 import { projectStore } from '../../store/project';
+import { refreshProviderStatus } from '../provider';
 import {
   editorBridge,
   flushMask,
@@ -80,7 +82,7 @@ export type EstimateStatus = 'idle' | 'waiting' | 'loading' | 'ready' | 'error';
 export interface RgnState {
   projectId: string | null;
   readOnly: string | null;
-  provider: { configured: boolean; connectivity: Connectivity } | null;
+  provider: { configured: boolean; connectivity: Connectivity; mode?: ProviderMode } | null;
   models: ModelSummary[];
   modelsStale: boolean;
   modelsLoading: boolean;
@@ -128,9 +130,15 @@ export interface RgnState {
 
 export const DEFAULT_MARGIN = 128;
 export const DEFAULT_BLEND: RgnBlend = { feather_px: 48, colour_match: true };
+/** Walk D5: while the provider is offline, or the model list or capabilities failed, the panel
+ *  asks again this often (PRV's offline poll delay, FR-PRV-19), so it recovers on reconnect. */
+export const PROVIDER_PROBE_MS = 10_000;
 /** FR-PRJ-19: the draft is saved ≥ 2 s after the last change. */
 export const DRAFT_SAVE_MS = 2000;
 const PREVIEW_DEBOUNCE_MS = 150;
+/** FR-RGN-24: the picker badge's text. */
+export const ASPECT_WARNING =
+  'Aspect differs from the sent region by more than 1 %; resized to fit the outer rect.';
 
 const initial: RgnState = {
   projectId: null,
@@ -201,6 +209,7 @@ const isCurrent = (k: string, t: number) => tokens[k] === t;
 const debouncer = new EstimateDebouncer((sig) => void runEstimate(sig));
 let draftTimer: ReturnType<typeof setTimeout> | null = null;
 let previewTimer: ReturnType<typeof setTimeout> | null = null;
+let probeTimer: ReturnType<typeof setTimeout> | null = null;
 let unsubscribe: (() => void) | null = null;
 /** Candidate ids whose thumbnail (FR-EDT-32) is being fetched. */
 const thumbsInFlight = new Set<string>();
@@ -217,6 +226,16 @@ const sameRect = (a: RectPx | null, b: RectPx | null) =>
 /** Offline: PRV returned cached models (§7 *offline*), or the provider says so. */
 export const isOffline = (s: RgnState): boolean =>
   s.modelsStale || s.provider?.connectivity === 'offline';
+
+/** Walk D7: one unit label for every amount in the panel: the estimate's, else the newest job's,
+ *  else the provider's (the fake reports "fake", Scenario "CU"). */
+export function costUnit(s: RgnState): string {
+  return (
+    s.estimate.result?.cost.unit ??
+    orderRows(s.iterations).find((r) => r.cost)?.cost?.unit ??
+    (s.provider?.mode === 'fake' ? 'fake' : 'CU')
+  );
+}
 
 export const activeJobId = (s: RgnState): string | null =>
   orderRows(s.iterations).find((r) => isActive(r.state))?.job_id ?? null;
@@ -304,23 +323,31 @@ async function runEstimate(sig: string): Promise<void> {
   }
 }
 
+/** Writes the panel's draft now. `mask_id` absent keeps the draft's mask (EDT owns it, R55);
+ *  without a region it is cleared. */
+function putDraft(mask?: { mask_id: string | null }): void {
+  const s = state;
+  if (!s.projectId || s.readOnly) return;
+  api.project
+    .putDraft({
+      final_prompt: s.prompt,
+      model_id: s.modelId,
+      controls: Object.fromEntries(s.touched.map((n) => [n, s.values[n]])),
+      seed: s.seedMode === 'pinned' ? s.seed : null,
+      region: s.inner ? { inner: s.inner, margin: s.margin } : null,
+      ...referencesDraft(), // REF's selection (FR-REF-20)
+      // No region, no mask (FR-EDT-20): the draft must not keep the removed region's mask.
+      ...(mask ?? (s.inner ? {} : { mask_id: null })),
+    })
+    // Shown in the save segment (walk D3); the next change saves again.
+    .catch((e) => projectStore.draftSaveFailed(e));
+}
+
 function saveDraftSoon(): void {
   if (draftTimer) clearTimeout(draftTimer);
   draftTimer = setTimeout(() => {
     draftTimer = null;
-    const s = state;
-    if (!s.projectId || s.readOnly) return;
-    api.project
-      .putDraft({
-        final_prompt: s.prompt,
-        model_id: s.modelId,
-        controls: Object.fromEntries(s.touched.map((n) => [n, s.values[n]])),
-        seed: s.seedMode === 'pinned' ? s.seed : null,
-        region: s.inner ? { inner: s.inner, margin: s.margin } : null,
-        ...referencesDraft(), // REF's selection (FR-REF-20)
-      })
-      // Shown in the save segment (walk D3); the next change saves again.
-      .catch((e) => projectStore.draftSaveFailed(e));
+    putDraft();
   }, DRAFT_SAVE_MS);
 }
 
@@ -329,12 +356,42 @@ function saveDraftSoon(): void {
 async function refreshProvider(): Promise<void> {
   try {
     const st = await api.provider.status();
-    set({ provider: { configured: st.configured, connectivity: st.connectivity } });
+    set({ provider: { configured: st.configured, connectivity: st.connectivity, mode: st.mode } });
   } catch {
     // Unknown provider status: leave submit to the estimate's errors.
   }
   schedule();
+  probeSoon();
 }
+
+/** The panel can't work with the provider's current answers (walk D5). */
+const needsProbe = (s: RgnState): boolean =>
+  !!s.projectId &&
+  s.provider?.configured !== false &&
+  (isOffline(s) || !!s.modelsError || !!s.capsError || (!s.modelsLoading && !s.models.length));
+
+function probeSoon(): void {
+  if (probeTimer || !needsProbe(state)) return;
+  probeTimer = setTimeout(() => {
+    probeTimer = null;
+    void probe();
+  }, PROVIDER_PROBE_MS);
+}
+
+/** Asks the provider again: models (then capabilities), and the status. A call that succeeds
+ *  after offline makes the core emit `provider:status-changed`; the chip's balance is refreshed
+ *  as well, since a cleared balance error changes no connectivity. */
+async function probe(): Promise<void> {
+  if (!needsProbe(state)) return;
+  const pid = state.projectId;
+  await reloadModels();
+  if (state.projectId !== pid) return;
+  await refreshProvider();
+  if (!needsProbe(state)) void refreshProviderStatus();
+}
+
+const reloadModels = () =>
+  loadModels(Object.fromEntries(state.touched.map((n) => [n, state.values[n]])));
 
 async function loadSpend(): Promise<void> {
   try {
@@ -360,35 +417,43 @@ async function refreshProject(): Promise<void> {
       layers: p.layers,
       headRevision: p.head_revision,
       readOnly: p.read_only,
-      maskId:
-        state.inner && !sameRect(state.inner, editorInner)
-          ? state.maskId
-          : (p.draft?.mask_id ?? state.maskId),
     });
-    if (restored) applyRestoredDraft(p.draft);
+    // A restore keeps EDT's live mask (OQ-EDT-14 A), not the restored draft's.
+    if (!restored && !(state.inner && !sameRect(state.inner, editorInner)))
+      takeMask(p.draft?.mask_id ?? state.maskId);
+    if (restored) applyRestoredDraft(p.draft, 'restore');
     syncPicker();
   } catch {
     // Keep the last snapshot; the next commit event retries.
   }
 }
 
+type DraftRegion = { inner?: RectPx; margin?: number } | null | undefined;
+
 /** Shows a restored revision's draft (walk D4), or the kept version's after a conflict is
- *  resolved (walk 2 N1). No draft save: the core already wrote it, and a save still waiting
- *  would write the replaced draft back. BL-26: its region goes back to EDT, validated (`refit` →
- *  `editorBridge.setRegion`); EDT keeps the overlapping mask and hands it off again. */
-function applyRestoredDraft(d: ProjectSnapshot['draft']): void {
+ *  resolved (walk 2 N1). A save still waiting would write the replaced draft back, so it is
+ *  dropped.
+ *  - `restore` (History, undo/redo of an accept or re-tune): EDT's live region and mask stay
+ *    (OQ-EDT-14 A) and nothing goes onto EDT's undo stack, so Redo stays available (FR-RGN-30,
+ *    walk D1). The draft is pointed back at them when the restored one differs.
+ *  - `kept` (Keep other, R60): the kept region goes back to EDT, validated (`refit` →
+ *    `editorBridge.setRegion`, BL-26); EDT keeps the overlapping mask and hands it off again. */
+function applyRestoredDraft(d: ProjectSnapshot['draft'], why: 'restore' | 'kept'): void {
   if (draftTimer) clearTimeout(draftTimer);
   draftTimer = null;
+  const t = nextToken('restore');
   reloadReferences(d?.references ?? null);
-  const region = d?.region as { inner?: RectPx; margin?: number } | null | undefined;
-  const inner = region?.inner ?? null;
-  const margin = region?.margin ?? state.margin;
-  if (!sameRect(inner, state.inner) || margin !== state.margin) {
-    // EDT's echo of this region is not an edit (no draft save, no prompt reset).
-    editorInner = inner;
-    set({ inner, margin });
-    if (!inner) editorBridge.setRegion(null);
-    void refit();
+  const region = d?.region as DraftRegion;
+  if (why === 'kept') {
+    const inner = region?.inner ?? null;
+    const margin = region?.margin ?? state.margin;
+    if (!sameRect(inner, state.inner) || margin !== state.margin) {
+      // EDT's echo of this region is not an edit (no draft save, no prompt reset).
+      editorInner = inner;
+      set({ inner, margin });
+      if (!inner) editorBridge.setRegion(null);
+      void refit();
+    }
   }
   set({
     prompt: d?.final_prompt ?? '',
@@ -396,8 +461,44 @@ function applyRestoredDraft(d: ProjectSnapshot['draft']): void {
     seed: d?.seed ?? null,
   });
   const model = d?.model_id ?? state.modelId;
-  if (model) void selectModel(model, d?.controls ?? null);
+  let loaded = Promise.resolve();
+  if (model) loaded = selectModel(model, d?.controls ?? null);
   else schedule();
+  if (why === 'restore')
+    void loaded.then(() => (isCurrent('restore', t) ? keepLiveRegion(d, t) : undefined));
+}
+
+/** OQ-EDT-14 A after a restore: the draft points at EDT's live region and stored mask again
+ *  (one save, after the restored model and controls loaded), so a reopen shows what the DM
+ *  sees. Nothing is written when the restored draft already matches. */
+async function keepLiveRegion(d: ProjectSnapshot['draft'], t: number): Promise<void> {
+  let mask: { mask_id: string | null } | undefined;
+  try {
+    // Submits the live mask first if it changed; null = no region (or nothing painted).
+    mask = { mask_id: (await flushMask())?.mask_id ?? null };
+  } catch {
+    mask = undefined; // EDT keeps it unsaved and retries; its own submit re-points the draft.
+  }
+  if (!isCurrent('restore', t) || draftTimer) return; // an edit since then saves it all
+  const region = d?.region as DraftRegion;
+  const sameRegion =
+    sameRect(region?.inner ?? null, state.inner) &&
+    (!state.inner || (region?.margin ?? DEFAULT_MARGIN) === state.margin);
+  const sameMask = !mask || (d?.mask_id ?? null) === mask.mask_id;
+  if (sameRegion && sameMask) return;
+  if (mask?.mask_id) takeMask(mask.mask_id);
+  putDraft(mask);
+}
+
+/** The draft's mask changed (EDT submitted the live mask, R7). The mask isn't cost-affecting
+ *  (FR-RGN-12), but an estimate that failed (`mask_invalid` for the previous region's mask)
+ *  runs again for the new one (walk D2). */
+function takeMask(maskId: string | null): void {
+  if (maskId === state.maskId) return;
+  const failed = state.estimate.status === 'error';
+  set({ maskId });
+  if (failed) debouncer.reset();
+  schedule();
 }
 
 async function refreshIterations(): Promise<void> {
@@ -429,6 +530,8 @@ async function refreshIterations(): Promise<void> {
       ...(changed ? { selectedCandidateId: null, preview: null } : {}),
     });
     if (changed) editorBridge.setCompare(null);
+    // The open-time "N job(s) can resume" banner ends with the last running job (walk D7).
+    if (!activeJobId(state)) projectStore.clearWarning('resumable');
     syncPicker();
     schedule();
   } catch {
@@ -448,6 +551,7 @@ async function loadModels(remembered: Values | null): Promise<void> {
   } catch (e) {
     set({ modelsLoading: false, modelsError: uiError(e) });
   }
+  probeSoon();
 }
 
 async function evaluate(): Promise<void> {
@@ -524,6 +628,7 @@ function syncPicker(): void {
       c.id === s.selectedCandidateId && s.preview
         ? { url: s.preview.url, rect: s.preview.rect }
         : null,
+    warning: c.aspectWarning ? ASPECT_WARNING : null,
   }));
   const selected = list.some((c) => c.id === s.selectedCandidateId) ? s.selectedCandidateId : null;
   editorBridge.setCandidates(candidates, pickerHandlers, selected);
@@ -619,14 +724,19 @@ function subscribe(): void {
       void refreshProject();
       void refreshIterations();
     }),
-    onEventSafe('provider:status-changed', () => void refreshProvider()),
+    onEventSafe('provider:status-changed', () =>
+      // Back online: the stale or missing list and a failed capability load reload at once.
+      refreshProvider().then(() => {
+        if (state.provider?.connectivity !== 'offline' && needsProbe(state)) void reloadModels();
+      }),
+    ),
     Promise.resolve(
       // Keep other (walk 2 N1): the kept draft. Keep this: the panel is this version already
       // (the core saved the refused draft; a save still waiting now succeeds).
       projectStore.onResolved((p, keep) => {
         if (p.project_id !== state.projectId || keep !== 'other') return;
         set({ headRevision: p.head_revision, maskId: p.draft?.mask_id ?? null });
-        applyRestoredDraft(p.draft);
+        applyRestoredDraft(p.draft, 'kept');
       }),
     ),
   ];
@@ -653,6 +763,7 @@ async function selectModel(id: string, remembered: Values | null): Promise<void>
     if (!isCurrent('caps', t)) return;
     set({ caps: null, capsLoading: false, capsError: uiError(e) });
     schedule();
+    probeSoon();
   }
 }
 
@@ -714,7 +825,8 @@ export const rgn = {
     debouncer.reset();
     if (draftTimer) clearTimeout(draftTimer);
     if (previewTimer) clearTimeout(previewTimer);
-    draftTimer = previewTimer = null;
+    if (probeTimer) clearTimeout(probeTimer);
+    draftTimer = previewTimer = probeTimer = null;
     editorInner = null;
     regionTaken = false;
     thumbsInFlight.clear();
@@ -739,8 +851,9 @@ export const rgn = {
   setRegion(inner: RectPx | null): void {
     if (sameRect(inner, editorInner)) return;
     editorInner = inner;
-    // A new region starts with an empty prompt (FR-RGN-11): removing it clears the prompt.
-    set(inner ? { inner } : { inner: null, prompt: '' });
+    // A new region starts with an empty prompt (FR-RGN-11): removing it clears the prompt, and
+    // its mask goes with it (FR-EDT-20); the next region's mask arrives when EDT submits it.
+    set(inner ? { inner } : { inner: null, prompt: '', maskId: null });
     saveDraftSoon();
     void refit();
   },

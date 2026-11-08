@@ -7,6 +7,11 @@ export const isTerminal = (s: JobState): boolean => TERMINAL.includes(s);
 /** Running: submit is disabled and the job strip shows progress. */
 export const isActive = (s: JobState): boolean => !isTerminal(s) && s !== 'fetched';
 
+/** The state a chip shows: the live event's, unless the core's row is already final. A job
+ *  closed by the next submit emits no event, so its last live state ("Ready") is stale (walk D6). */
+export const shownState = (row: RgnIteration, live: { state: JobState } | undefined): JobState =>
+  isTerminal(row.state) ? row.state : (live?.state ?? row.state);
+
 /** Newest first: the active job without candidates (n = null) leads, then by `n` descending. */
 export function orderRows(rows: RgnIteration[]): RgnIteration[] {
   return [...rows].sort((a, b) => {
@@ -20,6 +25,13 @@ export function orderRows(rows: RgnIteration[]): RgnIteration[] {
 export const stripJobId = (rows: RgnIteration[]): string | null => {
   const first = orderRows(rows)[0];
   return first && first.state !== 'closed' ? first.job_id : null;
+};
+
+/** R62: Retry is offered on the newest job once it is final (`closed` included, e.g. accepted);
+ *  older iterations get none (R61). */
+export const retryJobId = (rows: RgnIteration[]): string | null => {
+  const first = orderRows(rows)[0];
+  return first && canRetry(first.state) ? first.job_id : null;
 };
 
 /** Keeps the current selection while it exists; else the newest row. */
@@ -43,6 +55,8 @@ export interface TrackerCandidate {
   status: 'ready' | 'invalid';
   starred: boolean;
   accepted: boolean;
+  /** FR-RGN-24: the aspect differs from the sent one by > 1 % (resized to the outer rect). */
+  aspectWarning: boolean;
 }
 
 /** FR-RGN-40: the iteration's non-trashed candidates, in provider order (index 1-based). */
@@ -56,6 +70,7 @@ export function iterationCandidates(all: CandidateRecord[], jobId: string): Trac
       status: c.status === 'invalid' ? 'invalid' : 'ready',
       starred: c.starred,
       accepted: c.status === 'accepted',
+      aspectWarning: c.aspect_warning === true,
     }));
 }
 

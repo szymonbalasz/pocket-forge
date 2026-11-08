@@ -238,9 +238,15 @@ export function referencesDraft(): { references?: DraftReferences } {
   return { references: current() };
 }
 
-/** The selection estimate and submit send (FR-RGN-41): null = REF's defaults (FR-REF-17). */
+/** The selection estimate and submit send (FR-RGN-41). With REF's defaults (no saved
+ *  selection, FR-REF-17) it is the selection the block shows, not null: the core would re-derive
+ *  null without a default-ticked file that vanished and charge the job without it; given the
+ *  selection, `prepare` refuses it with `reference_unavailable` before any spend (BL-34). Null
+ *  only while the block isn't resolved for the current model. */
 export function referencesForSend(): DraftReferences | null {
-  return state.projectId ? state.refs : null;
+  if (!state.projectId) return null;
+  if (state.refs) return state.refs;
+  return state.modelId && !state.loading ? (state.resolved?.references ?? null) : null;
 }
 
 /** FR-RGN-45: the keys of the ticked items as the block shows them now, for the confirm's

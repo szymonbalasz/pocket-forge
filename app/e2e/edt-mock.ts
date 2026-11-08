@@ -106,8 +106,8 @@ export async function installMap(page: Page, opts: EdtMockOptions = {}): Promise
         const id = `01JMASK${String(++maskSeq).padStart(19, '0')}`;
         masks[id] = { rect: input.rect, data_b64: input.data_b64 };
         const w = window as unknown as Rec;
-        w.__pfMockSnapshot = {
-          ...((w.__pfMockSnapshot as Rec) ?? {}),
+        // In place: the rgn mock keeps a reference to the snapshot object.
+        Object.assign((w.__pfMockSnapshot ??= {}) as Rec, {
           draft: {
             final_prompt: '',
             model_id: null,
@@ -117,7 +117,7 @@ export async function installMap(page: Page, opts: EdtMockOptions = {}): Promise
             mask_id: id,
             updated_at: '2026-11-08T12:00:00.000Z',
           },
-        };
+        });
         (w.__pfMock as { emit: (e: string, p: unknown) => void } | undefined)?.emit(
           'project:committed',
           { seq: maskSeq },

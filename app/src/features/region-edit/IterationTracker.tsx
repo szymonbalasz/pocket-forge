@@ -15,6 +15,8 @@ import {
   isActive,
   orderRows,
   refsTooltip,
+  retryJobId,
+  shownState,
   stripJobId,
 } from './tracker';
 import type { RgnIteration } from '../../api';
@@ -31,7 +33,7 @@ export function useNow(on: boolean): number {
 }
 
 function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined }) {
-  const state = live?.state ?? row.state;
+  const state = shownState(row, live);
   const running = isActive(state);
   const now = useNow(running);
   const progress = live?.progress ?? null;
@@ -145,6 +147,7 @@ export function IterationTracker() {
   if (!s.projectId || s.iterations.length === 0) return null;
   const rows = orderRows(s.iterations);
   const strip = stripJobId(rows);
+  const retryable = retryJobId(rows);
   const select = (id: string) => rgn.selectIteration(id);
   return (
     <div className="rgn-tracker" data-testid="rgn-tracker">
@@ -156,7 +159,7 @@ export function IterationTracker() {
       >
         {rows.map((r) => {
           const live = s.live[r.job_id];
-          const state = live?.state ?? r.state;
+          const state = shownState(r, live);
           return (
             <div
               key={r.job_id}
@@ -206,6 +209,19 @@ export function IterationTracker() {
                     </span>
                   )}
                   <span>{costLabel(r.cost)}</span>
+                  {r.job_id === retryable && (
+                    <button
+                      type="button"
+                      className="small"
+                      data-testid="rgn-job-retry"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void rgn.retry(r.job_id);
+                      }}
+                    >
+                      Retry
+                    </button>
+                  )}
                 </div>
               )}
             </div>

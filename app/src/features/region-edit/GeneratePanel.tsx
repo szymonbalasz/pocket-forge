@@ -15,6 +15,7 @@ import { controlKind, isValueControl, stateOf } from './controls';
 import { amountLabel, costLabel, errorText, fitLabel } from './format';
 import {
   currentDraft,
+  costUnit,
   isOffline,
   missing,
   rgn,
@@ -298,7 +299,7 @@ function CostSection({ s }: { s: RgnState }) {
   else if (e.status === 'error' && e.error)
     line = <span className="error">{errorText(e.error.code, e.error.message)}</span>;
   else line = <span className="muted">Estimate: —</span>;
-  const unit = e.result?.cost.unit ?? 'CU';
+  const unit = costUnit(s);
   return (
     <div className="rgn-section">
       <div

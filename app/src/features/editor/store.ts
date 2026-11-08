@@ -50,6 +50,8 @@ export interface PickerCandidate {
   thumbUrl?: string | null;
   /** RGN's baked preview, shown by compare while this candidate is selected (R16). */
   preview?: CompareSource | null;
+  /** A warning badge on the item, e.g. RGN's aspect mismatch (FR-RGN-24); the text is its tooltip. */
+  warning?: string | null;
 }
 
 export interface PickerHandlers {

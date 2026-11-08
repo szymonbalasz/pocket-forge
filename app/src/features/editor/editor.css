@@ -296,6 +296,7 @@
 }
 
 .edt-picker-thumb {
+  position: relative;
   width: 96px;
   height: 64px;
   display: flex;
@@ -329,4 +330,21 @@
 
 .edt-picker-invalid .edt-picker-thumb {
   color: var(--pf-danger);
+}
+
+/* FR-RGN-24: the aspect-mismatch badge (or another feature's warning) on a candidate. */
+.edt-picker-warning {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--pf-warn-soft);
+  color: var(--pf-warn);
+  border: 1px solid var(--pf-warn);
+  font-size: var(--pf-font-size-meta);
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
 }

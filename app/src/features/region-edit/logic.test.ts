@@ -29,6 +29,8 @@ import {
   iterationCandidates,
   orderRows,
   refsTooltip,
+  retryJobId,
+  shownState,
   stripJobId,
   trashOnSubmit,
 } from './tracker';
@@ -390,6 +392,23 @@ describe('iteration tracker logic', () => {
     expect(stripJobId([row('J1', 1, 'closed', true)])).toBeNull();
   });
 
+  test('FR-RGN-28 walk D6 a job closed by the next submit shows Closed, not its last live state', () => {
+    const live = { state: 'fetched' as const };
+    expect(shownState(row('J1', 1, 'closed'), live)).toBe('closed');
+    expect(shownState(row('J1', 1, 'failed'), { state: 'running' })).toBe('failed');
+    // A live event still leads while the core's row isn't final yet.
+    expect(shownState(row('J2', null, 'submitted'), { state: 'running' })).toBe('running');
+    expect(shownState(row('J2', 2, 'fetched'), undefined)).toBe('fetched');
+  });
+
+  test('FR-RGN-21 R62 Retry on the newest job in any final state, closed included; never an older one', () => {
+    expect(retryJobId([row('J1', 1, 'closed', true), row('J2', 2, 'closed')])).toBe('J2');
+    for (const st of ['failed', 'canceled', 'lost', 'fetched'] as const)
+      expect(retryJobId([row('J1', 1, 'closed'), row('J2', 2, st)])).toBe('J2');
+    expect(retryJobId([row('J1', 1, 'closed'), row('J3', null, 'running')])).toBeNull();
+    expect(retryJobId([])).toBeNull();
+  });
+
   test('FR-RGN-40 the picker gets the iteration’s non-trashed candidates in provider order', () => {
     const all = [
       cand('B', 'J1', 1, { starred: true, status: 'dismissed' }),
@@ -397,11 +416,15 @@ describe('iteration tracker logic', () => {
       cand('C', 'J1', 2, { status: 'dismissed', trash_id: 'T1' }),
       cand('D', 'J1', 3, { status: 'invalid' }),
       cand('E', 'J2', 0),
+      cand('F', 'J1', 4, { aspect_warning: true }),
     ];
+    const ok = { starred: false, accepted: false, aspectWarning: false };
     expect(iterationCandidates(all, 'J1')).toEqual([
-      { id: 'A', index: 1, status: 'ready', starred: false, accepted: true },
-      { id: 'B', index: 2, status: 'ready', starred: true, accepted: false },
-      { id: 'D', index: 4, status: 'invalid', starred: false, accepted: false },
+      { ...ok, id: 'A', index: 1, status: 'ready', accepted: true },
+      { ...ok, id: 'B', index: 2, status: 'ready', starred: true },
+      { ...ok, id: 'D', index: 4, status: 'invalid' },
+      // FR-RGN-24: the core's aspect warning reaches the picker.
+      { ...ok, id: 'F', index: 5, status: 'ready', aspectWarning: true },
     ]);
   });
 
