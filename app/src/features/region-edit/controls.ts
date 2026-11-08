@@ -1,7 +1,7 @@
 // Capability-driven controls (RGN Appendix A, #37): which UI control each capability control
 // gets, the values sent (FR-RGN-34), resets on remembered or narrowed values (FR-RGN-11/33) and
 // the cost signature that drives the estimate (FR-RGN-12). Pure; no core calls.
-import type { Capabilities, RgnControlState } from '../../api';
+import type { Capabilities, ControlState, ControlsEvaluation } from '../../api';
 
 export type Control = Capabilities['controls'][number];
 export type Values = Record<string, unknown>;
@@ -81,55 +81,48 @@ export interface Restored {
   notices: string[];
 }
 
-/** FR-RGN-11: remembered values over the defaults; one the capabilities reject resets to the
- *  default with a notice. Unknown names are dropped silently (another model's control). */
-export function restoreValues(caps: Capabilities, remembered: Values | null | undefined): Restored {
-  const values = defaultsOf(caps);
-  const touched: string[] = [];
-  const notices: string[] = [];
-  for (const [name, v] of Object.entries(remembered ?? {})) {
-    const c = caps.controls.find((x) => x.name === name);
-    if (!c || !isValueControl(c)) continue;
-    if (fitsControl(c, v)) {
-      values[name] = v;
-      touched.push(name);
-    } else {
-      notices.push(
-        `${name}: the remembered value isn’t supported by this model; reset to the default.`,
-      );
-    }
-  }
-  return { values, touched, notices };
+/** FR-RGN-11: the defaults with the remembered values over them. The core's evaluation then
+ *  resets the ones the capabilities reject and drops unknown names (`fromEvaluation`). */
+export function withRemembered(
+  caps: Capabilities,
+  remembered: Values | null | undefined,
+): Restored {
+  const values = { ...defaultsOf(caps), ...(remembered ?? {}) };
+  return { values, touched: Object.keys(remembered ?? {}), notices: [] };
 }
 
-/** FR-RGN-33: a value outside the effective allowed set resets to the default (or to no value
- *  when the default isn't allowed either), with a notice. */
-export function applyEvaluation(
+/** FR-RGN-11/33: applies `rgn_controls_evaluate`: a reset value (outside the effective allowed
+ *  set, wrong type, out of range) takes the core's value with a notice; names this model has no
+ *  control for are dropped with a notice. */
+export function fromEvaluation(
   caps: Capabilities,
   values: Values,
   touched: string[],
-  evaluation: RgnControlState[],
+  ev: ControlsEvaluation,
 ): Restored {
   const next = { ...values };
   let t = [...touched];
   const notices: string[] = [];
-  for (const e of evaluation) {
-    const c = caps.controls.find((x) => x.name === e.name);
-    if (!c || !isValueControl(c) || !e.visible) continue;
-    const v = next[e.name];
-    if (v === null || v === undefined || e.allowed.length === 0) continue;
-    if (e.allowed.some((a) => same(a, v))) continue;
-    const d = c.default ?? null;
-    next[e.name] = d !== null && e.allowed.some((a) => same(a, d)) ? d : null;
-    t = t.filter((n) => n !== e.name);
+  for (const name of ev.unknown) {
+    if (!(name in next)) continue;
+    delete next[name];
+    t = t.filter((n) => n !== name);
+    notices.push(`${name}: not a setting of this model; dropped.`);
+  }
+  for (const c of ev.controls) {
+    const ctl = caps.controls.find((x) => x.name === c.name);
+    if (!ctl || !isValueControl(ctl) || !c.visible || !c.reset) continue;
+    const old = next[c.name];
+    next[c.name] = c.value ?? null;
+    t = t.filter((n) => n !== c.name);
     notices.push(
-      `${e.name}: “${String(v)}” isn’t available with these settings; reset to the default.`,
+      `${c.name}: “${String(old)}” isn’t available with these settings; reset to the default.`,
     );
   }
   return { values: next, touched: t, notices };
 }
 
-export const stateOf = (evaluation: RgnControlState[] | null, name: string) =>
+export const stateOf = (evaluation: ControlState[] | null, name: string) =>
   evaluation?.find((e) => e.name === name);
 
 /** Values passed to `rgn_controls_evaluate`: the control values plus the prompt and a pinned
@@ -151,7 +144,7 @@ export function evaluateInput(
 /** FR-RGN-33: visible required controls without a value (the prompt by FR-RGN-09). */
 export function missingRequired(
   caps: Capabilities,
-  evaluation: RgnControlState[] | null,
+  evaluation: ControlState[] | null,
   values: Values,
   prompt: string,
 ): string[] {
@@ -172,7 +165,7 @@ export function missingRequired(
  *  ones are omitted so the provider applies its default. Hidden ones are never sent (33). */
 export function sentValues(
   caps: Capabilities,
-  evaluation: RgnControlState[] | null,
+  evaluation: ControlState[] | null,
   values: Values,
   touched: string[],
 ): Values {

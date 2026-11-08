@@ -3,7 +3,7 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { Select, Slider, Switch } from 'radix-ui';
 
-import type { RgnControlState } from '../../api';
+import type { ControlState } from '../../api';
 import { controlKind, snap, type Control } from './controls';
 
 const NONE = '__none__';
@@ -106,7 +106,7 @@ export function ControlField({
 }: {
   c: Control;
   value: unknown;
-  state: RgnControlState | undefined;
+  state: ControlState | undefined;
   onChange: (v: unknown) => void;
 }) {
   const kind = controlKind(c);

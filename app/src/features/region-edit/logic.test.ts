@@ -1,16 +1,22 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
-import type { CandidateRecord, RgnControlState, RgnEstimate, RgnIteration } from '../../api';
+import type {
+  CandidateRecord,
+  ControlsEvaluation,
+  ControlState,
+  JobEstimate,
+  RgnIteration,
+} from '../../api';
 import { confirmPlan, initialForm } from './confirm';
 import {
-  applyEvaluation,
+  fromEvaluation,
   controlKind,
   costSignature,
   defaultsOf,
   missingRequired,
-  restoreValues,
   sentValues,
   snap,
+  withRemembered,
 } from './controls';
 import { EstimateDebouncer, ESTIMATE_DEBOUNCE_MS } from './estimate';
 import { costLabel, fitLabel, jobErrorText } from './format';
@@ -27,14 +33,32 @@ import {
 } from './tracker';
 
 const ctl = (name: string) => ALL_TYPES.controls.find((c) => c.name === name)!;
-const ev = (patch: Partial<Record<string, Partial<RgnControlState>>> = {}): RgnControlState[] =>
+const ev = (patch: Partial<Record<string, Partial<ControlState>>> = {}): ControlState[] =>
   ALL_TYPES.controls.map((c) => ({
     name: c.name,
+    type: c.type,
+    role: c.role,
+    min: c.min,
+    max: c.max,
+    step: c.step,
+    default: c.default,
+    cost_affecting: c.cost_affecting,
     visible: true,
     allowed: c.allowed,
     required: c.required,
+    value: c.default,
+    reset: false,
     ...patch[c.name],
   }));
+const evaluation = (controls: ControlState[], unknown: string[] = []): ControlsEvaluation => ({
+  model_id: ALL_TYPES.model_id,
+  controls,
+  required_missing: [],
+  unknown,
+  warnings: [],
+  prompt_required: true,
+  seed: true,
+});
 
 describe('capability-driven controls (Appendix A)', () => {
   test('FR-RGN-08 every fixture control type maps to its Appendix A control; images never shown', () => {
@@ -77,40 +101,31 @@ describe('capability-driven controls (Appendix A)', () => {
     expect(snap(ctl('strength'), 1.4)).toBe(1);
   });
 
-  test('FR-RGN-11 remembered values the capabilities reject reset to the default with a notice', () => {
-    const r = restoreValues(ALL_TYPES, {
-      guidance: 99,
-      mode: 'quality',
-      other_model: 1,
-      hd: 'yes',
-    });
-    expect(r.values.guidance).toBe(7.5);
-    expect(r.values.mode).toBe('quality');
-    expect(r.values.hd).toBe(false);
-    expect(r.touched).toEqual(['mode']);
-    expect(r.notices).toHaveLength(2);
-    expect(r.notices[0]).toMatch(/^guidance/);
+  test('FR-RGN-11 remembered values over the defaults; unknown names dropped with a notice', () => {
+    const r = withRemembered(ALL_TYPES, { guidance: 9, mode: 'quality', other_model: 1 });
+    expect(r.values).toMatchObject({ guidance: 9, mode: 'quality', other_model: 1, steps: 30 });
+    expect(r.touched).toEqual(['guidance', 'mode', 'other_model']);
+    const f = fromEvaluation(ALL_TYPES, r.values, r.touched, evaluation(ev(), ['other_model']));
+    expect(f.values).not.toHaveProperty('other_model');
+    expect(f.touched).toEqual(['guidance', 'mode']);
+    expect(f.notices).toEqual(['other_model: not a setting of this model; dropped.']);
   });
 
-  test('FR-RGN-33 a value outside the effective allowed set resets to the default with a notice', () => {
+  test('FR-RGN-33 a value the core reset (outside the effective allowed set) takes its value, with a notice', () => {
     const values = { ...defaultsOf(ALL_TYPES), mode: 'creative', style: 'photo' };
-    const r = applyEvaluation(
+    const r = fromEvaluation(
       ALL_TYPES,
       values,
       ['mode', 'style'],
-      ev({ style: { allowed: ['painterly', 'ink'], required: true } }),
+      evaluation(ev({ style: { allowed: ['painterly', 'ink'], value: 'painterly', reset: true } })),
     );
-    expect(r.values.style).toBeNull();
+    expect(r.values.style).toBe('painterly');
     expect(r.touched).toEqual(['mode']);
-    expect(r.notices[0]).toMatch(/style/);
-    // An allowed value stays.
-    const ok = applyEvaluation(
-      ALL_TYPES,
-      { ...values, style: 'ink' },
-      ['style'],
-      ev({ style: { allowed: ['painterly', 'ink'] } }),
-    );
+    expect(r.notices[0]).toMatch(/^style: “photo”/);
+    // Nothing reset: nothing changes.
+    const ok = fromEvaluation(ALL_TYPES, { ...values, style: 'ink' }, ['style'], evaluation(ev()));
     expect(ok.notices).toEqual([]);
+    expect(ok.values.style).toBe('ink');
   });
 
   test('FR-RGN-33 required controls are named; FR-RGN-09 the prompt when prompt_required', () => {
@@ -201,12 +216,23 @@ describe('labels', () => {
   });
 });
 
-const est = (cost: number | 'unknown', patch: Partial<RgnEstimate> = {}): RgnEstimate => ({
+const est = (cost: number | 'unknown', patch: Partial<JobEstimate> = {}): JobEstimate => ({
   estimate_id: 'e1',
   cost: { amount: cost, unit: 'CU' },
+  fit: {
+    inner: { x: 0, y: 0, w: 64, h: 64 },
+    outer: { x: 0, y: 0, w: 64, h: 64 },
+    margin: 0,
+    sent_w: 64,
+    sent_h: 64,
+    scale: 1,
+  },
+  candidate_count: 2,
   spend: 4,
   cap: 20,
+  threshold: 5,
   needs: [],
+  over_cap: false,
   ...patch,
 });
 const stored = { cap: 20, threshold: 5 };

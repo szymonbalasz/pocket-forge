@@ -19,12 +19,12 @@ import {
   type RectPx,
   type RegionFit,
   type RgnBlend,
-  type RgnControlState,
-  type RgnDraft,
-  type RgnEstimate,
+  type ControlState,
+  type JobDraft,
+  type JobEstimate,
   type RgnIteration,
   type RgnPreview,
-  type RgnSpend,
+  type Spend,
 } from '../../api';
 import {
   editorBridge,
@@ -35,11 +35,11 @@ import {
 } from '../editor';
 import type { ConfirmPlan } from './confirm';
 import {
-  applyEvaluation,
   costSignature,
   evaluateInput,
   missingRequired,
-  restoreValues,
+  fromEvaluation,
+  withRemembered,
   sentValues,
   type Values,
 } from './controls';
@@ -79,7 +79,7 @@ export interface RgnState {
   capsError: UiError | null;
   values: Values;
   touched: string[];
-  evaluation: RgnControlState[] | null;
+  evaluation: ControlState[] | null;
   notices: string[];
   prompt: string;
   seedMode: 'random' | 'pinned';
@@ -92,11 +92,11 @@ export interface RgnState {
   fitError: UiError | null;
   estimate: {
     status: EstimateStatus;
-    result: RgnEstimate | null;
+    result: JobEstimate | null;
     error: UiError | null;
     signature: string | null;
   };
-  spend: RgnSpend | null;
+  spend: Spend | null;
   confirmOpen: boolean;
   confirmError: UiError | null;
   submitting: boolean;
@@ -221,6 +221,7 @@ export function submitBlocker(s: RgnState): string | null {
   if (!s.fit)
     return s.fitError ? errorText(s.fitError.code, s.fitError.message) : 'Fitting the region…';
   if (!s.caps) return 'Pick a model.';
+  if (!s.maskId) return 'Paint a mask inside the region first.';
   const m = missing(s);
   if (m.length) return `Required: ${m.join(', ')}.`;
   if (s.estimate.status === 'error' && s.estimate.error)
@@ -230,8 +231,8 @@ export function submitBlocker(s: RgnState): string | null {
   return null;
 }
 
-export function currentDraft(s: RgnState): RgnDraft | null {
-  if (!s.fit || !s.caps || !s.modelId) return null;
+export function currentDraft(s: RgnState): JobDraft | null {
+  if (!s.fit || !s.caps || !s.modelId || !s.maskId) return null;
   return {
     region: { inner: s.fit.inner, margin: s.margin },
     mask_id: s.maskId,
@@ -243,7 +244,8 @@ export function currentDraft(s: RgnState): RgnDraft | null {
 }
 
 function signatureOf(s: RgnState): string | null {
-  if (!s.projectId || s.readOnly || isOffline(s) || !s.fit || !s.caps || !s.modelId) return null;
+  if (!s.projectId || s.readOnly || isOffline(s) || !s.fit || !s.caps || !s.modelId || !s.maskId)
+    return null;
   // Required controls (not the prompt) must be filled before an estimate makes sense.
   if (missing(s).some((n) => n !== 'prompt')) return null;
   const controls = sentValues(s.caps, s.evaluation, s.values, s.touched);
@@ -269,11 +271,11 @@ async function runEstimate(sig: string): Promise<void> {
   const t = nextToken('estimate');
   set({ estimate: { status: 'loading', result: null, error: null, signature: sig } });
   try {
-    const result = await api.region.estimate(draft);
+    const result = await api.region.estimate(state.projectId!, draft);
     if (!isCurrent('estimate', t) || debouncer.signature !== sig) return;
     set({
       estimate: { status: 'ready', result, error: null, signature: sig },
-      spend: state.spend ? { ...state.spend, spend: result.spend, cap: result.cap } : state.spend,
+      spend: { spend: result.spend, cap: result.cap, threshold: result.threshold },
     });
   } catch (e) {
     if (!isCurrent('estimate', t)) return;
@@ -313,7 +315,7 @@ async function refreshProvider(): Promise<void> {
 
 async function loadSpend(): Promise<void> {
   try {
-    set({ spend: await api.region.spendGet() });
+    set({ spend: await api.region.getSpend() });
   } catch {
     // The confirm dialog asks again (FR-RGN-16).
   }
@@ -397,24 +399,13 @@ async function evaluate(): Promise<void> {
   if (!s.caps || !s.modelId) return;
   const t = nextToken('evaluate');
   try {
-    let values = s.values;
-    let touched = s.touched;
-    const notices: string[] = [];
-    let evaluation: RgnControlState[] = [];
-    // A reset can change a rule's condition, so evaluate again (at most twice more).
-    for (let pass = 0; pass < 3; pass++) {
-      const r = await api.region.evaluate(
-        s.modelId,
-        evaluateInput(s.caps, values, s.prompt, s.seedMode === 'pinned' ? s.seed : null),
-      );
-      evaluation = r.controls;
-      const applied = applyEvaluation(s.caps, values, touched, evaluation);
-      notices.push(...applied.notices);
-      const changed = applied.values !== values && applied.notices.length > 0;
-      values = applied.values;
-      touched = applied.touched;
-      if (!changed) break;
-    }
+    const r = await api.region.evaluateControls(
+      s.modelId,
+      evaluateInput(s.caps, s.values, s.prompt, s.seedMode === 'pinned' ? s.seed : null),
+    );
+    // The core resets and re-evaluates itself (FR-RGN-33); one call is enough.
+    const { values, touched, notices } = fromEvaluation(s.caps, s.values, s.touched, r);
+    const evaluation = r.controls;
     if (!isCurrent('evaluate', t) || state.modelId !== s.modelId) return;
     set((cur) => ({
       evaluation,
@@ -438,7 +429,7 @@ async function refit(): Promise<void> {
   }
   const t = nextToken('fit');
   try {
-    const fit = await api.region.fitFor(s.projectId, s.inner, s.margin, s.modelId);
+    const fit = await api.region.fit(s.projectId, s.inner, s.margin, s.modelId ?? undefined);
     if (!isCurrent('fit', t)) return;
     set({ fit, fitError: null });
   } catch (e) {
@@ -580,7 +571,7 @@ async function selectModel(id: string, remembered: Values | null): Promise<void>
   try {
     const caps = await api.provider.getCapabilities(id);
     if (!isCurrent('caps', t)) return;
-    const r = restoreValues(caps, remembered);
+    const r = withRemembered(caps, remembered);
     set({ caps, capsLoading: false, values: r.values, touched: r.touched, notices: r.notices });
     await Promise.all([evaluate(), refit()]);
   } catch (e) {
@@ -720,7 +711,7 @@ export const rgn = {
     set({ submitting: true, confirmError: null });
     try {
       if (plan.saveSpend) {
-        const spend = await api.region.spendSet(plan.saveSpend.cap, plan.saveSpend.threshold);
+        const spend = await api.region.setSpend(plan.saveSpend);
         set({ spend });
       }
       const { job_id } = await api.region.submit({

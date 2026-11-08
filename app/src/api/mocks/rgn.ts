@@ -176,6 +176,66 @@ export function installRgnMock(seed: RgnMockSeed): void {
     }) as { name: string; visible: boolean; error?: { code: string; message: string } }[];
   };
 
+  // `rgn_controls_evaluate` as pf-core does it: evaluate, reset rejected values to their
+  // defaults, drop unknown names, evaluate again (FR-RGN-11/33).
+  const evaluateControls = (c: Capabilities, given: Rec) => {
+    const values: Rec = {};
+    for (const [k, v] of Object.entries(given)) if (v !== null && v !== undefined) values[k] = v;
+    const unknown = Object.keys(values).filter((k) => !c.controls.some((x) => x.name === k));
+    const reset = evaluate(c, values)
+      .filter((e) => e.error && e.error.code !== 'required')
+      .map((e) => e.name);
+    for (const k of [...unknown, ...reset]) delete values[k];
+    const second = evaluate(c, values);
+    const required_missing: string[] = [];
+    const controls = c.controls
+      .filter((x) => !['source', 'mask', 'reference'].includes(x.role))
+      .map((x) => {
+        const e = second.find((y) => y.name === x.name)! as unknown as Rec & {
+          visible: boolean;
+          allowed: unknown[];
+          required: boolean;
+          error?: { code: string; message: string };
+        };
+        let value: unknown = values[x.name] ?? x.default ?? null;
+        let wasReset = reset.includes(x.name);
+        if (e.visible && value !== null && e.allowed.length && !e.allowed.includes(value)) {
+          value = e.allowed[0] ?? null;
+          wasReset = true;
+        }
+        const required = e.required || (x.role === 'prompt' && c.prompt_required);
+        let error = e.error ? { control: x.name, ...e.error } : undefined;
+        if (e.visible && required && x.role === 'prompt' && !String(value ?? '').trim() && !error)
+          error = { control: x.name, code: 'required', message: `${x.name} is required` };
+        if (e.visible && error?.code === 'required') required_missing.push(x.name);
+        return {
+          name: x.name,
+          type: x.type,
+          role: x.role,
+          min: x.min,
+          max: x.max,
+          step: x.step,
+          default: x.default,
+          cost_affecting: x.cost_affecting,
+          visible: e.visible,
+          allowed: e.allowed,
+          required,
+          value: e.visible ? value : null,
+          reset: wasReset,
+          ...(e.visible && error ? { error } : {}),
+        };
+      });
+    return {
+      model_id: c.model_id,
+      controls,
+      required_missing,
+      unknown,
+      warnings: c.warnings,
+      prompt_required: c.prompt_required,
+      seed: c.seed,
+    };
+  };
+
   // FR-RGN-01/02/05: snap, clamp, margin, fit to input_px (simplified: grow to a multiple when
   // there is room, else resample to the nearest valid size).
   const fit = (input: Rec) => {
@@ -319,7 +379,7 @@ export function installRgnMock(seed: RgnMockSeed): void {
     rgn_controls_evaluate: (input: Rec) => {
       const c = caps(input.model_id);
       if (!c) return fail('unknown_model', 'unknown model');
-      return { controls: evaluate(c, (input.controls ?? {}) as Rec) };
+      return evaluateControls(c, (input.values ?? {}) as Rec);
     },
     rgn_job_estimate: async (input: Rec) => {
       const f1 = failOnce('rgn_job_estimate');
@@ -331,9 +391,13 @@ export function installRgnMock(seed: RgnMockSeed): void {
       return {
         estimate_id: estimateId(draft, ok.f, ok.c),
         cost: { amount: cost, unit },
+        fit: ok.f,
+        candidate_count: countOf(ok.c, (draft.controls ?? {}) as Rec),
         spend: s.spend,
         cap: s.cap,
+        threshold: s.threshold,
         needs: needsOf(cost),
+        over_cap: s.cap !== null && s.spend + (cost === 'unknown' ? 0 : cost) > s.cap,
       };
     },
     rgn_job_submit: async (input: Rec) => {
@@ -503,14 +567,20 @@ export function installRgnMock(seed: RgnMockSeed): void {
       return { seq: s.nextId++ };
     },
     rgn_spend_get: () => ({ spend: s.spend, cap: s.cap, threshold: s.threshold }),
+    // A missing field keeps its value; null clears it (pf-core `rgn_spend_set`).
     rgn_spend_set: (input: Rec) => {
-      const cap = Number(input.cap);
-      const threshold = Number(input.threshold);
-      if (!(cap >= 0) || !(threshold >= 0)) return fail('invalid_value', 'must be ≥ 0', 'cap');
-      s.cap = cap;
-      s.threshold = threshold;
-      emit('rgn:spend', { spend: s.spend, cap });
-      return { spend: s.spend, cap, threshold };
+      const next = { cap: s.cap, threshold: s.threshold };
+      for (const k of ['cap', 'threshold'] as const) {
+        if (!(k in input)) continue;
+        const v = input[k];
+        if (v === null) next[k] = null;
+        else if (typeof v === 'number' && Number.isFinite(v) && v >= 0) next[k] = v;
+        else return fail('invalid_value', 'must be a number ≥ 0', k);
+      }
+      s.cap = next.cap;
+      s.threshold = next.threshold;
+      emit('rgn:spend', { spend: s.spend, cap: s.cap });
+      return { spend: s.spend, cap: s.cap, threshold: s.threshold };
     },
     project_restore_revision: (input: Rec) => {
       const r = s.revs.find((x) => x.id === input.rev_id);

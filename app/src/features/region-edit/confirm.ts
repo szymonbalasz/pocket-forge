@@ -1,6 +1,6 @@
 // The spend confirm dialog's logic (FR-RGN-14/15/16, §7): what it shows, when it can confirm,
 // whether Enter confirms, and the confirmations sent with submit. Pure.
-import type { EstimateNeed, RgnEstimate } from '../../api';
+import type { SpendNeed, JobEstimate } from '../../api';
 
 export interface ConfirmForm {
   /** Cap and threshold as typed (setup, or the explicit "raise cap" field). */
@@ -36,7 +36,7 @@ export interface ConfirmPlan {
   blocker: string | null;
   /** Settings to store before submit (setup or a raised cap), else null. */
   saveSpend: { cap: number; threshold: number } | null;
-  confirmations: EstimateNeed[];
+  confirmations: SpendNeed[];
 }
 
 const parse = (s: string): number | null => {
@@ -45,7 +45,7 @@ const parse = (s: string): number | null => {
   return Number.isFinite(n) && n >= 0 ? n : null;
 };
 
-export function initialForm(est: RgnEstimate, threshold: number | null): ConfirmForm {
+export function initialForm(est: JobEstimate, threshold: number | null): ConfirmForm {
   return {
     cap: est.cap === null ? '' : String(est.cap),
     threshold: threshold === null ? '' : String(threshold),
@@ -54,7 +54,7 @@ export function initialForm(est: RgnEstimate, threshold: number | null): Confirm
 }
 
 export function confirmPlan(
-  est: RgnEstimate,
+  est: JobEstimate,
   stored: { cap: number | null; threshold: number | null },
   form: ConfirmForm,
   trashCount: number,
@@ -82,7 +82,7 @@ export function confirmPlan(
   const saveSpend =
     (setup || capChanged) && cap !== null && threshold !== null ? { cap, threshold } : null;
 
-  const confirmations: EstimateNeed[] = [];
+  const confirmations: SpendNeed[] = [];
   if (setup) confirmations.push('set_cap');
   if (overThreshold && form.second) confirmations.push('threshold');
   if (unknownCost && form.second) confirmations.push('unknown_cost');

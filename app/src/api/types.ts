@@ -227,6 +227,76 @@ export interface RegionFit {
   scale: number;
 }
 
+/** One control as the Generate panel renders it (`rgn_controls_evaluate`, FR-RGN-33). */
+export interface ControlState {
+  name: string;
+  type: Capabilities['controls'][number]['type'];
+  role: Capabilities['controls'][number]['role'];
+  min: number | null;
+  max: number | null;
+  step: number | null;
+  default: unknown;
+  cost_affecting: boolean;
+  /** False when a rule hides it: neither shown nor sent. */
+  visible: boolean;
+  /** Effective allowed values (empty = any value in range). */
+  allowed: unknown[];
+  required: boolean;
+  /** The value to show: the user's, or the default after a reset; null = unset. */
+  value: unknown;
+  /** The user's value was rejected and reset; show a notice. */
+  reset: boolean;
+  error?: { control: string; code: string; message: string };
+}
+
+/** `rgn_controls_evaluate` result. Image inputs (source, mask, reference) are never listed. */
+export interface ControlsEvaluation {
+  model_id: string;
+  controls: ControlState[];
+  /** Required controls without a value: submit is disabled, naming them. */
+  required_missing: string[];
+  /** Given names this model has no control for (dropped with a notice, FR-RGN-11). */
+  unknown: string[];
+  warnings: string[];
+  prompt_required: boolean;
+  seed: boolean;
+}
+
+/** The job draft estimate and submit act on (RGN §9). */
+export interface JobDraft {
+  region: { inner: RectPx; margin?: number };
+  mask_id: string;
+  model_id: string;
+  final_prompt: string;
+  /** Control name → value, as the user set them (FR-RGN-34). */
+  controls: Record<string, unknown>;
+  /** Pinned seed, or null = random. */
+  seed: number | null;
+}
+
+export type SpendNeed = 'threshold' | 'unknown_cost' | 'set_cap';
+
+/** `rgn_job_estimate` result (FR-RGN-12..16). */
+export interface JobEstimate {
+  estimate_id: string;
+  cost: { amount: number | 'unknown'; unit: string };
+  fit: RegionFit;
+  candidate_count: number;
+  spend: number;
+  cap: number | null;
+  threshold: number | null;
+  needs: SpendNeed[];
+  /** spend + estimate > cap: submit fails with `over_spend_cap` until the cap is raised. */
+  over_cap: boolean;
+}
+
+/** `rgn_spend_get` / `rgn_spend_set` result. */
+export interface Spend {
+  spend: number;
+  cap: number | null;
+  threshold: number | null;
+}
+
 /** `edt_mask_submit` result (FR-EDT-18). */
 export interface MaskRef {
   mask_id: string;
@@ -245,51 +315,6 @@ export interface MaskRead {
 export interface CostValue {
   amount: number | 'unknown';
   unit: string;
-}
-
-/** The region as the draft and the job keep it (schema §4.5). */
-export interface RgnRegion {
-  inner: RectPx;
-  margin: number;
-}
-
-/** What estimate and submit are built from (RGN §9). `controls` = the sent values
- *  (FR-RGN-34); `seed` null = random (FR-RGN-10). */
-export interface RgnDraft {
-  region: RgnRegion;
-  mask_id: string | null;
-  model_id: string;
-  final_prompt: string;
-  controls: Record<string, unknown>;
-  seed: number | null;
-}
-
-/** `rgn_controls_evaluate`: one entry per capability control (FR-RGN-33). */
-export interface RgnControlState {
-  name: string;
-  visible: boolean;
-  /** Effective allowed values (empty = no restriction). */
-  allowed: unknown[];
-  required: boolean;
-  error?: { code: string; message: string };
-}
-
-export type EstimateNeed = 'threshold' | 'unknown_cost' | 'set_cap';
-
-export interface RgnEstimate {
-  /** Hash of the cost-affecting inputs (FR-RGN-13). */
-  estimate_id: string;
-  cost: CostValue;
-  /** Session spend so far (FR-RGN-14). */
-  spend: number;
-  cap: number | null;
-  needs: EstimateNeed[];
-}
-
-export interface RgnSpend {
-  spend: number;
-  cap: number | null;
-  threshold: number | null;
 }
 
 export type JobState =
@@ -383,16 +408,19 @@ export interface Commands {
   provider_balance: [Record<string, never>, Balance];
   provider_fake_set_case: [{ case: string }, Record<string, never>];
   rgn_controls_evaluate: [
-    { model_id: string; controls: Record<string, unknown> },
-    { controls: RgnControlState[] },
+    { model_id: string; values: Record<string, unknown> },
+    ControlsEvaluation,
   ];
-  rgn_job_estimate: [{ draft: RgnDraft }, RgnEstimate];
+  rgn_job_estimate: [{ project_id?: string; draft: JobDraft }, JobEstimate];
+  rgn_spend_get: [Record<string, never>, Spend];
+  /** A missing field keeps its value; null clears it. */
+  rgn_spend_set: [{ cap?: number | null; threshold?: number | null }, Spend];
   rgn_job_submit: [
-    { draft: RgnDraft; estimate_id: string; confirmations: EstimateNeed[] },
+    { draft: JobDraft; estimate_id: string; confirmations: SpendNeed[] },
     { job_id: string },
   ];
   rgn_job_cancel: [{ job_id: string }, { result: 'canceled' | 'not_cancellable' }];
-  rgn_job_retry_draft: [{ job_id: string }, RgnDraft];
+  rgn_job_retry_draft: [{ job_id: string }, JobDraft];
   rgn_job_dismiss: [{ job_id: string }, { trashed: number }];
   rgn_candidate_preview: [{ job_id: string; candidate_id: string; blend: RgnBlend }, RgnPreview];
   rgn_candidate_accept: [
@@ -409,8 +437,6 @@ export interface Commands {
     { layer_id: string; revision_id: string },
   ];
   rgn_iterations_list: [Record<string, never>, RgnIteration[]];
-  rgn_spend_get: [Record<string, never>, RgnSpend];
-  rgn_spend_set: [{ cap: number; threshold: number }, RgnSpend];
 }
 
 export type CommandName = keyof Commands;

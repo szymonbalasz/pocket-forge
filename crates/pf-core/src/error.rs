@@ -43,6 +43,32 @@ pub enum ErrorCode {
     NotConfigured,
     /// A fake-only command ran in another provider mode.
     NotFakeMode,
+    /// A region under 16 × 16 px (RGN `rgn_region_fit`).
+    RegionTooSmall,
+    /// A region fully outside the image (RGN).
+    OutOfBounds,
+    /// An outer rect side over 4096 px (RGN).
+    RegionTooLarge,
+    /// The provider doesn't know the model (RGN).
+    UnknownModel,
+    /// The mask failed validation; `detail.reason` = `size|depth|empty` (RGN).
+    MaskInvalid,
+    /// The sent image or mask is over a model limit; `detail{field, limit}` (RGN, R20).
+    InputTooLarge,
+    /// The decoded original isn't ready yet (R11).
+    OriginalUnavailable,
+    /// A control value the capabilities reject; `detail{name, reason}` (RGN FR-RGN-33).
+    InvalidControl,
+    /// The estimate id doesn't match the job's cost-affecting inputs (FR-RGN-13).
+    EstimateStale,
+    /// Session spend + estimate is over the spend cap (FR-RGN-14).
+    OverSpendCap,
+    /// A needed confirmation wasn't given; `detail.needs` (FR-RGN-15/16).
+    ConfirmationMissing,
+    /// The asset project already has an active job (FR-RGN-17).
+    JobActive,
+    /// A settings value out of range (RGN `rgn_spend_set`).
+    InvalidValue,
 }
 
 impl ErrorCode {
@@ -73,6 +99,19 @@ impl ErrorCode {
             ErrorCode::StoreUnavailable => "store_unavailable",
             ErrorCode::NotConfigured => "not_configured",
             ErrorCode::NotFakeMode => "not_fake_mode",
+            ErrorCode::RegionTooSmall => "region_too_small",
+            ErrorCode::OutOfBounds => "out_of_bounds",
+            ErrorCode::RegionTooLarge => "region_too_large",
+            ErrorCode::UnknownModel => "unknown_model",
+            ErrorCode::MaskInvalid => "mask_invalid",
+            ErrorCode::InputTooLarge => "input_too_large",
+            ErrorCode::OriginalUnavailable => "original_unavailable",
+            ErrorCode::InvalidControl => "invalid_control",
+            ErrorCode::EstimateStale => "estimate_stale",
+            ErrorCode::OverSpendCap => "over_spend_cap",
+            ErrorCode::ConfirmationMissing => "confirmation_missing",
+            ErrorCode::JobActive => "job_active",
+            ErrorCode::InvalidValue => "invalid_value",
         }
     }
 }
