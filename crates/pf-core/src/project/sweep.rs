@@ -18,12 +18,14 @@ use crate::manifest::*;
 use crate::naming;
 use crate::settings::Settings;
 
-/// Deletes temp files in the app-owned parts of a project (FR-PRJ-20).
+/// Deletes temp files in the app-owned parts of a project (FR-PRJ-20). In `exports/` only stale
+/// ones (BL-32): a fresh temp may be a running export's, which FR-EXP-17's sweep keeps too.
 pub(super) fn remove_temp_files(dir: &Path) {
     fsx::remove_temp_files_shallow(dir);
-    for sub in [PFORGE_DIR, WORKING_DIR, RESULTS_DIR, EXPORTS_DIR] {
+    for sub in [PFORGE_DIR, WORKING_DIR, RESULTS_DIR] {
         fsx::remove_temp_files(&dir.join(sub));
     }
+    fsx::remove_stale_temp_files(&dir.join(EXPORTS_DIR), fsx::STALE_TEMP_FILE_AGE);
 }
 
 fn read_dir_names(dir: &Path) -> Vec<String> {

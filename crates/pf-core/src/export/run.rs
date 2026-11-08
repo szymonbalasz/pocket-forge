@@ -24,14 +24,15 @@ use super::settings::{ExportFormat, stamp};
 use crate::context::{Context, FaultPoint};
 use crate::core::State;
 use crate::error::{CoreError, ErrorCode, is_locked};
-use crate::fsx::TEMP_MARKER;
+use crate::fsx;
 use crate::manifest::{Layer, LayerKind};
 use crate::project::store;
 
 /// How long a locked destination is retried before `locked` (FR-EXP-18).
 const LOCK_RETRY_FOR: Duration = Duration::from_secs(3);
-/// Temp files older than this are swept before a write (FR-EXP-17).
-const STALE_TEMP_AGE: Duration = Duration::from_secs(3600);
+/// Temp files older than this are swept before a write (FR-EXP-17; PRJ's open sweep uses it too,
+/// BL-32).
+const STALE_TEMP_AGE: Duration = fsx::STALE_TEMP_FILE_AGE;
 /// Progress events are at most this frequent (and at least once per strip, FR-EXP-19).
 const PROGRESS_EVERY: Duration = Duration::from_millis(100);
 /// A step with no progress hook (Lanczos, the lock retry) still reports this often (FR-EXP-19:
@@ -262,18 +263,7 @@ fn sweep_stale_temps(dir: &Path) -> usize {
     let now = SystemTime::now();
     entries
         .flatten()
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
-        .filter(|e| {
-            let name = e.file_name().to_string_lossy().into_owned();
-            name.starts_with('.') && name.contains(TEMP_MARKER)
-        })
-        .filter(|e| {
-            e.metadata()
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|m| now.duration_since(m).ok())
-                .is_some_and(|age| age >= STALE_TEMP_AGE)
-        })
+        .filter(|e| fsx::is_stale_temp_file(e, now, STALE_TEMP_AGE))
         .filter(|e| fs::remove_file(e.path()).is_ok())
         .count()
 }
