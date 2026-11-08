@@ -59,7 +59,7 @@ test('FR-EDT-25 keys and clicks select ready candidates and emit onSelect; Enter
     ['accept', 'C1'],
   ]);
   // Picker keys are ignored in a text field too (FR-EDT-30).
-  await page.getByTestId('prj-home-import-path').click();
+  await page.getByTestId('prj-panel-history-label').click();
   await page.keyboard.press('2');
   await expect(items.nth(0)).toHaveAttribute('aria-selected', 'true');
 });

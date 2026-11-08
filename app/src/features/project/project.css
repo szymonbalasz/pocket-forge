@@ -1,0 +1,237 @@
+/* The left project panel and the PRJ status segment (asset-project §7). theme.css tokens only. */
+
+.prj-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+  padding: var(--pf-space-2) var(--pf-space-3) var(--pf-space-4);
+}
+
+.prj-panel-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: var(--pf-space-1);
+}
+
+.prj-panel-header .link {
+  align-self: flex-start;
+}
+
+.prj-panel-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--pf-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prj-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+}
+
+.prj-relink {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-space-1);
+  margin-top: var(--pf-space-1);
+}
+
+.prj-section {
+  border-top: 1px solid var(--pf-border);
+  padding: var(--pf-space-1) 0;
+}
+
+.prj-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  min-height: 24px;
+  font-size: var(--pf-font-size-meta);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--pf-text-dim);
+  cursor: pointer;
+  list-style: none;
+}
+
+.prj-section-head::-webkit-details-marker {
+  display: none;
+}
+
+.prj-section-head::before {
+  content: '▸';
+  font-size: 9px;
+}
+
+.prj-section[open] > .prj-section-head::before {
+  content: '▾';
+}
+
+.prj-count {
+  color: var(--pf-text-dim);
+}
+
+.prj-section-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.prj-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: none;
+  border-color: transparent;
+  color: var(--pf-text-dim);
+}
+
+.prj-icon-button:hover:not(:disabled) {
+  color: var(--pf-text);
+  background: var(--pf-bg-3);
+}
+
+.prj-section-body {
+  padding: 2px 0 var(--pf-space-1);
+}
+
+.prj-section-body > p {
+  margin: 2px 0;
+}
+
+.prj-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.prj-file {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  min-height: 24px;
+  padding: 1px var(--pf-space-1);
+  border-radius: var(--pf-radius);
+}
+
+.prj-file:hover {
+  background: var(--pf-bg-3);
+}
+
+.prj-file-thumb {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 2px;
+  background: var(--pf-bg-0);
+}
+
+.prj-file-icon {
+  flex: 0 0 28px;
+  text-align: center;
+  color: var(--pf-text-dim);
+}
+
+.prj-file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prj-file-size,
+.prj-rev-seq {
+  font-size: var(--pf-font-size-meta);
+  color: var(--pf-text-dim);
+}
+
+.prj-rev-seq {
+  flex: 0 0 auto;
+  min-width: 22px;
+}
+
+.prj-file[data-head='true'] .prj-rev-seq {
+  color: var(--pf-accent);
+}
+
+.prj-history-save {
+  display: flex;
+  gap: var(--pf-space-1);
+  margin-bottom: var(--pf-space-1);
+}
+
+.prj-usage {
+  margin: 0 0 var(--pf-space-1);
+  font-size: var(--pf-font-size-meta);
+}
+
+.prj-usage div {
+  display: flex;
+  justify-content: space-between;
+}
+
+.prj-usage dt {
+  color: var(--pf-text-dim);
+}
+
+.prj-usage dd {
+  margin: 0;
+}
+
+.prj-usage-total {
+  border-top: 1px solid var(--pf-border);
+  margin-top: 2px;
+  padding-top: 2px;
+}
+
+.prj-add-popover {
+  width: 300px;
+  padding: var(--pf-space-3);
+  background: var(--pf-bg-2);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  box-shadow: 0 4px 16px var(--pf-overlay);
+  z-index: 50;
+}
+
+.prj-add-popover form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+}
+
+/* ------------------------------------------------------------------ status segment */
+
+.prj-status {
+  display: inline-flex;
+  gap: var(--pf-space-2);
+  white-space: nowrap;
+}
+
+.prj-status-name {
+  color: var(--pf-text);
+}
+
+.prj-status-label {
+  color: var(--pf-text-dim);
+}
+
+.prj-status-failed .prj-status-label,
+.prj-status-conflict .prj-status-label {
+  color: var(--pf-danger);
+}
+
+.prj-status-read_only .prj-status-label {
+  color: var(--pf-warn);
+}

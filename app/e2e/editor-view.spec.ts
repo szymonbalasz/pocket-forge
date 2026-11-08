@@ -177,7 +177,7 @@ test('FR-EDT-03 pan with the pan tool, middle-drag and Space+drag; 64 px stay vi
 
 test('FR-EDT-30 tool shortcuts are ignored while a text field has focus', async ({ page }) => {
   await openMap(page);
-  const field = page.getByTestId('prj-home-import-path');
+  const field = page.getByTestId('prj-panel-history-label');
   await field.click();
   await page.keyboard.press('b');
   await page.keyboard.press(']');

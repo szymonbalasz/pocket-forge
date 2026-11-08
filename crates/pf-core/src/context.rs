@@ -220,6 +220,16 @@ impl FsAttributes for FakeFsAttributes {
     }
 }
 
+impl<T: FsAttributes + ?Sized> FsAttributes for Arc<T> {
+    fn is_cloud_only(&self, path: &Path) -> bool {
+        (**self).is_cloud_only(path)
+    }
+
+    fn hydrate(&self, path: &Path) -> std::io::Result<()> {
+        (**self).hydrate(path)
+    }
+}
+
 // ---------------------------------------------------------------- faults
 
 /// Where a fault can be injected into an atomic write.
@@ -391,6 +401,9 @@ pub struct Context {
     pub library_override: Option<PathBuf>,
     /// Base URL of the `pf-tiles` scheme as the webview sees it (EDT Appendix A).
     pub tiles_base_url: String,
+    /// Runs PRJ background work (thumbnails, the decoded original) on the calling thread, so
+    /// tests are deterministic. False in the app.
+    pub inline_background: bool,
 }
 
 impl std::fmt::Debug for Context {
@@ -427,6 +440,7 @@ impl Context {
             data_dir,
             library_override: None,
             tiles_base_url: default_tiles_base_url(),
+            inline_background: false,
         }
     }
 
@@ -439,6 +453,7 @@ impl Context {
             ids: Box::new(SequentialIds::default()),
             fs: Box::new(FakeFsAttributes::default()),
             credentials: std::sync::Arc::new(MemoryStore::default()),
+            inline_background: true,
             ..Context::new(data_dir)
         }
     }

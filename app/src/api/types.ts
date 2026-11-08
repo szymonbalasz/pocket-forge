@@ -28,17 +28,90 @@ export interface RootStatus {
 
 export interface LibraryConfig {
   roots: RootStatus[];
-  import_dest: string | null;
   overridden: boolean;
   configured: boolean;
 }
 
-export type SkipReason = 'unsupported' | 'animated' | 'too_large' | 'corrupt' | 'not_found' | 'io';
+/** A library section (#44): the rail entry and its folder (`Maps/`, `Tokens/`, `Items/`). */
+export type Section = 'maps' | 'tokens' | 'items';
 
-export type ImportItem =
-  | { status: 'imported'; source: string; path: string }
+/** `project.json` `kind`, from the section (FR-PRJ-46). */
+export type ProjectKind = 'map' | 'token' | 'item';
+
+export type SkipReason =
+  | 'unsupported'
+  | 'animated'
+  | 'too_large'
+  | 'corrupt'
+  | 'not_found'
+  | 'io'
+  | 'not_available_offline';
+
+/** One source of `project_create` (FR-PRJ-03..08). `path` is the project folder. */
+export type CreateItem =
+  | { status: 'created'; source: string; path: string }
   | { status: 'already_in_library'; source: string; path: string }
   | { status: 'skipped'; source: string; reason: SkipReason };
+
+export type CardBadge = 'read_only' | 'conflict' | 'unreadable' | 'not_available_offline';
+
+/** A home-grid card (FR-PRJ-49), read from `project.json` and `.pforge/thumb.jpg` only. */
+export interface ProjectCard {
+  /** `project_id`; the folder path when `project.json` is unreadable. */
+  id: string;
+  /** The project folder (absolute), the argument of `project_open` / `project_rename`. */
+  path: string;
+  name: string;
+  kind: ProjectKind;
+  /** Jobs with an iteration number (manifest `jobs[].iteration`). */
+  iterations: number;
+  /** `commit.at`, ISO time; null when `project.json` is unreadable (R45). */
+  last_edited: string | null;
+  /** Thumbnail URL on the `pf-tiles` scheme (EDT `library` key space, OQ-PRJ-16), or null. */
+  thumb_url: string | null;
+  badges: CardBadge[];
+}
+
+/** Project folders `project_folder_list` / `project_folder_add` take (FR-PRJ-47). */
+export type ProjectFolder = 'working' | 'references' | 'structure' | 'parts' | 'exports';
+
+/** A file in a project folder (FR-PRJ-48). `image` = a supported image (it gets a thumbnail). */
+export interface FolderFile {
+  name: string;
+  bytes: number;
+  mtime: string;
+  image: boolean;
+  /** Thumbnail URL on the `pf-tiles` scheme for images, or null (hydrated only on view). */
+  thumb_url?: string | null;
+}
+
+export interface TrashItem {
+  id: string;
+  /** Project-relative path the item came from. */
+  path: string;
+  kind: string;
+  bytes: number;
+  trashed_at: string;
+}
+
+export type DiskCategory =
+  | 'original'
+  | 'layers'
+  | 'masks'
+  | 'job_inputs'
+  | 'results'
+  | 'trash'
+  | 'user_folders'
+  | 'exports'
+  | 'other';
+
+/** `project_disk_usage` (FR-PRJ-33): bytes per category, from file metadata only. */
+export interface DiskUsage {
+  bytes: Record<DiskCategory, number>;
+  trash_count: number;
+  /** When the oldest trash item is purged (30 days, FR-PRJ-32), or null with an empty trash. */
+  next_purge: string | null;
+}
 
 export interface Layer {
   id: string;
@@ -74,6 +147,9 @@ export interface RevisionEntry {
 
 export type ReadOnlyReason = 'newer_version' | 'original_changed' | 'original_missing';
 
+/** `project_open` warning codes (asset-project §9): read-only reasons, `conflict`, `recovered`,
+ *  `resumable`, `lost`, `original_missing` (Relink). */
+
 export interface ProjectWarning {
   code: string;
   message: string;
@@ -81,8 +157,12 @@ export interface ProjectWarning {
 
 export interface ProjectSnapshot {
   project_id: string;
+  kind: ProjectKind;
+  /** The project folder name (FR-PRJ-44). */
   name: string;
+  /** The original, `<project_dir>/working/<file>`. */
   image_path: string;
+  /** The project folder (absolute). */
   project_dir: string;
   saved: boolean;
   read_only: ReadOnlyReason | null;
@@ -95,6 +175,8 @@ export interface ProjectSnapshot {
   revisions: RevisionEntry[];
   head_revision: string | null;
   commit_seq: number;
+  /** `commit.at` of the loaded manifest (the status bar's "Saved · time"). */
+  committed_at?: string;
 }
 
 export interface DraftInput {
@@ -104,12 +186,6 @@ export interface DraftInput {
   seed?: number | null;
   region?: unknown;
   mask_id?: string | null;
-}
-
-export interface RecentEntry {
-  path: string;
-  name: string;
-  opened_at: string;
 }
 
 export interface ImageOpen {
@@ -410,15 +486,13 @@ export interface CandidateRecord {
 export interface Commands {
   app_info: [Record<string, never>, AppInfo];
   library_get_config: [Record<string, never>, LibraryConfig];
-  library_set_roots: [{ roots: string[]; import_dest?: string | null }, LibraryConfig];
-  import_paths: [{ paths: string[] }, { items: ImportItem[] }];
+  library_set_roots: [{ roots: string[] }, LibraryConfig];
   project_open: [{ path: string }, ProjectSnapshot];
   project_close: [Record<string, never>, Record<string, never>];
   project_get: [Record<string, never>, ProjectSnapshot | null];
   project_put_draft: [{ draft: DraftInput }, { seq: number }];
   project_save_revision: [{ label?: string }, RevisionEntry];
   project_list_revisions: [Record<string, never>, RevisionEntry[]];
-  recent_list: [Record<string, never>, RecentEntry[]];
   edt_image_open: [{ project_id: string; image_id: string; max_side?: number }, ImageOpen];
   provider_status: [Record<string, never>, ProviderStatus];
   edt_tiles_open: [{ project_id: string; image_id: string; rebuild?: boolean }, TilesDescriptor];
@@ -476,6 +550,18 @@ export interface Commands {
   export_start: [{ settings: ExportSettingsInput; replace: boolean }, { export_id: string }];
   export_cancel: [{ export_id: string }, Record<string, never>];
   project_prefetch_original: [Record<string, never>, { ready?: boolean } | null];
+  // asset-project §9 (#44)
+  library_list_projects: [{ section: Section }, ProjectCard[]];
+  project_create: [{ section: Section; paths: string[] }, { items: CreateItem[] }];
+  project_create_cancel: [Record<string, never>, Record<string, never>];
+  project_create_from_clipboard: [{ section: Section; data_b64: string }, { path: string }];
+  project_rename: [{ path: string; name: string }, { path: string }];
+  project_folder_list: [{ folder: ProjectFolder }, FolderFile[]];
+  project_folder_add: [{ folder: ProjectFolder; paths: string[] }, FolderFile[]];
+  project_trash_list: [Record<string, never>, TrashItem[]];
+  project_trash_restore: [{ item_id: string }, Record<string, never>];
+  project_disk_usage: [Record<string, never>, DiskUsage];
+  project_relink_original: [{ path: string }, Record<string, never>];
 }
 
 export type CommandName = keyof Commands;
@@ -514,4 +600,9 @@ export interface Events {
   };
   'export:failed': { export_id: string; code: string; detail: unknown };
   'export:canceled': { export_id: string };
+  'import:progress': { done: number; total: number };
+  'project:save-failed': { reason: string; retrying: boolean };
+  'project:conflict': Record<string, never>;
+  'project:recovered': Record<string, never>;
+  'project:thumb-updated': { project_id: string };
 }

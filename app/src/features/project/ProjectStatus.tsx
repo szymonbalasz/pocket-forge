@@ -1,74 +1,36 @@
-// Status bar for the open asset project: name, save status, Save (Ctrl+S), Close.
+// The PRJ status-bar segment (`prj-status-save`, asset-project §7): the open project's save
+// state. Ctrl+S saves a revision (FR-PRJ-23).
 import { useEffect } from 'react';
 
-import { projectStore, useProjectState, type SaveStatus } from '../../store/project';
-import { saveLabel } from './saveLabel';
+import { projectStore, useProjectState } from '../../store/project';
+import { saveLabel, saveState } from './saveLabel';
 
 export function ProjectStatus() {
-  const { project, save, error } = useProjectState();
+  const { project, save } = useProjectState();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        void projectStore.save();
+        if (projectStore.get().project && !projectStore.get().project?.read_only)
+          void projectStore.save();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  if (!project) return null;
+  const state = saveState(save, project.read_only);
   return (
-    <div className="status">
-      {error && (
-        <span className="error" data-testid="prj-error" data-code={error.code}>
-          {error.message}{' '}
-          <button type="button" className="link" onClick={() => projectStore.clearError()}>
-            Dismiss
-          </button>
-        </span>
-      )}
-      {project && (
-        <>
-          <span className="status-name" title={project.image_path}>
-            {project.name}
-          </span>
-          <span data-testid="prj-status-save" data-state={stateOf(save, project.read_only)}>
-            {saveLabel(save, project.read_only)}
-          </span>
-          {project.warnings.map((w) => (
-            <span
-              key={w.code}
-              className="warning"
-              data-testid="prj-status-warning"
-              data-code={w.code}
-            >
-              {w.message}
-            </span>
-          ))}
-          <span className="spacer" />
-          <button
-            type="button"
-            data-testid="prj-toolbar-save"
-            disabled={project.read_only !== null || save.kind === 'saving'}
-            onClick={() => void projectStore.save()}
-            title="Save a revision (Ctrl+S)"
-          >
-            Save
-          </button>
-          <button
-            type="button"
-            data-testid="prj-toolbar-close"
-            onClick={() => void projectStore.close()}
-          >
-            Close
-          </button>
-        </>
-      )}
-    </div>
+    <span
+      className={`prj-status prj-status-${state}`}
+      data-testid="prj-status-save"
+      data-state={state}
+      title={project.project_dir}
+    >
+      <span className="prj-status-name">{project.name}</span>
+      <span className="prj-status-label">{saveLabel(save, project.read_only)}</span>
+    </span>
   );
-}
-
-function stateOf(save: SaveStatus, readOnly: string | null): string {
-  return readOnly ? 'read_only' : save.kind;
 }

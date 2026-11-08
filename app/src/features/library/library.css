@@ -1,0 +1,287 @@
+/* Section rail extras and the home grid (asset-project §7). Colours: theme.css tokens only. */
+
+.pf-rail-item[aria-current='true'] {
+  color: var(--pf-text);
+}
+
+/* ------------------------------------------------------------------ home */
+
+.prj-home {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-3);
+  padding: var(--pf-space-4);
+  background: var(--pf-bg-1);
+  outline: 2px dashed transparent;
+  outline-offset: -8px;
+}
+
+.prj-home-over {
+  outline-color: var(--pf-accent);
+  background: var(--pf-bg-2);
+}
+
+.prj-home .banner {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.prj-home-header {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.prj-home-header h1,
+.prj-setup h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.prj-home-header button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-1);
+}
+
+.prj-home-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--pf-text-dim);
+  border: 2px dashed var(--pf-border);
+  border-radius: 6px;
+  padding: var(--pf-space-4);
+}
+
+.prj-home-empty p:first-child {
+  font-size: 15px;
+  color: var(--pf-text);
+}
+
+.prj-home-drop-hint {
+  position: absolute;
+  inset: auto 0 var(--pf-space-4) 0;
+  text-align: center;
+  color: var(--pf-accent);
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ cards */
+
+.prj-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--pf-space-3);
+}
+
+.prj-card {
+  position: relative;
+  background: var(--pf-bg-2);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  overflow: hidden;
+}
+
+.prj-card:hover,
+.prj-card:focus-within {
+  border-color: var(--pf-text-dim);
+}
+
+.prj-card-body {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 0 var(--pf-space-2);
+  background: none;
+  border: none;
+  border-radius: 0;
+  text-align: left;
+}
+
+.prj-card-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--pf-bg-0);
+  margin-bottom: var(--pf-space-1);
+}
+
+.prj-card-thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  color: var(--pf-text-dim);
+}
+
+.prj-card-name {
+  padding: 0 var(--pf-space-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prj-card-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--pf-space-2);
+  padding: 0 var(--pf-space-2);
+  font-size: var(--pf-font-size-meta);
+  color: var(--pf-text-dim);
+}
+
+.prj-card-badges {
+  position: absolute;
+  top: var(--pf-space-1);
+  left: var(--pf-space-1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-space-1);
+  pointer-events: none;
+}
+
+.prj-badge {
+  font-size: var(--pf-font-size-meta);
+  padding: 1px 6px;
+  border-radius: var(--pf-radius);
+  background: var(--pf-overlay);
+  color: var(--pf-text);
+}
+
+.prj-badge-conflict,
+.prj-badge-unreadable {
+  color: var(--pf-danger);
+}
+
+.prj-badge-read_only,
+.prj-badge-not_available_offline {
+  color: var(--pf-warn);
+}
+
+.prj-card-rename {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 var(--pf-space-2);
+}
+
+/* ------------------------------------------------------------------ menus, popovers, toasts */
+
+.prj-menu,
+.prj-popover {
+  background: var(--pf-bg-2);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  box-shadow: 0 4px 16px var(--pf-overlay);
+  z-index: 50;
+}
+
+.prj-menu {
+  min-width: 140px;
+  padding: var(--pf-space-1);
+}
+
+.prj-menu-item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--pf-space-3);
+  padding: 4px var(--pf-space-2);
+  border-radius: var(--pf-radius);
+  cursor: default;
+  outline: none;
+}
+
+.prj-menu-item[data-highlighted] {
+  background: var(--pf-accent-soft);
+}
+
+.prj-menu-key {
+  color: var(--pf-text-dim);
+  font-size: var(--pf-font-size-meta);
+}
+
+.prj-popover {
+  width: 340px;
+  padding: var(--pf-space-3);
+}
+
+.prj-popover form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+}
+
+.prj-toast {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+  min-width: 280px;
+  max-width: 520px;
+  padding: var(--pf-space-2) var(--pf-space-3);
+  background: var(--pf-bg-3);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  box-shadow: 0 4px 16px var(--pf-overlay);
+}
+
+.prj-toast:not(.prj-toast-summary) {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.prj-summary-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 160px;
+  overflow: auto;
+  font-size: var(--pf-font-size-meta);
+}
+
+.prj-summary-list li {
+  display: flex;
+  gap: var(--pf-space-2);
+}
+
+.prj-summary-file {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------------ first run */
+
+.prj-setup {
+  align-items: center;
+  justify-content: center;
+}
+
+.prj-setup-form {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+}
