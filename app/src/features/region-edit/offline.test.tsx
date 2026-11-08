@@ -39,7 +39,9 @@ async function openOffline(fail: 'models' | 'caps') {
   const status = h.provider_status!;
   let offline = true;
   h.provider_status = (i) =>
-    offline && fail === 'models' ? { ...(status(i) as object), connectivity: 'offline' } : status(i);
+    offline && fail === 'models'
+      ? { ...(status(i) as object), connectivity: 'offline' }
+      : status(i);
   h.provider_list_models = (i) =>
     offline && fail === 'models' ? Promise.reject(offlineError) : online.list(i);
   h.provider_get_capabilities = (i) =>
