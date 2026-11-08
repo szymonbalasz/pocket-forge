@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Collapsible, Select, Slider, Switch } from 'radix-ui';
 
+import { useSlotIdle } from '../../shared/slot';
 import { useProjectState } from '../../store/project';
 import { useEditorRegion } from '../editor';
 import { openProviderSettings } from '../provider';
@@ -418,6 +419,7 @@ export function GeneratePanel() {
   const s = useRgn((x) => x);
   const { project } = useProjectState();
   const [open, setOpen] = useState(true);
+  useSlotIdle(!s.projectId);
   if (!s.projectId) return null;
   return (
     <Collapsible.Root open={open} onOpenChange={setOpen} asChild>

@@ -69,7 +69,7 @@ Tier S ([feature-tiers](../feature-tiers.md)): "Localised edit of a masked regio
 
 ## 7. UI/UX notes
 - **Provider settings** (`app/src/features/provider/`): key and secret as password fields (cleared after Save), Save, Clear, Test connection, optional team and project id. Test ids `prv-settings-key|secret|team|project|save|clear|test`.
-- **Status chip** in the header (`prv-header-chip`): `Fake provider` (always visible in fake mode) · `Scenario · ok` · `offline` · `auth error` · `not configured`, plus the balance (`1,234 CU` or `unknown`). States: *not configured* → the chip links to settings and RGN disables submit. *Offline* → cached models shown as stale. *Auth error* → link to settings. *Loading*: Test connection shows a spinner. Job states and controls are RGN's UI.
+- **Status chip**, a status-bar segment (`prv-status-chip`, ui-guidelines): `Fake provider` (always visible in fake mode) · `Scenario · ok` · `offline` · `auth error` · `not configured`, plus the balance (`1,234 CU` or `unknown`). States: *not configured* → the chip links to settings and RGN disables submit. *Offline* → cached models shown as stale. *Auth error* → link to settings. *Loading*: Test connection shows a spinner. Job states and controls are RGN's UI.
 
 ## 8. Data and file effects
 Field tables live in [manifest-schema](../architecture/manifest-schema.md) (PRJ). PRV needs:

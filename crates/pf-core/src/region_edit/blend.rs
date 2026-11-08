@@ -4,21 +4,20 @@
 //!
 //! The algorithm is the imaging spike's (`spikes/imaging/src/region.rs` in git history), which
 //! measured an edge step of 0.28 levels/px and a residual offset of 0.03 (FR-RGN-32).
-//! > pf-imaging has no blend module yet; this lives in RGN until one exists.
+//! The pixel work is `pf_imaging::bake_patch` (ADR 0004); RGN owns the controls, the notices
+//! and the layer's `blend` record.
 
 use image::{RgbImage, RgbaImage};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+
+pub use pf_imaging::{ColourFit, GAIN_RANGE, MIN_CONTEXT_SHARE, feather, fit_colour};
 
 use super::fit::RectPx;
 
 /// Feather range (FR-RGN-26).
 pub const MAX_FEATHER: u32 = 256;
 pub const DEFAULT_FEATHER: u32 = 48;
-/// Colour match needs this share of the outer rect unmasked (FR-RGN-26).
-pub const MIN_CONTEXT_SHARE: f64 = 0.01;
-/// The fitted gain is clamped to this range (the spike's guard against a flat context).
-pub const GAIN_RANGE: (f64, f64) = (0.8, 1.25);
 
 /// Blend controls as the panel sends them (`{feather_px, colour_match}`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,20 +46,6 @@ impl Default for BlendInput {
     }
 }
 
-/// A fitted colour match: per channel `out = in × gain + offset`.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ColourFit {
-    pub gain: [f64; 3],
-    pub offset: [f64; 3],
-}
-
-impl ColourFit {
-    pub const IDENTITY: ColourFit = ColourFit {
-        gain: [1.0; 3],
-        offset: [0.0; 3],
-    };
-}
-
 /// A baked patch: RGBA cropped to alpha > 0, its placement in image px, and the layer's
 /// `blend` record (schema §4.3).
 #[derive(Debug, Clone)]
@@ -70,95 +55,6 @@ pub struct Baked {
     pub blend: Value,
     /// `colour_match_skipped` when too little context is unmasked (FR-RGN-26).
     pub notices: Vec<String>,
-}
-
-fn box_h(src: &[u8], w: usize, r: usize) -> Vec<u8> {
-    let mut out = vec![0u8; src.len()];
-    let n = (2 * r + 1) as u32;
-    for (o, s) in out.chunks_mut(w).zip(src.chunks(w)) {
-        let at = |i: isize| u32::from(s[i.clamp(0, w as isize - 1) as usize]);
-        let mut sum: u32 = (-(r as isize)..=r as isize).map(at).sum();
-        for (x, px) in o.iter_mut().enumerate() {
-            *px = ((sum + n / 2) / n) as u8;
-            sum += at(x as isize + r as isize + 1);
-            sum -= at(x as isize - r as isize);
-        }
-    }
-    out
-}
-
-fn transpose(src: &[u8], w: usize, h: usize) -> Vec<u8> {
-    let mut out = vec![0u8; w * h];
-    for y in 0..h {
-        for x in 0..w {
-            out[x * h + y] = src[y * w + x];
-        }
-    }
-    out
-}
-
-/// Inward feather: alpha is 0 at the mask edge and reaches the mask's value about `f` px inside.
-/// Pixels outside the mask (0) stay 0. `f` = 0 returns the painted mask.
-pub fn feather(mask: &[u8], w: u32, h: u32, f: u32) -> Vec<u8> {
-    if f == 0 || mask.is_empty() {
-        return mask.to_vec();
-    }
-    let (w, h) = (w as usize, h as usize);
-    let r = (f as usize / 3).max(1);
-    let mut b = mask.to_vec();
-    for _ in 0..3 {
-        b = box_h(&b, w, r);
-    }
-    let mut t = transpose(&b, w, h);
-    for _ in 0..3 {
-        t = box_h(&t, h, r);
-    }
-    let b = transpose(&t, h, w);
-    b.iter()
-        .zip(mask)
-        .map(|(&v, &m)| {
-            if m == 0 {
-                0
-            } else {
-                (2 * i32::from(v) - 255).clamp(0, i32::from(m)) as u8
-            }
-        })
-        .collect()
-}
-
-/// Least-squares gain and offset per channel over the unmasked context (mask = 0), or `None`
-/// when less than [`MIN_CONTEXT_SHARE`] of the rect is unmasked.
-pub fn fit_colour(base: &RgbImage, cand: &RgbImage, mask: &[u8]) -> Option<ColourFit> {
-    let total = mask.len();
-    let n = mask.iter().filter(|&&m| m == 0).count();
-    if total == 0 || (n as f64) < MIN_CONTEXT_SHARE * total as f64 || n == 0 {
-        return None;
-    }
-    let (b, c) = (base.as_raw(), cand.as_raw());
-    let mut fit = ColourFit::IDENTITY;
-    for ch in 0..3 {
-        let (mut sx, mut sy, mut sxx, mut sxy) = (0f64, 0f64, 0f64, 0f64);
-        for (i, _) in mask.iter().enumerate().filter(|(_, m)| **m == 0) {
-            let x = f64::from(c[i * 3 + ch]);
-            let y = f64::from(b[i * 3 + ch]);
-            sx += x;
-            sy += y;
-            sxx += x * x;
-            sxy += x * y;
-        }
-        let nf = n as f64;
-        let (mx, my) = (sx / nf, sy / nf);
-        let var = sxx / nf - mx * mx;
-        let cov = sxy / nf - mx * my;
-        let gain = if var > 1e-6 {
-            (cov / var).clamp(GAIN_RANGE.0, GAIN_RANGE.1)
-        } else {
-            1.0
-        };
-        fit.gain[ch] = gain;
-        fit.offset[ch] = my - gain * mx;
-    }
-    Some(fit)
 }
 
 fn round3(v: f64) -> f64 {
@@ -175,68 +71,33 @@ pub fn bake(
     outer: RectPx,
     blend: BlendInput,
 ) -> Baked {
-    let (w, h) = cand.dimensions();
-    debug_assert_eq!(base.dimensions(), (w, h));
-    debug_assert_eq!(mask.len(), (w * h) as usize);
+    let p = pf_imaging::bake_patch(
+        base,
+        cand,
+        mask,
+        blend.feather_px.min(MAX_FEATHER),
+        blend.colour_match,
+    );
     let mut notices = vec![];
-    let fit = if blend.colour_match {
-        match fit_colour(base, cand, mask) {
-            Some(f) => Some(f),
-            None => {
-                notices.push("colour_match_skipped".to_owned());
-                None
-            }
-        }
-    } else {
-        None
-    };
-    let mut alpha = feather(mask, w, h, blend.feather_px.min(MAX_FEATHER));
-    if !alpha.iter().any(|&a| a > 0) {
-        // A sliver of a mask the feather ate completely: keep the painted edge.
-        alpha = mask.to_vec();
+    if p.colour_match_skipped {
+        notices.push("colour_match_skipped".to_owned());
     }
-    let (mut x0, mut y0, mut x1, mut y1) = (w, h, 0, 0);
-    for y in 0..h {
-        for x in 0..w {
-            if alpha[(y * w + x) as usize] > 0 {
-                x0 = x0.min(x);
-                y0 = y0.min(y);
-                x1 = x1.max(x + 1);
-                y1 = y1.max(y + 1);
-            }
-        }
-    }
-    if x1 <= x0 || y1 <= y0 {
-        (x0, y0, x1, y1) = (0, 0, 1, 1);
-    }
-    let f = fit.unwrap_or(ColourFit::IDENTITY);
-    let src = cand.as_raw();
-    let rgba = RgbaImage::from_fn(x1 - x0, y1 - y0, |x, y| {
-        let (sx, sy) = (x + x0, y + y0);
-        let i = (sy * w + sx) as usize;
-        let mut px = [0u8; 4];
-        for ch in 0..3 {
-            let v = f64::from(src[i * 3 + ch]) * f.gain[ch] + f.offset[ch];
-            px[ch] = v.round().clamp(0.0, 255.0) as u8;
-        }
-        px[3] = alpha[i];
-        image::Rgba(px)
-    });
+    let f = p.fit.unwrap_or(ColourFit::IDENTITY);
     let blend_record = json!({
         "feather_px": blend.feather_px,
         "colour_match": {
-            "on": fit.is_some(),
+            "on": p.fit.is_some(),
             "gain": f.gain.map(round3),
             "offset": f.offset.map(round3),
         },
     });
     Baked {
-        rgba,
+        rgba: p.rgba,
         rect: RectPx {
-            x: outer.x + x0,
-            y: outer.y + y0,
-            w: x1 - x0,
-            h: y1 - y0,
+            x: outer.x + p.crop.x,
+            y: outer.y + p.crop.y,
+            w: p.crop.width,
+            h: p.crop.height,
         },
         blend: blend_record,
         notices,
