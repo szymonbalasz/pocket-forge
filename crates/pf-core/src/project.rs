@@ -631,8 +631,18 @@ pub struct DraftInput {
     pub seed: Option<i64>,
     #[serde(default)]
     pub region: Option<Value>,
-    #[serde(default)]
-    pub mask_id: Option<Ulid>,
+    /// Absent = keep the draft's mask (EDT `put_mask` owns it, R7); `null` = clear it.
+    #[serde(default, deserialize_with = "present")]
+    pub mask_id: Option<Option<Ulid>>,
+}
+
+/// Tells an absent field (`None`, via `default`) from an explicit `null` (`Some(None)`).
+fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    <Option<T> as serde::Deserialize>::deserialize(d).map(Some)
 }
 
 /// `project_put_draft` (FR-PRJ-19): one commit with the draft and, if given, EXP's unsaved export
@@ -644,7 +654,7 @@ pub fn put_draft(
     draft: DraftInput,
     export_settings: Option<serde_json::Map<String, Value>>,
 ) -> CoreResult<u64> {
-    if let Some(id) = draft.mask_id
+    if let Some(Some(id)) = draft.mask_id
         && !p.manifest.masks.iter().any(|m| m.id == id)
     {
         return Err(
@@ -657,13 +667,14 @@ pub fn put_draft(
             .as_ref()
             .map(|d| d.extra.clone())
             .unwrap_or_default();
+        let kept_mask = m.draft.as_ref().and_then(|d| d.mask_id);
         m.draft = Some(Draft {
             final_prompt: draft.final_prompt,
             model_id: draft.model_id,
             controls: draft.controls,
             seed: draft.seed,
             region: draft.region,
-            mask_id: draft.mask_id,
+            mask_id: draft.mask_id.unwrap_or(kept_mask),
             updated_at: ctx.now(),
             extra,
         });

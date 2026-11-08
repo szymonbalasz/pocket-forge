@@ -16,6 +16,7 @@ pub mod images;
 pub mod job;
 pub mod library;
 pub mod manifest;
+pub mod masks;
 pub mod naming;
 pub mod project;
 mod provider_commands;

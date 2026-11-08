@@ -164,6 +164,8 @@ export interface ProjectSnapshot {
   image_path: string;
   /** The project folder (absolute). */
   project_dir: string;
+  /** The original's stable image id (= `layers[0].id`, #48 (3)); EDT opens tiles with it. */
+  original_image_id?: string;
   saved: boolean;
   read_only: ReadOnlyReason | null;
   warnings: ProjectWarning[];
@@ -413,10 +415,17 @@ export interface MaskRef {
   rect: RectPx;
 }
 
-/** `edt_mask_read` result: raw w·h bytes (an array over IPC) + rect. */
+/** `edt_mask_read` result: rect + the raw w·h bytes as base64 (FR-EDT-18). */
 export interface MaskRead {
+  mask_id: string;
   rect: RectPx;
-  bytes: number[] | ArrayBuffer;
+  data_b64: string;
+}
+
+/** A decoded `edt_mask_read` (what `api.mask.read` returns). */
+export interface MaskBytes {
+  rect: RectPx;
+  bytes: Uint8Array;
 }
 
 // ── Region edit (RGN §9) ──────────────────────────────────────────────────────────────────────
@@ -502,6 +511,7 @@ export interface Commands {
     RegionFit,
   ];
   edt_mask_read: [{ project_id: string; mask_id: string }, MaskRead];
+  edt_mask_submit: [{ project_id: string; rect: RectPx; data_b64: string }, MaskRef];
   project_restore_revision: [{ rev_id: string }, RevisionEntry];
   provider_credentials_set: [{ key: string; secret: string }, Record<string, never>];
   provider_credentials_clear: [Record<string, never>, Record<string, never>];

@@ -9,6 +9,7 @@ const centre = () => {
 
 export const actions = {
   setTool(tool: Tool): void {
+    if (editorStore.get().originalMissing) return; // BL-10: tools are disabled.
     editorStore.set({ tool });
   },
 

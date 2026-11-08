@@ -3,10 +3,13 @@
 import type Konva from 'konva';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { api, type ProjectSnapshot } from '../../api';
+import { api, onEvent, type ProjectSnapshot } from '../../api';
+import { projectStore } from '../../store/project';
 import { bindActions } from './actions';
+import { bindRegionSink, setActiveMaskSync } from './bridge';
 import { maskHash, type MaskBuffer } from './mask';
 import { MaskController } from './MaskController';
+import { coreHandoff, MaskSync } from './maskHandoff';
 import { konvaMaskView } from './maskView';
 import { applyDrag, insideRect, type Handle, type RegionDrag } from './region';
 import { fitRegion, RegionError } from './regionFit';
@@ -15,10 +18,6 @@ import { pushUndo, revisionUndoEntry, undoStack } from './session';
 import { dispatchShortcut, type ShortcutMap } from './shortcuts';
 import { editorStore, useEditor, type Rect } from './store';
 import { screenToImage, type Pt } from './view';
-
-function toBytes(b: number[] | ArrayBuffer): Uint8Array {
-  return b instanceof ArrayBuffer ? new Uint8Array(b) : Uint8Array.from(b);
-}
 
 export function useMaskTools({
   project,
@@ -30,7 +29,7 @@ export function useMaskTools({
   maskLayer: Konva.Layer | null;
   container: React.RefObject<HTMLDivElement | null>;
 }) {
-  const { view, tool, brushSize, hardness, region, image } = useEditor((s) => s);
+  const { view, tool, brushSize, hardness, region, image, originalMissing } = useEditor((s) => s);
   const ctl = useRef<MaskController | null>(null);
   const drag = useRef<{ d: RegionDrag; pointerId: number } | null>(null);
   const stroking = useRef<number | null>(null);
@@ -38,6 +37,10 @@ export function useMaskTools({
   const [cursor, setCursor] = useState<Pt | null>(null);
   const [regionError, setRegionError] = useState<{ code: string; message: string } | null>(null);
   const [maskWarning, setMaskWarning] = useState<string | null>(null);
+  // FR-EDT-29: read-only follows the project (a relink clears it without a remount).
+  const readOnly = useRef(project.read_only !== null);
+  readOnly.current = project.read_only !== null;
+  const sync = useRef<MaskSync | null>(null);
 
   // One controller per project; its view follows the mask layer instance. The Stage can remount
   // (the viewport drops to 0 when the store resets on open), so a new layer gets a new view
@@ -46,21 +49,55 @@ export function useMaskTools({
     if (!maskLayer) return;
     const mv = konvaMaskView(maskLayer);
     if (ctl.current) ctl.current.setView(mv);
-    else
-      ctl.current = new MaskController({
+    else {
+      const c = new MaskController({
         undo: undoStack,
         view: mv,
         setRegion: (r) => editorStore.set({ region: r }),
+        onChange: () => sync.current?.changed(),
       });
+      ctl.current = c;
+      // FR-EDT-28: the hand-off for this project (debounce, job submit, close).
+      sync.current = new MaskSync({
+        projectId: project.project_id,
+        handoff: coreHandoff,
+        buffer: () => c.buffer,
+        version: () => c.version,
+        stroking: () => c.stroking,
+        readOnly: () => readOnly.current,
+        onStatus: (maskStatus) => editorStore.set({ maskStatus }),
+      });
+      setActiveMaskSync(sync.current);
+    }
     return () => mv.destroy();
-  }, [maskLayer]);
+  }, [maskLayer, project.project_id]);
+
+  // FR-EDT-28: submit before the project closes; retry a failed submit after the next commit
+  // (a resolved conflict, a released lock); a read-only change refreshes the status.
+  useEffect(() => {
+    bindRegionSink((r) => ctl.current?.applyValidated(r));
+    const off = projectStore.onBeforeClose(() => sync.current?.flush() ?? Promise.resolve());
+    const sub = onEvent('project:committed', () => sync.current?.retry());
+    return () => {
+      bindRegionSink(null);
+      off();
+      void sub.then(
+        (u) => u(),
+        () => undefined,
+      );
+    };
+  }, []);
+  useEffect(() => {
+    sync.current?.changed();
+  }, [project.read_only]);
 
   // FR-EDT-19: reopen loads the draft's mask once per controller, when the image size is known;
   // a different draft region keeps the overlap.
   const draftLoadedFor = useRef<MaskController | null>(null);
   useEffect(() => {
     const c = ctl.current;
-    if (!c || !image || draftLoadedFor.current === c) return;
+    // BL-10: with the original missing, the draft loads after the relink.
+    if (!c || !image || originalMissing || draftLoadedFor.current === c) return;
     draftLoadedFor.current = c;
     const draft = project.draft as {
       mask_id?: string | null;
@@ -75,7 +112,7 @@ export function useMaskTools({
           if (draft?.mask_id) {
             try {
               const read = await api.mask.read(project.project_id, draft.mask_id);
-              m = { rect: read.rect, data: toBytes(read.bytes) };
+              m = { rect: read.rect, data: read.bytes };
               if (m.data.length !== m.rect.w * m.rect.h) throw new Error('size mismatch');
             } catch (e) {
               // A corrupt or unreadable mask: start empty with a warning (EDT §11).
@@ -83,18 +120,25 @@ export function useMaskTools({
               m = null;
             }
           }
-          if (ctl.current === c) c.load(r, m);
+          if (ctl.current !== c) return;
+          // The store holds `m`: no submit unless the region changed it (FR-EDT-19).
+          sync.current?.markLoaded(m, m ? (draft?.mask_id ?? null) : null);
+          c.load(r, m);
         } catch {
           // The saved region no longer fits: start without one.
         }
       })();
     }
     return undefined;
-  }, [maskLayer, project.project_id, project.draft, image]);
+  }, [maskLayer, project.project_id, project.draft, image, originalMissing]);
 
   useEffect(
     () => () => {
       ctl.current = null;
+      sync.current?.dispose();
+      sync.current = null;
+      setActiveMaskSync(null);
+      editorStore.set({ maskStatus: { kind: 'none' } });
       undoStack.clear(); // KQ-16: history is per session.
     },
     [],
@@ -250,6 +294,9 @@ export function useMaskTools({
       return out;
     },
     undoDepth: () => undoStack.snapshot(),
+    maskStatus: () => sync.current?.current ?? null,
+    /** FR-EDT-28: the job-submit trigger, as RGN calls it. */
+    flushMask: () => sync.current?.flush() ?? null,
     maskVersion: () => ctl.current?.version ?? 0,
     /** FR-EDT-23: push an accept-style entry (undo/redo restore revisions). */
     pushRevisionEntry: (parent: string, later: string) =>

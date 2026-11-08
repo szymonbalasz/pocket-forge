@@ -28,6 +28,7 @@ import {
 } from '../../api';
 import {
   editorBridge,
+  flushMask,
   pushUndo,
   revisionUndoEntry,
   thumbnailUrl,
@@ -432,6 +433,8 @@ async function refit(): Promise<void> {
     const fit = await api.region.fit(s.projectId, s.inner, s.margin, s.modelId ?? undefined);
     if (!isCurrent('fit', t)) return;
     set({ fit, fitError: null });
+    // BL-14: EDT draws the region RGN validated (margin, model, Retry's region).
+    editorBridge.setRegion({ inner: fit.inner, outer: fit.outer });
   } catch (e) {
     if (!isCurrent('fit', t)) return;
     set({ fit: null, fitError: uiError(e) });
@@ -714,8 +717,11 @@ export const rgn = {
         const spend = await api.region.setSpend(plan.saveSpend);
         set({ spend });
       }
+      // R7: EDT submits the live mask first, so the job sends exactly what the DM sees.
+      const ref = await flushMask();
+      if (ref) set({ maskId: ref.mask_id });
       const { job_id } = await api.region.submit({
-        draft,
+        draft: ref ? { ...draft, mask_id: ref.mask_id } : draft,
         estimate_id: est.estimate_id,
         confirmations: plan.confirmations,
       });

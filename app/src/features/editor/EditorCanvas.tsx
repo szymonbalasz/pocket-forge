@@ -6,6 +6,7 @@ import { Layer, Stage } from 'react-konva';
 
 import {
   api,
+  ApiError,
   onEvent,
   type Layer as ManifestLayer,
   type ProjectSnapshot,
@@ -62,6 +63,33 @@ function useDevicePixelRatio(stage: React.RefObject<Konva.Stage | null>) {
 
 type Drag = { kind: 'pan'; x: number; y: number; pointerId: number };
 
+/** A pyramid build failure, said plainly (D6). Rebuild is offered only where it can help. */
+interface BuildError {
+  code: string;
+  message: string;
+}
+
+const BUILD_TEXT: Record<string, string> = {
+  not_found: 'The image file can’t be found.',
+  unsupported: 'This image format isn’t supported.',
+  animated: 'Animated images aren’t supported.',
+  too_large: 'The image is larger than 16384 px per side.',
+  corrupt: 'The image file is damaged and can’t be read.',
+};
+
+export const buildErrorText = (e: BuildError): string =>
+  BUILD_TEXT[e.code] ?? `The image could not be prepared: ${e.message}`;
+
+/** Rebuild re-reads the same source, so it can't fix a missing, damaged or unsupported file. */
+export const canRebuild = (e: BuildError): boolean => !(e.code in BUILD_TEXT);
+
+function buildError(e: unknown): BuildError {
+  if (e instanceof ApiError) return { code: e.code, message: e.message };
+  if (e && typeof e === 'object' && 'code' in e && 'message' in e)
+    return { code: String(e.code), message: String(e.message) };
+  return { code: 'error', message: e instanceof Error ? e.message : String(e) };
+}
+
 export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -79,7 +107,7 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   const [layerError, setLayerError] = useState<string | null>(null);
   const [desc, setDesc] = useState<TilesDescriptor | null>(null);
   const [tileStats, setTileStats] = useState<TileStats | null>(null);
-  const [buildError, setBuildError] = useState<string | null>(null);
+  const [buildErr, setBuildError] = useState<BuildError | null>(null);
   const [spaceHeld, setSpaceHeld] = useState(false);
   const drag = useRef<Drag | null>(null);
   const { view, viewport, dpr, tool, image, maskVisible } = useEditor((s) => s);
@@ -89,7 +117,10 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   useElementSize(containerRef);
   useDevicePixelRatio(stageRef);
 
-  const originalId = project.layers[0]?.id;
+  // #48 (3): the original's stable image id (PRJ `resolve_image`), so a reopen reuses the pyramid.
+  const originalId = project.original_image_id ?? project.layers[0]?.id;
+  // BL-10 / D6: no original, nothing to show or edit until PRJ relinks it.
+  const originalMissing = project.read_only === 'original_missing';
 
   // Open the pyramid (FR-EDT-07): the descriptor comes back at once; levels arrive by event.
   const openTiles = useCallback(
@@ -101,7 +132,7 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
         setDesc(d);
         if (rebuild) tilesRef.current?.reset(d);
       } catch (e) {
-        setBuildError((e as Error).message);
+        setBuildError(buildError(e));
       }
     },
     [project.project_id, originalId],
@@ -110,9 +141,18 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   useEffect(() => {
     editorStore.reset();
     editorStore.set({ image: { w: project.width, h: project.height } });
-    void openTiles(false);
     return () => editorStore.set({ image: null });
-  }, [project.project_id, project.width, project.height, openTiles]);
+  }, [project.project_id, project.width, project.height]);
+
+  // After a relink the original is back: open (or reopen, with a new key) its tiles.
+  useEffect(() => {
+    editorStore.set({ originalMissing });
+    if (originalMissing) {
+      setDesc(null);
+      return;
+    }
+    void openTiles(false);
+  }, [originalMissing, openTiles]);
 
   // Tile events for this pyramid.
   useEffect(() => {
@@ -123,7 +163,9 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
       }),
       onEvent('edt:tiles-failed', (p) => {
         if (p.key !== tilesRef.current?.descriptor.key) return;
-        setBuildError(typeof p.error === 'string' ? p.error : p.error.message);
+        setBuildError(
+          typeof p.error === 'string' ? { code: 'error', message: p.error } : buildError(p.error),
+        );
       }),
     ];
     return () =>
@@ -322,6 +364,7 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
     // Overlay controls (badges, banners, handles with their own logic) aren't canvas input;
     // capturing the pointer here would steal their click.
     if ((e.target as Element).closest('button, a, input, [data-overlay]')) return;
+    if (editorStore.get().originalMissing) return;
     // Take focus from text fields, so tool shortcuts work after clicking the canvas (FR-EDT-30).
     containerRef.current?.focus({ preventScroll: true });
     const panning = e.button === 1 || (e.button === 0 && (tool === 'pan' || spaceHeld));
@@ -381,7 +424,7 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
     }),
   });
 
-  const loaded = tileStats?.backdropShown ?? false;
+  const loaded = (tileStats?.backdropShown ?? false) && !originalMissing;
   const panCursor = tool === 'pan' || spaceHeld;
   return (
     <div className="editor">
@@ -435,15 +478,36 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
             The candidate could not be shown: {compareError}
           </div>
         )}
-        {!loaded && !buildError && (
+        {!loaded && !buildErr && !originalMissing && (
           <div className="editor-spinner" data-testid="edt-loading" aria-label="Loading" />
         )}
-        {buildError && (
-          <div className="banner banner-error editor-banner" data-testid="edt-build-error">
-            The image could not be prepared: {buildError}{' '}
-            <button type="button" className="link" onClick={() => void openTiles(true)}>
-              Rebuild
-            </button>
+        {originalMissing && (
+          <div
+            className="banner banner-warning editor-banner"
+            data-testid="edt-original-missing"
+            role="status"
+          >
+            The original image is missing, so there is nothing to edit. Relink it in the project
+            panel to keep working.
+          </div>
+        )}
+        {buildErr && !originalMissing && (
+          <div
+            className="banner banner-error editor-banner"
+            data-testid="edt-build-error"
+            data-code={buildErr.code}
+          >
+            {buildErrorText(buildErr)}{' '}
+            {canRebuild(buildErr) && (
+              <button
+                type="button"
+                className="link"
+                data-testid="edt-build-rebuild"
+                onClick={() => void openTiles(true)}
+              >
+                Rebuild
+              </button>
+            )}
           </div>
         )}
         {layerError && (
@@ -451,7 +515,7 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
             A layer could not be shown: {layerError}
           </div>
         )}
-        {!!tileStats?.failed && (
+        {!!tileStats?.failed && !originalMissing && (
           <div className="editor-badge" data-testid="edt-tiles-error" role="status">
             Some tiles failed to load.{' '}
             <button

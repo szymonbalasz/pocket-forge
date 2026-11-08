@@ -27,9 +27,11 @@ const TOOLS: { tool: Tool; label: string; key: string; Icon: ComponentType }[] =
 ];
 
 export function EditorToolbar() {
-  const { tool, brushSize, hardness, maskVisible, image, region, undo } = useEditor((s) => s);
+  const { tool, brushSize, hardness, maskVisible, image, region, undo, originalMissing } =
+    useEditor((s) => s);
   if (!image) return null;
-  const canPaint = region !== null;
+  // BL-10: with the original missing there is nothing to edit.
+  const canPaint = region !== null && !originalMissing;
   return (
     <div
       className="edt-toolbar"
@@ -46,6 +48,7 @@ export function EditorToolbar() {
             data-testid={`edt-toolbar-${t}`}
             aria-pressed={tool === t}
             aria-label={label}
+            disabled={originalMissing}
             onClick={() => actions.setTool(t)}
           >
             <Icon />

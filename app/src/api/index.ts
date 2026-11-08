@@ -11,7 +11,9 @@ import type {
   CoreErrorShape,
   Events,
   ExportSettingsInput,
+  MaskBytes,
   ProjectFolder,
+  RectPx,
   Section,
 } from './types';
 
@@ -85,6 +87,22 @@ export async function appReady(ok: boolean, detail: string): Promise<void> {
   } catch {
     // Not fatal: only the smoke run depends on it.
   }
+}
+
+/** Standard base64 of binary data (masks over IPC; ~4× smaller than a JSON number array). */
+export function toBase64(bytes: Uint8Array): string {
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK)
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK) as unknown as number[]);
+  return btoa(bin);
+}
+
+export function fromBase64(text: string): Uint8Array {
+  const bin = atob(text);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
 /** Typed shortcuts for the commands, grouped by area. */
@@ -176,8 +194,13 @@ export const api = {
     iterations: () => call('rgn_iterations_list', {}),
   },
   mask: {
-    read: (projectId: string, maskId: string) =>
-      call('edt_mask_read', { project_id: projectId, mask_id: maskId }),
+    /** FR-EDT-18: the mask's w·h bytes for `rect` → `MaskRef` (base64 over IPC). */
+    submit: (projectId: string, rect: RectPx, bytes: Uint8Array) =>
+      call('edt_mask_submit', { project_id: projectId, rect, data_b64: toBase64(bytes) }),
+    read: async (projectId: string, maskId: string): Promise<MaskBytes> => {
+      const r = await call('edt_mask_read', { project_id: projectId, mask_id: maskId });
+      return { rect: r.rect, bytes: fromBase64(r.data_b64) };
+    },
   },
   provider: {
     status: () => call('provider_status', {}),

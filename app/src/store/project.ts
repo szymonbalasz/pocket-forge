@@ -36,6 +36,13 @@ const initial: ProjectState = {
 let state: ProjectState = initial;
 const listeners = new Set<() => void>();
 let listening = false;
+/** Work features finish before the project closes (EDT's mask submit, FR-EDT-28). */
+const beforeClose = new Set<() => Promise<unknown>>();
+
+/** Runs every before-close hook; a failing hook doesn't stop the close (it keeps its own state). */
+async function runBeforeClose(): Promise<void> {
+  await Promise.all([...beforeClose].map((f) => f().catch(() => undefined)));
+}
 
 function set(patch: Partial<ProjectState>): void {
   state = { ...state, ...patch };
@@ -99,7 +106,10 @@ export const projectStore = {
   async open(path: string): Promise<boolean> {
     set({ busy: true, error: null, opening: path });
     try {
-      if (state.project) await api.project.close().catch(() => undefined);
+      if (state.project) {
+        await runBeforeClose();
+        await api.project.close().catch(() => undefined);
+      }
       const project = await api.project.open(path);
       set({ project, save: { kind: 'saved', at: savedAt(project) }, busy: false, opening: null });
       bump();
@@ -113,6 +123,7 @@ export const projectStore = {
   /** Back to the home grid. */
   async close(): Promise<void> {
     try {
+      await runBeforeClose();
       await api.project.close();
     } catch (e) {
       // `unsaved` (FR-PRJ-21): stay open and say why.
@@ -173,6 +184,12 @@ export const projectStore = {
       set({ error: errorOf(e), save: { kind: 'saved', at: savedAt(state.project) } });
     }
     bump();
+  },
+
+  /** Registers work to finish before the project closes; returns the unregister function. */
+  onBeforeClose(hook: () => Promise<unknown>): () => void {
+    beforeClose.add(hook);
+    return () => void beforeClose.delete(hook);
   },
 
   setError(error: { code: string; message: string } | null): void {

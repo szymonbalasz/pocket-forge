@@ -1,13 +1,18 @@
-// Status-bar part of the editor (FR-EDT-04): zoom readout and the Fit / Actual / Display presets.
+// Status-bar part of the editor (FR-EDT-04): zoom readout and the Fit / Actual / Display presets,
+// plus the mask hand-off state (FR-EDT-28/29).
 import { actions } from './actions';
+import { maskStatusText } from './maskHandoff';
 import { noMouseFocus } from './shortcuts';
 import { useEditor } from './store';
 import { Tip } from './Tip';
 import { displayScale, zoomPercent } from './view';
 
 export function EditorStatus() {
-  const { view, dpr, image, pxPerSquare, undo } = useEditor((s) => s);
+  const { view, dpr, image, pxPerSquare, undo, maskStatus } = useEditor((s) => s);
   if (!image) return null;
+  const maskText = maskStatusText(maskStatus);
+  const maskState =
+    maskStatus.kind === 'unsaved' ? `unsaved:${maskStatus.reason}` : maskStatus.kind;
   const display = displayScale(pxPerSquare.source, pxPerSquare.target);
   return (
     <div className="edt-status" onMouseDown={noMouseFocus}>
@@ -44,6 +49,18 @@ export function EditorStatus() {
       <span className="tabular muted">
         {image.w} × {image.h} px
       </span>
+      {maskText && (
+        <span
+          className={
+            maskStatus.kind === 'unsaved' ? 'edt-mask-status warning' : 'edt-mask-status muted'
+          }
+          data-testid="edt-mask-status"
+          data-state={maskState}
+          role="status"
+        >
+          {maskText}
+        </span>
+      )}
       {undo.error && (
         <span className="error" data-testid="edt-undo-error" data-code={undo.error}>
           {undo.busy ? '' : `Undo failed: ${undo.error}`}

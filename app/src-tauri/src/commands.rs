@@ -68,6 +68,8 @@ tauri_commands! {
     project_prefetch_original => c::ProjectPrefetchOriginal,
     project_folder_list => c::ProjectFolderList,
     project_folder_add => c::ProjectFolderAdd,
+    edt_mask_submit => c::EdtMaskSubmit,
+    edt_mask_read => c::EdtMaskRead,
 }
 
 #[cfg(test)]
