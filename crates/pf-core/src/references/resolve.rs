@@ -60,6 +60,28 @@ pub struct DraftItem {
     pub extra: Extra,
 }
 
+/// Set by Retry (FR-REF-26, schema §4.5): the iteration (`NNN`) an item was restored from.
+pub const RETRY_OF: &str = "retry_of";
+/// Set by Retry when the file's bytes differ from what the job sent (FR-REF-26).
+pub const CHANGED: &str = "changed";
+
+impl DraftItem {
+    /// The iteration this item was restored from by Retry, if any.
+    pub fn retry_of(&self) -> Option<&str> {
+        self.extra.get(RETRY_OF).and_then(serde_json::Value::as_str)
+    }
+
+    /// `NNN` when Retry found the file changed since that job (badge `changed_since:<NNN>`).
+    pub fn changed_since(&self) -> Option<&str> {
+        let changed = self.extra.get(CHANGED).and_then(serde_json::Value::as_bool);
+        if changed == Some(true) {
+            self.retry_of()
+        } else {
+            None
+        }
+    }
+}
+
 /// Draft `references` (schema §4.5): `{packs, items}`; `null` = REF's defaults.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DraftReferences {
@@ -269,8 +291,8 @@ pub struct ItemOut {
     pub slot: String,
     pub on: bool,
     pub state: ItemState,
-    /// `cloud`, `missing`, `corrupt`, `duplicate`.
-    pub badges: Vec<&'static str>,
+    /// `cloud`, `missing`, `corrupt`, `duplicate`, `changed_since:<NNN>` (FR-REF-26).
+    pub badges: Vec<String>,
     /// False for missing and corrupt items (they can't be ticked).
     pub checkable: bool,
     /// EDT `library` key and URL for the thumbnail, set by the command.
@@ -367,10 +389,13 @@ pub fn reconcile(
             let checkable = matches!(a.state, ItemState::Ok | ItemState::CloudOnly);
             let mut badges = vec![];
             match a.state {
-                ItemState::CloudOnly => badges.push("cloud"),
-                ItemState::Corrupt => badges.push("corrupt"),
-                ItemState::Missing => badges.push("missing"),
+                ItemState::CloudOnly => badges.push("cloud".to_owned()),
+                ItemState::Corrupt => badges.push("corrupt".to_owned()),
+                ItemState::Missing => badges.push("missing".to_owned()),
                 ItemState::Ok => {}
+            }
+            if let Some(n) = prev.and_then(|p| p.changed_since()) {
+                badges.push(format!("changed_since:{n}"));
             }
             Row {
                 out: ItemOut {
@@ -457,7 +482,7 @@ pub fn reconcile(
                     slot: slots[slot].name.clone(),
                     on: false,
                     state: ItemState::Missing,
-                    badges: vec!["missing"],
+                    badges: vec!["missing".to_owned()],
                     checkable: false,
                     thumb_key: None,
                     thumb_url: None,
@@ -465,6 +490,45 @@ pub fn reconcile(
                 });
                 kept_draft_items.push(DraftItem {
                     key,
+                    ..item.clone()
+                });
+            } else if item.retry_of().is_some() {
+                // Restored by Retry (FR-REF-26): a file that can't be found shows as missing.
+                let (source, pack_id, pack_name, file) = match key.strip_prefix("project:") {
+                    Some(f) => (Source::Project, None, None, f.to_owned()),
+                    None => {
+                        let found = picked
+                            .iter()
+                            .filter_map(|p| p.found.as_ref())
+                            .find(|l| key.starts_with(&format!("pack:{}:", l.json.pack_id)));
+                        (
+                            Source::Pack,
+                            found.map(|l| l.json.pack_id),
+                            found.map(|l| l.name.clone()),
+                            key_file(&key).to_owned(),
+                        )
+                    }
+                };
+                let slot = slot_index(slots, item.role);
+                missing_rows.push(ItemOut {
+                    key: key.clone(),
+                    source,
+                    pack_id,
+                    pack_name,
+                    file,
+                    role: item.role,
+                    slot: slots[slot].name.clone(),
+                    on: false,
+                    state: ItemState::Missing,
+                    badges: vec!["missing".to_owned()],
+                    checkable: false,
+                    thumb_key: None,
+                    thumb_url: None,
+                    path: None,
+                });
+                kept_draft_items.push(DraftItem {
+                    key,
+                    on: false,
                     ..item.clone()
                 });
             } else {
@@ -490,16 +554,18 @@ pub fn reconcile(
         .collect();
     let ready = slots_out.iter().all(|s| s.on >= s.min);
     let mut items: Vec<ItemOut> = rows.into_iter().map(|r| r.out).collect();
+    // R53: the draft keeps only roles the user chose (or Retry restored); `null` = the default,
+    // re-derived per model (FR-REF-17), so a model change can apply a pack's role.
     let mut draft_items: Vec<DraftItem> = items
         .iter()
-        .map(|i| DraftItem {
-            key: i.key.clone(),
-            on: i.on,
-            role: i.role,
-            extra: prev_items
-                .get(&i.key)
-                .map(|p| p.extra.clone())
-                .unwrap_or_default(),
+        .map(|i| {
+            let prev = prev_items.get(&i.key);
+            DraftItem {
+                key: i.key.clone(),
+                on: i.on,
+                role: prev.and_then(|p| p.role),
+                extra: prev.map(|p| p.extra.clone()).unwrap_or_default(),
+            }
         })
         .collect();
     draft_items.extend(kept_draft_items);
@@ -543,7 +609,7 @@ pub fn mark_duplicates(items: &mut [ItemOut], hash_of: impl Fn(&Path) -> Option<
             continue;
         };
         if !seen.insert(h) {
-            item.badges.push("duplicate");
+            item.badges.push("duplicate".to_owned());
         }
     }
 }

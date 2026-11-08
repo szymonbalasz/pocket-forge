@@ -17,6 +17,7 @@ use crate::commands::NoInput;
 use crate::core::{Command, Core, Validate};
 use crate::error::{CoreError, CoreResult, ErrorCode};
 use crate::provider_commands::provider_call;
+use crate::references::{self, DraftReferences, Prepared, resolve::Notice};
 use crate::settings;
 
 const MAX_PROMPT_CHARS: usize = 20_000;
@@ -189,10 +190,10 @@ pub struct JobDraft {
     /// Pinned seed, or `null` = random (FR-RGN-10).
     #[serde(default)]
     pub seed: Option<u64>,
-    /// REF's draft references (#51, FR-RGN-41, schema §4.5); `null` = REF's defaults. Carried
-    /// as given; REF slice 6 resolves them inside `prepare_job`.
+    /// REF's draft references (#51, FR-RGN-41, schema §4.5); `null` = REF's defaults.
+    /// Resolved and prepared inside [`prepare_job`].
     #[serde(default)]
-    pub references: Option<Value>,
+    pub references: Option<DraftReferences>,
 }
 
 impl Validate for JobDraft {
@@ -206,7 +207,20 @@ impl Validate for JobDraft {
                 "the prompt is too long",
             ));
         }
-        check_controls_map("draft.controls", &self.controls)
+        check_controls_map("draft.controls", &self.controls)?;
+        if let Some(r) = &self.references
+            && (r.packs.len() > 1000
+                || r.items.len() > 10_000
+                || r.items
+                    .iter()
+                    .any(|i| i.key.is_empty() || i.key.len() > 2400))
+        {
+            return Err(CoreError::invalid(
+                "draft.references",
+                "not a valid references selection",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -217,6 +231,8 @@ pub struct PreparedJob {
     pub fit: RegionFit,
     pub sent: controls::SentControls,
     pub images: prepare::SentImages,
+    /// REF's prepared references (FR-RGN-41): `JobRequest.references` and the job rows.
+    pub references: Prepared,
     pub estimate_id: String,
 }
 
@@ -227,7 +243,7 @@ impl PreparedJob {
             model_id: model_id.trim().to_owned(),
             final_prompt: final_prompt.to_owned(),
             controls: self.sent.controls.clone(),
-            references: vec![],
+            references: self.references.provider_references(),
             region_png: self.images.region_png.clone(),
             mask_png: self.images.mask_png.clone(),
             candidate_count: self.sent.candidate_count,
@@ -269,14 +285,23 @@ pub fn prepare_job(
         draft.seed,
         for_submit,
     )?;
+    // FR-RGN-41: after the controls check; its errors fail before any provider call. Without an
+    // open project only the test seam (`source_override`) gets here: no references to send.
+    let references = if core.state().project.is_none() {
+        Prepared::default()
+    } else {
+        references::prepare_for_send(core, &caps, draft.references.as_ref())?
+    };
     let mask = src.mask(draft.mask_id)?;
     let images = prepare::prepare(&*src, &fit, &mask, &caps)?;
-    let estimate_id = estimate_id(draft.model_id.trim(), &fit, &sent.cost_inputs);
+    let refs = references::prepare::estimate_inputs(&references.sent, &caps.slots);
+    let estimate_id = estimate_id(draft.model_id.trim(), &fit, &sent.cost_inputs, &refs);
     Ok(PreparedJob {
         caps,
         fit,
         sent,
         images,
+        references,
         estimate_id,
     })
 }
@@ -305,6 +330,10 @@ pub struct JobEstimateOutput {
     pub cost: Cost,
     pub fit: RegionFit,
     pub candidate_count: u32,
+    /// References that will be sent, after dedupe (the confirm text, FR-RGN-45).
+    pub references: usize,
+    /// REF's notices from prepare (`duplicate`: identical bytes sent once, FR-REF-21).
+    pub reference_notices: Vec<Notice>,
     /// `spend`, `cap`, `threshold`, `needs[threshold|unknown_cost|set_cap]`, `over_cap`.
     #[serde(flatten)]
     pub spend: SpendView,
@@ -346,6 +375,8 @@ impl Command for RgnJobEstimate {
             cost,
             fit: job.fit,
             candidate_count: job.sent.candidate_count,
+            references: job.references.sent.len(),
+            reference_notices: job.references.notices,
             spend: view,
         })
     }

@@ -34,7 +34,14 @@ import {
   thumbnailUrl,
   type PickerCandidate,
 } from '../editor';
-import { referencesBlocker, referencesDraft } from '../references';
+import {
+  referencesBlocker,
+  referencesCostKey,
+  referencesDraft,
+  referencesForSend,
+  restoreReferences,
+  settleReferences,
+} from '../references';
 import type { ConfirmPlan } from './confirm';
 import {
   costSignature,
@@ -246,6 +253,7 @@ export function currentDraft(s: RgnState): JobDraft | null {
     final_prompt: s.prompt,
     controls: sentValues(s.caps, s.evaluation, s.values, s.touched),
     seed: s.seedMode === 'pinned' ? s.seed : null,
+    references: referencesForSend(), // REF's selection (FR-RGN-41)
   };
 }
 
@@ -255,7 +263,9 @@ function signatureOf(s: RgnState): string | null {
   // Required controls (not the prompt) must be filled before an estimate makes sense.
   if (missing(s).some((n) => n !== 'prompt')) return null;
   const controls = sentValues(s.caps, s.evaluation, s.values, s.touched);
-  return costSignature(s.modelId, { w: s.fit.sent_w, h: s.fit.sent_h }, s.caps, controls);
+  const sig = costSignature(s.modelId, { w: s.fit.sent_w, h: s.fit.sent_h }, s.caps, controls);
+  // FR-RGN-42: ticks in cost-affecting reference slots re-estimate too.
+  return `${sig}|refs:${referencesCostKey()}`;
 }
 
 /** FR-RGN-12: re-checks the cost signature; a change re-estimates after 500 ms. */
@@ -663,6 +673,7 @@ export const rgn = {
   /** The References block changed (REF, FR-REF-20): re-render submit; save a user edit. */
   referencesChanged(save: boolean): void {
     set({});
+    schedule();
     if (save) saveDraftSoon();
   },
 
@@ -792,6 +803,7 @@ export const rgn = {
         },
       }));
       editorBridge.setCompare(null);
+      settleReferences(); // the Retry flags are history now (FR-REF-26)
       await Promise.all([refreshIterations(), loadSpend(), refreshProject()]);
     } catch (e) {
       const err = uiError(e);
@@ -840,6 +852,8 @@ export const rgn = {
         },
       });
       debouncer.reset();
+      // FR-RGN-44: the job's references, with changed / missing flags (REF resets its block).
+      restoreReferences(d.references ?? null);
       await selectModel(d.model_id, d.controls);
       saveDraftSoon();
     } catch (e) {

@@ -429,6 +429,32 @@ pub struct IterationRow {
     pub accepted_in_stack: bool,
     /// `references[]` count for the chip (FR-RGN-45).
     pub references: usize,
+    /// The chip's tooltip (FR-RGN-45): each file sent, with its pack (null = the project) and
+    /// role, in request order.
+    pub reference_files: Vec<ReferenceFile>,
+}
+
+/// One sent reference as the tracker tooltip lists it (FR-RGN-45).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReferenceFile {
+    pub file: String,
+    pub pack_name: Option<String>,
+    pub role: Option<String>,
+}
+
+/// The tooltip rows of a job's `references[]` (schema §4.6).
+fn reference_files(job: &JobFile) -> Vec<ReferenceFile> {
+    job.references
+        .iter()
+        .map(|r| {
+            let path = r["path"].as_str().unwrap_or_default();
+            ReferenceFile {
+                file: path.rsplit('/').next().unwrap_or(path).to_owned(),
+                pack_name: r["pack_name"].as_str().map(str::to_owned),
+                role: r["role"].as_str().map(str::to_owned),
+            }
+        })
+        .collect()
 }
 
 impl Command for RgnIterationsList {
@@ -461,6 +487,7 @@ impl Command for RgnIterationsList {
                 cost: shown_cost(live),
                 accepted_in_stack: p.manifest.layers.iter().any(|l| l.job_id == Some(j.id)),
                 references: j.references.len(),
+                reference_files: reference_files(j),
             }
         };
         let mut rows: Vec<IterationRow> = p

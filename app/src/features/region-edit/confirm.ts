@@ -31,6 +31,8 @@ export interface ConfirmPlan {
   enterConfirms: boolean;
   /** "N unstarred candidates of the previous job go to the trash". */
   trashCount: number;
+  /** References sent with the job: "with N references" (FR-RGN-45). */
+  references: number;
   canConfirm: boolean;
   /** Why it can't confirm yet. */
   blocker: string | null;
@@ -101,6 +103,7 @@ export function confirmPlan(
     needsSecond,
     enterConfirms: !needsSecond,
     trashCount,
+    references: est.references ?? 0,
     canConfirm: blocker === null,
     blocker,
     saveSpend,
