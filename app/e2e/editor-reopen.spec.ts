@@ -3,6 +3,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 import { hook, openMap } from './edt-mock';
+import { openFirstCard } from './mock-core';
 
 const W = 64;
 const H = 32;
@@ -120,8 +121,8 @@ test('FR-EDT-14 FR-EDT-24 after close and reopen the mask tint and the compare i
   page,
 }) => {
   await openMap(page);
-  await page.getByTestId('prj-toolbar-close').click();
-  await page.getByTestId('prj-home-recent-item').first().click();
+  await page.getByTestId('prj-panel-close').click();
+  await openFirstCard(page);
   await expect(page.getByTestId('edt-canvas-stage')).toHaveAttribute('data-image-loaded', 'true');
   await hook(page, 'setView', { scale: 0.5, tx: 0, ty: 0 });
 

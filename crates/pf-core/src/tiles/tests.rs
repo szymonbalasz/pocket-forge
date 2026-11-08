@@ -49,7 +49,7 @@ fn png_bytes(w: u32, h: u32, rgb: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Imports and opens a generated PNG; returns the project snapshot.
+/// Creates a project from a generated PNG and opens it; returns the project snapshot.
 fn open_png(e: &Env, name: &str, w: u32, h: u32) -> Value {
     let src = e.dir.path().join(name);
     if !src.exists() {
@@ -57,7 +57,10 @@ fn open_png(e: &Env, name: &str, w: u32, h: u32) -> Value {
     }
     let out = e
         .core
-        .dispatch("import_paths", json!({"paths": [src.to_string_lossy()]}))
+        .dispatch(
+            "project_create",
+            json!({"section": "maps", "paths": [src.to_string_lossy()]}),
+        )
         .unwrap();
     let path = out["items"][0]["path"].as_str().unwrap().to_owned();
     e.core
@@ -230,8 +233,7 @@ fn fr_edt_10_aborted_build_is_never_served_and_rebuilt_on_reopen() {
     let faults = Faults::parse("after_level:1", FaultAction::Error).unwrap();
     let e = env_in(dir, faults);
     let snap = open_png(&e, "crypt.png", 1300, 900);
-    // Saved, so the reopen below sees the same layer (image) id.
-    e.core.dispatch("project_save_revision", json!({})).unwrap();
+    // The original's image id is stable from creation (#48 (3)), so the reopen sees the same key.
     let desc = tiles_open(&e, &snap, false);
     let key = desc["key"].as_str().unwrap().to_owned();
     wait_built(&e, &key);

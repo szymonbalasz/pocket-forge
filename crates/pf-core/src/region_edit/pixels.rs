@@ -95,7 +95,7 @@ impl OpenProjectSource {
             project_id: p.manifest.project_id,
             size: (p.manifest.original.width, p.manifest.original.height),
             read_only: p.read_only.is_some(),
-            image_path: p.image_path.clone(),
+            image_path: p.original_path(),
             project_dir: p.dir.clone(),
             layers: p.manifest.layers.clone(),
             cache,

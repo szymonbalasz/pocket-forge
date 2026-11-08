@@ -10,13 +10,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ulid::Ulid;
 
+use std::sync::atomic::Ordering;
+
 use crate::core::{Command, Core, Validate, dispatch_json};
+use crate::create::{self, CreateItem};
 use crate::error::{CoreError, CoreResult, ErrorCode};
-use crate::import::{self, ImportItem};
-use crate::library::{self, LibraryConfig};
-use crate::manifest::RevisionEntry;
-use crate::project::{self, DraftInput, ProjectSnapshot};
-use crate::recent::{self, RecentEntry};
+use crate::library::{self, LibraryConfig, ProjectCard};
+use crate::manifest::{Kind, RevisionEntry};
+use crate::naming;
+use crate::project::{self, DraftInput, FolderFile, ProjectSnapshot};
 use crate::settings::{self, SettingsWarning};
 use crate::tiles;
 
@@ -100,8 +102,6 @@ pub struct LibrarySetRoots;
 #[serde(deny_unknown_fields)]
 pub struct LibrarySetRootsInput {
     pub roots: Vec<String>,
-    #[serde(default)]
-    pub import_dest: Option<String>,
 }
 
 impl Validate for LibrarySetRootsInput {
@@ -112,9 +112,6 @@ impl Validate for LibrarySetRootsInput {
         for (i, r) in self.roots.iter().enumerate() {
             check_path(&format!("roots[{i}]"), r)?;
         }
-        if let Some(d) = &self.import_dest {
-            check_path("import_dest", d)?;
-        }
         Ok(())
     }
 }
@@ -124,41 +121,87 @@ impl Command for LibrarySetRoots {
     type Input = LibrarySetRootsInput;
     type Output = LibraryConfig;
 
+    /// FR-PRJ-01: validates, creates any missing section folders, then saves.
     fn run(core: &Core, input: Self::Input) -> CoreResult<LibraryConfig> {
         let roots: Vec<PathBuf> = input.roots.iter().map(PathBuf::from).collect();
         library::validate_roots(&core.ctx, &roots)?;
-        let import_dest = input.import_dest.map(PathBuf::from);
-        if let Some(dest) = &import_dest
-            && !roots
-                .iter()
-                .any(|r| library::normalise(dest).starts_with(library::normalise(r)))
-        {
-            return Err(CoreError::invalid(
-                "import_dest",
-                "the import destination must be inside a library folder",
-            ));
+        for (i, root) in roots.iter().enumerate() {
+            library::ensure_sections(root).map_err(|e| e.with_field(format!("roots[{i}]")))?;
         }
         let mut state = core.state();
         let mut next = state.settings.clone();
         next.library.roots = roots;
-        next.library.import_dest = import_dest;
         settings::save(&core.ctx, &next)?;
         state.settings = next;
         Ok(library::config(&core.ctx, &state.settings))
     }
 }
 
-// ---------------------------------------------------------------- import
+/// A section by its folder (`maps|tokens|items`, the UI's spelling) or its kind
+/// (`map|token|item`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionInput {
+    #[serde(alias = "map")]
+    Maps,
+    #[serde(alias = "token")]
+    Tokens,
+    #[serde(alias = "item")]
+    Items,
+}
 
-pub struct ImportPaths;
+impl From<SectionInput> for Kind {
+    fn from(s: SectionInput) -> Kind {
+        match s {
+            SectionInput::Maps => Kind::Map,
+            SectionInput::Tokens => Kind::Token,
+            SectionInput::Items => Kind::Item,
+        }
+    }
+}
+
+pub struct LibraryListProjects;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ImportPathsInput {
+pub struct SectionOnly {
+    pub section: SectionInput,
+}
+
+impl Validate for SectionOnly {}
+
+impl Command for LibraryListProjects {
+    const NAME: &'static str = "library_list_projects";
+    type Input = SectionOnly;
+    type Output = Vec<ProjectCard>;
+
+    /// FR-PRJ-49. Doesn't hold the state lock while it reads the folders. Thumbnails are served
+    /// through EDT's `library` key space (OQ-PRJ-16).
+    fn run(core: &Core, input: SectionOnly) -> CoreResult<Vec<ProjectCard>> {
+        let settings = core.state().settings.clone();
+        let mut cards = library::list_projects(&core.ctx, &settings, input.section.into())?;
+        for card in &mut cards {
+            card.thumb_url = card
+                .thumb
+                .as_deref()
+                .and_then(|t| tiles::register_library_image(core, t));
+        }
+        Ok(cards)
+    }
+}
+
+// ---------------------------------------------------------------- creation
+
+pub struct ProjectCreate;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectCreateInput {
+    pub section: SectionInput,
     pub paths: Vec<String>,
 }
 
-impl Validate for ImportPathsInput {
+impl Validate for ProjectCreateInput {
     fn validate(&self) -> CoreResult<()> {
         if self.paths.is_empty() || self.paths.len() > MAX_PATHS {
             return Err(CoreError::invalid(
@@ -174,22 +217,149 @@ impl Validate for ImportPathsInput {
 }
 
 #[derive(Debug, Serialize)]
-pub struct ImportPathsOutput {
-    pub items: Vec<ImportItem>,
+pub struct ProjectCreateOutput {
+    pub items: Vec<CreateItem>,
 }
 
-impl Command for ImportPaths {
-    const NAME: &'static str = "import_paths";
-    type Input = ImportPathsInput;
-    type Output = ImportPathsOutput;
+impl Command for ProjectCreate {
+    const NAME: &'static str = "project_create";
+    type Input = ProjectCreateInput;
+    type Output = ProjectCreateOutput;
 
-    fn run(core: &Core, input: Self::Input) -> CoreResult<ImportPathsOutput> {
-        let paths: Vec<PathBuf> = input.paths.iter().map(PathBuf::from).collect();
+    /// FR-PRJ-03 … 11. Runs without the state lock, so `project_create_cancel` and other
+    /// commands answer meanwhile. Cancel → `canceled` with `detail.items`.
+    fn run(core: &Core, input: Self::Input) -> CoreResult<ProjectCreateOutput> {
+        let _one_at_a_time = core.create_lock.lock().unwrap_or_else(|e| e.into_inner());
+        core.create_cancel.store(false, Ordering::Relaxed);
         let settings = core.state().settings.clone();
-        let items = import::import_paths(&core.ctx, &settings, &paths)?;
-        core.ctx
-            .emit("import:done", serde_json::json!({ "total": items.len() }));
-        Ok(ImportPathsOutput { items })
+        let paths: Vec<PathBuf> = input.paths.iter().map(PathBuf::from).collect();
+        let items = create::create_projects(
+            &core.ctx,
+            &settings,
+            input.section.into(),
+            &paths,
+            &core.create_cancel,
+            Some(&core.thumbs),
+        )?;
+        Ok(ProjectCreateOutput { items })
+    }
+}
+
+pub struct ProjectCreateCancel;
+
+impl Command for ProjectCreateCancel {
+    const NAME: &'static str = "project_create_cancel";
+    type Input = NoInput;
+    type Output = Ok_;
+
+    fn run(core: &Core, _: NoInput) -> CoreResult<Ok_> {
+        core.create_cancel.store(true, Ordering::Relaxed);
+        Ok(Ok_ {})
+    }
+}
+
+pub struct ProjectCreateFromClipboard;
+
+/// Largest pasted image accepted, in base64 characters (about 512 MiB of bytes).
+const MAX_CLIPBOARD_B64: usize = 700 * 1024 * 1024;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectCreateFromClipboardInput {
+    pub section: SectionInput,
+    /// Encoded PNG, JPEG or WebP bytes, standard base64.
+    pub data_b64: String,
+}
+
+impl std::fmt::Debug for ProjectCreateFromClipboardInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProjectCreateFromClipboardInput")
+            .field("section", &self.section)
+            .field("data_b64", &self.data_b64.len())
+            .finish()
+    }
+}
+
+impl Validate for ProjectCreateFromClipboardInput {
+    fn validate(&self) -> CoreResult<()> {
+        if self.data_b64.trim().is_empty() {
+            return Err(CoreError::invalid("data_b64", "no image data"));
+        }
+        if self.data_b64.len() > MAX_CLIPBOARD_B64 {
+            return Err(
+                CoreError::new(ErrorCode::TooLarge, "the pasted image is too large")
+                    .with_field("data_b64"),
+            );
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct PathOutput {
+    pub path: PathBuf,
+}
+
+impl Command for ProjectCreateFromClipboard {
+    const NAME: &'static str = "project_create_from_clipboard";
+    type Input = ProjectCreateFromClipboardInput;
+    type Output = PathOutput;
+
+    /// FR-PRJ-10.
+    fn run(core: &Core, input: Self::Input) -> CoreResult<PathOutput> {
+        let bytes = crate::b64::decode(&input.data_b64)
+            .ok_or_else(|| CoreError::invalid("data_b64", "not valid base64"))?;
+        let _one_at_a_time = core.create_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let settings = core.state().settings.clone();
+        let mut creator = create::Creator::new(
+            &core.ctx,
+            &settings,
+            input.section.into(),
+            Some(&core.thumbs),
+        )?;
+        let path = creator.create_from_bytes(&bytes)?;
+        Ok(PathOutput { path })
+    }
+}
+
+pub struct ProjectRename;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectRenameInput {
+    pub path: String,
+    pub name: String,
+}
+
+impl Validate for ProjectRenameInput {
+    fn validate(&self) -> CoreResult<()> {
+        check_path("path", &self.path)?;
+        if self.name.chars().count() > 4 * naming::MAX_NAME_CHARS {
+            return Err(
+                CoreError::new(ErrorCode::InvalidName, "the name is too long").with_field("name"),
+            );
+        }
+        Ok(())
+    }
+}
+
+impl Command for ProjectRename {
+    const NAME: &'static str = "project_rename";
+    type Input = ProjectRenameInput;
+    type Output = PathOutput;
+
+    /// FR-PRJ-45: a closed project only.
+    fn run(core: &Core, input: Self::Input) -> CoreResult<PathOutput> {
+        let state = core.state();
+        let open_dir = state.project.as_ref().map(|p| p.dir.clone());
+        let path = library::rename_project(
+            &core.ctx,
+            &state.settings,
+            &PathBuf::from(&input.path),
+            &input.name,
+            open_dir.as_deref(),
+        )?;
+        Ok(PathOutput { path })
     }
 }
 
@@ -200,6 +370,7 @@ pub struct ProjectOpen;
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectOpenInput {
+    /// The project folder (FR-PRJ-14).
     pub path: String,
 }
 
@@ -216,10 +387,16 @@ impl Command for ProjectOpen {
 
     fn run(core: &Core, input: Self::Input) -> CoreResult<ProjectSnapshot> {
         let mut state = core.state();
-        let p = project::open(&core.ctx, &state.settings, &PathBuf::from(&input.path))?;
+        let settings = state.settings.clone();
+        let p = project::open(
+            &core.ctx,
+            &settings,
+            &PathBuf::from(&input.path),
+            Some(core.thumbs.clone()),
+        )?;
         let snap = p.snapshot();
-        if let Err(e) = recent::touch(&core.ctx, &p.image_path, &snap.name) {
-            tracing::warn!(error = %e, "could not update recent.json");
+        if let Some(old) = state.project.take() {
+            old.decoded.release();
         }
         core.served().reset(Some(snap.project_id));
         state.project = Some(p);
@@ -234,9 +411,12 @@ impl Command for ProjectClose {
     type Input = NoInput;
     type Output = Ok_;
 
+    /// Releases the decoded original (R11) and the served images.
     fn run(core: &Core, _: NoInput) -> CoreResult<Ok_> {
         let mut state = core.state();
-        state.project = None;
+        if let Some(p) = state.project.take() {
+            p.decoded.release();
+        }
         core.served().reset(None);
         Ok(Ok_ {})
     }
@@ -260,6 +440,9 @@ pub struct ProjectPutDraft;
 #[serde(deny_unknown_fields)]
 pub struct ProjectPutDraftInput {
     pub draft: DraftInput,
+    /// EXP's unsaved export settings (R30): `grid`, `target_px_per_square`, `format`.
+    #[serde(default)]
+    pub export: Option<serde_json::Map<String, Value>>,
 }
 
 impl Validate for ProjectPutDraftInput {
@@ -276,6 +459,16 @@ impl Validate for ProjectPutDraftInput {
             .is_some_and(|m| m.is_empty() || m.len() > 200)
         {
             return Err(CoreError::invalid("draft.model_id", "not a valid model id"));
+        }
+        if let Some(e) = &self.export
+            && let Some(k) = e
+                .keys()
+                .find(|k| !matches!(k.as_str(), "grid" | "target_px_per_square" | "format"))
+        {
+            return Err(CoreError::invalid(
+                format!("export.{k}"),
+                "the draft save carries grid, target_px_per_square and format only",
+            ));
         }
         Ok(())
     }
@@ -295,7 +488,7 @@ impl Command for ProjectPutDraft {
         let mut state = core.state();
         let install_id = state.settings.install_id;
         let p = state.project.as_mut().ok_or_else(no_project)?;
-        let seq = project::put_draft(&core.ctx, install_id, p, input.draft)?;
+        let seq = project::put_draft(&core.ctx, install_id, p, input.draft, input.export)?;
         Ok(SeqOutput { seq })
     }
 }
@@ -347,15 +540,160 @@ impl Command for ProjectListRevisions {
     }
 }
 
-pub struct RecentList;
+pub struct ProjectRestoreRevision;
 
-impl Command for RecentList {
-    const NAME: &'static str = "recent_list";
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectRestoreRevisionInput {
+    pub rev_id: Ulid,
+}
+
+impl Validate for ProjectRestoreRevisionInput {}
+
+impl Command for ProjectRestoreRevision {
+    const NAME: &'static str = "project_restore_revision";
+    type Input = ProjectRestoreRevisionInput;
+    type Output = RevisionEntry;
+
+    /// FR-PRJ-23, 43: undo/redo of accept and re-tune.
+    fn run(core: &Core, input: Self::Input) -> CoreResult<RevisionEntry> {
+        let mut state = core.state();
+        let install_id = state.settings.install_id;
+        let p = state.project.as_mut().ok_or_else(no_project)?;
+        project::restore_revision(&core.ctx, install_id, p, input.rev_id)
+    }
+}
+
+pub struct ProjectRelinkOriginal;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PathInput {
+    pub path: String,
+}
+
+impl Validate for PathInput {
+    fn validate(&self) -> CoreResult<()> {
+        check_path("path", &self.path)
+    }
+}
+
+impl Command for ProjectRelinkOriginal {
+    const NAME: &'static str = "project_relink_original";
+    type Input = PathInput;
+    type Output = Ok_;
+
+    /// FR-PRJ-16.
+    fn run(core: &Core, input: PathInput) -> CoreResult<Ok_> {
+        let mut state = core.state();
+        let install_id = state.settings.install_id;
+        let p = state.project.as_mut().ok_or_else(no_project)?;
+        project::relink_original(&core.ctx, install_id, p, &PathBuf::from(&input.path))?;
+        Ok(Ok_ {})
+    }
+}
+
+pub struct ProjectPrefetchOriginal;
+
+impl Command for ProjectPrefetchOriginal {
+    const NAME: &'static str = "project_prefetch_original";
     type Input = NoInput;
-    type Output = Vec<RecentEntry>;
+    type Output = Ok_;
 
-    fn run(core: &Core, _: NoInput) -> CoreResult<Vec<RecentEntry>> {
-        Ok(recent::load(&core.ctx))
+    /// FR-PRJ-42, R11: starts the background decode; `project:original-ready` follows. A decode
+    /// that already failed reports its error (`corrupt`, …).
+    fn run(core: &Core, _: NoInput) -> CoreResult<Ok_> {
+        let decoded = {
+            let state = core.state();
+            let p = state.project.as_ref().ok_or_else(no_project)?;
+            if p.read_only == Some(project::ReadOnlyReason::OriginalMissing) {
+                return Err(CoreError::new(
+                    ErrorCode::NotFound,
+                    "the original is missing",
+                ));
+            }
+            library::hydrate_if_needed(&core.ctx, &p.original_path())?;
+            p.decoded.clone()
+        };
+        match decoded.get(&core.ctx) {
+            Ok(_) => Ok(Ok_ {}),
+            Err(e) if e.code == ErrorCode::OriginalUnavailable => Ok(Ok_ {}),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+pub struct ProjectFolderList;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FolderInput {
+    pub folder: String,
+}
+
+impl Validate for FolderInput {}
+
+fn with_thumb_urls(core: &Core, mut files: Vec<FolderFile>) -> Vec<FolderFile> {
+    for f in files.iter_mut().filter(|f| f.image) {
+        f.thumb_url = tiles::register_library_image(core, &f.path);
+    }
+    files
+}
+
+impl Command for ProjectFolderList {
+    const NAME: &'static str = "project_folder_list";
+    type Input = FolderInput;
+    type Output = Vec<FolderFile>;
+
+    /// FR-PRJ-48: on open, focus and Refresh; metadata only.
+    fn run(core: &Core, input: FolderInput) -> CoreResult<Vec<FolderFile>> {
+        let files = {
+            let state = core.state();
+            let p = state.project.as_ref().ok_or_else(no_project)?;
+            project::folder_list(p, &input.folder)?
+        };
+        Ok(with_thumb_urls(core, files))
+    }
+}
+
+pub struct ProjectFolderAdd;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectFolderAddInput {
+    pub folder: String,
+    pub paths: Vec<String>,
+}
+
+impl Validate for ProjectFolderAddInput {
+    fn validate(&self) -> CoreResult<()> {
+        if self.paths.is_empty() || self.paths.len() > MAX_PATHS {
+            return Err(CoreError::invalid(
+                "paths",
+                format!("give 1 to {MAX_PATHS} paths"),
+            ));
+        }
+        for (i, p) in self.paths.iter().enumerate() {
+            check_path(&format!("paths[{i}]"), p)?;
+        }
+        Ok(())
+    }
+}
+
+impl Command for ProjectFolderAdd {
+    const NAME: &'static str = "project_folder_add";
+    type Input = ProjectFolderAddInput;
+    type Output = Vec<FolderFile>;
+
+    /// FR-PRJ-47: copies into `references/`, `structure/` or `parts/`.
+    fn run(core: &Core, input: Self::Input) -> CoreResult<Vec<FolderFile>> {
+        let files = {
+            let state = core.state();
+            let p = state.project.as_ref().ok_or_else(no_project)?;
+            let paths: Vec<PathBuf> = input.paths.iter().map(PathBuf::from).collect();
+            project::folder_add(&core.ctx, p, &input.folder, &paths)?
+        };
+        Ok(with_thumb_urls(core, files))
     }
 }
 
@@ -460,14 +798,12 @@ registry![
     AppInfo,
     LibraryGetConfig,
     LibrarySetRoots,
-    ImportPaths,
     ProjectOpen,
     ProjectClose,
     ProjectGet,
     ProjectPutDraft,
     ProjectSaveRevision,
     ProjectListRevisions,
-    RecentList,
     EdtImageOpen,
     ProviderStatus,
     EdtTilesOpen,
@@ -485,6 +821,16 @@ registry![
     RgnJobEstimate,
     RgnSpendGet,
     RgnSpendSet,
+    LibraryListProjects,
+    ProjectCreate,
+    ProjectCreateCancel,
+    ProjectCreateFromClipboard,
+    ProjectRename,
+    ProjectRestoreRevision,
+    ProjectRelinkOriginal,
+    ProjectPrefetchOriginal,
+    ProjectFolderList,
+    ProjectFolderAdd,
 ];
 
 #[cfg(test)]
@@ -535,16 +881,29 @@ mod tests {
             ErrorCode::NotFound
         );
         let e = core
-            .dispatch("import_paths", json!({"paths": "x"}))
+            .dispatch("project_create", json!({"section": "maps", "paths": "x"}))
             .unwrap_err();
         assert_eq!(
             (e.code, e.field.as_deref()),
             (ErrorCode::InvalidInput, Some("input"))
         );
         let e = core
-            .dispatch("import_paths", json!({"paths": [""]}))
+            .dispatch("project_create", json!({"section": "maps", "paths": [""]}))
             .unwrap_err();
         assert_eq!(e.field.as_deref(), Some("paths[0]"));
+        let e = core
+            .dispatch(
+                "project_create",
+                json!({"section": "dungeons", "paths": ["a"]}),
+            )
+            .unwrap_err();
+        assert_eq!(e.field.as_deref(), Some("input"));
+        for retired in ["import_paths", "recent_list", "import_clipboard_image"] {
+            assert_eq!(
+                core.dispatch(retired, json!({})).unwrap_err().code,
+                ErrorCode::NotFound
+            );
+        }
         let e = core
             .dispatch("project_save_revision", json!({}))
             .unwrap_err();
@@ -554,21 +913,37 @@ mod tests {
     }
 
     #[test]
-    fn import_open_image_serve_save_reopen_end_to_end() {
+    fn create_list_open_image_serve_save_reopen_end_to_end() {
         let (dir, core) = core();
         let src = dir.path().join("outside.png");
         std::fs::write(&src, png_bytes(64, 48)).unwrap();
 
         let out = core
-            .dispatch("import_paths", json!({"paths": [src.to_string_lossy()]}))
+            .dispatch(
+                "project_create",
+                json!({"section": "maps", "paths": [src.to_string_lossy()]}),
+            )
             .unwrap();
-        assert_eq!(out["items"][0]["status"], "imported");
+        assert_eq!(out["items"][0]["status"], "created");
         let path = out["items"][0]["path"].as_str().unwrap().to_owned();
+        assert!(path.ends_with("outside"));
+
+        let cards = core
+            .dispatch("library_list_projects", json!({"section": "maps"}))
+            .unwrap();
+        assert_eq!(cards[0]["name"], "outside");
+        assert_eq!(cards[0]["path"].as_str().unwrap(), path);
+        let thumb = cards[0]["thumb_url"].as_str().unwrap();
+        assert!(thumb.contains("/i/l-"), "{thumb}");
+        let res = core.serve_scheme(&thumb[thumb.find("/i/").unwrap()..]);
+        assert_eq!((res.status, res.content_type), (200, Some("image/jpeg")));
 
         let snap = core
             .dispatch("project_open", json!({"path": path}))
             .unwrap();
-        assert_eq!(snap["saved"], false);
+        assert_eq!(snap["kind"], "map");
+        assert_eq!(snap["original_image_id"], snap["layers"][0]["id"]);
+        assert!(snap["committed_at"].is_string());
         assert_eq!(
             (snap["width"].as_u64(), snap["height"].as_u64()),
             (Some(64), Some(48))
@@ -585,8 +960,13 @@ mod tests {
         let res = core.serve_scheme(scheme_path);
         assert_eq!((res.status, res.content_type), (200, Some("image/png")));
 
+        core.dispatch(
+            "project_put_draft",
+            json!({"draft": {"final_prompt": "moss"}}),
+        )
+        .unwrap();
         let rev = core.dispatch("project_save_revision", json!({})).unwrap();
-        assert_eq!(rev["reason"], "create");
+        assert_eq!(rev["reason"], "save");
         core.dispatch("project_close", json!({})).unwrap();
         assert_eq!(
             core.serve_scheme(scheme_path).status,
@@ -594,12 +974,15 @@ mod tests {
             "keys unregistered on close"
         );
 
-        let recent = core.dispatch("recent_list", json!({})).unwrap();
-        assert_eq!(recent[0]["path"].as_str().unwrap(), path);
+        assert_eq!(
+            core.serve_scheme(&thumb[thumb.find("/i/").unwrap()..])
+                .status,
+            200,
+            "library keys survive close"
+        );
         let again = core
             .dispatch("project_open", json!({"path": path}))
             .unwrap();
-        assert_eq!(again["saved"], true);
         assert_eq!(again["project_id"], snap["project_id"]);
         assert_eq!(again["head_revision"], rev["id"]);
     }

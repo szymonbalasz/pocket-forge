@@ -30,7 +30,7 @@
 | Library: previews, search | A | A |
 | Parts: reusable cut-outs placed on other projects (#45) | — | A |
 | Art recipes (style text, references, constraints, output, settings) | A | A |
-| Reference images with roles (style / structure / identity) | A | A |
+| Reference packs + project references attached to requests; roles where the model exposes them (#51) | A | **S** |
 | Prompt preview and editing of the final submitted prompt | S? | S |
 | Model capability discovery (controls reflect the model) | A | **S** (#37) |
 | Structural sketch: import or draw | A | A |
@@ -38,7 +38,7 @@
 | Tags and collections | A | A |
 | Token workflow and presets | A | A |
 | Item art workflow and presets | A | A |
-| Text-to-image generation of a new asset | A | A |
+| Text-to-image generation of a new asset | A | A (first after the MVP, #52) |
 | Joining / overlapping map sections (map extension) | B | B |
 | Comments / notes pinned to image locations | B | B |
 | Links to campaign subjects (locations, NPCs, items) | B | B |

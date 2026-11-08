@@ -1,15 +1,16 @@
-// App-wide state shared by features: the open asset project and its save status.
+// App-wide state shared by features: the open asset project and its save state.
 // Holds no domain logic: every change is a core command, and the store keeps its result.
 import { useSyncExternalStore } from 'react';
 
-import { api, ApiError, type ImportItem, type ProjectSnapshot } from '../api';
+import { api, ApiError, hasCore, onEvent, type ProjectSnapshot } from '../api';
 
+/** The PRJ status-bar segment's states (asset-project §7). */
 export type SaveStatus =
-  | { kind: 'unsaved' }
-  | { kind: 'saving' }
   | { kind: 'saved'; at: string }
-  | { kind: 'unchanged' }
-  | { kind: 'failed'; code: string; message: string };
+  | { kind: 'saving' }
+  | { kind: 'unchanged'; at: string }
+  | { kind: 'failed'; code: string; message: string; retrying: boolean }
+  | { kind: 'conflict' };
 
 export interface ProjectState {
   project: ProjectSnapshot | null;
@@ -17,38 +18,75 @@ export interface ProjectState {
   /** Last command error worth showing in a banner. */
   error: { code: string; message: string } | null;
   busy: boolean;
+  /** The project folder being opened, or the last one that failed to open (Retry). */
+  opening: string | null;
+  /** Bumped after every commit this UI knows of, so panels reload their lists. */
+  revision: number;
 }
 
 const initial: ProjectState = {
   project: null,
-  save: { kind: 'unsaved' },
+  save: { kind: 'saved', at: '' },
   error: null,
   busy: false,
+  opening: null,
+  revision: 0,
 };
 
 let state: ProjectState = initial;
 const listeners = new Set<() => void>();
+let listening = false;
 
 function set(patch: Partial<ProjectState>): void {
   state = { ...state, ...patch };
   for (const l of listeners) l();
 }
 
-function errorOf(e: unknown): { code: string; message: string } {
+export function errorOf(e: unknown): { code: string; message: string } {
   return e instanceof ApiError
     ? { code: e.code, message: e.message }
     : { code: 'ui', message: String(e) };
 }
 
-function saveStatusOf(p: ProjectSnapshot): SaveStatus {
-  return p.saved
-    ? { kind: 'saved', at: p.revisions.at(-1)?.created_at ?? '' }
-    : { kind: 'unsaved' };
+function savedAt(p: ProjectSnapshot): string {
+  return p.committed_at ?? p.revisions.at(-1)?.created_at ?? '';
+}
+
+function bump(): void {
+  set({ revision: state.revision + 1 });
+}
+
+/** Core events that change the save state (asset-project §9). */
+function listen(): void {
+  if (listening || !hasCore()) return;
+  listening = true;
+  const on = (p: Promise<unknown>) => p.catch(() => undefined);
+  on(
+    onEvent('project:committed', () => {
+      if (!state.project) return;
+      set({ save: { kind: 'saved', at: new Date().toISOString() } });
+      bump();
+    }),
+  );
+  on(
+    onEvent('project:save-failed', ({ reason, retrying }) => {
+      if (!state.project) return;
+      set({
+        save: { kind: 'failed', code: reason, message: reason.replace(/_/g, ' '), retrying },
+      });
+    }),
+  );
+  on(
+    onEvent('project:conflict', () => {
+      if (state.project) set({ save: { kind: 'conflict' } });
+    }),
+  );
 }
 
 export const projectStore = {
   get: (): ProjectState => state,
   subscribe(listener: () => void): () => void {
+    listen();
     listeners.add(listener);
     return () => listeners.delete(listener);
   },
@@ -57,59 +95,88 @@ export const projectStore = {
     set(initial);
   },
 
+  /** Opens a project folder (FR-PRJ-14). */
   async open(path: string): Promise<boolean> {
-    set({ busy: true, error: null });
+    set({ busy: true, error: null, opening: path });
     try {
+      if (state.project) await api.project.close().catch(() => undefined);
       const project = await api.project.open(path);
-      set({ project, save: saveStatusOf(project), busy: false });
+      set({ project, save: { kind: 'saved', at: savedAt(project) }, busy: false, opening: null });
+      bump();
       return true;
     } catch (e) {
-      set({ error: errorOf(e), busy: false });
+      set({ project: null, error: errorOf(e), busy: false });
       return false;
     }
   },
 
+  /** Back to the home grid. */
   async close(): Promise<void> {
     try {
       await api.project.close();
-    } finally {
-      set({ project: null, save: { kind: 'unsaved' }, error: null });
+    } catch (e) {
+      // `unsaved` (FR-PRJ-21): stay open and say why.
+      const err = errorOf(e);
+      if (err.code === 'unsaved') {
+        set({ error: err });
+        return;
+      }
     }
+    set({ project: null, save: initial.save, error: null });
+    bump();
   },
 
-  /** Ctrl+S: a revision if anything changed (the first save creates the project). */
-  async save(): Promise<void> {
+  /** Re-reads the open project (after a restore, relink, …). */
+  async reload(): Promise<void> {
+    if (!state.project) return;
+    try {
+      const project = await api.project.get();
+      set({ project });
+    } catch (e) {
+      set({ error: errorOf(e) });
+    }
+    bump();
+  },
+
+  /** Ctrl+S: a `save` revision if anything changed since the head (FR-PRJ-23). */
+  async save(label?: string): Promise<void> {
     if (!state.project) return;
     set({ save: { kind: 'saving' } });
     try {
-      const rev = await api.project.saveRevision();
+      const rev = await api.project.saveRevision(label);
       const project = await api.project.get();
-      set({ project, save: { kind: 'saved', at: rev.created_at } });
+      set({ project: project ?? state.project, save: { kind: 'saved', at: rev.created_at } });
     } catch (e) {
       const err = errorOf(e);
+      const at = state.project ? savedAt(state.project) : '';
       set({
-        save: err.code === 'unchanged' ? { kind: 'unchanged' } : { kind: 'failed', ...err },
+        save:
+          err.code === 'unchanged'
+            ? { kind: 'unchanged', at }
+            : err.code === 'conflict'
+              ? { kind: 'conflict' }
+              : { kind: 'failed', ...err, retrying: false },
       });
     }
+    bump();
   },
 
-  /** Imports paths, then opens the first usable one. Returns the per-item results. */
-  async importAndOpen(paths: string[]): Promise<ImportItem[]> {
-    set({ busy: true, error: null });
+  /** Restores a revision as a new `restore` revision (FR-PRJ-23, 43). */
+  async restore(revId: string): Promise<void> {
+    if (!state.project) return;
+    set({ save: { kind: 'saving' } });
     try {
-      const { items } = await api.library.importPaths(paths);
-      set({ busy: false });
-      for (const item of items) {
-        if (item.status !== 'skipped') {
-          await projectStore.open(item.path);
-          break;
-        }
-      }
-      return items;
+      const rev = await api.project.restoreRevision(revId);
+      const project = await api.project.get();
+      set({ project: project ?? state.project, save: { kind: 'saved', at: rev.created_at } });
     } catch (e) {
-      set({ error: errorOf(e), busy: false });
-      return [];
+      set({ error: errorOf(e), save: { kind: 'saved', at: savedAt(state.project) } });
     }
+    bump();
+  },
+
+  setError(error: { code: string; message: string } | null): void {
+    set({ error });
   },
 
   clearError(): void {

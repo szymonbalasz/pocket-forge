@@ -35,11 +35,11 @@
 │    │             │ status bar: zoom, mask, job   │              │
 └────┴─────────────┴──────────────────────────────┴──────────────┘
 ```
-- **Section rail** (56 px): Maps, Tokens, Items, then Settings at the bottom. Owner: asset-project (PRJ).
+- **Section rail** (56 px): Maps, Tokens, Items, **References**, then Settings at the bottom. Owner: asset-project (PRJ). References is not a section: selecting it shows the packs home (reference-packs, REF) in the home slot.
 - **Home** (no project open): a grid of project cards for the selected section (thumbnail of the working image, name, iteration count, last edited) and **+ New**. Owner: PRJ.
 - **Left panel** (240–360 px, resizable): the project's folders (Working, References, Structure, Parts, Results), then History (revisions) and Storage (disk use). Owner: PRJ.
 - **Canvas, toolbar, status bar, candidate picker:** editor-canvas (EDT).
-- **Right panel** (300–380 px): Generate (region-edit, RGN), then Export (EXP), as collapsible sections.
+- **Right panel** (300–380 px): Generate (region-edit, RGN), then Export (EXP), as collapsible sections. Inside Generate, the **References block** (owned by REF, rendered by RGN through REF's `index.ts`) sits between Model and Prompt and is hidden when the model has no reference slots. The multi-select pack picker uses Radix Popover.
 - **Iteration tracker:** the bottom strip lists iterations (`results/NNN`). Owner: RGN, using EDT's picker for the selected iteration.
 - **Status bar** is shared: features register **segments** (EDT zoom and mask, PRJ save state, RGN job state, PRV provider chip) through the feature registry, ordered by a `priority` number. EDT owns the bar itself.
 - Slots live in `app/src/shell/Layout.tsx`; features register into a slot (or a status-bar segment) through the feature registry. A feature never renders into another feature's slot.

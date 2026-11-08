@@ -17,3 +17,6 @@ Small items for idle slots (see [process.md](../process.md)). The planned work a
 | BL-11 | A deleted tile is requested 5× instead of 3 (FR-EDT-12) | XS | tile manager | — | open |
 | BL-12 | The provider chip sits on the rail; move it to a status-bar segment (ui-guidelines) | XS | `features/provider`, shell | PRJ UI build | open, PRJ UI builder |
 | BL-13 | Flaky: `fr_prj_15_changed_original_opens_read_only` (size+mtime misses a rewrite within one mtime tick) | XS | `pf-core` project | PRJ core build | open, PRJ core builder |
+| BL-14 | EDT doesn't redraw the region outline when the margin changes, or when Retry fills in a job's region: add an EDT bridge setter | S | `features/editor` bridge, `features/region-edit` | — | open |
+| BL-15 | The right panel is empty on Home: show a hint or collapse it | XS | shell | PRJ UI merge | open |
+| BL-16 | EDT `library` keys serve user-folder images at full size: add a `max_side` copy (OQ-PRJ-16 said ≤ 512 px) | XS | `pf-core` tiles.rs | — | open |

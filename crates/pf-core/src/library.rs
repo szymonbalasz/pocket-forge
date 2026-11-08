@@ -1,15 +1,24 @@
-//! Library roots and the import destination (FR-PRJ-01, FR-PRJ-02, FR-PRJ-04).
+//! Library roots, sections and the home grid (FR-PRJ-01, 02, 09, 45, 46, 49).
+//!
+//! A root holds `Maps/`, `Tokens/`, `Items/` (#44); each project is a folder in one of them.
 
 use std::path::{Component, Path, PathBuf};
+use std::time::Duration;
 
 use serde::Serialize;
+use serde_json::Value;
+use ulid::Ulid;
 
 use crate::context::Context;
 use crate::error::{CoreError, CoreResult, ErrorCode};
+use crate::fsx;
+use crate::manifest::{Kind, MANIFEST_FILE, MANIFEST_SCHEMA_VERSION, THUMB_FILE};
+use crate::naming;
 use crate::settings::Settings;
+use crate::time::Timestamp;
 
-/// Default import destination folder under the first root (#40).
-pub const IMPORTED_DIR: &str = "Imported";
+/// Creation temp folders older than this are removed at startup (FR-PRJ-09, R35).
+pub const STALE_TEMP_DIR_AGE: Duration = Duration::from_secs(3600);
 
 /// One effective library root.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -22,8 +31,8 @@ pub struct RootStatus {
 /// What `library_get_config` returns.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct LibraryConfig {
+    /// The first receives new projects (FR-PRJ-01).
     pub roots: Vec<RootStatus>,
-    pub import_dest: Option<PathBuf>,
     /// True when `PF_LIBRARY_DIR` replaces the configured roots for this run.
     pub overridden: bool,
     /// False on first run, before a root is chosen.
@@ -38,14 +47,38 @@ pub fn effective_roots(ctx: &Context, settings: &Settings) -> Vec<PathBuf> {
     }
 }
 
-/// Prepares the library at startup: creates the `PF_LIBRARY_DIR` folder if it's missing (dev and
-/// test runs only point it inside the worktree). Configured roots are never created.
+/// Prepares the library at startup: creates the `PF_LIBRARY_DIR` folder and its sections if
+/// they're missing (dev and test runs only point it inside the worktree). Configured roots are
+/// never created.
 pub fn prepare_override(ctx: &Context) -> CoreResult<()> {
     if let Some(dir) = &ctx.library_override {
         std::fs::create_dir_all(dir)
             .map_err(|e| CoreError::io(format!("creating {}", dir.display()), &e))?;
+        ensure_sections(dir)?;
     }
     Ok(())
+}
+
+/// Creates any missing `Maps/`, `Tokens/`, `Items/` in an existing root (FR-PRJ-01).
+pub fn ensure_sections(root: &Path) -> CoreResult<()> {
+    if !root.is_dir() {
+        return Err(unavailable(root));
+    }
+    for kind in Kind::ALL {
+        let dir = root.join(kind.section_dir());
+        if !dir.is_dir() {
+            std::fs::create_dir(&dir)
+                .map_err(|e| CoreError::io(format!("creating {}", dir.display()), &e))?;
+        }
+    }
+    Ok(())
+}
+
+fn unavailable(root: &Path) -> CoreError {
+    CoreError::new(
+        ErrorCode::LibraryUnavailable,
+        format!("the library folder {} is unavailable", root.display()),
+    )
 }
 
 pub fn config(ctx: &Context, settings: &Settings) -> LibraryConfig {
@@ -57,23 +90,10 @@ pub fn config(ctx: &Context, settings: &Settings) -> LibraryConfig {
         })
         .collect();
     LibraryConfig {
-        import_dest: import_dest(ctx, settings),
         overridden: ctx.library_override.is_some(),
         configured: !roots.is_empty(),
         roots,
     }
-}
-
-/// The import destination: the configured one, else `<first root>/Imported/`.
-pub fn import_dest(ctx: &Context, settings: &Settings) -> Option<PathBuf> {
-    if ctx.library_override.is_none()
-        && let Some(dest) = &settings.library.import_dest
-    {
-        return Some(dest.clone());
-    }
-    effective_roots(ctx, settings)
-        .first()
-        .map(|r| r.join(IMPORTED_DIR))
 }
 
 /// Lexically normalised absolute path (no `.`/`..`), without touching the disk.
@@ -92,7 +112,7 @@ pub fn normalise(path: &Path) -> PathBuf {
 }
 
 /// Case-insensitive on Windows and macOS, where the filesystems usually are.
-fn same_or_inside(path: &Path, base: &Path) -> bool {
+pub fn same_or_inside(path: &Path, base: &Path) -> bool {
     let fold = |p: &Path| {
         let s = normalise(p).to_string_lossy().replace('\\', "/");
         if cfg!(any(windows, target_os = "macos")) {
@@ -106,7 +126,7 @@ fn same_or_inside(path: &Path, base: &Path) -> bool {
     p == b || p.starts_with(&format!("{b}/"))
 }
 
-/// The root containing `path`, if any (FR-PRJ-05).
+/// The root containing `path`, if any.
 pub fn root_of(ctx: &Context, settings: &Settings, path: &Path) -> Option<PathBuf> {
     effective_roots(ctx, settings)
         .into_iter()
@@ -168,18 +188,279 @@ pub fn require_available(ctx: &Context, settings: &Settings) -> CoreResult<Vec<P
         ));
     }
     if let Some(missing) = roots.iter().find(|r| !r.is_dir()) {
-        return Err(CoreError::new(
-            ErrorCode::LibraryUnavailable,
-            format!("the library folder {} is unavailable", missing.display()),
-        ));
+        return Err(unavailable(missing));
     }
     Ok(roots)
+}
+
+/// The section folder that receives new projects of `kind`: in the first root (FR-PRJ-01),
+/// created if it's missing.
+pub fn target_section(ctx: &Context, settings: &Settings, kind: Kind) -> CoreResult<PathBuf> {
+    let roots = require_available(ctx, settings)?;
+    ensure_sections(&roots[0])?;
+    Ok(roots[0].join(kind.section_dir()))
+}
+
+/// The `kind` of the section a project folder sits in, if its parent is a section folder.
+pub fn kind_of_folder(project_dir: &Path) -> Option<Kind> {
+    project_dir
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| Kind::from_section_dir(&n.to_string_lossy()))
+}
+
+/// The startup sweep (FR-PRJ-09, R35, BL-02): creation temp folders older than an hour in
+/// every available section, and temp files the atomic writer left in `<data-dir>` and its
+/// spool. Never touches anything without the temp marker.
+pub fn sweep_startup(ctx: &Context, settings: &Settings) -> usize {
+    let mut removed = fsx::remove_temp_files_shallow(&ctx.data_dir)
+        + fsx::remove_temp_files(&ctx.data_dir.join("pending"));
+    for root in effective_roots(ctx, settings) {
+        for kind in Kind::ALL {
+            let section = root.join(kind.section_dir());
+            removed += fsx::remove_stale_temp_dirs(&section, STALE_TEMP_DIR_AGE);
+            removed += fsx::remove_temp_files_shallow(&section);
+        }
+    }
+    if removed > 0 {
+        tracing::info!(removed, "startup sweep removed temp files and folders");
+    }
+    removed
+}
+
+// ---------------------------------------------------------------- home grid
+
+/// A badge on a home card (FR-PRJ-49).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CardBadge {
+    ReadOnly,
+    Conflict,
+    Unreadable,
+    NotAvailableOffline,
+}
+
+/// One project card (FR-PRJ-49).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ProjectCard {
+    /// The project id, or the folder path when `project.json` can't be read (UI contract).
+    pub id: String,
+    /// The folder name (FR-PRJ-44).
+    pub name: String,
+    /// Absolute project folder (what `project_open` takes).
+    pub path: PathBuf,
+    /// The section's kind (FR-PRJ-46), whatever the manifest says.
+    pub kind: Kind,
+    /// Absolute `.pforge/thumb.jpg`, when it exists (internal; the UI gets `thumb_url`).
+    #[serde(skip)]
+    pub thumb: Option<PathBuf>,
+    /// A `pf-tiles` URL in EDT's `library` key space (OQ-PRJ-16), set by the command.
+    pub thumb_url: Option<String>,
+    pub iterations: usize,
+    /// `commit.at`.
+    pub last_edited: Option<Timestamp>,
+    pub badges: Vec<CardBadge>,
+}
+
+/// Hydrates a cloud-only file (FR-PRJ-17). Offline → `not_available_offline`.
+pub fn hydrate_if_needed(ctx: &Context, path: &Path) -> CoreResult<()> {
+    if ctx.fs.is_cloud_only(path) {
+        ctx.fs.hydrate(path).map_err(|e| {
+            CoreError::new(
+                ErrorCode::NotAvailableOffline,
+                format!("{} is only in the cloud: {e}", path.display()),
+            )
+        })?;
+    }
+    Ok(())
+}
+
+/// `library_list_projects(section)` (FR-PRJ-49): every project folder in that section of every
+/// root, newest first. Reads only `project.json` and the thumbnail of each.
+pub fn list_projects(
+    ctx: &Context,
+    settings: &Settings,
+    kind: Kind,
+) -> CoreResult<Vec<ProjectCard>> {
+    let roots = require_available(ctx, settings)?;
+    let mut cards = vec![];
+    for root in roots {
+        let section = root.join(kind.section_dir());
+        let Ok(entries) = std::fs::read_dir(&section) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !entry.file_type().is_ok_and(|t| t.is_dir()) || name.contains(fsx::TEMP_MARKER) {
+                continue;
+            }
+            if let Some(card) = card_for(ctx, &entry.path(), name, kind) {
+                cards.push(card);
+            }
+        }
+    }
+    cards.sort_by(|a, b| {
+        b.last_edited
+            .cmp(&a.last_edited)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(cards)
+}
+
+fn card_for(ctx: &Context, dir: &Path, name: String, kind: Kind) -> Option<ProjectCard> {
+    let manifest = dir.join(MANIFEST_FILE);
+    // A folder without `project.json` is ignored (FR-PRJ-49).
+    if std::fs::symlink_metadata(&manifest).is_err() {
+        return None;
+    }
+    let mut card = ProjectCard {
+        id: dir.to_string_lossy().into_owned(),
+        name,
+        path: dir.to_path_buf(),
+        kind,
+        thumb: None,
+        thumb_url: None,
+        iterations: 0,
+        last_edited: None,
+        badges: vec![],
+    };
+    if has_conflict_copy(dir) {
+        card.badges.push(CardBadge::Conflict);
+    }
+    if hydrate_if_needed(ctx, &manifest).is_err() {
+        card.badges.push(CardBadge::NotAvailableOffline);
+        return Some(card);
+    }
+    let parsed = std::fs::read(&manifest)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+    let Some(v) = parsed else {
+        card.badges.push(CardBadge::Unreadable);
+        return Some(card);
+    };
+    let project_id: Option<Ulid> = v["project_id"].as_str().and_then(|s| s.parse().ok());
+    if let Some(id) = project_id {
+        card.id = id.to_string();
+    }
+    card.last_edited = v["commit"]["at"].as_str().and_then(|s| s.parse().ok());
+    card.iterations = v["jobs"].as_array().map_or(0, |jobs| {
+        jobs.iter().filter(|j| j["iteration"].is_u64()).count()
+    });
+    match v["schema_version"].as_u64() {
+        Some(n) if n > u64::from(MANIFEST_SCHEMA_VERSION) => card.badges.push(CardBadge::ReadOnly),
+        Some(_) if project_id.is_some() => {}
+        _ => card.badges.push(CardBadge::Unreadable),
+    }
+    let thumb = dir.join(THUMB_FILE);
+    if thumb.is_file() && hydrate_if_needed(ctx, &thumb).is_ok() {
+        card.thumb = Some(thumb);
+    }
+    Some(card)
+}
+
+/// True if the folder holds a sync conflict copy of `project.json` (FR-PRJ-34).
+pub fn has_conflict_copy(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|e| naming::is_conflict_copy(&e.file_name().to_string_lossy(), MANIFEST_FILE))
+    })
+}
+
+/// Validates a project folder path: inside a root, an existing folder with `project.json`
+/// (FR-PRJ-14). Returns the normalised absolute path.
+pub fn require_project_folder(
+    ctx: &Context,
+    settings: &Settings,
+    path: &Path,
+) -> CoreResult<PathBuf> {
+    let path = std::path::absolute(path)
+        .map(|p| normalise(&p))
+        .map_err(|e| CoreError::io("resolving the path", &e))?;
+    if !path.exists() {
+        return Err(CoreError::new(
+            ErrorCode::NotFound,
+            format!("{} not found", path.display()),
+        ));
+    }
+    if root_of(ctx, settings, &path).is_none() {
+        return Err(CoreError::new(
+            ErrorCode::OutsideLibrary,
+            "the folder is outside the library",
+        ));
+    }
+    Ok(path)
+}
+
+/// `project_rename` (FR-PRJ-45): renames a closed project's folder. Nothing inside changes.
+pub fn rename_project(
+    ctx: &Context,
+    settings: &Settings,
+    path: &Path,
+    name: &str,
+    open_dir: Option<&Path>,
+) -> CoreResult<PathBuf> {
+    let dir = require_project_folder(ctx, settings, path)?;
+    if !dir.join(MANIFEST_FILE).is_file() {
+        return Err(not_a_project(&dir));
+    }
+    if open_dir.is_some_and(|o| same_or_inside(o, &dir) && same_or_inside(&dir, o)) {
+        return Err(CoreError::new(
+            ErrorCode::ProjectOpen,
+            "close the project before renaming it",
+        ));
+    }
+    if !naming::is_valid_name(name) {
+        return Err(CoreError::new(
+            ErrorCode::InvalidName,
+            format!(
+                "names can't contain <>:\"/\\|?* or control characters, start with a dot, end with a dot or space, be a reserved Windows name, or be longer than {} characters",
+                naming::MAX_NAME_CHARS
+            ),
+        )
+        .with_field("name"));
+    }
+    let parent = dir
+        .parent()
+        .ok_or_else(|| CoreError::internal("a project folder has no parent"))?;
+    let current = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if current == name {
+        return Ok(dir);
+    }
+    let taken = std::fs::read_dir(parent)
+        .map_err(|e| CoreError::io("reading the section folder", &e))?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .any(|n| naming::same_name(&n, name) && !naming::same_name(&n, &current));
+    if taken {
+        return Err(CoreError::new(
+            ErrorCode::NameTaken,
+            format!("a project named {name:?} already exists here"),
+        )
+        .with_field("name"));
+    }
+    let target = parent.join(name);
+    fsx::rename_with_retry(&dir, &target)
+        .map_err(|e| CoreError::io(format!("renaming {}", dir.display()), &e))?;
+    Ok(target)
+}
+
+pub fn not_a_project(dir: &Path) -> CoreError {
+    CoreError::new(
+        ErrorCode::NotAProject,
+        format!(
+            "{} is not an asset project (no project.json)",
+            dir.display()
+        ),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::time::Timestamp;
 
     fn setup() -> (tempfile::TempDir, Context) {
         let dir = tempfile::tempdir().unwrap();
@@ -218,6 +499,24 @@ mod tests {
     }
 
     #[test]
+    fn fr_prj_01_sections_are_created_in_a_root() {
+        let (dir, _ctx) = setup();
+        let lib = dir.path().join("lib");
+        std::fs::create_dir(&lib).unwrap();
+        std::fs::create_dir(lib.join("Maps")).unwrap();
+        std::fs::write(lib.join("Maps/keep.txt"), b"x").unwrap();
+        ensure_sections(&lib).unwrap();
+        for s in ["Maps", "Tokens", "Items"] {
+            assert!(lib.join(s).is_dir(), "{s}");
+        }
+        assert!(lib.join("Maps/keep.txt").exists());
+        assert_eq!(
+            ensure_sections(&dir.path().join("gone")).unwrap_err().code,
+            ErrorCode::LibraryUnavailable
+        );
+    }
+
+    #[test]
     fn fr_prj_02_unavailable_root_reports_and_blocks() {
         let (dir, ctx) = setup();
         let mut s = Settings::defaults(&ctx);
@@ -228,10 +527,15 @@ mod tests {
             require_available(&ctx, &s).unwrap_err().code,
             ErrorCode::LibraryUnavailable
         );
+        assert_eq!(
+            target_section(&ctx, &s, Kind::Map).unwrap_err().code,
+            ErrorCode::LibraryUnavailable
+        );
+        assert!(!dir.path().join("gone").exists(), "nothing written");
     }
 
     #[test]
-    fn override_replaces_roots_and_sets_import_dest() {
+    fn override_replaces_roots_and_gets_sections() {
         let (dir, mut ctx) = setup();
         let lib = dir.path().join("lib");
         ctx.library_override = Some(lib.clone());
@@ -239,8 +543,32 @@ mod tests {
         let s = Settings::defaults(&ctx);
         let cfg = config(&ctx, &s);
         assert!(cfg.overridden && cfg.configured && cfg.roots[0].available);
-        assert_eq!(cfg.import_dest, Some(lib.join(IMPORTED_DIR)));
+        assert!(lib.join("Tokens").is_dir());
         assert_eq!(root_of(&ctx, &s, &lib.join("x/y.png")), Some(lib.clone()));
         assert_eq!(root_of(&ctx, &s, &dir.path().join("libx/y.png")), None);
+        assert_eq!(
+            target_section(&ctx, &s, Kind::Item).unwrap(),
+            lib.join("Items")
+        );
+    }
+
+    #[test]
+    fn fr_prj_09_r35_startup_sweep_removes_only_marked_leftovers() {
+        let (dir, mut ctx) = setup();
+        let lib = dir.path().join("lib");
+        ctx.library_override = Some(lib.clone());
+        prepare_override(&ctx).unwrap();
+        let s = Settings::defaults(&ctx);
+        std::fs::write(ctx.data_dir.join(".settings.json.pf-tmp-01"), b"x").unwrap();
+        std::fs::write(ctx.data_dir.join("settings.json"), b"{}").unwrap();
+        std::fs::create_dir_all(ctx.data_dir.join("pending/p1")).unwrap();
+        std::fs::write(ctx.data_dir.join("pending/p1/.1.json.pf-tmp-02"), b"x").unwrap();
+        std::fs::write(lib.join("Maps/.x.png.pf-tmp-03"), b"x").unwrap();
+        std::fs::create_dir(lib.join("Maps/.Crypt.pf-tmp-04")).unwrap();
+        std::fs::create_dir(lib.join("Maps/Crypt")).unwrap();
+        assert_eq!(sweep_startup(&ctx, &s), 3, "the fresh temp folder stays");
+        assert!(ctx.data_dir.join("settings.json").exists());
+        assert!(lib.join("Maps/.Crypt.pf-tmp-04").is_dir());
+        assert!(lib.join("Maps/Crypt").is_dir());
     }
 }

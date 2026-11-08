@@ -1,5 +1,5 @@
 // The provider status chip (a status-bar segment, provider spec §7). Clicking it opens the
-// provider settings, which also open from the rail's Settings entry (`openProviderSettings`).
+// provider settings, which also open from the rail's Settings entry (`shared/settings.ts`).
 import { useEffect } from 'react';
 
 import { chipOf } from './chip';

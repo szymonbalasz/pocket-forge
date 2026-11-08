@@ -17,6 +17,7 @@ export interface FakeTauri {
 export function baseSnapshot(size = { w: 2048, h: 2560 }): ProjectSnapshot {
   return {
     project_id: '01JPROJECT0000000000000000',
+    kind: 'map',
     name: 'map.png',
     image_path: 'C:/pf-test/library/Maps/map/working/map.png',
     project_dir: 'C:/pf-test/library/Maps/map',

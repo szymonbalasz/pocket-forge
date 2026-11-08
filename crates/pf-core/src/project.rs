@@ -1,19 +1,31 @@
-//! The asset project store: open, the commit protocol, revisions and the draft.
-//! Skeleton scope (PRJ slices 1 and 3, minimum). Jobs, candidates, masks, trash, conflicts,
-//! rebuild and the decoded original are later PRJ slices.
+//! The asset project store (PRJ): open/close, the commit protocol, revisions, the draft, relink,
+//! project folders and image resolution. The store API other features call (jobs, candidates,
+//! masks, layers, export) is in [`store`]; open-time recovery is in `sweep`.
+//!
+//! A project is a folder `<root>/<Maps|Tokens|Items>/<name>/` with `project.json` (#44). Every
+//! mutating call commits before it returns (FR-PRJ-18): new write-once files, then
+//! `project.json`, each temp → flush → rename. The manifest rename is the commit point.
 
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
+use serde_json::Value;
 use ulid::Ulid;
 
 use crate::context::Context;
+use crate::decoded::DecodedOriginal;
 use crate::error::{CoreError, CoreResult, ErrorCode};
 use crate::fsx;
+use crate::job::{JOB_FILE, JobFile};
 use crate::library;
 use crate::manifest::*;
 use crate::settings::Settings;
+use crate::thumb::{self, ThumbJob, Thumbnails};
 use crate::time::Timestamp;
+
+pub mod store;
+mod sweep;
 
 /// Why a project is read-only (FR-PRJ-15/16/26, FR-PRJ-41).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -23,43 +35,80 @@ pub enum ReadOnlyReason {
     NewerVersion,
     /// "Original changed".
     OriginalChanged,
-    /// "Original missing" (relink is PRJ slice 3).
+    /// "Original missing": Relink clears it (FR-PRJ-16).
     OriginalMissing,
 }
 
-/// A non-fatal note from `project_open`.
+/// A non-fatal note from `project_open`: `newer_version`, `original_changed`,
+/// `original_missing`, `kind_changed`, `conflict`, `recovered`, `resumable`, `lost`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Warning {
     pub code: &'static str,
     pub message: String,
+    #[serde(skip_serializing_if = "Value::is_null")]
+    pub detail: Value,
+}
+
+impl Warning {
+    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Warning {
+            code,
+            message: message.into(),
+            detail: Value::Null,
+        }
+    }
+}
+
+/// Ids that write-once revision files reference (so commits never trash them).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct RevisionRefs {
+    pub layers: HashSet<Ulid>,
+    pub masks: HashSet<Ulid>,
+}
+
+impl RevisionRefs {
+    pub(crate) fn add(&mut self, rev: &RevisionFile) {
+        for l in &rev.layers {
+            self.layers.insert(l.id);
+            self.masks.extend(l.mask_id);
+        }
+        self.masks
+            .extend(rev.draft.as_ref().and_then(|d| d.mask_id));
+    }
 }
 
 /// An asset project held in memory while it's open.
 #[derive(Debug)]
 pub struct OpenProject {
-    /// Absolute path of the original.
-    pub image_path: PathBuf,
-    /// Absolute path of `<file>.pforge/`.
+    /// Absolute project folder.
     pub dir: PathBuf,
     pub manifest: Manifest,
-    /// False until the first commit creates the folder (FR-PRJ-13).
-    pub on_disk: bool,
     /// The `commit{seq, install_id}` last loaded or written (FR-PRJ-35).
     pub last_commit: Option<(u64, Ulid)>,
     pub read_only: Option<ReadOnlyReason>,
     pub warnings: Vec<Warning>,
+    /// The job files, authoritative (R2), as last loaded or written.
+    pub jobs: BTreeMap<Ulid, JobFile>,
+    pub(crate) refs: RevisionRefs,
+    /// FR-PRJ-42, R11.
+    pub decoded: DecodedOriginal,
+    /// Where thumbnails are queued (`None` in unit tests that don't need them).
+    pub thumbs: Option<Thumbnails>,
 }
 
 /// What `project_open` returns.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProjectSnapshot {
     pub project_id: Ulid,
-    /// File name of the original.
+    /// The folder name (FR-PRJ-44).
     pub name: String,
-    pub image_path: PathBuf,
+    pub kind: Kind,
+    /// Absolute project folder.
     pub project_dir: PathBuf,
-    /// True once the project exists on disk.
-    pub saved: bool,
+    /// Absolute path of the original (`working/<file>`).
+    pub image_path: PathBuf,
+    /// The original's stable image id (= `layers[0].id`, #48 (3)).
+    pub original_image_id: Ulid,
     pub read_only: Option<ReadOnlyReason>,
     pub warnings: Vec<Warning>,
     pub width: u32,
@@ -68,9 +117,16 @@ pub struct ProjectSnapshot {
     pub layers: Vec<Layer>,
     pub draft: Option<Draft>,
     pub revisions: Vec<RevisionEntry>,
-    /// `None` until the first commit.
-    pub head_revision: Option<Ulid>,
+    /// The manifest's candidate records (R44), for RGN's tracker and EDT's picker.
+    pub candidates: Vec<Candidate>,
+    pub head_revision: Ulid,
     pub commit_seq: u64,
+    /// Always true: a project exists on disk from its creation (FR-PRJ-09). Kept for the UI.
+    pub saved: bool,
+    /// `commit.at`: last edited.
+    pub committed_at: Timestamp,
+    /// EXP's record (schema §4.10).
+    pub export: Option<Value>,
 }
 
 impl OpenProject {
@@ -78,10 +134,11 @@ impl OpenProject {
         let m = &self.manifest;
         ProjectSnapshot {
             project_id: m.project_id,
-            name: file_name(&self.image_path),
-            image_path: self.image_path.clone(),
+            name: folder_name(&self.dir),
+            kind: m.kind,
             project_dir: self.dir.clone(),
-            saved: self.on_disk,
+            image_path: self.original_path(),
+            original_image_id: m.original_image_id().unwrap_or(m.project_id),
             read_only: self.read_only,
             warnings: self.warnings.clone(),
             width: m.original.width,
@@ -90,20 +147,31 @@ impl OpenProject {
             layers: m.layers.clone(),
             draft: m.draft.clone(),
             revisions: m.revisions.clone(),
-            head_revision: self.on_disk.then_some(m.head_revision),
+            candidates: m.candidates.clone(),
+            head_revision: m.head_revision,
             commit_seq: self.last_commit.map_or(0, |c| c.0),
+            saved: true,
+            committed_at: m.commit.at,
+            export: m.export.clone(),
         }
     }
 
+    /// Absolute path of a project path (`working/x.png`, `.pforge/…`).
+    pub fn path(&self, rel: &str) -> PathBuf {
+        self.dir.join(rel)
+    }
+
+    /// Absolute path of the original.
+    pub fn original_path(&self) -> PathBuf {
+        self.path(&self.manifest.original.file)
+    }
+
     fn manifest_path(&self) -> PathBuf {
-        self.dir.join(MANIFEST_FILE)
+        self.path(MANIFEST_FILE)
     }
 
-    fn revision_path(&self, id: Ulid) -> PathBuf {
-        self.dir.join(REVISIONS_DIR).join(format!("{id}.json"))
-    }
-
-    fn require_writable(&self) -> CoreResult<()> {
+    /// Fails fast with `read_only` (FR-PRJ-41).
+    pub fn require_writable(&self) -> CoreResult<()> {
         match self.read_only {
             Some(reason) => Err(CoreError::new(
                 ErrorCode::ReadOnly,
@@ -113,133 +181,27 @@ impl OpenProject {
             None => Ok(()),
         }
     }
+
+    fn request_thumbnail(&self, ctx: &Context) {
+        if let Some(t) = &self.thumbs {
+            t.request(ThumbJob::new(ctx, &self.dir, &self.manifest));
+        }
+    }
 }
 
-fn file_name(p: &Path) -> String {
+pub(crate) fn folder_name(p: &Path) -> String {
     p.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default()
 }
 
-/// `<file>.pforge` next to the image.
-pub fn project_dir_for(image: &Path) -> PathBuf {
-    let mut name = image.as_os_str().to_owned();
-    name.push(PROJECT_SUFFIX);
-    PathBuf::from(name)
-}
-
-fn mtime_of(meta: &std::fs::Metadata) -> Timestamp {
+pub(crate) fn mtime_of(meta: &std::fs::Metadata) -> Timestamp {
     meta.modified()
         .map(Timestamp::from_system)
         .unwrap_or(Timestamp(0))
 }
 
-/// Opens an image or a `.pforge` folder (FR-PRJ-13/14/15/26). Writes nothing in the project.
-pub fn open(ctx: &Context, settings: &Settings, path: &Path) -> CoreResult<OpenProject> {
-    let path = std::path::absolute(path)
-        .map(|p| library::normalise(&p))
-        .map_err(|e| CoreError::io("resolving the path", &e))?;
-    let is_project_dir = path.is_dir()
-        && path
-            .to_string_lossy()
-            .to_lowercase()
-            .ends_with(PROJECT_SUFFIX);
-    let (image_hint, dir) = if is_project_dir {
-        let s = path.to_string_lossy();
-        (
-            PathBuf::from(&s[..s.len() - PROJECT_SUFFIX.len()]),
-            path.clone(),
-        )
-    } else {
-        (path.clone(), project_dir_for(&path))
-    };
-    if library::root_of(ctx, settings, &dir).is_none() {
-        return Err(CoreError::new(
-            ErrorCode::OutsideLibrary,
-            "the image is outside the library; import it first",
-        ));
-    }
-    let manifest_path = dir.join(MANIFEST_FILE);
-    if manifest_path.is_file() {
-        return open_existing(&dir, &manifest_path, &image_hint);
-    }
-    let mut warnings = vec![];
-    if dir.is_dir() {
-        // A crash during the first commit can leave the folder without a manifest.
-        fsx::remove_temp_files(&dir);
-        if dir.join(REVISIONS_DIR).is_dir() {
-            warnings.push(Warning {
-                code: "manifest_missing",
-                message: "The project manifest is missing; starting from the original. Older revision files are kept.".into(),
-            });
-        }
-    }
-    let mut p = open_new(ctx, &image_hint, dir)?;
-    p.warnings.extend(warnings);
-    Ok(p)
-}
-
-fn open_new(ctx: &Context, image: &Path, dir: PathBuf) -> CoreResult<OpenProject> {
-    if !image.is_file() {
-        return Err(CoreError::new(
-            ErrorCode::NotFound,
-            format!("{} not found", image.display()),
-        ));
-    }
-    if ctx.fs.is_cloud_only(image) {
-        ctx.fs.hydrate(image).map_err(|e| {
-            CoreError::new(
-                ErrorCode::NotAvailableOffline,
-                format!("the image is only in the cloud and can't be downloaded: {e}"),
-            )
-        })?;
-    }
-    let info = pf_imaging::probe_file(image).map_err(probe_error)?;
-    let meta = std::fs::metadata(image).map_err(|e| CoreError::io("reading the image", &e))?;
-    let now = ctx.now();
-    let manifest = Manifest {
-        schema_version: MANIFEST_SCHEMA_VERSION,
-        project_id: ctx.new_id(),
-        created_at: now,
-        commit: Commit {
-            seq: 0,
-            install_id: Ulid::nil(),
-            at: now,
-        },
-        original: Original {
-            file: format!("../{}", file_name(image)),
-            // Hashed at the first commit, so opening stays fast and writes nothing.
-            content_hash: String::new(),
-            size: meta.len(),
-            mtime: mtime_of(&meta),
-            width: info.width,
-            height: info.height,
-            format: info.format.as_str().into(),
-            extra: Extra::new(),
-        },
-        layers: vec![Layer::original(ctx.new_id(), info.width, info.height)],
-        masks: vec![],
-        draft: None,
-        jobs: vec![],
-        candidates: vec![],
-        revisions: vec![],
-        head_revision: ctx.new_id(),
-        trash: vec![],
-        export: None,
-        extra: Extra::new(),
-    };
-    Ok(OpenProject {
-        image_path: image.to_path_buf(),
-        dir,
-        manifest,
-        on_disk: false,
-        last_commit: None,
-        read_only: None,
-        warnings: vec![],
-    })
-}
-
-fn probe_error(e: pf_imaging::ProbeError) -> CoreError {
+pub(crate) fn probe_error(e: pf_imaging::ProbeError) -> CoreError {
     use pf_imaging::ProbeError as P;
     let code = match &e {
         P::Unsupported => ErrorCode::Unsupported,
@@ -251,112 +213,239 @@ fn probe_error(e: pf_imaging::ProbeError) -> CoreError {
     CoreError::new(code, e.to_string())
 }
 
-fn open_existing(dir: &Path, manifest_path: &Path, image_hint: &Path) -> CoreResult<OpenProject> {
-    // Leftovers of an interrupted commit (FR-PRJ-20).
-    fsx::remove_temp_files(dir);
-    let bytes =
-        std::fs::read(manifest_path).map_err(|e| CoreError::io("reading manifest.json", &e))?;
-    let version = peek_schema_version(&bytes).ok_or_else(|| {
-        // Rebuild from revisions (FR-PRJ-24) is a later PRJ slice.
-        CoreError::new(ErrorCode::Corrupt, "manifest.json is unreadable")
-    })?;
-    let mut read_only = None;
-    let mut warnings = vec![];
-    if version > u64::from(MANIFEST_SCHEMA_VERSION) {
-        read_only = Some(ReadOnlyReason::NewerVersion);
-        warnings.push(Warning {
-            code: "newer_version",
-            message: "Made by a newer Pocket Forge. The project opens read-only.".into(),
-        });
-    }
-    let manifest: Manifest = serde_json::from_slice(&bytes).map_err(|e| {
+fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> CoreResult<T> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| CoreError::io(format!("reading {}", path.display()), &e))?;
+    serde_json::from_slice(&bytes).map_err(|e| {
         CoreError::new(
             ErrorCode::Corrupt,
-            format!("manifest.json is unreadable: {e}"),
+            format!("{} is unreadable: {e}", path.display()),
         )
-    })?;
-    let image_path = library::normalise(&dir.join(&manifest.original.file));
-    if image_path != *image_hint && !image_hint.as_os_str().is_empty() {
-        tracing::debug!(manifest = %image_path.display(), hint = %image_hint.display(), "original path from manifest");
-    }
-    match std::fs::metadata(&image_path) {
-        Err(_) => {
-            read_only.get_or_insert(ReadOnlyReason::OriginalMissing);
-            warnings.push(Warning {
-                code: "original_missing",
-                message: "Original missing. The project opens read-only.".into(),
-            });
-        }
-        Ok(meta) => {
-            let o = &manifest.original;
-            if meta.len() != o.size || mtime_of(&meta) != o.mtime {
-                let hash = fsx::hash_file(&image_path)
-                    .map_err(|e| CoreError::io("hashing the original", &e))?;
-                if hash != o.content_hash {
-                    read_only.get_or_insert(ReadOnlyReason::OriginalChanged);
-                    warnings.push(Warning {
-                        code: "original_changed",
-                        message:
-                            "Original changed outside Pocket Forge. The project opens read-only."
-                                .into(),
-                    });
-                }
-            }
-        }
-    }
-    Ok(OpenProject {
-        image_path,
-        dir: dir.to_path_buf(),
-        last_commit: Some((manifest.commit.seq, manifest.commit.install_id)),
-        manifest,
-        on_disk: true,
-        read_only,
-        warnings,
     })
 }
 
-/// One commit (FR-PRJ-18): new write-once files first, then the manifest; the manifest rename
-/// is the commit point. `change` edits a copy of the manifest and returns the new revision
-/// files to write; on any error the in-memory project is unchanged.
+// ---------------------------------------------------------------- open
+
+/// `project_open` (FR-PRJ-14 … 17, 20, 24, 26, 29): opens a project folder inside a root.
+pub fn open(
+    ctx: &Context,
+    settings: &Settings,
+    path: &Path,
+    thumbs: Option<Thumbnails>,
+) -> CoreResult<OpenProject> {
+    let dir = library::require_project_folder(ctx, settings, path)?;
+    if !dir.is_dir() {
+        return Err(library::not_a_project(&dir));
+    }
+    let manifest_path = dir.join(MANIFEST_FILE);
+    let mut warnings = vec![];
+    let mut read_only = None;
+    let manifest = if std::fs::symlink_metadata(&manifest_path).is_ok() {
+        library::hydrate_if_needed(ctx, &manifest_path)?;
+        let bytes =
+            std::fs::read(&manifest_path).map_err(|e| CoreError::io("reading project.json", &e))?;
+        let version = peek_schema_version(&bytes);
+        if version.is_some_and(|v| v > u64::from(MANIFEST_SCHEMA_VERSION)) {
+            read_only = Some(ReadOnlyReason::NewerVersion);
+            warnings.push(Warning::new(
+                "newer_version",
+                "Made by a newer Pocket Forge. The project opens read-only.",
+            ));
+        }
+        match serde_json::from_slice::<Manifest>(&bytes) {
+            Ok(m) => Some(m),
+            Err(e) if read_only.is_some() => {
+                return Err(CoreError::new(
+                    ErrorCode::Corrupt,
+                    format!("project.json was made by a newer Pocket Forge and can't be read: {e}"),
+                ));
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "project.json unreadable; rebuilding");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let (manifest, recovered) = match manifest {
+        Some(m) => (m, false),
+        // FR-PRJ-24: rebuilt from the revision and job files, if there are any.
+        None => match sweep::rebuild_manifest(ctx, settings, &dir)? {
+            Some(m) => (m, true),
+            None => return Err(library::not_a_project(&dir)),
+        },
+    };
+    if recovered {
+        warnings.push(Warning::new(
+            "recovered",
+            "project.json was missing or unreadable and was rebuilt from the history.",
+        ));
+        ctx.emit(
+            "project:recovered",
+            serde_json::json!({ "project_id": manifest.project_id }),
+        );
+    }
+
+    let writable_layout = read_only.is_none();
+    if writable_layout {
+        // Leftovers of an interrupted commit (FR-PRJ-20). User-owned folders are never touched.
+        sweep::remove_temp_files(&dir);
+    }
+
+    let mut p = OpenProject {
+        decoded: DecodedOriginal::new(manifest.project_id, dir.join(&manifest.original.file)),
+        last_commit: (!recovered).then_some((manifest.commit.seq, manifest.commit.install_id)),
+        dir,
+        manifest,
+        read_only,
+        warnings,
+        jobs: BTreeMap::new(),
+        refs: RevisionRefs::default(),
+        thumbs,
+    };
+    check_original(ctx, &mut p)?;
+    if let Some(kind) = library::kind_of_folder(&p.dir)
+        && kind != p.manifest.kind
+    {
+        // FR-PRJ-46: the folder wins; written at the next commit.
+        p.manifest.kind = kind;
+        p.warnings.push(Warning::new(
+            "kind_changed",
+            format!("The project is in the {} folder now.", kind.section_dir()),
+        ));
+    }
+    if library::has_conflict_copy(&p.dir) {
+        p.warnings.push(Warning::new(
+            "conflict",
+            "This project was also changed on another machine.",
+        ));
+    }
+    sweep::load_history(&mut p)?;
+    if recovered && p.read_only.is_none() {
+        // Write the rebuilt manifest at once so the recovery is durable.
+        p.last_commit = None;
+        write_recovered(ctx, settings, &mut p)?;
+    }
+    sweep::on_open(ctx, settings.install_id, &mut p)?;
+    if p.read_only != Some(ReadOnlyReason::NewerVersion)
+        && p.read_only != Some(ReadOnlyReason::OriginalMissing)
+        && thumb::needs_rebuild(&p.dir)
+    {
+        p.request_thumbnail(ctx);
+    }
+    Ok(p)
+}
+
+/// FR-PRJ-15/16/17: hydrate, then compare size and mtime, then the hash.
+fn check_original(ctx: &Context, p: &mut OpenProject) -> CoreResult<()> {
+    let path = p.original_path();
+    let meta = match std::fs::symlink_metadata(&path) {
+        Err(_) => {
+            p.read_only.get_or_insert(ReadOnlyReason::OriginalMissing);
+            p.warnings.push(Warning::new(
+                "original_missing",
+                "Original missing. Relink it to keep working; until then the project is read-only.",
+            ));
+            return Ok(());
+        }
+        Ok(m) => m,
+    };
+    library::hydrate_if_needed(ctx, &path)?;
+    // R33: refuse an original that fails the cheap end-of-file check.
+    pf_imaging::probe_file_complete(&path).map_err(probe_error)?;
+    let meta = std::fs::metadata(&path).unwrap_or(meta);
+    let o = &p.manifest.original;
+    if meta.len() != o.size || mtime_of(&meta) != o.mtime || racily_clean(&p.dir, o.mtime) {
+        let hash = fsx::hash_file(&path).map_err(|e| CoreError::io("hashing the original", &e))?;
+        if hash != o.content_hash {
+            p.read_only.get_or_insert(ReadOnlyReason::OriginalChanged);
+            p.warnings.push(Warning::new(
+                "original_changed",
+                "Original changed outside Pocket Forge. The project opens read-only.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Size + mtime can't see a rewrite within one mtime tick of the recorded one. When the recorded
+/// mtime is within [`RACY_WINDOW_MS`] of `project.json`'s own mtime, the stored hash decides
+/// (git's "racily clean" rule). Once a later commit rewrites `project.json`, a change to the
+/// original shows up as a new mtime again and open stays hash-free.
+const RACY_WINDOW_MS: i64 = 2000;
+
+fn racily_clean(dir: &Path, recorded: Timestamp) -> bool {
+    std::fs::metadata(dir.join(MANIFEST_FILE))
+        .map(|m| mtime_of(&m).millis() <= recorded.millis() + RACY_WINDOW_MS)
+        .unwrap_or(true)
+}
+
+fn write_recovered(ctx: &Context, settings: &Settings, p: &mut OpenProject) -> CoreResult<()> {
+    let _ = settings;
+    let seq = p.manifest.commit.seq + 1;
+    p.manifest.commit = Commit {
+        seq,
+        install_id: p.manifest.commit.install_id,
+        at: ctx.now(),
+    };
+    fsx::write_json_atomic(ctx, &p.manifest_path(), &p.manifest)?;
+    p.last_commit = Some((seq, p.manifest.commit.install_id));
+    Ok(())
+}
+
+// ---------------------------------------------------------------- commit
+
+/// What a commit writes besides the manifest.
+#[derive(Debug, Default)]
+pub struct CommitPlan {
+    /// Write-once files written before the manifest: project path → bytes.
+    pub files: Vec<(String, Vec<u8>)>,
+    pub revisions: Vec<RevisionFile>,
+    /// Job files written before the manifest (a new job, an iteration folder).
+    pub jobs_before: Vec<JobFile>,
+    /// Job files written after the manifest (follow-ups rolled forward on open).
+    pub jobs_after: Vec<JobFile>,
+}
+
+/// One commit (FR-PRJ-18). `change` edits a copy of the manifest and fills the plan; on any
+/// error before the commit point the in-memory project is unchanged. Returns the new `seq`.
 pub fn commit(
     ctx: &Context,
     install_id: Ulid,
     p: &mut OpenProject,
-    change: impl FnOnce(&Context, &mut Manifest) -> CoreResult<Vec<RevisionFile>>,
+    change: impl FnOnce(&Context, &OpenProject, &mut Manifest, &mut CommitPlan) -> CoreResult<()>,
 ) -> CoreResult<u64> {
     p.require_writable()?;
     let mut next = p.manifest.clone();
-    let mut revisions = vec![];
-    if !p.on_disk {
-        // First commit: hash the original, create the folder and r0 (FR-PRJ-13).
-        let meta = std::fs::metadata(&p.image_path)
-            .map_err(|e| CoreError::io("reading the original", &e))?;
-        next.original.content_hash =
-            fsx::hash_file(&p.image_path).map_err(|e| CoreError::io("hashing the original", &e))?;
-        next.original.size = meta.len();
-        next.original.mtime = mtime_of(&meta);
-        next.created_at = ctx.now();
+    let mut plan = CommitPlan::default();
+    change(ctx, p, &mut next, &mut plan)?;
+    if let Some(kind) = library::kind_of_folder(&p.dir) {
+        next.kind = kind;
     }
-    revisions.extend(change(ctx, &mut next)?);
-    if !p.on_disk && next.revisions.is_empty() {
-        let id = next.head_revision;
-        revisions.push(push_revision(
-            ctx,
-            &mut next,
-            id,
-            RevisionReason::Create,
-            None,
+    store::trash_superseded_masks(ctx, p, &mut next, &plan);
+    check_commit_unchanged(p)?;
+    if !p.dir.is_dir() {
+        // Renamed or moved in Explorer while open (§11): state stays in memory.
+        return Err(CoreError::new(
+            ErrorCode::NotFound,
+            "the project folder was moved or renamed; reopen it from home",
         ));
     }
 
-    if p.on_disk {
-        check_commit_unchanged(p)?;
-    } else {
-        std::fs::create_dir_all(p.dir.join(REVISIONS_DIR))
-            .map_err(|e| CoreError::io(format!("creating {}", p.dir.display()), &e))?;
+    for (rel, bytes) in &plan.files {
+        let target = p.path(rel);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| CoreError::io(format!("creating {}", parent.display()), &e))?;
+        }
+        fsx::write_atomic(ctx, &target, bytes)?;
     }
-    for rev in &revisions {
-        fsx::write_json_atomic(ctx, &p.revision_path(rev.id), rev)?;
+    for rev in &plan.revisions {
+        fsx::write_json_atomic(ctx, &p.path(&revision_file(rev.id)), rev)?;
+    }
+    for job in &plan.jobs_before {
+        write_job(ctx, p, job)?;
     }
     let seq = p.last_commit.map_or(0, |c| c.0) + 1;
     next.commit = Commit {
@@ -366,18 +455,58 @@ pub fn commit(
     };
     fsx::write_json_atomic(ctx, &p.manifest_path(), &next)?;
 
+    // Committed. Everything below is rolled forward on open if it fails.
+    let layers_changed = next.layers != p.manifest.layers;
     p.manifest = next;
-    p.on_disk = true;
     p.last_commit = Some((seq, install_id));
+    for rev in &plan.revisions {
+        p.refs.add(rev);
+    }
+    for job in plan.jobs_before {
+        p.jobs.insert(job.id, job);
+    }
+    for job in plan.jobs_after {
+        if let Err(e) = write_job(ctx, p, &job) {
+            tracing::warn!(job = %job.id, error = %e, "job follow-up not written; rolled forward on open");
+        }
+        p.jobs.insert(job.id, job);
+    }
+    sweep::apply_file_moves(p);
     ctx.emit("project:committed", serde_json::json!({ "seq": seq }));
+    if layers_changed {
+        p.request_thumbnail(ctx);
+    }
     Ok(seq)
+}
+
+pub(crate) fn write_job(ctx: &Context, p: &OpenProject, job: &JobFile) -> CoreResult<()> {
+    let path = p.path(&format!("{}/{JOB_FILE}", job.dir()));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| CoreError::io(format!("creating {}", parent.display()), &e))?;
+    }
+    fsx::write_json_atomic(ctx, &path, job)
 }
 
 /// FR-PRJ-35: the on-disk commit must still be the one last loaded or written.
 fn check_commit_unchanged(p: &OpenProject) -> CoreResult<()> {
-    let conflict = || CoreError::new(ErrorCode::Conflict, "manifest.json changed on disk");
-    let bytes = std::fs::read(p.manifest_path()).map_err(|_| conflict())?;
-    let disk: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| conflict())?;
+    let conflict = || {
+        CoreError::new(
+            ErrorCode::Conflict,
+            "project.json changed on disk (another machine?)",
+        )
+    };
+    let bytes = match std::fs::read(p.manifest_path()) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound && !p.dir.is_dir() => {
+            return Err(CoreError::new(
+                ErrorCode::NotFound,
+                "the project folder was moved or renamed; reopen it from home",
+            ));
+        }
+        Err(_) => return Err(conflict()),
+    };
+    let disk: Value = serde_json::from_slice(&bytes).map_err(|_| conflict())?;
     let seq = disk["commit"]["seq"].as_u64();
     let install = disk["commit"]["install_id"]
         .as_str()
@@ -390,18 +519,18 @@ fn check_commit_unchanged(p: &OpenProject) -> CoreResult<()> {
 
 /// Appends a revision snapshot of the current layers + draft, makes it the head, and returns
 /// the file to write.
-fn push_revision(
+pub(crate) fn push_revision(
     ctx: &Context,
     m: &mut Manifest,
-    id: Ulid,
     reason: RevisionReason,
     label: Option<String>,
 ) -> RevisionFile {
+    let id = ctx.new_id();
     let parent = (!m.revisions.is_empty()).then_some(m.head_revision);
     let rev = RevisionFile {
         schema_version: REVISION_SCHEMA_VERSION,
         id,
-        seq: m.revisions.len() as u64,
+        seq: m.revisions.iter().map(|r| r.seq + 1).max().unwrap_or(0),
         created_at: ctx.now(),
         reason,
         label,
@@ -415,16 +544,17 @@ fn push_revision(
     rev
 }
 
+// ---------------------------------------------------------------- revisions
+
 /// Reads a revision file.
 pub fn read_revision(p: &OpenProject, id: Ulid) -> CoreResult<RevisionFile> {
-    let bytes = std::fs::read(p.revision_path(id))
-        .map_err(|e| CoreError::io(format!("reading revision {id}"), &e))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|e| CoreError::new(ErrorCode::Corrupt, format!("revision {id}: {e}")))
+    if !p.manifest.revisions.iter().any(|r| r.id == id) {
+        return Err(CoreError::new(ErrorCode::UnknownId, "unknown revision").with_field("rev_id"));
+    }
+    read_json(&p.path(&revision_file(id)))
 }
 
-/// Ctrl+S (FR-PRJ-23): a `save` revision if the layers or draft changed since the head. The
-/// first save of a new project creates it with `r0` instead.
+/// Ctrl+S (FR-PRJ-23): a `save` revision if the layers or draft changed since the head.
 pub fn save_revision(
     ctx: &Context,
     install_id: Ulid,
@@ -432,36 +562,60 @@ pub fn save_revision(
     label: Option<String>,
 ) -> CoreResult<RevisionEntry> {
     p.require_writable()?;
-    if !p.on_disk {
-        commit(ctx, install_id, p, |ctx, m| {
-            let id = m.head_revision;
-            Ok(vec![push_revision(
-                ctx,
-                m,
-                id,
-                RevisionReason::Create,
-                label,
-            )])
-        })?;
-    } else {
-        let head = read_revision(p, p.manifest.head_revision)?;
-        if head.layers == p.manifest.layers && head.draft == p.manifest.draft {
+    let head = read_revision(p, p.manifest.head_revision)?;
+    if head.layers == p.manifest.layers && head.draft == p.manifest.draft {
+        return Err(CoreError::new(
+            ErrorCode::Unchanged,
+            "nothing changed since the last revision",
+        ));
+    }
+    commit(ctx, install_id, p, |ctx, _, m, plan| {
+        plan.revisions
+            .push(push_revision(ctx, m, RevisionReason::Save, label));
+        Ok(())
+    })?;
+    head_entry(p)
+}
+
+/// `project_restore_revision` (FR-PRJ-23, 43): a new `restore` revision with that revision's
+/// layers and draft. Candidate statuses and the trash are unchanged (R3).
+pub fn restore_revision(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    rev_id: Ulid,
+) -> CoreResult<RevisionEntry> {
+    p.require_writable()?;
+    let rev = read_revision(p, rev_id)?;
+    for layer in rev.layers.iter().filter(|l| l.kind == LayerKind::Patch) {
+        let file = layer.file.as_deref().unwrap_or_default();
+        if !p.path(file).is_file() {
             return Err(CoreError::new(
-                ErrorCode::Unchanged,
-                "nothing changed since the last revision",
+                ErrorCode::NotFound,
+                format!("the layer file {file} of that revision is missing"),
             ));
         }
-        commit(ctx, install_id, p, |ctx, m| {
-            let id = ctx.new_id();
-            Ok(vec![push_revision(ctx, m, id, RevisionReason::Save, label)])
-        })?;
     }
+    commit(ctx, install_id, p, |ctx, _, m, plan| {
+        m.layers = rev.layers.clone();
+        m.draft = rev.draft.clone();
+        plan.revisions
+            .push(push_revision(ctx, m, RevisionReason::Restore, None));
+        Ok(())
+    })?;
+    head_entry(p)
+}
+
+fn head_entry(p: &OpenProject) -> CoreResult<RevisionEntry> {
     p.manifest
         .revisions
-        .last()
+        .iter()
+        .find(|r| r.id == p.manifest.head_revision)
         .cloned()
-        .ok_or_else(|| CoreError::internal("no revision after save"))
+        .ok_or_else(|| CoreError::internal("no head revision after the commit"))
 }
+
+// ---------------------------------------------------------------- draft
 
 /// The draft fields a caller sets; `updated_at` comes from the clock seam.
 #[derive(Debug, Clone, PartialEq, Default, serde::Deserialize)]
@@ -472,23 +626,32 @@ pub struct DraftInput {
     #[serde(default)]
     pub model_id: Option<String>,
     #[serde(default)]
-    pub controls: std::collections::BTreeMap<String, serde_json::Value>,
+    pub controls: BTreeMap<String, Value>,
     #[serde(default)]
     pub seed: Option<i64>,
     #[serde(default)]
-    pub region: Option<serde_json::Value>,
+    pub region: Option<Value>,
     #[serde(default)]
     pub mask_id: Option<Ulid>,
 }
 
-/// `project_put_draft` (FR-PRJ-19): one commit. Creates the project on first use.
+/// `project_put_draft` (FR-PRJ-19): one commit with the draft and, if given, EXP's unsaved export
+/// settings (R30: `grid`, `target_px_per_square`, `format`, merged into the `export` record).
 pub fn put_draft(
     ctx: &Context,
     install_id: Ulid,
     p: &mut OpenProject,
     draft: DraftInput,
+    export_settings: Option<serde_json::Map<String, Value>>,
 ) -> CoreResult<u64> {
-    commit(ctx, install_id, p, |ctx, m| {
+    if let Some(id) = draft.mask_id
+        && !p.manifest.masks.iter().any(|m| m.id == id)
+    {
+        return Err(
+            CoreError::new(ErrorCode::UnknownId, "unknown mask").with_field("draft.mask_id")
+        );
+    }
+    commit(ctx, install_id, p, |ctx, _, m, _| {
         let extra = m
             .draft
             .as_ref()
@@ -504,8 +667,222 @@ pub fn put_draft(
             updated_at: ctx.now(),
             extra,
         });
-        Ok(vec![])
+        if let Some(settings) = export_settings {
+            store::merge_export(m, settings);
+        }
+        Ok(())
     })
+}
+
+// ---------------------------------------------------------------- relink
+
+/// `project_relink_original` (FR-PRJ-16): accepts a file only if its hash matches, copies it back
+/// into `working/` and commits its size and mtime. Clears "Original missing".
+pub fn relink_original(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    source: &Path,
+) -> CoreResult<()> {
+    if p.read_only.is_some() && p.read_only != Some(ReadOnlyReason::OriginalMissing) {
+        p.require_writable()?;
+    }
+    let target = p.original_path();
+    if target.exists() {
+        return Err(CoreError::invalid("path", "the original isn't missing"));
+    }
+    library::hydrate_if_needed(ctx, source)?;
+    let hash = fsx::hash_file(source).map_err(|e| CoreError::io("reading the file", &e))?;
+    if hash != p.manifest.original.content_hash {
+        return Err(CoreError::new(
+            ErrorCode::HashMismatch,
+            "that file isn't this project's original (different content)",
+        ));
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| CoreError::io(format!("creating {}", parent.display()), &e))?;
+    }
+    fsx::copy_atomic_new(ctx, source, &target)?;
+    let meta = std::fs::metadata(&target).map_err(|e| CoreError::io("reading the original", &e))?;
+    let was = p.read_only.take();
+    let result = commit(ctx, install_id, p, |_, _, m, _| {
+        m.original.size = meta.len();
+        m.original.mtime = mtime_of(&meta);
+        Ok(())
+    });
+    if let Err(e) = result {
+        p.read_only = was;
+        return Err(e);
+    }
+    p.warnings.retain(|w| w.code != "original_missing");
+    p.decoded = DecodedOriginal::new(p.manifest.project_id, target);
+    Ok(())
+}
+
+// ---------------------------------------------------------------- images (EDT)
+
+/// What an image id names (FR-EDT-31/32 via `resolve_image`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ImageKind {
+    Original,
+    Layer,
+    Candidate,
+    Mask,
+}
+
+/// A resolved image of the open project.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResolvedImage {
+    pub path: PathBuf,
+    pub kind: ImageKind,
+}
+
+impl OpenProject {
+    /// `resolve_image(image_id)` (R4, #48 (3)): the original (its stable id = the original
+    /// layer's id, from creation), a layer of the current stack or of any revision, a candidate
+    /// (its trashed copy while it's in the trash), or a mask → its file.
+    pub fn resolve_image(&self, image_id: Ulid) -> CoreResult<ResolvedImage> {
+        let m = &self.manifest;
+        let found = |rel: &str, kind| ResolvedImage {
+            path: self.path(rel),
+            kind,
+        };
+        if m.original_image_id() == Some(image_id) {
+            return Ok(found(&m.original.file, ImageKind::Original));
+        }
+        if let Some(l) = m.layers.iter().find(|l| l.id == image_id) {
+            let file = l.file.as_deref().ok_or_else(|| {
+                CoreError::new(ErrorCode::Corrupt, "the layer has no file").with_field("image_id")
+            })?;
+            return Ok(found(file, ImageKind::Layer));
+        }
+        if let Some(c) = m.candidates.iter().find(|c| c.id == image_id) {
+            let rel = match c.trash_id.and_then(|t| m.trash.iter().find(|i| i.id == t)) {
+                Some(item) => item.trashed_path(&c.file),
+                None => c.file.clone(),
+            };
+            return Ok(found(&rel, ImageKind::Candidate));
+        }
+        if let Some(mask) = m.masks.iter().find(|k| k.id == image_id) {
+            return Ok(found(&mask.file, ImageKind::Mask));
+        }
+        if self.refs.layers.contains(&image_id) {
+            return Ok(found(&layer_file(image_id), ImageKind::Layer));
+        }
+        Err(CoreError::new(ErrorCode::UnknownId, "unknown image").with_field("image_id"))
+    }
+}
+
+// ---------------------------------------------------------------- project folders
+
+/// The folders `project_folder_list` takes (FR-PRJ-47, 48).
+pub const LISTED_FOLDERS: [&str; 5] = ["working", "references", "structure", "parts", "exports"];
+
+/// One file in a project folder.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FolderFile {
+    /// Relative to the folder, `/` separators.
+    pub name: String,
+    /// Absolute path.
+    pub path: PathBuf,
+    pub bytes: u64,
+    pub mtime: Timestamp,
+    /// A supported image by its extension (no file is opened, so nothing is hydrated).
+    pub image: bool,
+    /// A `pf-tiles` URL for images (EDT `library` key space), set by the command.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thumb_url: Option<String>,
+}
+
+fn check_folder(folder: &str, allowed: &[&str]) -> CoreResult<()> {
+    if allowed.contains(&folder) {
+        Ok(())
+    } else {
+        Err(CoreError::new(
+            ErrorCode::UnknownFolder,
+            format!("{folder:?} is not one of {}", allowed.join(", ")),
+        )
+        .with_field("folder"))
+    }
+}
+
+/// `project_folder_list` (FR-PRJ-48): files in a project folder, recursively, by name. Reads
+/// metadata only and never hydrates (FR-PRJ-17).
+pub fn folder_list(p: &OpenProject, folder: &str) -> CoreResult<Vec<FolderFile>> {
+    check_folder(folder, &LISTED_FOLDERS)?;
+    let base = p.path(folder);
+    let mut out = vec![];
+    collect_files(&base, "", &mut out);
+    out.sort_by_key(|f| f.name.to_lowercase());
+    Ok(out)
+}
+
+fn collect_files(dir: &Path, prefix: &str, out: &mut Vec<FolderFile>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.contains(fsx::TEMP_MARKER) {
+            continue;
+        }
+        let rel = if prefix.is_empty() {
+            name
+        } else {
+            format!("{prefix}/{name}")
+        };
+        let Ok(meta) = std::fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        if meta.is_dir() {
+            collect_files(&entry.path(), &rel, out);
+        } else if meta.is_file() {
+            out.push(FolderFile {
+                image: pf_imaging::has_image_extension(&entry.path()),
+                path: entry.path(),
+                bytes: meta.len(),
+                mtime: mtime_of(&meta),
+                name: rel,
+                thumb_url: None,
+            });
+        }
+    }
+}
+
+/// `project_folder_add` (FR-PRJ-47): copies files into a user-owned folder under free names.
+/// Never moves, renames or overwrites anything there. Returns the folder's new listing.
+pub fn folder_add(
+    ctx: &Context,
+    p: &OpenProject,
+    folder: &str,
+    sources: &[PathBuf],
+) -> CoreResult<Vec<FolderFile>> {
+    check_folder(folder, &USER_DIRS)?;
+    p.require_writable()?;
+    let base = p.path(folder);
+    std::fs::create_dir_all(&base)
+        .map_err(|e| CoreError::io(format!("creating {}", base.display()), &e))?;
+    for source in sources {
+        if !source.is_file() {
+            return Err(CoreError::new(
+                ErrorCode::NotFound,
+                format!("{} is not a file", source.display()),
+            ));
+        }
+        library::hydrate_if_needed(ctx, source)?;
+        let name = folder_name(source);
+        let (stem, ext) = match name.rsplit_once('.') {
+            Some((s, e)) if !s.is_empty() => (s.to_owned(), format!(".{e}")),
+            _ => (name.clone(), String::new()),
+        };
+        let free = crate::naming::first_free(&stem, |c| {
+            std::fs::symlink_metadata(base.join(format!("{c}{ext}"))).is_ok()
+        });
+        fsx::copy_atomic_new(ctx, source, &base.join(format!("{free}{ext}")))?;
+    }
+    folder_list(p, folder)
 }
 
 #[cfg(test)]

@@ -39,7 +39,12 @@
 | **Read-only** | An asset project that can be viewed (and masks painted) but not changed, e.g. when it was written by a newer app version. |
 | **Local cache** | Per-machine, rebuildable data outside the library (tiles, index). Losing it loses no project data. |
 | **Reference image** | An image supplied to a job with a **reference role**. |
-| **Reference role** | What a reference image may influence: *style*, *structure* or *identity*. |
+| **Reference role** | What a reference image may influence: *style*, *structure* or *identity*, where the model exposes one; otherwise none. |
+| **Reference slot** | A model input that takes reference images, with a count limit (min–max) and maybe a role. |
+| **Project reference** | An image in a project's `references/` folder. |
+| **References block** | The part of the Generate panel that picks the references for a request. |
+| **References trash** | The library-level trash for deleted packs, under `References/.pforge/trash/`. |
+| **Reference pack** | A named, reusable set of reference images kept as a folder in `<library-root>/References/<pack>/`, optionally attached to a request (#51). |
 | **Structural sketch** | A drawn or imported image that fixes layout or pose (the *structure* role). |
 | **Art recipe** | Reusable production guidance: style text, approved references, composition constraints, output requirements and tested settings. |
 | **Final prompt** | The exact prompt text submitted to the provider. It is always visible and editable. |
