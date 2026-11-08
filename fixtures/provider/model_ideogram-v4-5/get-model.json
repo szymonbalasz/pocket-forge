@@ -4,7 +4,7 @@
   "model": "model_ideogram-v4-5",
   "case": "get-model",
   "recorded_on": "2026-11-08",
-  "source": "synthetic",
+  "source": "recorded",
   "exchanges": [
     {
       "request": {
@@ -18,123 +18,237 @@
         },
         "body": {
           "model": {
-            "id": "model_ideogram-v4-5",
-            "name": "Ideogram 4.5",
-            "type": "custom",
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
             "capabilities": [
-              "img2img",
-              "inpaint"
+              "txt2img",
+              "img2img"
             ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Pending",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Scenario",
+              "modelProvider": "Ideogram",
+              "subProcessor": "Provider"
+            },
+            "createdAt": "2026-09-28T08:48:05.961Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_AUeCzV4jJ8GggYNW3YdEpi5j",
+              "asset_BzL8cUo6SS36hY2s5grVAcZU",
+              "asset_HZNVLC5Pa6i1KJeDA5imgVAd",
+              "asset_tppVbUnAXvgUm227Aj71Wge8",
+              "asset_S1kyB7Jhf1rGvgrbx2G9EVQq",
+              "asset_R6dFHw24C1fpCWozM7tKHHp7",
+              "asset_L7tqg5hXCeSBWeivbghqrZkY",
+              "asset_YBUe7gdnybo5naTTsSoLDkGA",
+              "asset_qYpfvwakAhzGH5LBDbMEBbWL",
+              "asset_K7sVngPnfDnmUFWskNV2F25a",
+              "asset_xb8Dunyk9sdYGEcknwKWYoRY",
+              "asset_YGEZuM13EVvzHaaMAEJGbhSL",
+              "asset_KdbGcYRm9Dyv3Qvny5K5xJQo",
+              "asset_RopBkSZYpJ4NooZASyCuW7X9",
+              "asset_4e1tk1FUWoyERA72V9qEs3AD",
+              "asset_mXxGzdKYyGqE318nx9C7Rybg",
+              "asset_BqyA2AdixhKrGTSNxaeNqDo1",
+              "asset_UieKQoVGQYeeWuPPVXrNU54v",
+              "asset_GSr6Ub81KYbHSZ26WbsHHhZ7",
+              "asset_NafJYgUxCMrPVbkyUf17ssWg"
+            ],
+            "id": "model_ideogram-v4-5",
             "inputs": [
               {
+                "costImpact": false,
+                "description": "Describe the image you want to generate, or the edit to apply, including any text that should appear in it. Refer to input images by position: image 1 is the source, image 2 the first reference, and so on.",
+                "label": "Prompt",
+                "maxLength": 10000,
                 "name": "prompt",
-                "type": "string",
+                "prompt": true,
+                "promptSpark": true,
                 "required": {
                   "always": true
-                }
+                },
+                "type": "string"
               },
               {
+                "costImpact": false,
+                "description": "Optional images to edit (up to 5, or 4 with a mask). The first is the source image to edit, the others are references. Leave empty to create from your prompt alone.",
+                "kind": "image",
+                "label": "Reference Images",
+                "maxLength": 5,
                 "name": "referenceImages",
-                "type": "file_array",
-                "kind": "image",
-                "max": 5,
-                "maxSize": 52428800
-              },
-              {
-                "name": "mask",
-                "type": "file",
-                "kind": "image",
-                "maskFrom": "referenceImages",
+                "parent": true,
                 "required": {
-                  "always": true
-                }
-              },
-              {
-                "name": "numOutputs",
-                "type": "number",
-                "min": 1,
-                "max": 4,
-                "step": 1,
-                "default": 1,
-                "costImpact": true
-              },
-              {
-                "name": "seed",
-                "type": "number",
-                "min": 0,
-                "max": 2147483647,
-                "step": 1
-              },
-              {
-                "name": "renderingSpeed",
-                "type": "string",
-                "allowedValues": [
-                  "TURBO",
-                  "DEFAULT",
-                  "QUALITY"
-                ],
-                "default": "DEFAULT",
-                "costImpact": true
-              },
-              {
-                "name": "magicPrompt",
-                "type": "string",
-                "allowedValues": [
-                  "AUTO",
-                  "ON",
-                  "OFF"
-                ],
-                "default": "AUTO"
-              },
-              {
-                "name": "styleType",
-                "type": "string",
-                "allowedValues": [
-                  "AUTO",
-                  "GENERAL",
-                  "REALISTIC",
-                  "DESIGN",
-                  "FICTION"
-                ],
-                "default": "AUTO"
-              },
-              {
-                "name": "colorPalette",
-                "type": "string",
-                "allowedValues": [
-                  "EMBER",
-                  "FRESH",
-                  "JUNGLE",
-                  "MAGIC",
-                  "MELON",
-                  "MOSAIC",
-                  "PASTEL",
-                  "ULTRAMARINE"
-                ],
-                "required": {
-                  "always": false,
-                  "conditional": [
-                    {
-                      "input": "styleType",
-                      "values": [
-                        "DESIGN"
+                  "conditional": {
+                    "values": {
+                      "quality": [
+                        "very_low"
                       ]
                     }
-                  ]
-                }
+                  }
+                },
+                "type": "file_array"
               },
               {
-                "name": "aspectRatio",
-                "type": "string",
+                "costImpact": false,
+                "description": "Optional mask over the first reference image. White marks the region to edit, black the region to keep. Requires Aspect Ratio to stay on Auto.",
+                "kind": "image",
+                "label": "Mask",
+                "maskFrom": "referenceImages",
+                "name": "mask",
+                "parent": true,
+                "type": "file"
+              },
+              {
                 "allowedValues": [
                   "auto",
-                  "1:1",
+                  "source",
+                  "3:1",
+                  "8:3",
+                  "23:9",
+                  "22:9",
+                  "12:5",
+                  "2:1",
                   "16:9",
-                  "9:16"
+                  "8:5",
+                  "3:2",
+                  "4:3",
+                  "5:4",
+                  "1:1",
+                  "4:5",
+                  "3:4",
+                  "2:3",
+                  "5:8",
+                  "9:16",
+                  "1:2",
+                  "5:12",
+                  "9:22",
+                  "9:23",
+                  "3:8",
+                  "1:3"
                 ],
-                "default": "1:1"
+                "costImpact": false,
+                "default": "auto",
+                "description": "The shape of the image. Auto lets the model choose from the prompt and images; Source keeps the first reference image's shape.",
+                "group": "Settings",
+                "label": "Aspect Ratio",
+                "name": "aspectRatio",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "1K",
+                  "2K"
+                ],
+                "costImpact": false,
+                "default": "2K",
+                "description": "The output resolution when an explicit aspect ratio is set. 1K exists only for 1:1, 4:5, 3:4, 2:3, 5:8, 9:16, 1:2 and their landscape counterparts.",
+                "group": "Settings",
+                "label": "Resolution",
+                "name": "resolution",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "very_low",
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "costImpact": true,
+                "default": "high",
+                "description": "The quality-versus-speed tradeoff. Higher quality takes longer and costs more. Very Low requires a reference image.",
+                "group": "Settings",
+                "label": "Quality",
+                "name": "quality",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "auto",
+                  "on",
+                  "off"
+                ],
+                "costImpact": false,
+                "default": "auto",
+                "description": "Whether the model enriches your prompt before generating. Applies to text-to-image only: edits are always turned into structured instructions.",
+                "group": "Settings",
+                "label": "Magic Prompt",
+                "name": "magicPrompt",
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "default": 1,
+                "description": "How many images to generate (1-8). Each additional image adds to the cost.",
+                "group": "Settings",
+                "label": "Image Count",
+                "max": 8,
+                "min": 1,
+                "name": "numOutputs",
+                "step": 1,
+                "type": "number"
+              },
+              {
+                "costImpact": false,
+                "description": "A number that locks in the randomness of the generation. Leave blank for a new result each time.",
+                "group": "Settings",
+                "label": "Seed",
+                "max": 2147483647,
+                "min": 0,
+                "name": "seed",
+                "type": "number"
+              },
+              {
+                "costImpact": false,
+                "default": false,
+                "description": "Screens outputs for copyrighted content. Flagged images are withheld. Adds latency.",
+                "group": "Settings",
+                "label": "Copyright Detection",
+                "name": "enableCopyrightDetection",
+                "type": "boolean"
               }
-            ]
+            ],
+            "name": "Ideogram 4.5",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Generate posters, logos and packaging with accurate in-image text up to 2K, or edit an image with up to four references and an optional mask. Four quality tiers.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Ideogram",
+              "editing",
+              "sc:featured",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "selects": {
+                "aspectRatio": {
+                  "auto": "Auto",
+                  "source": "Match Source"
+                },
+                "magicPrompt": {
+                  "auto": "Auto",
+                  "off": "Off",
+                  "on": "On"
+                },
+                "quality": {
+                  "high": "High",
+                  "low": "Low",
+                  "medium": "Medium",
+                  "very_low": "Very Low"
+                }
+              }
+            },
+            "updatedAt": "2026-10-09T17:40:57.412Z",
+            "userId": "<user-1>"
           }
         }
       }

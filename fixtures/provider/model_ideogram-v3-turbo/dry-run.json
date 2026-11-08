@@ -1,0 +1,461 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_ideogram-v3-turbo",
+  "case": "dry-run",
+  "recorded_on": "2026-11-08",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_ideogram-v3-turbo"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "txt2img",
+              "img2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Replicate",
+              "modelProvider": "Ideogram",
+              "subProcessor": "Replicate"
+            },
+            "createdAt": "2025-07-10T12:57:23.981Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_9WQCNUEmUjEEUnEKJ2cMRa54",
+              "asset_eSBYyrSEA6yoGhtmvvhNpC1j",
+              "asset_hcMZDYkgn2fd2DVrePTDmjdy",
+              "asset_ba9Ngb3BToz3PS5suTac3nWb",
+              "asset_P5FzBVX9vD2NsrtHBLRwPFgD",
+              "asset_RBT26xXyjAuAPuDW77bFzQo7",
+              "asset_ZdwaYRaMVfrQzHY7hQt56qar",
+              "asset_rmQjhNoUnkCqqUqCNWc4k2hY",
+              "asset_hrFztTCaxHLUfn6MK4pxmQk7",
+              "asset_u9UAEWYeSVZoWzWkPLbrTUep",
+              "asset_bU8R1W4SDBXYFqwAGmEbmRbW",
+              "asset_48apYTkZQLHRhZ3fshsLgENR",
+              "asset_zCk9tknJrU2qdTnohorqJ9m1",
+              "asset_YgL7mHq3gH4sPR7Q5KuVjMvx",
+              "asset_sPivpKBzY7gzgjbz9RTKTd7P",
+              "asset_s5nNw4yPUSBADqnxjEDf5RkU",
+              "asset_vPU1yn5RZYS8qDttHrjUc91Q",
+              "asset_ukcB2UY5rbt26c2A7VSyP9ap",
+              "asset_izDXfwBwdZLCmT5vM7WaPWhP",
+              "asset_NzJCyD2Fw5y9mzjSUFXM3hNW",
+              "asset_hoxCijqYYxNHXxn5kmBaNtjL",
+              "asset_BkALdULtHwS4UwFxQ482py7A",
+              "asset_4WMqrx8u9PT7W5UZeMDzAGri",
+              "asset_1BgsqTqHVAkL72ESWK9X9gPW",
+              "asset_BUvgwR7ao3VRVLQbBf8oPmHK",
+              "asset_MrKSQASS4QaFw11ptJoUmNpq",
+              "asset_K87F986NQ4m1d7isgAXsMza3",
+              "asset_CvZMdWqvpBwTVFkXPzuLLa2y",
+              "asset_mkMTGQs5to7yZ6zwrFzwkRm9"
+            ],
+            "id": "model_ideogram-v3-turbo",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Describe your image",
+                "label": "Prompt",
+                "maxLength": 4096,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "1:3",
+                  "1:2",
+                  "2:3",
+                  "3:4",
+                  "4:5",
+                  "9:16",
+                  "10:16",
+                  "1:1",
+                  "5:4",
+                  "4:3",
+                  "3:2",
+                  "16:10",
+                  "16:9",
+                  "2:1",
+                  "3:1"
+                ],
+                "costImpact": false,
+                "default": "4:3",
+                "description": "Aspect ratio. Ignored if a resolution or inpainting image is given.",
+                "label": "Aspect Ratio",
+                "name": "aspectRatio",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "None",
+                  "512x1536",
+                  "576x1408",
+                  "640x1344",
+                  "704x1344",
+                  "768x1344",
+                  "832x1216",
+                  "896x1152",
+                  "960x1024",
+                  "1024x1024",
+                  "1088x960",
+                  "1152x896",
+                  "1216x832",
+                  "1280x768",
+                  "1344x704",
+                  "1408x640",
+                  "1472x576",
+                  "1536x512"
+                ],
+                "costImpact": false,
+                "default": "None",
+                "description": "Resolution. Overrides aspect ratio. Ignored if an inpainting image is given.",
+                "label": "Resolution",
+                "name": "resolution",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "Auto",
+                  "On",
+                  "Off"
+                ],
+                "costImpact": false,
+                "default": "Auto",
+                "description": "Magic Prompt will interpret your prompt and optimize it to maximize variety and quality of the images generated. You can also use it to write prompts in different languages.",
+                "label": "Magic Prompt Option",
+                "name": "magicPromptOption",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "An image file to use for inpainting. You must also use a mask.",
+                "kind": "image",
+                "label": "Image for Inpainting",
+                "name": "image",
+                "parent": true,
+                "type": "file"
+              },
+              {
+                "costImpact": false,
+                "description": "A black and white image. Black pixels are inpainted, white pixels are preserved. The mask will be resized to match the image size.",
+                "kind": "image",
+                "label": "Mask",
+                "maskFrom": "image",
+                "name": "mask",
+                "parent": true,
+                "required": {
+                  "ifDefined": {
+                    "image": {
+                      "message": "A mask must be provided if an inpainting image is set."
+                    }
+                  }
+                },
+                "type": "file"
+              },
+              {
+                "costImpact": false,
+                "description": "A list of images to use as style references.",
+                "kind": "image",
+                "label": "Style Reference Images",
+                "maxLength": 4,
+                "name": "styleReferenceImages",
+                "parent": true,
+                "type": "file_array"
+              },
+              {
+                "allowedValues": [
+                  "None",
+                  "Auto",
+                  "General",
+                  "Realistic",
+                  "Design"
+                ],
+                "costImpact": false,
+                "default": "None",
+                "description": "The styles help define the specific aesthetic of the image you want to generate.",
+                "label": "Style Type",
+                "name": "styleType",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "None",
+                  "80s Illustration",
+                  "90s Nostalgia",
+                  "Abstract Organic",
+                  "Analog Nostalgia",
+                  "Art Brut",
+                  "Art Deco",
+                  "Art Poster",
+                  "Aura",
+                  "Avant Garde",
+                  "Bauhaus",
+                  "Blueprint",
+                  "Blurry Motion",
+                  "Bright Art",
+                  "C4D Cartoon",
+                  "Children's Book",
+                  "Collage",
+                  "Coloring Book I",
+                  "Coloring Book II",
+                  "Cubism",
+                  "Dark Aura",
+                  "Doodle",
+                  "Double Exposure",
+                  "Dramatic Cinema",
+                  "Editorial",
+                  "Emotional Minimal",
+                  "Ethereal Party",
+                  "Expired Film",
+                  "Flat Art",
+                  "Flat Vector",
+                  "Forest Reverie",
+                  "Geo Minimalist",
+                  "Glass Prism",
+                  "Golden Hour",
+                  "Graffiti I",
+                  "Graffiti II",
+                  "Halftone Print",
+                  "High Contrast",
+                  "Hippie Era",
+                  "Iconic",
+                  "Japandi Fusion",
+                  "Jazzy",
+                  "Long Exposure",
+                  "Magazine Editorial",
+                  "Minimal Illustration",
+                  "Mixed Media",
+                  "Monochrome",
+                  "Nightlife",
+                  "Oil Painting",
+                  "Old Cartoons",
+                  "Paint Gesture",
+                  "Pop Art",
+                  "Retro Etching",
+                  "Riviera Pop",
+                  "Spotlight 80s",
+                  "Stylized Red",
+                  "Surreal Collage",
+                  "Travel Poster",
+                  "Vintage Geo",
+                  "Vintage Poster",
+                  "Watercolor",
+                  "Weird",
+                  "Woodblock Print"
+                ],
+                "costImpact": false,
+                "default": "None",
+                "description": "The style preset to use for the image generation.",
+                "label": "Style Preset",
+                "name": "stylePreset",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "Use a seed for reproducible results. Leave blank to use a random seed.",
+                "label": "Seed",
+                "max": 2147483647,
+                "min": 0,
+                "name": "seed",
+                "type": "number"
+              }
+            ],
+            "name": "Ideogram 3 (Turbo)",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Ideogram 3 (Turbo) by Ideogram. Fast text-to-image with inpainting, 15 aspect ratios, 60+ style presets, up to 4 style references, and multilingual Magic Prompt.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Ideogram",
+              "Image to Image",
+              "Text to Image",
+              "deprecated:model_ideogram-v4",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "updatedAt": "2026-06-28T10:15:26.123Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "room-512.png"
+          },
+          "name": "pocket-forge-source.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "authorId": "<user-3>",
+            "collectionIds": [],
+            "createdAt": "2026-11-08T19:14:00.570Z",
+            "editCapabilities": [
+              "REMOVE_BACKGROUND",
+              "REFINE",
+              "PIXELATE",
+              "PROMPT_EDITING",
+              "UPSCALE",
+              "UPSCALE_360",
+              "DETECTION",
+              "VECTORIZATION",
+              "SEGMENTATION",
+              "REFRAME",
+              "GENERATIVE_FILL"
+            ],
+            "id": "<asset-1>",
+            "kind": "image",
+            "metadata": {
+              "height": 512,
+              "kind": "image",
+              "name": "pocket-forge-source.png",
+              "size": 3031,
+              "type": "uploaded",
+              "width": 512
+            },
+            "mimeType": "image/png",
+            "ownerId": "<user-4>",
+            "privacy": "private",
+            "properties": {
+              "height": 512,
+              "size": 3031,
+              "width": 512
+            },
+            "source": "uploaded",
+            "status": "success",
+            "tags": [],
+            "updatedAt": "2026-11-08T19:14:00.570Z",
+            "url": "fake://asset/2"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "upload.png"
+          },
+          "name": "pocket-forge-mask.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "authorId": "<user-3>",
+            "collectionIds": [],
+            "createdAt": "2026-11-08T19:14:19.401Z",
+            "editCapabilities": [
+              "REMOVE_BACKGROUND",
+              "REFINE",
+              "PIXELATE",
+              "PROMPT_EDITING",
+              "UPSCALE",
+              "UPSCALE_360",
+              "DETECTION",
+              "VECTORIZATION",
+              "SEGMENTATION",
+              "REFRAME",
+              "GENERATIVE_FILL"
+            ],
+            "id": "<asset-2>",
+            "kind": "image",
+            "metadata": {
+              "height": 512,
+              "kind": "image",
+              "name": "pocket-forge-mask.png",
+              "size": 2242,
+              "type": "uploaded",
+              "width": 512
+            },
+            "mimeType": "image/png",
+            "ownerId": "<user-4>",
+            "privacy": "private",
+            "properties": {
+              "height": 512,
+              "size": 2242,
+              "width": 512
+            },
+            "source": "uploaded",
+            "status": "success",
+            "tags": [],
+            "updatedAt": "2026-11-08T19:14:19.401Z",
+            "url": "fake://asset/3"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/generate/custom/model_ideogram-v3-turbo",
+        "query": {
+          "dryRun": "true"
+        },
+        "body": {
+          "image": "<asset-1>",
+          "mask": "<asset-2>",
+          "prompt": "a mossy flagstone floor",
+          "seed": 1
+        }
+      },
+      "response": {
+        "status": 269,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "costDetails": {
+            "custom-generation": 4
+          },
+          "creativeUnitsCost": 4,
+          "creativeUnitsDiscount": 0
+        }
+      }
+    }
+  ]
+}
