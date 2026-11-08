@@ -7,7 +7,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 import type { Capabilities } from '../src/api';
 import { mockRefs, refSeed } from './ref-mock';
-import { drawRegion, openRgn } from './rgn-mock';
+import { drawRegion, inputsOf, openRgn } from './rgn-mock';
 
 const REFS = JSON.parse(
   readFileSync(
@@ -111,4 +111,59 @@ test('FR-REF-18 a required slot under its min disables submit and names the slot
   await pickWeapons(page);
   await expect(page.getByTestId('ref-block-under')).toHaveCount(0);
   await expect(page.getByTestId('rgn-panel-submit-reason')).not.toContainText('References');
+});
+
+test('FR-REF-21 FR-RGN-45 walk R1/R2: the confirm counts the current ticks; a ticked file gone before Generate fails with no job', async ({
+  page,
+}) => {
+  await mockRefs(
+    page,
+    refSeed({ slots: SLOTS, projectRefs: [{ file: 'mood-a.png' }, { file: 'mood-b.png' }] }),
+  );
+  await openRgn(page, {
+    models: [{ id: 'fake-refs', name: 'Refs' }],
+    capabilities: { 'fake-refs': REFS },
+  });
+  await drawRegion(page, [400, 500], [800, 900]);
+  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await expect(page.getByTestId('rgn-panel-submit')).toBeEnabled();
+  const estimates = (await inputsOf(page, 'rgn_job_estimate')).length;
+
+  // R2: an identity tick (not cost-affecting) reuses the estimate; the confirm still counts 3.
+  await pickWeapons(page);
+  const b = `pack:${WEAPONS}:swatch-b.jpg`;
+  await item(page, b).getByTestId('ref-block-item-role').click();
+  await page.getByRole('option', { name: 'Identity' }).click();
+  await check(page, b).check();
+  await expect(page.getByTestId('ref-block-count')).toHaveText('Style 2/2 · Identity 1/1');
+  await page.getByTestId('rgn-panel-submit').click();
+  const dlg = page.getByTestId('rgn-confirm');
+  await expect(dlg.getByTestId('rgn-confirm-references')).toHaveText('with 3 references');
+  expect((await inputsOf(page, 'rgn_job_estimate')).length).toBe(estimates);
+  await dlg.getByTestId('rgn-confirm-cancel').click();
+
+  // R1: mood-b is moved away in Explorer, and nothing resolves the block before Generate.
+  await page.evaluate(() => {
+    const m = (window as unknown as { __pfRefMock: { projectRefs: { file: string }[] } })
+      .__pfRefMock;
+    m.projectRefs = m.projectRefs.filter((f) => f.file !== 'mood-b.png');
+  });
+  await page.getByTestId('rgn-panel-submit').click();
+  await dlg.getByTestId('rgn-confirm-ok').click();
+  await expect(page.getByTestId('rgn-panel-submit-error')).toContainText(
+    "mood-b.png can't be sent: it can't be found",
+  );
+  expect(await inputsOf(page, 'rgn_job_submit')).toHaveLength(1);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as unknown as { __pfRgnMock: { state: () => { jobs: unknown[] } } }).__pfRgnMock
+          .state().jobs.length,
+    ),
+  ).toBe(0);
+  // The block resolves again and says which one.
+  await expect(
+    page.getByTestId('ref-block-notice').and(page.locator('[data-code="dropped"]')),
+  ).toHaveText(/mood-b\.png is no longer available/);
+  await expect(item(page, 'project:mood-b.png')).toHaveCount(0);
 });

@@ -55,11 +55,24 @@ export function initialForm(est: JobEstimate, threshold: number | null): Confirm
   };
 }
 
+/** FR-RGN-45: the references the job sends. From the current selection (`onKeys`, REF's ticked
+ *  items), not the estimate's count: an estimate is reused while only non-cost-affecting slots
+ *  change (FR-REF-24). Items the estimate found identical to an earlier one are sent once.
+ *  `null` (no resolved block) → the estimate's count. */
+export function referencesSent(est: JobEstimate, onKeys: string[] | null): number {
+  if (!onKeys) return est.references ?? 0;
+  const once = new Set(
+    (est.reference_notices ?? []).filter((n) => n.code === 'duplicate').map((n) => n.key),
+  );
+  return onKeys.filter((k) => !once.has(k)).length;
+}
+
 export function confirmPlan(
   est: JobEstimate,
   stored: { cap: number | null; threshold: number | null },
   form: ConfirmForm,
   trashCount: number,
+  onKeys: string[] | null = null,
 ): ConfirmPlan {
   const setup = est.needs.includes('set_cap') || stored.cap === null || stored.threshold === null;
   const cost = est.cost.amount;
@@ -103,7 +116,7 @@ export function confirmPlan(
     needsSecond,
     enterConfirms: !needsSecond,
     trashCount,
-    references: est.references ?? 0,
+    references: referencesSent(est, onKeys),
     canConfirm: blocker === null,
     blocker,
     saveSpend,

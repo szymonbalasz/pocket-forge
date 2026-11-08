@@ -253,6 +253,22 @@ describe('confirm dialog logic (FR-RGN-14..16, §7)', () => {
     expect(confirmPlan(est(3), stored, initialForm(est(3), 5), 0).references).toBe(0);
   });
 
+  test('FR-RGN-45 walk R2 "with N references" follows the current selection, not the reused estimate', () => {
+    // The estimate saw 2 (one sent once as a duplicate of the other); since then only a
+    // non-cost-affecting slot changed, so the estimate is reused.
+    const e = est(3, {
+      references: 1,
+      reference_notices: [
+        { code: 'duplicate', message: 'b is a; sent once', key: 'project:b.png' },
+      ],
+    });
+    const plan = (keys: string[] | null) => confirmPlan(e, stored, initialForm(e, 5), 0, keys);
+    expect(plan(null).references).toBe(1);
+    expect(plan(['project:a.png', 'project:b.png', 'pack:P:face.png']).references).toBe(2);
+    expect(plan(['project:a.png', 'pack:P:face.png', 'pack:P:hand.png']).references).toBe(3);
+    expect(plan([]).references).toBe(0);
+  });
+
   test('FR-RGN-14 within cap and threshold: Enter confirms, nothing extra is sent', () => {
     const e = est(3);
     const p = confirmPlan(e, stored, initialForm(e, 5), 0);

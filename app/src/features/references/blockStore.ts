@@ -243,6 +243,15 @@ export function referencesForSend(): DraftReferences | null {
   return state.projectId ? state.refs : null;
 }
 
+/** FR-RGN-45: the keys of the ticked items as the block shows them now, for the confirm's
+ *  "with N references"; null while the block isn't resolved (the estimate's count applies). */
+export function referencesOnKeys(s: BlockState = state): string[] | null {
+  const r = s.resolved;
+  if (!s.modelId || !r) return null;
+  if (!r.visible) return [];
+  return r.items.filter((i) => i.on).map((i) => i.key);
+}
+
 /** FR-RGN-42: the ticked items of cost-affecting slots, in order. RGN re-estimates when it
  *  changes; other slots never do (FR-REF-24). */
 export function referencesCostKey(): string {
