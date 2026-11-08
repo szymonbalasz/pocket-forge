@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Capabilities, ModelSummary};
 
-const CACHE_VERSION: u32 = 1;
+/// 2: `slots[]` carry `min/max/cost_affecting` (FR-PRV-31). An older file is dropped and refetched.
+const CACHE_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CacheFile {

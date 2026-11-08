@@ -1,0 +1,333 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_ideogram-character",
+  "case": "references",
+  "recorded_on": "2026-11-08",
+  "source": "synthetic",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_ideogram-character"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "id": "model_ideogram-character",
+            "name": "Ideogram Character",
+            "type": "custom",
+            "capabilities": [
+              "img2img",
+              "inpaint"
+            ],
+            "inputs": [
+              {
+                "name": "prompt",
+                "type": "string",
+                "required": {
+                  "always": true
+                }
+              },
+              {
+                "name": "image",
+                "type": "file",
+                "kind": "image",
+                "required": {
+                  "always": true
+                },
+                "maxSize": 52428800
+              },
+              {
+                "name": "mask",
+                "type": "file",
+                "kind": "image",
+                "maskFrom": "image",
+                "required": {
+                  "always": true
+                }
+              },
+              {
+                "name": "numOutputs",
+                "type": "number",
+                "min": 1,
+                "max": 4,
+                "step": 1,
+                "default": 1,
+                "costImpact": true
+              },
+              {
+                "name": "seed",
+                "type": "number",
+                "min": 0,
+                "max": 2147483647,
+                "step": 1
+              },
+              {
+                "name": "renderingSpeed",
+                "type": "string",
+                "allowedValues": [
+                  "TURBO",
+                  "DEFAULT",
+                  "QUALITY"
+                ],
+                "default": "DEFAULT",
+                "costImpact": true
+              },
+              {
+                "name": "magicPrompt",
+                "type": "string",
+                "allowedValues": [
+                  "AUTO",
+                  "ON",
+                  "OFF"
+                ],
+                "default": "AUTO"
+              },
+              {
+                "name": "styleType",
+                "type": "string",
+                "allowedValues": [
+                  "AUTO",
+                  "GENERAL",
+                  "REALISTIC",
+                  "DESIGN",
+                  "FICTION"
+                ],
+                "default": "AUTO"
+              },
+              {
+                "name": "colorPalette",
+                "type": "string",
+                "allowedValues": [
+                  "EMBER",
+                  "FRESH",
+                  "JUNGLE",
+                  "MAGIC",
+                  "MELON",
+                  "MOSAIC",
+                  "PASTEL",
+                  "ULTRAMARINE"
+                ],
+                "required": {
+                  "always": false,
+                  "conditionalValues": {
+                    "styleType": [
+                      "DESIGN"
+                    ]
+                  }
+                }
+              },
+              {
+                "name": "styleReferenceImages",
+                "type": "file_array",
+                "kind": "image",
+                "max": 4
+              },
+              {
+                "name": "characterReferenceImages",
+                "type": "file_array",
+                "kind": "image",
+                "max": 1,
+                "required": {
+                  "always": true
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "room-256.png"
+          },
+          "name": "pocket-forge-source.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "id": "<asset-1>"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "disc-256.png"
+          },
+          "name": "pocket-forge-mask.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "id": "<asset-2>"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "ref-style-a.png"
+          },
+          "name": "pocket-forge-reference.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "id": "<asset-3>"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "ref-style-b.jpg"
+          },
+          "name": "pocket-forge-reference.jpg"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "id": "<asset-4>"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "ref-identity.webp"
+          },
+          "name": "pocket-forge-reference.webp"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "id": "<asset-5>"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/generate/custom/model_ideogram-character",
+        "query": {
+          "dryRun": "true"
+        },
+        "body": {
+          "characterReferenceImages": [
+            "<asset-5>"
+          ],
+          "image": "<asset-1>",
+          "mask": "<asset-2>",
+          "numOutputs": 2,
+          "prompt": "a mossy flagstone floor",
+          "seed": 7,
+          "styleReferenceImages": [
+            "<asset-3>",
+            "<asset-4>"
+          ]
+        }
+      },
+      "response": {
+        "status": 269,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "creativeUnitsCost": 12,
+          "costDetails": {
+            "references": 3
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/generate/custom/model_ideogram-character",
+        "body": {
+          "characterReferenceImages": [
+            "<asset-5>"
+          ],
+          "image": "<asset-1>",
+          "mask": "<asset-2>",
+          "numOutputs": 2,
+          "prompt": "a mossy flagstone floor",
+          "seed": 7,
+          "styleReferenceImages": [
+            "<asset-3>",
+            "<asset-4>"
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "job": {
+            "jobId": "<job-1>",
+            "status": "queued"
+          }
+        }
+      }
+    }
+  ]
+}
