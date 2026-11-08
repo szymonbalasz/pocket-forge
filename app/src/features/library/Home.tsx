@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Popover } from 'radix-ui';
 
-import { onFileDrop } from '../../api';
+import { onFileDrop, pickPaths } from '../../api';
 import { IconPlus } from '../../shell/icons';
 import { projectStore, useProjectState } from '../../store/project';
 import { Card } from './Card';
@@ -164,8 +164,8 @@ function HomeView() {
   );
 }
 
-/** + New (FR-PRJ-03). A native multi-select dialog needs `tauri-plugin-dialog` (not approved
- *  yet); until then the popover takes file paths, one per line. */
+/** + New (FR-PRJ-03): the native multi-select image dialog (#53). Where no dialog is available
+ *  (tests on the mocked core), a popover takes file or folder paths, one per line. */
 function NewButton({ disabled }: { disabled: boolean }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
@@ -175,11 +175,23 @@ function NewButton({ disabled }: { disabled: boolean }) {
     .filter(Boolean);
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
-        <button type="button" className="primary" data-testid="prj-home-new" disabled={disabled}>
+      <Popover.Anchor asChild>
+        <button
+          type="button"
+          className="primary"
+          data-testid="prj-home-new"
+          disabled={disabled}
+          aria-haspopup="dialog"
+          onClick={() =>
+            pickPaths({ title: 'New from images', multiple: true, images: true }).then(
+              (picked) => void libraryStore.create(picked),
+              () => setOpen(true),
+            )
+          }
+        >
           <IconPlus /> New
         </button>
-      </Popover.Trigger>
+      </Popover.Anchor>
       <Popover.Portal>
         <Popover.Content className="prj-popover" align="end" sideOffset={6}>
           <form
@@ -320,6 +332,23 @@ function RootSetup({ first }: { first: boolean }) {
             setError(null);
           }}
         />
+        <button
+          type="button"
+          data-testid="prj-setup-browse"
+          onClick={() =>
+            pickPaths({ title: 'Choose your library folder', directory: true }).then(
+              ([dir]) => {
+                if (!dir) return;
+                setPath(dir);
+                setError(null);
+                void libraryStore.setRoot(dir).then(setError);
+              },
+              () => setError('No folder dialog here: type the path instead.'),
+            )
+          }
+        >
+          Browse…
+        </button>
         {error && (
           <p className="error small" data-testid="prj-setup-error" role="alert">
             {error}
