@@ -35,9 +35,12 @@ test('FR-PRJ-21 a failed draft save shows in the save state; the next commit cle
   expect(projectStore.get().save.kind).toBe('saved');
 
   fireEvent.change(screen.getByTestId('rgn-panel-prompt'), { target: { value: 'flooded crypt' } });
-  await waitFor(() => expect(projectStore.get().save).toMatchObject({ kind: 'failed', message }), {
-    timeout: DRAFT_SAVE_MS + 2000,
-  });
+  await waitFor(
+    () => expect(projectStore.get().save).toMatchObject({ kind: 'failed', code: 'not_found' }),
+    {
+      timeout: DRAFT_SAVE_MS + 2000,
+    },
+  );
 
   // The next change saves again (the mock fails once); its commit sets the segment back.
   fireEvent.change(screen.getByTestId('rgn-panel-prompt'), { target: { value: 'flooded hall' } });

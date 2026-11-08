@@ -305,7 +305,7 @@ function saveDraftSoon(): void {
         ...referencesDraft(), // REF's selection (FR-REF-20)
       })
       // Shown in the save segment (walk D3); the next change saves again.
-      .catch((e) => projectStore.draftSaveFailed(uiError(e)));
+      .catch((e) => projectStore.draftSaveFailed(e));
   }, DRAFT_SAVE_MS);
 }
 

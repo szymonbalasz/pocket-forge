@@ -207,9 +207,9 @@ export const projectStore = {
 
   /** A draft write failed (RGN's `project_put_draft`): the save segment must not say Saved. The
    *  next commit sets it back (FR-PRJ-21; PRJ's own retry is separate). */
-  draftSaveFailed(err: { code: string; message: string }): void {
-    if (state.project)
-      set({ save: { kind: 'failed', code: err.code, message: err.message, retrying: false } });
+  draftSaveFailed(e: unknown): void {
+    if (!state.project) return;
+    set({ save: { kind: 'failed', ...errorOf(e), code: saveCode(e), retrying: false } });
   },
 
   setError(error: { code: string; message: string } | null): void {
