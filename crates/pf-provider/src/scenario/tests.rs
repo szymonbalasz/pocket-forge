@@ -103,7 +103,7 @@ fn fr_prv_25_list_models_returns_masked_edit_models_only() {
         [V3, CHAR],
         "404 skipped; Character's required reference slot no longer blocks it (FR-PRV-32)"
     );
-    assert_eq!(list.models[0].name, "Ideogram V3 Balanced");
+    assert_eq!(list.models[0].name, "Ideogram 3 (Balanced)");
     assert_eq!(r.t.remaining(), 0);
     assert!(
         r.t.seen().iter().all(|s| s.authorized),

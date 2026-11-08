@@ -100,7 +100,7 @@ impl Redactor {
             Value::Object(m) => {
                 for (k, x) in m {
                     match (k.as_str(), x) {
-                        ("assetId", Value::String(s)) => self.id(s, "asset"),
+                        ("assetId" | "entityId", Value::String(s)) => self.id(s, "asset"),
                         ("assetIds", Value::Array(a)) => a
                             .iter()
                             .filter_map(Value::as_str)

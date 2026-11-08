@@ -219,6 +219,89 @@ fn fr_prv_14_large_files_use_multipart_and_upload_once_per_hash() {
     );
 }
 
+/// A multipart upload by hand: create, one part, complete, then `GET /uploads/{id}` per poll.
+fn multipart(polls: Vec<Value>) -> super::tests::Rig {
+    let upload = |status: &str| json!({"upload": {"id": "up1", "status": status}});
+    let mut x = vec![
+        ex(
+            Method::Post,
+            "/uploads",
+            200,
+            json!({"upload": {"id": "up1", "status": "pending",
+                "parts": [{"number": 1, "url": "fake://upload/1/part/1", "expires": "later"}]}}),
+        ),
+        ex(Method::Put, "fake://upload/1/part/1", 200, Value::Null),
+        ex(
+            Method::Post,
+            "/uploads/up1/action",
+            200,
+            upload("validating"),
+        ),
+    ];
+    x.extend(
+        polls
+            .into_iter()
+            .map(|b| ex(Method::Get, "/uploads/up1", 200, b)),
+    );
+    rig_with(x, &[])
+}
+
+#[test]
+fn fr_prv_14_a_slow_validating_upload_is_polled_with_backoff_until_it_names_its_asset() {
+    let mut polls = vec![json!({"upload": {"id": "up1", "status": "validating"}}); 5];
+    polls.push(json!({"upload": {"id": "up1", "status": "validated"}}));
+    polls.push(json!({"upload": {"id": "up1", "status": "imported", "entityId": "asset_Big"}}));
+    let r = multipart(polls);
+    let a = block_on(r.p.upload(&noise_png(1200, 7), UploadPurpose::Source)).unwrap();
+    assert_eq!(a.0, "asset_Big", "the asset id is the upload's entityId");
+    assert_eq!(r.t.remaining(), 0);
+    let secs: Vec<u64> = r.sleeps.delays().iter().map(|d| d.as_secs()).collect();
+    assert_eq!(secs, [1, 2, 4, 8, 8, 8, 8], "1 s, then doubling to 8 s");
+}
+
+#[test]
+fn fr_prv_14_an_upload_that_never_validates_gives_up_after_about_a_minute() {
+    let polls = vec![json!({"upload": {"id": "up1", "status": "validating"}}); 10];
+    let r = multipart(polls);
+    let e = block_on(r.p.upload(&noise_png(1200, 7), UploadPurpose::Source)).unwrap_err();
+    let ProviderError::ProviderFailure { hint } = e else {
+        panic!("{e:?}")
+    };
+    assert_eq!(
+        hint,
+        "the upload did not complete within 60 s (last status: validating)"
+    );
+    let total: u64 = r.sleeps.delays().iter().map(|d| d.as_secs()).sum();
+    assert!((60..=70).contains(&total), "waited {total} s");
+}
+
+#[test]
+fn fr_prv_14_a_failed_upload_surfaces_the_provider_error_message() {
+    let r = multipart(vec![json!({"upload": {"id": "up1", "status": "failed",
+        "errorMessage": "Image dimensions exceed the limit"}})]);
+    let e = block_on(r.p.upload(&noise_png(1200, 7), UploadPurpose::Source)).unwrap_err();
+    let ProviderError::ProviderFailure { hint } = e else {
+        panic!("{e:?}")
+    };
+    assert_eq!(
+        hint,
+        "the provider rejected the upload: Image dimensions exceed the limit"
+    );
+    assert_eq!(r.t.remaining(), 0, "stopped polling at failed");
+}
+
+#[test]
+fn fr_prv_14_a_finished_upload_without_an_asset_id_is_a_readable_error() {
+    let r = multipart(vec![json!({"upload": {"id": "up1", "status": "complete"}})]);
+    let e = block_on(r.p.upload(&noise_png(1200, 7), UploadPurpose::Source)).unwrap_err();
+    assert_eq!(
+        e,
+        ProviderError::ProviderFailure {
+            hint: "the upload finished (complete) without an asset id".into()
+        }
+    );
+}
+
 #[test]
 fn fr_prv_14_small_files_use_post_assets_and_the_ref_cache_clears_on_credential_change() {
     let up = |n: u32| {
@@ -319,8 +402,7 @@ fn fr_prv_16_ip_detection_is_stripped_even_if_the_model_lists_it() {
         269,
         json!({"creativeUnitsCost": 3}),
     );
-    dry.request.body =
-        Some(json!({"image": "", "mask": "", "numOutputs": 0, "prompt": "", "seed": 0}));
+    dry.request.body = Some(json!({"image": "", "mask": "", "prompt": "", "seed": 0})); // real V3: no numOutputs
     let r = rig_with(vec![model, up(1), up(2), dry], &[V3]);
     let mut req = request(V3);
     req.controls.insert("ipDetection".into(), json!(true));
@@ -517,7 +599,11 @@ fn fr_prv_13_limits_are_checked_before_any_network_call() {
     }
     // A file over max_bytes: GPT Image's max is 50 MB; shrink it through the source's maxSize.
     let mut model = get_model(V3);
-    model.response.body["model"]["inputs"][1]["maxSize"] = json!(1000);
+    let inputs = model.response.body["model"]["inputs"]
+        .as_array_mut()
+        .unwrap();
+    let image = inputs.iter_mut().find(|i| i["name"] == "image").unwrap();
+    image["maxSize"] = json!(1000);
     let r = rig_with(vec![model], &[V3]);
     assert_eq!(
         block_on(r.p.estimate(&request(V3))).unwrap_err(),

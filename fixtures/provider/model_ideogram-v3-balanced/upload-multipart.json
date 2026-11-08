@@ -3,7 +3,7 @@
   "provider": "scenario",
   "model": "model_ideogram-v3-balanced",
   "case": "upload-multipart",
-  "recorded_on": "2026-11-07",
+  "recorded_on": "2026-11-08",
   "source": "synthetic",
   "exchanges": [
     {
@@ -15,7 +15,10 @@
           "fileName": "pocket-forge-source.png",
           "fileSize": 1,
           "kind": "image",
-          "parts": 1
+          "parts": 1,
+          "assetOptions": {
+            "hide": true
+          }
         }
       },
       "response": {
@@ -23,10 +26,25 @@
         "body": {
           "upload": {
             "id": "<upload-1>",
+            "authorId": "<user-1>",
+            "ownerId": "<user-1>",
+            "fileName": "pocket-forge-source.png",
+            "kind": "image",
+            "source": "multipart",
+            "status": "pending",
+            "createdAt": "2026-11-08T00:00:00.000Z",
+            "updatedAt": "2026-11-08T00:00:00.000Z",
+            "contentType": "image/png",
+            "fileSize": 1,
+            "partsCount": 1,
+            "assetOptions": {
+              "hide": true
+            },
             "parts": [
               {
                 "number": 1,
-                "url": "fake://upload/1/part/1"
+                "url": "fake://upload/1/part/1",
+                "expires": "2026-11-08T01:00:00.000Z"
               }
             ]
           }
@@ -54,13 +72,7 @@
         "method": "POST",
         "path": "/uploads/<upload-1>/action",
         "body": {
-          "action": "complete",
-          "parts": [
-            {
-              "etag": "\"etag-1\"",
-              "number": 1
-            }
-          ]
+          "action": "complete"
         }
       },
       "response": {
@@ -68,7 +80,14 @@
         "body": {
           "upload": {
             "id": "<upload-1>",
-            "status": "validating"
+            "authorId": "<user-1>",
+            "ownerId": "<user-1>",
+            "fileName": "pocket-forge-source.png",
+            "kind": "image",
+            "source": "multipart",
+            "status": "validating",
+            "createdAt": "2026-11-08T00:00:00.000Z",
+            "updatedAt": "2026-11-08T00:00:00.000Z"
           }
         }
       }
@@ -83,8 +102,15 @@
         "body": {
           "upload": {
             "id": "<upload-1>",
-            "status": "complete",
-            "assetId": "<asset-1>"
+            "authorId": "<user-1>",
+            "ownerId": "<user-1>",
+            "fileName": "pocket-forge-source.png",
+            "kind": "image",
+            "source": "multipart",
+            "status": "imported",
+            "createdAt": "2026-11-08T00:00:00.000Z",
+            "updatedAt": "2026-11-08T00:00:00.000Z",
+            "entityId": "<asset-1>"
           }
         }
       }

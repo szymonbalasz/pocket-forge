@@ -105,8 +105,16 @@ fn control_type(ty: &str, role: ControlRole, input: &Map<String, Value>) -> Opti
 }
 
 /// Conditions from `required.conditional` / `required.conditionalValues`: a map
-/// `{input: value | [values]}` or a list of `{input|name|field, value | values}`.
+/// `{input: value | [values]}` (real models wrap it as `{values: {input: [values]}}`) or a list
+/// of `{input|name|field, value | values}`.
 fn conditions(v: &Value) -> Option<Vec<(String, Value)>> {
+    if let Some(inner @ Value::Object(_)) = v
+        .as_object()
+        .filter(|m| m.len() == 1)
+        .and_then(|m| m.get("values"))
+    {
+        return conditions(inner);
+    }
     match v {
         Value::Object(m) => Some(m.iter().map(|(k, v)| (k.clone(), v.clone())).collect()),
         Value::Array(items) => items
@@ -147,8 +155,8 @@ fn rule(when: &str, value: Value, then: &str) -> Rule {
     }
 }
 
-/// A reference slot (FR-PRV-31): `file` → max 1; `file_array` → the input's `max`, else the
-/// overlay's `slot_max`, else 1 with a warning. `min` is 1 if the input is required.
+/// A reference slot (FR-PRV-31): `file` → max 1; `file_array` → the input's `max` (real models
+/// say `maxLength`), else the overlay's `slot_max`, else 1 with a warning. `min` is 1 if the input is required.
 fn slot(
     name: &str,
     ty: &str,
@@ -273,8 +281,11 @@ pub fn normalise(
                     }
                 }
             }
+            // The adapter always sends the source and the mask together, so "required if the
+            // other is defined" on either of them always holds (real V3, Character, GPT bodies).
+            let sent_together = matches!(role, ControlRole::Source | ControlRole::Mask);
             for key in ["ifDefined", "ifNotDefined"] {
-                if req.get(key).is_some_and(|v| !v.is_null()) {
+                if !sent_together && req.get(key).is_some_and(|v| !v.is_null()) {
                     warnings.push(format!(
                         "{name:?}: required.{key} is not mapped; the control is optional"
                     ));
@@ -292,7 +303,7 @@ pub fn normalise(
                 name,
                 ty,
                 always,
-                max,
+                max.or_else(|| num(input.get("maxLength"))),
                 cost_affecting,
                 row,
                 &mut warnings,
@@ -621,12 +632,10 @@ mod tests {
             ("model_ideogram-v3-balanced", style4),
             ("model_ideogram-v3-quality", style4),
             ("model_ideogram-v3-turbo", style4),
+            // Real Character: one required `file` identity, no style references.
             (
                 "model_ideogram-character",
-                &[
-                    ("styleReferenceImages", Some(Style), 0, 4, false),
-                    ("characterReferenceImages", Some(Identity), 1, 1, false),
-                ],
+                &[("characterReferenceImage", Some(Identity), 1, 1, false)],
             ),
             (
                 "fake-white-edit",
@@ -753,6 +762,37 @@ mod tests {
                 row.model_id
             );
             assert!(c.warnings.is_empty(), "{}: {:?}", row.model_id, c.warnings);
+        }
+    }
+
+    /// The real recordings (2026-11-08) list `txt2img`/`img2img` and never `inpaint`: masked edit
+    /// rests on a `mask` input (`maskFrom`) alone. Without it a real model is not offered, and
+    /// GPT's mask says `backgroundBehavior: transparent`, matching the alpha convention.
+    #[test]
+    fn fr_prv_11_real_models_offer_masked_edit_only_with_a_mask_input() {
+        for row in SCENARIO_ROWS.iter() {
+            let rec = crate::scenario::fixture_recording(row.model_id, "get-model").unwrap();
+            let body = &rec.exchanges[0].response.body;
+            let inputs = body["model"]["inputs"].as_array().unwrap();
+            let mask = inputs.iter().find(|i| i.get("maskFrom").is_some());
+            let mask = mask.unwrap_or_else(|| panic!("{}: no mask input", row.model_id));
+            assert_eq!(
+                mask["backgroundBehavior"] == "transparent",
+                row.convention == MaskConvention::AlphaTransparentEdit,
+                "{}",
+                row.model_id
+            );
+            let mut stripped = body.clone();
+            stripped["model"]["inputs"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|i| i.get("maskFrom").is_none());
+            stripped["model"]["capabilities"] = json!(["txt2img", "img2img", "inpaint"]);
+            let c = normalise(row.model_id, &stripped, Some(row))
+                .unwrap()
+                .capabilities;
+            assert!(c.operations.is_empty(), "{}", row.model_id);
+            assert!(c.mask.is_none(), "{}", row.model_id);
         }
     }
 

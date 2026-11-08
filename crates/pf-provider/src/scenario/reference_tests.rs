@@ -25,6 +25,13 @@ const V3: &str = "model_ideogram-v3-balanced";
 const STYLE: &str = "styleReferenceImages";
 const IDENTITY: &str = "characterReferenceImages";
 
+/// A two-slot model (style `file_array` max 4 + required identity `file_array` max 1), from the
+/// synthetic `references` recording. The real Character (2026-11-08) has one required `file`
+/// identity input and no style references; see `real_character_sends_one_identity_ref`.
+fn two_slot_model() -> crate::replay::Exchange {
+    fixture_recording(CHAR, "references").unwrap().exchanges[0].clone()
+}
+
 fn style_a() -> Vec<u8> {
     room_png(64)
 }
@@ -170,7 +177,7 @@ fn fr_prv_33_bad_references_are_refused_with_zero_network_calls() {
         ("hash mismatch", vec![one_identity(), wrong_hash]),
     ];
     // Only the capabilities call is recorded; any other request would panic the replay.
-    let r = rig_with(vec![get_model(CHAR)], &[CHAR]);
+    let r = rig_with(vec![two_slot_model()], &[CHAR]);
     block_on(r.p.get_capabilities(CHAR)).unwrap();
     let reference_error = ProviderError::InvalidRequest {
         field: "reference".into(),
@@ -239,7 +246,7 @@ fn fr_prv_34_a_missing_reference_is_reuploaded_with_the_rest_once() {
     let generate = format!("/generate/custom/{CHAR}");
     let r = rig_with(
         vec![
-            get_model(CHAR),
+            two_slot_model(),
             ex(Method::Post, "/assets", 200, asset("image-1")),
             ex(Method::Post, "/assets", 200, asset("mask-1")),
             ex(Method::Post, "/assets", 200, asset("a-1")),
@@ -282,7 +289,7 @@ fn fr_prv_34_a_reference_missing_twice_is_invalid_request_reference() {
             json!({"reason": "Asset in characterReferenceImages not found"}),
         )
     };
-    let mut exchanges = vec![get_model(CHAR)];
+    let mut exchanges = vec![two_slot_model()];
     for round in 0..2 {
         for name in ["image", "mask", "identity"] {
             exchanges.push(ex(
@@ -314,7 +321,7 @@ fn fr_prv_34_without_dry_run_assets_estimate_uploads_no_references() {
     let t = Arc::new(ReplayTransport::from_exchanges(
         BASE,
         vec![
-            get_model(CHAR),
+            two_slot_model(),
             ex(
                 Method::Post,
                 &format!("/generate/custom/{CHAR}?dryRun=true"),
@@ -339,4 +346,42 @@ fn fr_prv_34_without_dry_run_assets_estimate_uploads_no_references() {
     let body = est.provider.0["request"].as_object().unwrap();
     assert!(!body.contains_key(STYLE) && !body.contains_key(IDENTITY));
     assert!(est.provider.0["asset_refs"].get("references").is_none());
+}
+
+#[test]
+fn fr_prv_33_real_character_sends_one_identity_ref_as_a_file() {
+    // The real Character get-model: `characterReferenceImage` is a required `file`.
+    let id = "characterReferenceImage";
+    let r = rig_with(
+        vec![
+            get_model(CHAR),
+            ex(Method::Post, "/assets", 200, asset("a-image")),
+            ex(Method::Post, "/assets", 200, asset("a-mask")),
+            ex(Method::Post, "/assets", 200, asset("a-id")),
+            ex(
+                Method::Post,
+                &format!("/generate/custom/{CHAR}"),
+                200,
+                job("j1"),
+            ),
+        ],
+        &[CHAR],
+    );
+    let caps = block_on(r.p.get_capabilities(CHAR)).unwrap();
+    let slots: Vec<_> = caps
+        .slots
+        .iter()
+        .map(|s| (s.name.as_str(), s.min, s.max))
+        .collect();
+    assert_eq!(slots, [(id, 1, 1)]);
+    assert_eq!(
+        block_on(r.p.submit(&request(CHAR, vec![]))).unwrap_err(),
+        ProviderError::InvalidRequest {
+            field: "reference".into()
+        },
+        "the identity is required"
+    );
+    let rec = block_on(r.p.submit(&request(CHAR, vec![reference(id, None, identity())]))).unwrap();
+    assert_eq!(rec.0["request"][id], json!("a-id"));
+    assert_eq!(r.t.remaining(), 0);
 }
