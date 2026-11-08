@@ -3,7 +3,7 @@
   "provider": "scenario",
   "model": "model_ideogram-v4-5",
   "case": "get-model",
-  "recorded_on": "2026-11-07",
+  "recorded_on": "2026-11-08",
   "source": "synthetic",
   "exchanges": [
     {
@@ -34,19 +34,17 @@
                 }
               },
               {
-                "name": "image",
-                "type": "file",
+                "name": "referenceImages",
+                "type": "file_array",
                 "kind": "image",
-                "required": {
-                  "always": true
-                },
+                "max": 5,
                 "maxSize": 52428800
               },
               {
                 "name": "mask",
                 "type": "file",
                 "kind": "image",
-                "maskFrom": "image",
+                "maskFrom": "referenceImages",
                 "required": {
                   "always": true
                 }
@@ -126,10 +124,15 @@
                 }
               },
               {
-                "name": "styleReferenceImages",
-                "type": "file_array",
-                "kind": "image",
-                "max": 4
+                "name": "aspectRatio",
+                "type": "string",
+                "allowedValues": [
+                  "auto",
+                  "1:1",
+                  "16:9",
+                  "9:16"
+                ],
+                "default": "1:1"
               }
             ]
           }

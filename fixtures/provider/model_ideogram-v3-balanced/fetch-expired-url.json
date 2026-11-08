@@ -1,7 +1,7 @@
 {
   "format_version": 1,
   "provider": "scenario",
-  "model": "model_ideogram-v3",
+  "model": "model_ideogram-v3-balanced",
   "case": "fetch-expired-url",
   "recorded_on": "2026-11-07",
   "source": "synthetic",

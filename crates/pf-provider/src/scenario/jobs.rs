@@ -25,7 +25,7 @@ use super::api::{
 use super::{ScenarioProvider, lock};
 use crate::limits;
 use crate::mask::convert_mask;
-use crate::pixels::{ImageFormat, sniff};
+use crate::pixels::{ImageFormat, png_size, sniff};
 use crate::scenario::record::content_hash;
 use crate::transport::Method;
 use crate::{
@@ -96,6 +96,8 @@ type Download<'a> = Pin<Box<dyn Future<Output = ProviderResult<Result<Vec<u8>, u
 /// What a job request turns into before it is sent.
 struct Prepared {
     caps: Capabilities,
+    /// Inputs that take a list of files (the source too, for GPT Image and Ideogram 4.5).
+    arrays: Vec<String>,
     image: Vec<u8>,
     mask: Vec<u8>,
 }
@@ -366,8 +368,13 @@ impl ScenarioProvider {
         let mask = convert_mask(&request.mask_png, &request.region_png, support)?;
         limits::check_converted(&caps, &request.region_png, "image")?;
         limits::check_converted(&caps, &mask, "mask")?;
+        let arrays = lock(&self.arrays)
+            .get(&request.model_id)
+            .cloned()
+            .unwrap_or_default();
         Ok(Prepared {
             caps,
+            arrays,
             image: request.region_png.clone(),
             mask,
         })
@@ -410,6 +417,8 @@ impl ScenarioProvider {
         let values = self.values_for(&p.caps, request);
         for c in &p.caps.controls {
             let v = match c.role {
+                // A list input (GPT Image's `referenceImages`) gets the source as its first item.
+                ControlRole::Source if p.arrays.contains(&c.name) => refs.map(|r| json!([r.image])),
                 ControlRole::Source => refs.map(|r| json!(r.image)),
                 ControlRole::Mask => refs.map(|r| json!(r.mask)),
                 ControlRole::Reference => refs.and_then(|r| {
@@ -425,6 +434,16 @@ impl ScenarioProvider {
             };
             if let Some(v) = v.filter(|_| !NEVER_SEND.contains(&c.name.as_str())) {
                 body.insert(c.name.clone(), v);
+            }
+        }
+        // Inputs the overlay fills: fixed values and the sent size (never controls).
+        if let Some(row) = self.row(&request.model_id) {
+            for (name, value) in row.fixed {
+                body.insert((*name).to_owned(), json!(value));
+            }
+            if let (Some((w, h)), Some((sw, sh))) = (row.size_inputs, png_size(&p.image)) {
+                body.insert(w.to_owned(), json!(sw));
+                body.insert(h.to_owned(), json!(sh));
             }
         }
         Value::Object(body)

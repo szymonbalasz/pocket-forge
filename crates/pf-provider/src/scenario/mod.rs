@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use serde_json::Value;
 
 pub use self::api::DEFAULT_BASE_URL;
+pub use self::overlay::scenario_model_ids;
 use self::api::{Api, Retry, seg};
 use self::cache::{CacheFile, ModelCache};
 use self::overlay::{OverlayRow, SCENARIO_ROWS, row_in};
@@ -66,6 +67,8 @@ pub struct ScenarioProvider {
     cache: ModelCache,
     /// Capabilities fetched this session (estimate/submit read these first).
     caps: Mutex<HashMap<String, Capabilities>>,
+    /// Per model: the inputs that take a list of files (from the same fetch as `caps`).
+    pub(crate) arrays: Mutex<HashMap<String, Vec<String>>>,
     /// Upload ref cache: content hash → asset ref, per session (R15).
     pub(crate) refs: Mutex<HashMap<String, AssetRef>>,
     overlay: Vec<OverlayRow>,
@@ -101,17 +104,20 @@ const APP_FIXTURES: &[(&str, &str, &str)] = fixture_table![
 #[cfg(test)]
 const TEST_FIXTURES: &[(&str, &str, &str)] = fixture_table![
     "model_openai-gpt-image-2" / "get-model",
-    "model_openai-gpt-image-2-5" / "get-model",
+    "model_openai-gpt-image-2-5-flare" / "get-model",
+    "model_openai-gpt-image-2-5-sunburst" / "get-model",
     "model_ideogram-v4-5" / "get-model",
     "model_ideogram-v4-5-precise-edit" / "get-model",
-    "model_ideogram-v3" / "get-model",
+    "model_ideogram-v3-balanced" / "get-model",
+    "model_ideogram-v3-quality" / "get-model",
+    "model_ideogram-v3-turbo" / "get-model",
     "model_ideogram-character" / "get-model",
-    "model_ideogram-v3" / "contract",
-    "model_ideogram-v3" / "dry-run-no-assets",
-    "model_ideogram-v3" / "upload-multipart",
-    "model_ideogram-v3" / "reupload",
-    "model_ideogram-v3" / "fetch-expired-url",
-    "model_ideogram-v3" / "cancel",
+    "model_ideogram-v3-balanced" / "contract",
+    "model_ideogram-v3-balanced" / "dry-run-no-assets",
+    "model_ideogram-v3-balanced" / "upload-multipart",
+    "model_ideogram-v3-balanced" / "reupload",
+    "model_ideogram-v3-balanced" / "fetch-expired-url",
+    "model_ideogram-v3-balanced" / "cancel",
     "model_ideogram-character" / "references",
 ];
 
@@ -146,6 +152,7 @@ impl ScenarioProvider {
                 .as_deref()
                 .map_or_else(ModelCache::none, ModelCache::in_dir),
             caps: Mutex::new(HashMap::new()),
+            arrays: Mutex::new(HashMap::new()),
             refs: Mutex::new(HashMap::new()),
             overlay,
             connectivity,
@@ -196,7 +203,7 @@ impl ScenarioProvider {
         }
     }
 
-    fn row(&self, model_id: &str) -> Option<&OverlayRow> {
+    pub(crate) fn row(&self, model_id: &str) -> Option<&OverlayRow> {
         row_in(&self.overlay, model_id)
     }
 
@@ -218,6 +225,7 @@ impl ScenarioProvider {
         };
         let n = normalise::normalise(model_id, &body, self.row(model_id))?;
         lock(&self.caps).insert(model_id.to_owned(), n.capabilities.clone());
+        lock(&self.arrays).insert(model_id.to_owned(), n.array_inputs.clone());
         Ok(Some((n.name, n.capabilities)))
     }
 

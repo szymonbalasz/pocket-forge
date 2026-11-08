@@ -21,7 +21,7 @@ use crate::{
 };
 
 const CHAR: &str = "model_ideogram-character";
-const V3: &str = "model_ideogram-v3";
+const V3: &str = "model_ideogram-v3-balanced";
 const STYLE: &str = "styleReferenceImages";
 const IDENTITY: &str = "characterReferenceImages";
 
