@@ -85,7 +85,10 @@ function evalPlan({ settings, w, h, name, existing }: EvalInput): EvalResult {
     const est = Math.ceil(
       streams ? (w * 512 * 3 * 2) / mib : full + out * (s.format === 'webp' ? 2 : 1),
     );
-    const warnings = size.warnings.map((code) => ({ code, message: WARNING_TEXT[code] }));
+    const warnings: { code: string; message: string }[] = size.warnings.map((code) => ({
+      code,
+      message: WARNING_TEXT[code],
+    }));
     if (est > 2048) warnings.push({ code: 'memory', message: `Needs about ${est} MiB` });
     return {
       ok: true,
@@ -124,9 +127,7 @@ export async function openExport(page: Page, seed: Partial<ExportSeed> = {}): Pr
         project_dir: projectDir,
         read_only: seed.readOnly,
       };
-      const evaluate = w.__pfExpEval as (
-        i: unknown,
-      ) => Promise<
+      const evaluate = w.__pfExpEval as (i: unknown) => Promise<
         | {
             ok: true;
             plan: Rec & { path: string; exists: unknown; formats: Rec[] };
