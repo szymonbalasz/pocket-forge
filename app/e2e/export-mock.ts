@@ -89,7 +89,7 @@ function evalPlan({ settings, w, h, name, existing }: EvalInput): EvalResult {
       code,
       message: WARNING_TEXT[code],
     }));
-    if (est > 2048) warnings.push({ code: 'memory', message: `Needs about ${est} MiB` });
+    if (est > 2048) warnings.push({ code: 'memory', message: `Needs about ${est} MiB of memory` });
     return {
       ok: true,
       source: size.source,

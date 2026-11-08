@@ -186,6 +186,29 @@ describe('export store', () => {
     expect(exportStore.get().done).toBeNull();
   });
 
+  test('FR-EXP-19 a rescale shows one forward-only overall fraction across phases', async () => {
+    h.exp.plan.mockResolvedValue(plan({ scale: 0.5, width: 2100, height: 2800 }));
+    await bound();
+    await exportStore.start();
+    const seen: number[] = [];
+    for (const [phase, fraction] of [
+      ['compose', 0.94],
+      ['resize', 0],
+      ['resize', 1],
+      ['encode', 0.06],
+      ['encode', 0.94],
+      ['write', 0.5],
+      ['write', 0.5],
+    ] as const) {
+      h.emit('export:progress', { export_id: 'e1', phase, fraction });
+      seen.push(exportStore.get().run!.overall);
+    }
+    expect(seen).toEqual([...seen].sort((a, b) => a - b));
+    expect(seen[0]).toBeGreaterThan(0.3);
+    expect(seen.at(-1)).toBeGreaterThan(0.95);
+    expect(exportStore.get().run).toMatchObject({ phase: 'write', fraction: 0.5 });
+  });
+
   test('FR-EXP-19 events that arrive before export_start returns still apply', async () => {
     await bound();
     let resolve!: (v: { export_id: string }) => void;

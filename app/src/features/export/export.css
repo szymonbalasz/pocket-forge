@@ -94,7 +94,14 @@
 
 .exp-formats {
   display: flex;
+  align-items: center;
   gap: var(--pf-space-3);
+}
+
+/* Each format's wrapper (or tooltip trigger) is a flex box, so no line box aligns the label on
+   the radio's baseline, which moves when the checked dot appears (walkthrough D5). */
+.exp-formats > span {
+  display: flex;
 }
 
 .exp-format {
@@ -167,6 +174,22 @@
   margin-left: auto;
 }
 
+/* "Cancel the export and close?": the question, then both answers on one row. */
+.exp-close-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.exp-close-ask > span {
+  flex: 1 0 100%;
+}
+
+.exp-close-ask > button {
+  white-space: nowrap;
+}
+
 .exp-error {
   display: flex;
   align-items: center;
@@ -177,20 +200,19 @@
   flex: 1;
 }
 
+/* In the section's flow (below the actions), so it never covers a control. */
 .exp-toast-viewport {
-  position: fixed;
-  right: var(--pf-space-4);
-  bottom: 40px;
   display: flex;
   flex-direction: column;
   gap: var(--pf-space-2);
-  width: 320px;
-  max-width: calc(100vw - 2 * var(--pf-space-4));
   margin: 0;
-  padding: 0;
+  padding: 0 var(--pf-space-3) var(--pf-space-3);
   list-style: none;
-  z-index: 60;
   outline: none;
+}
+
+.exp-toast-viewport:empty {
+  display: none;
 }
 
 .exp-toast {

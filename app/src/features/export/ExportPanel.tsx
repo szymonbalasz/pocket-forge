@@ -157,7 +157,9 @@ export function ExportPanel() {
       const el = body.current?.querySelector<HTMLElement>(
         '[data-testid="exp-panel-grid-mode"] [data-state="on"], input:not(:disabled)',
       );
-      el?.focus();
+      // A modifier chord doesn't count as keyboard modality in Chromium, so ask for the ring
+      // (ui-guidelines: focus ring always visible).
+      el?.focus({ focusVisible: true });
     });
     return () => cancelAnimationFrame(id);
   }, [s.focusTick]);
@@ -204,7 +206,7 @@ export function ExportPanel() {
             <span>Export</span>
             {run && (
               <span className="small muted tabular exp-header-progress">
-                {Math.round(run.fraction * 100)} %
+                {Math.round(run.overall * 100)} %
               </span>
             )}
           </button>
@@ -348,7 +350,7 @@ export function ExportPanel() {
 
           {run && s.closeAsk && (
             <div
-              className="banner small exp-close-ask"
+              className="banner banner-warning small exp-close-ask"
               role="alert"
               data-testid="exp-panel-close-ask"
             >
@@ -377,16 +379,16 @@ export function ExportPanel() {
                 role="progressbar"
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-valuenow={Math.round(run.fraction * 100)}
+                aria-valuenow={Math.round(run.overall * 100)}
                 data-testid="exp-panel-progress"
                 data-phase={run.phase}
               >
-                <div className="exp-progress-fill" style={{ width: `${run.fraction * 100}%` }} />
+                <div className="exp-progress-fill" style={{ width: `${run.overall * 100}%` }} />
               </div>
               <span className="small muted tabular" data-testid="exp-panel-phase">
                 {run.canceling
                   ? 'Canceling…'
-                  : `${PHASE_TEXT[run.phase] ?? run.phase} ${Math.round(run.fraction * 100)} %`}
+                  : `${PHASE_TEXT[run.phase] ?? run.phase} · ${Math.round(run.overall * 100)} %`}
               </span>
               <button
                 type="button"
@@ -437,9 +439,11 @@ export function ExportPanel() {
             </div>
           )}
         </Collapsible.Content>
+        {/* Inline under the section, never over it: the toast must not cover Replace while
+            the user tweaks and re-exports (walkthrough D1). Shown even when collapsed. */}
+        <Toast.Viewport className="exp-toast-viewport" data-testid="exp-toast-viewport" />
       </Collapsible.Root>
       <ExportToast />
-      <Toast.Viewport className="exp-toast-viewport" />
     </Toast.Provider>
   );
 }
@@ -450,7 +454,7 @@ export function ExportStatus() {
   if (!run) return null;
   return (
     <span className="small tabular" data-testid="exp-status-progress">
-      Exporting {Math.round(run.fraction * 100)} %
+      Exporting {Math.round(run.overall * 100)} %
     </span>
   );
 }

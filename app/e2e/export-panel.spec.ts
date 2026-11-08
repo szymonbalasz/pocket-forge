@@ -23,6 +23,21 @@ test('FR-EXP-06 FR-EXP-07 FR-EXP-08 FR-EXP-26 grid + target → plan line, and E
   // Ctrl+E focuses the section (EXP §7).
   await expect(page.getByTestId('exp-panel-grid-mode-px')).toBeFocused();
   await expect(plan(page)).toHaveText('4200×5600 · Full resolution · exports/Crypt.png');
+  // The checked format's label lines up with the others (walkthrough D5).
+  const labelY = (f: string) =>
+    page
+      .getByTestId(`exp-panel-format-${f}`)
+      .locator('xpath=..')
+      .boundingBox()
+      .then((b) => b!.y);
+  expect(Math.abs((await labelY('png')) - (await labelY('jpeg')))).toBeLessThan(1);
+  // After mouse use, Ctrl+E still shows the focus ring (ui-guidelines; walkthrough D4).
+  await page.getByTestId('edt-view-fit').click();
+  await page.keyboard.press('Control+e');
+  await expect(page.getByTestId('exp-panel-grid-mode-px')).toBeFocused();
+  expect(
+    await page.getByTestId('exp-panel-grid-mode-px').evaluate((el) => el.matches(':focus-visible')),
+  ).toBe(true);
   await expect(page.getByTestId('exp-panel-target-ppsq')).toBeDisabled();
   await expect(page.getByTestId('edt-view-display')).toBeDisabled();
 
@@ -88,7 +103,16 @@ test('FR-EXP-19 FR-EXP-27 Start → progress → done toast with copy path, then
   await expect(page.getByTestId('exp-panel-replace-note')).toHaveText(
     /^Replaces Crypt_70px\.png \(\d+(\.\d)? MB, now\)$/,
   );
-  await start(page).click();
+  // The toast sits below the section's controls, so Replace works while it shows (D1).
+  await expect(toast).toBeVisible();
+  const [toastBox, startBox, noteBox] = await Promise.all([
+    toast.boundingBox(),
+    start(page).boundingBox(),
+    page.getByTestId('exp-panel-replace-note').boundingBox(),
+  ]);
+  expect(toastBox!.y).toBeGreaterThanOrEqual(startBox!.y + startBox!.height);
+  expect(toastBox!.y).toBeGreaterThanOrEqual(noteBox!.y + noteBox!.height);
+  await start(page).click({ timeout: 2_000 });
   await expect(page.getByTestId('exp-panel-progress')).toBeVisible();
   const st = await exportState(page);
   expect(st.starts.map((s) => s.replace)).toEqual([false, true]);
@@ -199,4 +223,25 @@ test('FR-EXP-25 saved settings restore into the panel at open', async ({ page })
   await expect(page.getByTestId('exp-panel-target-ppsq')).toHaveValue('70');
   await expect(page.getByTestId('exp-panel-format-webp')).toHaveAttribute('data-state', 'checked');
   await expect(plan(page)).toHaveText('4200×5600 → 2100×2800 · 0.5× · exports/Crypt_70px.webp');
+});
+
+test('OQ-EXP-09 closing during an export asks inline, in warning colour, answers on one row', async ({
+  page,
+}) => {
+  await openExport(page, { steps: 60, stepMs: 150 });
+  await expandExport(page);
+  await start(page).click();
+  await expect(page.getByTestId('exp-panel-progress')).toBeVisible();
+  await page.getByTestId('prj-panel-close').click();
+  const ask = page.getByTestId('exp-panel-close-ask');
+  await expect(ask).toBeVisible();
+  await expect(ask).toHaveClass(/banner-warning/);
+  const [confirm, keep] = await Promise.all([
+    page.getByTestId('exp-panel-close-confirm').boundingBox(),
+    page.getByTestId('exp-panel-close-keep').boundingBox(),
+  ]);
+  expect(Math.abs(confirm!.y - keep!.y)).toBeLessThan(1);
+  await page.getByTestId('exp-panel-close-keep').click();
+  await expect(ask).toBeHidden();
+  await expect(page.getByTestId('exp-panel-progress')).toBeVisible();
 });

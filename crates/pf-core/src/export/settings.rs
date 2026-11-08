@@ -326,7 +326,7 @@ pub fn plan(
     if est > PEAK_WARN_MIB {
         warnings.push(PlanWarning {
             code: "memory",
-            message: format!("Needs about {est} MiB"),
+            message: format!("Needs about {est} MiB of memory"),
         });
     }
     Ok(Plan {
