@@ -743,6 +743,8 @@ export interface PackCard {
   name: string;
   /** Absolute pack folder. */
   path: string;
+  /** The pack folder relative to its library root (`References/<name>`), for the tooltip (BL-35). */
+  rel_path?: string;
   image_count: number;
   /** The first line of the notes ("" when none). */
   notes_first_line: string;
