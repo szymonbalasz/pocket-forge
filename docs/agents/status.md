@@ -16,9 +16,9 @@
 | Reference packs core (REF 1, 4) | — | merged | done | — |
 | Provider references (REF 2) | — | merged | done | — |
 | Backlog: BL-12/15/19/20 | `backlog2` | `fix/backlog-2` | in progress | — |
-| Packs UI + References block (REF 3, 5) | `ref-ui` | `build/reference-packs-ui` | in progress | — |
+| Packs UI + References block (REF 3, 5) | — | merged | done | — |
 | Asset-project walkthrough (steps 1–6, 9) | `walk-prj` | `test/prj-walk` | in progress | — |
-| Later: REF 6 (RGN integration) | — | — | waiting | REF 4, 5 and RGN 3 merged |
+| REF 6 (RGN integration) | `ref-rgn` | `build/reference-packs-rgn` | in progress | — |
 
 ## Pending owner decisions
 - OQ-IMG-12: file the image-webp bug upstream? (not urgent)
