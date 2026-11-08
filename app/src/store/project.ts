@@ -37,6 +37,17 @@ let state: ProjectState = initial;
 const listeners = new Set<() => void>();
 let listening = false;
 
+/** A feature's say before the open project closes, ahead of PRJ's own `unsaved` check (EXP's
+ *  "Cancel the export and close?"). Returns true to allow it now; false to hold the close and
+ *  call `proceed` later. */
+export type CloseGuard = (proceed: () => void) => boolean;
+const closeGuards = new Set<CloseGuard>();
+
+function guardsAllow(proceed: () => void): boolean {
+  for (const g of closeGuards) if (!g(proceed)) return false;
+  return true;
+}
+
 function set(patch: Partial<ProjectState>): void {
   state = { ...state, ...patch };
   for (const l of listeners) l();
@@ -108,6 +119,37 @@ function listen(): void {
   );
 }
 
+/** `open` once the guards allowed it. */
+async function openNow(path: string): Promise<boolean> {
+  set({ busy: true, error: null, opening: path });
+  try {
+    if (state.project) await api.project.close().catch(() => undefined);
+    const project = await api.project.open(path);
+    set({ project, save: { kind: 'saved', at: savedAt(project) }, busy: false, opening: null });
+    bump();
+    return true;
+  } catch (e) {
+    set({ project: null, error: errorOf(e), busy: false });
+    return false;
+  }
+}
+
+/** `close` once the guards allowed it. */
+async function closeNow(force: boolean): Promise<void> {
+  try {
+    await api.project.close(force);
+  } catch (e) {
+    // `unsaved` (FR-PRJ-21): stay open and say why.
+    const err = errorOf(e);
+    if (err.code === 'unsaved') {
+      set({ error: err });
+      return;
+    }
+  }
+  set({ project: null, save: initial.save, error: null });
+  bump();
+}
+
 export const projectStore = {
   get: (): ProjectState => state,
   subscribe(listener: () => void): () => void {
@@ -120,35 +162,23 @@ export const projectStore = {
     set(initial);
   },
 
-  /** Opens a project folder (FR-PRJ-14). */
-  async open(path: string): Promise<boolean> {
-    set({ busy: true, error: null, opening: path });
-    try {
-      if (state.project) await api.project.close().catch(() => undefined);
-      const project = await api.project.open(path);
-      set({ project, save: { kind: 'saved', at: savedAt(project) }, busy: false, opening: null });
-      bump();
-      return true;
-    } catch (e) {
-      set({ project: null, error: errorOf(e), busy: false });
-      return false;
-    }
+  /** Registers a close guard (see `CloseGuard`); returns its removal. */
+  addCloseGuard(guard: CloseGuard): () => void {
+    closeGuards.add(guard);
+    return () => closeGuards.delete(guard);
   },
 
-  /** Back to the home grid. `force` closes although a save is still pending (FR-PRJ-21). */
+  /** Opens a project folder (FR-PRJ-14). Closing the open one asks the close guards first. */
+  async open(path: string): Promise<boolean> {
+    if (state.project && !guardsAllow(() => void openNow(path))) return false;
+    return openNow(path);
+  },
+
+  /** Back to the home grid. The close guards are asked first; `force` closes although a save is
+   *  still pending (FR-PRJ-21). */
   async close(force = false): Promise<void> {
-    try {
-      await api.project.close(force);
-    } catch (e) {
-      // `unsaved` (FR-PRJ-21): stay open and say why.
-      const err = errorOf(e);
-      if (err.code === 'unsaved') {
-        set({ error: err });
-        return;
-      }
-    }
-    set({ project: null, save: initial.save, error: null });
-    bump();
+    if (!guardsAllow(() => void closeNow(force))) return;
+    await closeNow(force);
   },
 
   /** Re-reads the open project (after a restore, relink, …). */
