@@ -945,6 +945,34 @@ fn fr_rgn_11_a_restored_count_the_capabilities_reject_resets_with_a_notice() {
     assert_eq!(e.unknown, vec!["num_samples".to_owned()], "notice: dropped");
 }
 
+/// Walk owner-UX L2: with the folder moved, estimate and submit refuse with `folder_moved`
+/// (readable, no path), not the OS text of the mask read failing; nothing is spent.
+#[test]
+fn fr_rgn_31_a_moved_folder_refuses_estimate_and_submit_with_folder_moved() {
+    let lab = Lab::new();
+    let draft = lab.draft("kitchen");
+    let est = lab.estimate(&draft);
+    crate::test_support::rename_dir(
+        &lab.project_dir,
+        &lab.project_dir.with_file_name("Elsewhere"),
+    );
+    for e in [
+        lab.core
+            .dispatch("rgn_job_estimate", json!({ "draft": draft }))
+            .unwrap_err(),
+        lab.core
+            .dispatch(
+                "rgn_job_submit",
+                json!({"draft": draft, "estimate_id": est["estimate_id"], "confirmations": est["needs"]}),
+            )
+            .unwrap_err(),
+    ] {
+        assert!(crate::project::is_folder_moved(&e), "{e:?}");
+        assert!(!e.message.contains("os error"), "{}", e.message);
+    }
+    assert_eq!(lab.core.state().rgn.ledger.total(), 0.0, "nothing spent");
+}
+
 #[test]
 fn fr_rgn_38_read_only_project_refuses_submit_and_dismiss() {
     let lab = Lab::new();

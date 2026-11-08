@@ -282,6 +282,13 @@ test('BL-30 walk owner-UX L1: a Restore failing with folder_moved clears the fig
     .getAllByTestId('prj-panel-warning')
     .find((b) => b.dataset.code === 'folder_moved');
   expect(banner).toBeTruthy();
+  // The folder came back: the next commit clears the signal (and RGN's Generate block).
+  act(() => core.emit('project:committed', { seq: 9 }));
+  await waitFor(() =>
+    expect(
+      screen.queryAllByTestId('prj-panel-warning').some((b) => b.dataset.code === 'folder_moved'),
+    ).toBe(false),
+  );
 });
 
 test('FR-PRJ-31 a failed restore says why as a sentence, not raw core text (walk 2 N2)', async () => {

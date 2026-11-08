@@ -74,6 +74,9 @@ export function errorText(code: string, message: string): string {
       return 'Only the newest iteration can be accepted (after undoing its accept). Compare, star and discard still work.';
     case 'estimate_stale':
       return 'The settings changed since the estimate; estimating again.';
+    case 'io':
+      // Walk owner-UX L2: never the OS text (paths, "os error 3").
+      return 'Couldn’t read the project’s files. Check the project folder, then try again.';
     default:
       return message || code;
   }

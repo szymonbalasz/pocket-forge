@@ -19,7 +19,7 @@ import {
   withRemembered,
 } from './controls';
 import { EstimateDebouncer, ESTIMATE_DEBOUNCE_MS } from './estimate';
-import { costLabel, fitLabel, jobErrorText } from './format';
+import { costLabel, errorText, fitLabel, jobErrorText } from './format';
 import { ALL_TYPES } from './testUtils';
 import {
   canCancel,
@@ -196,6 +196,14 @@ describe('FR-RGN-12 estimate debounce', () => {
 });
 
 describe('labels', () => {
+  test('walk owner-UX L2: an io error never shows OS text', () => {
+    const t = errorText(
+      'io',
+      'Reading mask 01M6: The system cannot find the path specified. (os error 3)',
+    );
+    expect(t).not.toMatch(/os error|01M6/);
+  });
+
   test('FR-RGN-05 fit label: sent unresampled, or patch N.N× softer (outer ÷ sent)', () => {
     const outer = { x: 0, y: 0, w: 3000, h: 1500 };
     expect(fitLabel({ outer, sent_w: 3000, sent_h: 1500 })).toBe('sent unresampled');

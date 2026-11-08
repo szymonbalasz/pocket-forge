@@ -10,7 +10,7 @@ import { editorFeature } from '../editor';
 import { GeneratePanel } from './GeneratePanel';
 import { IterationTracker } from './IterationTracker';
 import { JobStatus } from './JobStatus';
-import { rgn } from './store';
+import { FOLDER_MOVED_BLOCKER, rgn } from './store';
 import { ALL_TYPES, mockControls, mockCore, polyfillRadix, SIMPLE } from './testUtils';
 
 const Picker = editorFeature.slots.bottom!;
@@ -478,6 +478,26 @@ describe('confirm dialog (FR-RGN-14..16, §7)', { timeout: 20_000 }, () => {
     await waitFor(() => expect(screen.queryByTestId('rgn-confirm')).toBeNull());
     expect(screen.queryByTestId('rgn-panel-submit-error')).toBeNull();
     expect(mockControls().state().spend).toBe(2);
+  });
+
+  test('walk owner-UX L2: a moved folder blocks Generate with a readable reason, no OS text', async () => {
+    const dlg = await ready({ spend: { cap: 100, threshold: 10 } });
+    const h = handlers();
+    h.rgn_job_submit = () =>
+      Promise.reject({
+        code: 'not_found',
+        message:
+          'The project folder was moved or renamed outside Pocket Forge. Reopen it from home.',
+        detail: { reason: 'folder_moved' },
+      });
+    fireEvent.click(within(dlg).getByTestId('rgn-confirm-ok'));
+    await waitFor(() => expect(screen.queryByTestId('rgn-confirm')).toBeNull());
+    const submit = screen.getByTestId('rgn-panel-submit') as HTMLButtonElement;
+    await waitFor(() => expect(submit.disabled).toBe(true));
+    expect(screen.getByTestId('rgn-panel-submit-reason').textContent).toBe(FOLDER_MOVED_BLOCKER);
+    expect(screen.getByTestId('rgn-panel-submit-error').textContent).not.toMatch(/os error/);
+    // No estimates while it's moved.
+    expect(rgn.get().estimate.status).toBe('idle');
   });
 
   test('BL-36 a dearer fresh estimate shows the confirm again; nothing is spent', async () => {
