@@ -305,6 +305,28 @@ fn side(
     }
 }
 
+/// BL-22 (OQ-PRJ-11 A): while a conflict is open, the original or a patch layer of either
+/// version resolves too, so EDT can draw the other version's stack read-only. Returns the
+/// project path and whether it's the original; None if neither version has `image_id`. A patch
+/// is always `layer_file(id)` (write-once, by id); a synced copy's original path must stay
+/// inside the project folder.
+pub(crate) fn side_image(p: &OpenProject, image_id: Ulid) -> Option<(String, bool)> {
+    let s = sides(p).ok()?;
+    [s.this, s.other].into_iter().flatten().find_map(|m| {
+        if m.original_image_id() == Some(image_id) {
+            let f = &m.original.file;
+            let inside = Path::new(f)
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)));
+            return inside.then(|| (f.clone(), true));
+        }
+        m.layers
+            .iter()
+            .any(|l| l.id == image_id && l.kind == LayerKind::Patch)
+            .then(|| (layer_file(image_id), false))
+    })
+}
+
 /// `project_conflict_get` (FR-PRJ-36): both versions. `no_conflict` if there is none.
 pub fn conflict_get(p: &OpenProject, install_id: Ulid) -> CoreResult<ConflictView> {
     let s = sides(p)?;

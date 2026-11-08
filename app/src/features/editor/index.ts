@@ -19,3 +19,6 @@ export type { CompareSource, PickerCandidate, PickerHandlers } from './store';
 // Read-only for RGN (R18): the validated region the region tool holds, or null.
 export { useEditorRegion, useEditorRegionRestored } from './bridge';
 export type { RegionState } from './store';
+// Read-only for PRJ's conflict view (BL-22, OQ-PRJ-11 A): draws a given layer stack.
+export { LayerStack } from './LayerStack';
+export type { LayerStackProps } from './LayerStack';

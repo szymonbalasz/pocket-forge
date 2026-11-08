@@ -967,7 +967,8 @@ pub struct ResolvedImage {
 impl OpenProject {
     /// `resolve_image(image_id)` (R4, #48 (3)): the original (its stable id = the original
     /// layer's id, from creation), a layer of the current stack or of any revision, a candidate
-    /// (its trashed copy while it's in the trash), or a mask → its file.
+    /// (its trashed copy while it's in the trash), or a mask → its file. While a conflict is
+    /// open, also either version's original or patch layers (BL-22).
     pub fn resolve_image(&self, image_id: Ulid) -> CoreResult<ResolvedImage> {
         let m = &self.manifest;
         let found = |rel: &str, kind| ResolvedImage {
@@ -995,6 +996,14 @@ impl OpenProject {
         }
         if self.refs.layers.contains(&image_id) {
             return Ok(found(&layer_file(image_id), ImageKind::Layer));
+        }
+        if let Some((rel, original)) = conflict::side_image(self, image_id) {
+            let kind = if original {
+                ImageKind::Original
+            } else {
+                ImageKind::Layer
+            };
+            return Ok(found(&rel, kind));
         }
         Err(CoreError::new(ErrorCode::UnknownId, "unknown image").with_field("image_id"))
     }

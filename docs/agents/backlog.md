@@ -25,7 +25,7 @@ Small items for idle slots (see [process.md](../process.md)). The planned work a
 | BL-19 | Move the feather/colour-match bake from `pf-core` `region_edit/blend.rs` into `pf-imaging` (ADR 0004 puts blend there) | S | `pf-imaging`, `pf-core` region_edit | RGN, REF 6 builds | done |
 | BL-20 | FR-RGN-18 `long_running` at 180 s has no test (clock seam) | XS | `pf-core` region_edit tests | RGN builds | done |
 | BL-21 | `cargo clippy --release -D warnings` fails on an unused field (`Faults.rule`, `pf-core` context.rs); CI runs only debug clippy | XS | `pf-core` context.rs | — | done |
-| BL-22 | Conflict view draws each layer stack as text (OQ-PRJ-11 B fallback): EDT has no read-only "draw this layer stack" component yet; swap it into `ConflictView.tsx` panes when EDT exposes one (OQ-PRJ-11 A) | S | `features/editor` export, `features/project/ConflictView.tsx` | EDT build | open |
+| BL-22 | Conflict view draws each layer stack as text (OQ-PRJ-11 B fallback): EDT has no read-only "draw this layer stack" component yet; swap it into `ConflictView.tsx` panes when EDT exposes one (OQ-PRJ-11 A) | S | `features/editor` export (`LayerStack`), `features/project/ConflictView.tsx`, `pf-core` `resolve_image` (either version's layers while in conflict) | EDT build | done |
 | BL-23 | A purged candidate keeps a `trash_id` that points at nothing | XS | `pf-core` project retention | — | done |
 | BL-24 | Restore only `candidates`, `job_inputs` and `conflict_copy` trash items (R51): restoring an orphan or mask item is undone by the next sweep | XS | `pf-core` project, `features/project` | — | done |
 | BL-25 | RGN spool replay drops an entry the store refuses for good, after logging it: surface it to the user | XS | `pf-core` region_edit runner | — | done |
