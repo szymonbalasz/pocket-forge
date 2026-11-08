@@ -56,7 +56,9 @@ button.link {
   outline-offset: 1px;
 }
 
-input,
+/* Text-like fields only: a checkbox or radio keeps its own size (walk REF R3). `:where` keeps the
+   specificity of a bare `input`, so feature rules still win as before. */
+input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'])),
 textarea {
   background: var(--pf-bg-3);
   border: 1px solid var(--pf-border);
@@ -121,7 +123,8 @@ h2 {
 }
 
 .pf-rail-item {
-  width: 48px;
+  /* Room for "References" at 10 px (≈ 48 px) with a margin (walk REF R7). */
+  width: 52px;
   display: flex;
   flex-direction: column;
   align-items: center;

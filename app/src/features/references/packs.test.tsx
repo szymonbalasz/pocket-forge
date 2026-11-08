@@ -420,6 +420,27 @@ test('FR-REF-05 FR-REF-28 what a listing did is shown from the cards’ notices 
   expect(screen.queryByTestId('ref-home-notices')).toBeNull();
 });
 
+test('R61 a trashed pack.json has no Restore and is labelled as such', async () => {
+  setup({
+    trash: [
+      {
+        id: '01JMOCKTRASHPACKJSON000000',
+        kind: 'images',
+        pack_id: '01JMOCKPACKWEAPONS00000000',
+        pack_name: 'Weapons',
+        files: ['pack.json'],
+        trashed_at: '2026-11-08T12:00:00Z',
+        purge_at: '2026-12-08T12:00:00Z',
+        restorable: false,
+      },
+    ],
+  });
+  const row = await screen.findByTestId('ref-trash-item');
+  expect(row.textContent).toContain('Weapons’s older pack.json');
+  expect(row.textContent).not.toContain('1 image');
+  expect(within(row).queryByTestId('ref-trash-restore')).toBeNull();
+});
+
 test('FR-REF-12 Recently deleted shows the pack name and the purge date', async () => {
   setup();
   await waitFor(() => expect(cards()).toHaveLength(2));
@@ -428,10 +449,76 @@ test('FR-REF-12 Recently deleted shows the pack name and the purge date', async 
   fireEvent.click(await screen.findByTestId('ref-dialog-delete-confirm'));
   const row = await screen.findByTestId('ref-trash-item');
   expect(row.textContent).toContain('armour');
-  expect(row.textContent).toContain('until 2026-12-08');
+  // History's day format (walk R7), not the raw ISO date.
+  const day = new Date('2026-12-08T12:00:00Z').toLocaleDateString([], {
+    month: 'short',
+    day: 'numeric',
+  });
+  expect(row.textContent).toContain(`until ${day}`);
+  expect(row.textContent).not.toContain('2026-12-08');
   fireEvent.click(within(row).getByTestId('ref-trash-restore'));
   await waitFor(() => expect(cardNames()).toEqual(['armour', 'Weapons']));
   expect(core.calls.find((c) => c.cmd === 'ref_trash_restore')?.input).toEqual({
     id: expect.stringMatching(/^01JMOCKTRASH/),
   });
+});
+
+test('FR-REF-28 walk R5: a listing notice survives an overlapping listing that lands last', async () => {
+  setup({
+    packs: [
+      {
+        ...sampleRefSeed().packs[0]!,
+        notices: [{ code: 'conflict_resolved', message: 'Weapons had a sync conflict' }],
+      },
+    ],
+  });
+  // The first listing (with the notice) answers after the second (without it).
+  const h = core.handlersSnapshot();
+  let n = 0;
+  core.useHandlers({
+    ...h,
+    ref_list_packs: async (i) => {
+      const first = n++ === 0;
+      const out = await h.ref_list_packs!(i);
+      if (first) await new Promise((r) => setTimeout(r, 60));
+      return out;
+    },
+  });
+  await act(async () => {
+    void refs.refreshList();
+    await refs.refreshList();
+  });
+  await waitFor(() => expect(n).toBe(2));
+  const notice = await screen.findByTestId('ref-home-notice');
+  expect(notice.dataset.code).toBe('conflict_resolved');
+  fireEvent.click(within(screen.getByTestId('ref-home-notices')).getByRole('button'));
+  expect(screen.queryByTestId('ref-home-notices')).toBeNull();
+});
+
+test('FR-REF-28 walk R5: what a listing moves to the trash is listed by the same refresh', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  const h = core.handlersSnapshot();
+  core.useHandlers({
+    ...h,
+    // A listing that resolves a conflict: the loser lands in the trash before it answers.
+    ref_list_packs: async (i) => {
+      await new Promise((r) => setTimeout(r, 30));
+      mock.trash.unshift({
+        id: '01JMOCKTRASHLOSER000000000',
+        kind: 'images',
+        pack_id: '01JMOCKPACKWEAPONS00000000',
+        pack_name: 'Weapons',
+        files: ['pack-LAPTOP.json'],
+        trashed_at: '2026-11-08T12:00:00Z',
+        purge_at: '2026-12-08T12:00:00Z',
+        restorable: false,
+      });
+      return h.ref_list_packs!(i);
+    },
+  });
+  await act(() => refs.refresh());
+  expect(screen.getAllByTestId('ref-trash-item').map((r) => r.dataset.recordId)).toContain(
+    '01JMOCKTRASHLOSER000000000',
+  );
 });

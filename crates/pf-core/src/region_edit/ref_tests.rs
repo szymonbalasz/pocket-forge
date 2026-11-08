@@ -245,6 +245,121 @@ fn fr_rgn_41_reference_errors_fail_before_any_provider_call() {
     fs.offline.store(false, Ordering::Relaxed);
 }
 
+/// Walkthrough R1: a ticked item deleted or moved after the estimate is never dropped
+/// silently. Estimate and submit fail with `reference_unavailable(missing)` before any
+/// provider call; no job, no spend.
+#[test]
+fn fr_ref_21_a_ticked_reference_gone_before_submit_fails_without_spend() {
+    let (lab, _) = lab_with(&[("a.png", 10), ("b.png", 20)]);
+    let pack = make_pack(&lab, "Blades", &[("s1.png", 30)]);
+    let refs = json!({
+        "packs": [{"pack_id": pack, "name": "Blades"}],
+        "items": [
+            {"key": "project:a.png", "on": true, "role": null},
+            {"key": "project:b.png", "on": true, "role": null},
+            {"key": format!("pack:{pack}:s1.png"), "on": true, "role": null},
+        ],
+    });
+    let d = draft(&lab, "fake-white-edit", refs);
+    let est = lab.estimate(&d);
+    assert_eq!(est["references"], json!(3));
+    let spend = lab.core.dispatch("rgn_spend_get", json!({})).unwrap()["spend"].clone();
+    let calls = lab.fake().last_reference_hashes();
+    let submit = |d: &Value| {
+        lab.core
+            .dispatch(
+                "rgn_job_submit",
+                json!({"draft": d, "estimate_id": est["estimate_id"], "confirmations": est["needs"]}),
+            )
+            .unwrap_err()
+    };
+    let no_spend = |what: &str| {
+        assert!(
+            lab.manifest()["jobs"].as_array().unwrap().is_empty(),
+            "{what}: no job recorded"
+        );
+        assert_eq!(
+            lab.core.dispatch("rgn_spend_get", json!({})).unwrap()["spend"],
+            spend,
+            "{what}: no spend"
+        );
+        assert_eq!(
+            lab.fake().last_reference_hashes(),
+            calls,
+            "{what}: no provider call"
+        );
+    };
+
+    // Moved out of the pack in Explorer.
+    let moved = lab.dir.path().join("moved-s1.png");
+    std::fs::rename(pack_dir(&lab, "Blades").join("s1.png"), &moved).unwrap();
+    let err = submit(&d);
+    assert_eq!(err.code, ErrorCode::ReferenceUnavailable);
+    assert_eq!(
+        err.detail,
+        json!({"key": format!("pack:{pack}:s1.png"), "reason": "missing"})
+    );
+    no_spend("moved");
+    let err = lab
+        .core
+        .dispatch("rgn_job_estimate", json!({ "draft": d }))
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::ReferenceUnavailable, "estimate too");
+    no_spend("estimate");
+
+    // Deleted from the project's references/.
+    std::fs::rename(&moved, pack_dir(&lab, "Blades").join("s1.png")).unwrap();
+    std::fs::remove_file(lab.project_dir.join("references").join("b.png")).unwrap();
+    let err = submit(&d);
+    assert_eq!(
+        err.detail,
+        json!({"key": "project:b.png", "reason": "missing"})
+    );
+    no_spend("deleted");
+
+    // Now corrupt: it can't be ticked any more, and is not dropped silently either.
+    std::fs::write(
+        lab.project_dir.join("references").join("a.png"),
+        b"not a png",
+    )
+    .unwrap();
+    std::fs::write(lab.project_dir.join("references").join("b.png"), swatch(20)).unwrap();
+    let err = submit(&d);
+    assert_eq!(
+        err.detail,
+        json!({"key": "project:a.png", "reason": "corrupt"})
+    );
+    no_spend("corrupt");
+
+    // The block shows it, and its reconciled draft (what the UI saves) submits cleanly.
+    let r = resolve(&lab, "fake-white-edit", &d["references"]);
+    assert_eq!(item(&r, "project:a.png")["badges"], json!(["corrupt"]));
+    let id = lab
+        .submit_draft(draft(&lab, "fake-white-edit", r["references"].clone()))
+        .unwrap();
+    assert_eq!(lab.job(id).references.len(), 2);
+    lab.drive();
+
+    // A deleted pack is shown (`pack_unavailable`, items `missing`, off) and its ticks are kept
+    // for its return; it doesn't block the send.
+    let r = resolve(&lab, "fake-white-edit", &d["references"]);
+    lab.core
+        .dispatch("ref_pack_delete", json!({"pack_id": pack}))
+        .unwrap();
+    let r = resolve(&lab, "fake-white-edit", &r["references"]);
+    assert!(
+        r["notices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["code"] == "pack_unavailable")
+    );
+    let id = lab
+        .submit_draft(draft(&lab, "fake-white-edit", r["references"].clone()))
+        .unwrap();
+    assert_eq!(lab.job(id).references.len(), 1);
+}
+
 #[test]
 fn fr_rgn_41_a_model_without_slots_sends_nothing() {
     let (lab, _) = lab_with(&[("a.png", 10)]);

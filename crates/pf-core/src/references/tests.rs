@@ -560,7 +560,17 @@ fn fr_ref_28_pack_json_conflict_copy_later_updated_at_wins() {
     assert_eq!(cards[0].notes_first_line, "from the laptop");
     assert!(!dir.join("pack-LAPTOP.json").exists());
     let t = trash::list(&e.ctx, &e.settings);
-    assert_eq!(t[0].files, ["pack.json"], "the older one is restorable");
+    assert_eq!(t[0].files, ["pack.json"], "the older one is in the trash");
+    // R61 (like R57): it is not restorable, so it can't loop back as a conflict copy.
+    assert!(!t[0].restorable);
+    let err = trash::restore(&e.ctx, &e.settings, t[0].id).unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotRestorable);
+    assert_eq!(
+        trash::list(&e.ctx, &e.settings).len(),
+        1,
+        "still in the trash"
+    );
+    assert!(!dir.join("pack (2).json").exists());
     // An older conflict copy loses.
     let mut older = newer.clone();
     older.notes = "stale".into();
@@ -573,6 +583,15 @@ fn fr_ref_28_pack_json_conflict_copy_later_updated_at_wins() {
     let cards = packs::list_packs(&e.ctx, &e.settings);
     assert_eq!(cards[0].notes_first_line, "from the laptop");
     assert_eq!(cards[0].pack_id, Some(out.pack.pack_id));
+    let t = trash::list(&e.ctx, &e.settings);
+    assert_eq!(t[0].files, ["pack (2).json"]);
+    assert!(!t[0].restorable);
+    // Images and packs stay restorable.
+    let l = loc(&e, out.pack.pack_id);
+    let img = trash::remove_images(&e.ctx, &l, &["a.png".into()]).unwrap();
+    let t = trash::list(&e.ctx, &e.settings);
+    assert!(t.iter().find(|i| i.id == img).unwrap().restorable);
+    trash::restore(&e.ctx, &e.settings, img).unwrap();
 }
 
 #[test]
@@ -644,4 +663,54 @@ fn fr_ref_29_commands_validate_and_round_trip() {
         .dispatch("ref_trash_restore", json!({"id": del["item_id"]}))
         .unwrap();
     assert!(Path::new(restored["path"].as_str().unwrap()).ends_with("Blades"));
+}
+
+/// FR-REF-14 (walk R6, R61): the pack view's and the block's image thumbnails are ≤ 256 px,
+/// small files included; the packs-home mosaic keeps the 512 px library key.
+#[test]
+fn fr_ref_14_image_thumbnails_are_256_px() {
+    let e = env();
+    let mut ctx = crate::context::Context::deterministic(
+        e.dir.path().join("data2"),
+        crate::time::Timestamp(T0),
+    );
+    ctx.library_override = Some(e.lib());
+    let core = crate::Core::new(ctx).unwrap();
+    let src = e.outside("s.png", &crate::test_support::png_bytes(320, 300, 7));
+    let out = core
+        .dispatch(
+            "ref_pack_create",
+            json!({"name": "Swords", "paths": [src.to_string_lossy()]}),
+        )
+        .unwrap();
+    let id = out["pack"]["pack_id"].as_str().unwrap().to_owned();
+    let size = |url: &str| {
+        let path = &url[url.find("/i/").unwrap()..];
+        let res = core.serve_scheme(path);
+        assert_eq!(res.status, 200, "{url}");
+        let img = image::load_from_memory(&res.body).unwrap();
+        (img.width(), img.height())
+    };
+    let got = core
+        .dispatch("ref_pack_get", json!({"pack_id": id}))
+        .unwrap();
+    assert_eq!(
+        size(got["images"][0]["thumb_url"].as_str().unwrap()),
+        (256, 240)
+    );
+
+    // The References block over a project with the same file in references/.
+    let dir = e.project("Crypt");
+    std::fs::copy(&src, dir.join("references").join("s.png")).unwrap();
+    core.dispatch("project_open", json!({"path": dir})).unwrap();
+    let r = core
+        .dispatch(
+            "ref_resolve",
+            json!({"model_id": "fake-white-edit", "references": null}),
+        )
+        .unwrap();
+    assert_eq!(
+        size(r["items"][0]["thumb_url"].as_str().unwrap()),
+        (256, 240)
+    );
 }

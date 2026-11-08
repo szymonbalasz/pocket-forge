@@ -328,6 +328,25 @@
   padding: 2px 4px;
 }
 
+.ref-popover input[type='checkbox'],
+.ref-block-item input[type='checkbox'] {
+  flex: none;
+  margin: 0;
+}
+
+/* A pack name stays on one line, ellipsised; its count stays visible. */
+.ref-popover-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ref-popover-count {
+  flex: none;
+  white-space: nowrap;
+}
+
 .ref-popover label[data-disabled='true'] {
   color: var(--pf-text-dim);
 }

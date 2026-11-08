@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { ContextMenu, Popover } from 'radix-ui';
 
 import { onFileDrop, pickPaths, type PackCard, type PackImage } from '../../api';
+import { dateLabel } from '../../shared/dates';
 import { useHomeView } from '../../shared/home';
 import { IconPlus, IconReferences } from '../../shell/icons';
 import { useProjectState } from '../../store/project';
@@ -18,6 +19,7 @@ import {
   reasonLabel,
   ROLES,
   summariseAdd,
+  trashLabel,
 } from './format';
 import { RoleSelect } from './RoleSelect';
 import { refs, useRefs } from './store';
@@ -271,11 +273,7 @@ function PackCardView({ card }: { card: PackCard }) {
 /** What the last listing did (adopted a folder, gave a copied pack a new id, resolved a
  *  `pack.json` conflict, FR-REF-04, 05, 28), from the cards' `notices[]`. */
 function ListNotices() {
-  const { cards, noticesSeen } = useRefs();
-  const notices = (cards ?? []).flatMap((c) =>
-    c.notices.map((n) => ({ ...n, id: `${c.id}:${n.code}:${n.message}` })),
-  );
-  const shown = notices.filter((n) => !noticesSeen.includes(n.id));
+  const { notices: shown } = useRefs();
   if (!shown.length) return null;
   return (
     <div className="banner banner-warning" role="status" data-testid="ref-home-notices">
@@ -308,22 +306,20 @@ function TrashList() {
       <ul className="ref-trash" data-testid="ref-trash-list">
         {trash.map((t) => (
           <li key={t.id} data-testid="ref-trash-item" data-record-id={t.id} data-kind={t.kind}>
-            <span>
-              {t.kind === 'pack'
-                ? t.pack_name
-                : `${imagesLabel(t.files.length)} from ${t.pack_name}`}
+            <span>{trashLabel(t)}</span>
+            <span className="ref-meta tabular" title={`Deleted ${dateLabel(t.trashed_at)}`}>
+              until {dateLabel(t.purge_at)}
             </span>
-            <span className="ref-meta tabular" title={`Deleted ${t.trashed_at}`}>
-              until {t.purge_at.slice(0, 10)}
-            </span>
-            <button
-              type="button"
-              className="link"
-              data-testid="ref-trash-restore"
-              onClick={() => void refs.restore(t.id)}
-            >
-              Restore
-            </button>
+            {t.restorable !== false && (
+              <button
+                type="button"
+                className="link"
+                data-testid="ref-trash-restore"
+                onClick={() => void refs.restore(t.id)}
+              >
+                Restore
+              </button>
+            )}
           </li>
         ))}
       </ul>

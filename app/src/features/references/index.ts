@@ -7,9 +7,12 @@ export {
   referencesCostKey,
   referencesDraft,
   referencesForSend,
+  referencesOnKeys,
+  refreshReferences,
   reloadReferences,
   restoreReferences,
   settleReferences,
+  useBlock as useReferencesBlock,
 } from './blockStore';
 
 // REF: the packs home and pack view in the home (canvas) slot while References is selected
