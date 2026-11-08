@@ -172,7 +172,10 @@ function PackCardView({ card }: { card: PackCard }) {
             data-testid="ref-home-card"
             data-record-id={card.id}
             title={
-              id ? card.path : `${card.path} (not ready: Pocket Forge couldn’t write pack.json)`
+              // BL-35: relative to the library root, never the absolute path.
+              id
+                ? (card.rel_path ?? card.name)
+                : `${card.rel_path ?? card.name} (not ready: Pocket Forge couldn’t write pack.json)`
             }
           >
             <button

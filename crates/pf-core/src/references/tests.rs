@@ -76,6 +76,8 @@ fn fr_ref_01_images_are_supported_top_level_files() {
     std::fs::write(dir.join("sub/c.png"), swatch(2)).unwrap();
     let cards = packs::list_packs(&e.ctx, &e.settings);
     assert_eq!(cards[0].image_count, 3);
+    // BL-35: the tooltip path is relative to the library root.
+    assert_eq!(cards[0].rel_path, format!("References/{}", cards[0].name));
     let v = packs::view(&e.ctx, &loc(&e, cards[0].pack_id.unwrap()));
     assert_eq!(names(&v), ["A.jpg", "b.png", "broken.png"]);
     assert_eq!(v.images[2].state, ImageState::Corrupt);

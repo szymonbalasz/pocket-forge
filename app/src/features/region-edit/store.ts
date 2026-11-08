@@ -192,6 +192,16 @@ function set(patch: Partial<RgnState> | ((s: RgnState) => Partial<RgnState>)): v
   for (const l of listeners) l();
 }
 
+/** BL-36: a fresh estimate may be submitted under the plan the DM confirmed: within its cap, no
+ *  dearer than the cost shown, and needing no confirmation that wasn't given. */
+function withinConfirmed(fresh: JobEstimate, plan: ConfirmPlan): boolean {
+  const cost = fresh.cost.amount;
+  if (plan.cap === null) return false;
+  if (fresh.spend + (cost === 'unknown' ? 0 : cost) > plan.cap) return false;
+  if (!fresh.needs.every((n) => plan.confirmations.includes(n))) return false;
+  return plan.cost === 'unknown' || (cost !== 'unknown' && cost <= plan.cost);
+}
+
 const uiError = (e: unknown): UiError =>
   e instanceof ApiError
     ? {
@@ -938,11 +948,38 @@ export const rgn = {
       // R7: EDT submits the live mask first, so the job sends exactly what the DM sees.
       const ref = await flushMask();
       if (ref) set({ maskId: ref.mask_id });
-      const { job_id } = await api.region.submit({
-        draft: ref ? { ...draft, mask_id: ref.mask_id } : draft,
-        estimate_id: est.estimate_id,
-        confirmations: plan.confirmations,
-      });
+      const sent = ref ? { ...draft, mask_id: ref.mask_id } : draft;
+      const submit = (estimateId: string) =>
+        api.region.submit({
+          draft: sent,
+          estimate_id: estimateId,
+          confirmations: plan.confirmations,
+        });
+      let job_id: string;
+      try {
+        ({ job_id } = await submit(est.estimate_id));
+      } catch (e) {
+        // BL-36: the estimate expired while the dialog was open. Estimate again; submit only
+        // when the new one stays within what was confirmed, else show the confirm again.
+        if (uiError(e).code !== 'estimate_stale') throw e;
+        const fresh = await api.region.estimate(state.projectId!, sent);
+        set({
+          estimate: { status: 'ready', result: fresh, error: null, signature: debouncer.signature },
+          spend: { spend: fresh.spend, cap: fresh.cap, threshold: fresh.threshold },
+        });
+        if (!withinConfirmed(fresh, plan)) {
+          set({
+            submitting: false,
+            confirmError: {
+              code: 'estimate_changed',
+              message:
+                'The estimate changed while this dialog was open. Check it and confirm again.',
+            },
+          });
+          return;
+        }
+        ({ job_id } = await submit(fresh.estimate_id));
+      }
       set((cur) => ({
         submitting: false,
         confirmOpen: false,

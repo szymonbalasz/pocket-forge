@@ -500,14 +500,16 @@ pub fn reconcile(
                     .strip_prefix(&format!("pack:{}:", p.draft.pack_id))
                     .unwrap_or_default()
                     .to_owned();
-                let slot = slot_index(slots, item.role);
+                // BL-35: a role of this model's slots, as for an available item (never blank).
+                let role = pick_role(slots, item.role, None);
+                let slot = slot_index(slots, role);
                 missing_rows.push(ItemOut {
                     key: key.clone(),
                     source: Source::Pack,
                     pack_id: Some(p.draft.pack_id),
                     pack_name: Some(p.draft.name.clone()),
                     file,
-                    role: item.role,
+                    role,
                     slot: slots[slot].name.clone(),
                     on: false,
                     state: ItemState::Missing,
@@ -541,14 +543,15 @@ pub fn reconcile(
                         )
                     }
                 };
-                let slot = slot_index(slots, item.role);
+                let role = pick_role(slots, item.role, None);
+                let slot = slot_index(slots, role);
                 missing_rows.push(ItemOut {
                     key: key.clone(),
                     source,
                     pack_id,
                     pack_name,
                     file,
-                    role: item.role,
+                    role,
                     slot: slots[slot].name.clone(),
                     on: false,
                     state: ItemState::Missing,

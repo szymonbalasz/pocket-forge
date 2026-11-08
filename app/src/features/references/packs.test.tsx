@@ -400,6 +400,22 @@ test('FR-REF-04 a folder without pack.json is listed as not ready and cannot be 
   expect(core.names()).not.toContain('ref_pack_get');
 });
 
+test('BL-35 a pack card tooltip is relative to the library root, never the absolute path', async () => {
+  setup({
+    packs: [
+      ...sampleRefSeed().packs,
+      { name: 'Loose', images: [{ file: 'x.png' }], notReady: true },
+    ],
+  });
+  await waitFor(() => expect(cards()).toHaveLength(3));
+  for (const c of cards()) expect(c.title).not.toContain('C:/pf-mock');
+  expect(card('Loose').title).toBe(
+    'References/Loose (not ready: Pocket Forge couldn’t write pack.json)',
+  );
+  const name = within(cards()[0]!).getByTestId('ref-home-card-name').textContent;
+  expect(cards()[0]!.title).toBe(`References/${name}`);
+});
+
 test('FR-REF-05 FR-REF-28 what a listing did is shown from the cards’ notices and can be dismissed', async () => {
   setup({
     packs: [

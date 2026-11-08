@@ -148,6 +148,31 @@ fn fr_prj_43_restore_writes_a_new_restore_revision() {
 }
 
 #[test]
+fn bl_32_open_sweep_keeps_a_fresh_export_temp_like_fr_exp_17() {
+    let e = env();
+    let dir = e.project("Crypt");
+    let exports = dir.join(EXPORTS_DIR);
+    std::fs::create_dir_all(&exports).unwrap();
+    let old = exports.join(".Crypt.png.pf-tmp-01old");
+    let fresh = exports.join(".Crypt.png.pf-tmp-01fresh");
+    let layer = dir.join(".pforge/layers/.a.png.pf-tmp-y");
+    for p in [&old, &fresh, &layer] {
+        std::fs::write(p, b"x").unwrap();
+    }
+    let two_hours_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+    std::fs::File::options()
+        .write(true)
+        .open(&old)
+        .unwrap()
+        .set_modified(two_hours_ago)
+        .unwrap();
+    e.open(&dir);
+    assert!(!old.exists(), "a stale export temp is swept");
+    assert!(fresh.exists(), "a fresh one may be a running export's");
+    assert!(!layer.exists(), "app-owned temps elsewhere go at any age");
+}
+
+#[test]
 fn fr_prj_20_crash_after_manifest_temp_reopens_the_state_before() {
     let mut e = env();
     let dir = e.project("Crypt");

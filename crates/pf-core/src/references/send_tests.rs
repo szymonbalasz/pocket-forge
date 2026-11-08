@@ -567,6 +567,38 @@ fn fr_ref_26_renamed_and_deleted_packs() {
 }
 
 #[test]
+fn bl_35_a_missing_item_shows_a_role_of_the_models_slots() {
+    let e = env();
+    let dir = project_with_refs(&e, &[]);
+    let p = pack(&e, "Blades", &[("a.png", swatch(1)), ("b.png", swatch(2))]);
+    let s = RefSession::default();
+    let prev = DraftReferences {
+        packs: vec![picked(&p)],
+        ..Default::default()
+    };
+    let mut draft = resolve(&e, &s, &dir, &style_identity(), Some(&prev)).references;
+    draft.items[0].role = None; // e.g. saved under a model with an unnamed slot
+    draft.items[1].role = Some(ReferenceRole::Identity);
+    let l = find_pack(&e.ctx, &e.settings, p.json.pack_id).unwrap();
+    trash::delete_pack(&e.ctx, &l).unwrap();
+    let r = resolve(&e, &s, &dir, &style_identity(), Some(&draft));
+    assert!(r.items.iter().all(|i| i.state == ItemState::Missing));
+    let roles: Vec<_> = r.items.iter().map(|i| (i.file.as_str(), i.role)).collect();
+    assert!(
+        roles.contains(&("a.png", Some(ReferenceRole::Style))),
+        "{roles:?}"
+    );
+    assert!(
+        roles.contains(&("b.png", Some(ReferenceRole::Identity))),
+        "{roles:?}"
+    );
+    assert_eq!(
+        r.references.items[0].role, None,
+        "the draft itself is kept as it was"
+    );
+}
+
+#[test]
 fn fr_ref_29_ref_resolve_command() {
     let e = env();
     let dir = project_with_refs(&e, &[("a.png", swatch(1))]);

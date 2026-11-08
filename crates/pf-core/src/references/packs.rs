@@ -45,6 +45,9 @@ pub struct PackCard {
     pub name: String,
     /// Absolute pack folder.
     pub path: PathBuf,
+    /// BL-35: the pack folder relative to its library root (`References/<name>`, `/`-separated),
+    /// for the card's tooltip.
+    pub rel_path: String,
     pub image_count: usize,
     /// The first line of the notes.
     pub notes_first_line: String,
@@ -82,11 +85,21 @@ fn load_card(
     seen: &mut HashSet<Ulid>,
 ) -> PackCard {
     let images = image_files(dir);
+    let rel_path = dir
+        .strip_prefix(root)
+        .map(|r| {
+            r.components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/")
+        })
+        .unwrap_or_else(|_| name.clone());
     let mut card = PackCard {
         id: dir.to_string_lossy().into_owned(),
         pack_id: None,
         name,
         path: dir.to_path_buf(),
+        rel_path,
         image_count: images.len(),
         notes_first_line: String::new(),
         thumb: None,
