@@ -2,6 +2,8 @@
 //! window and event forwarding. No domain logic: everything is a `pf-core` command.
 
 mod commands;
+#[cfg(debug_assertions)]
+mod smoke_export;
 
 use pf_core::context::EventSink;
 use pf_core::{Context, Core};
@@ -22,10 +24,29 @@ impl EventSink for TauriEvents {
 /// The UI calls this once it has rendered and reached the core. In test builds with
 /// `PF_SMOKE=1` it ends the process (exit 0 if `ok`), which is how `tauri:smoke` knows the
 /// window loaded. Otherwise it only logs.
+/// With `PF_SMOKE_EXPORT_IMAGE` as well, an `ok` report first runs the export step
+/// (`smoke_export`, debug builds only) on a worker thread, then exits.
 #[tauri::command]
 fn app_ready(app: AppHandle, ok: bool, detail: String) {
     tracing::info!(ok, %detail, "UI ready");
     if cfg!(debug_assertions) && std::env::var("PF_SMOKE").is_ok_and(|v| v == "1") {
+        #[cfg(debug_assertions)]
+        if ok && let Some(image) = smoke_export::image() {
+            println!("PF_SMOKE shell ok {detail}");
+            std::thread::spawn(move || {
+                let result = smoke_export::run(&app.state::<Core>(), &image);
+                match &result {
+                    Ok(d) => println!("PF_SMOKE export ok {d}"),
+                    Err(e) => println!("PF_SMOKE export failed {e}"),
+                }
+                println!(
+                    "PF_SMOKE {} {detail}",
+                    if result.is_ok() { "ok" } else { "failed" }
+                );
+                app.exit(if result.is_ok() { 0 } else { 1 });
+            });
+            return;
+        }
         println!("PF_SMOKE {} {detail}", if ok { "ok" } else { "failed" });
         app.exit(if ok { 0 } else { 1 });
     }
