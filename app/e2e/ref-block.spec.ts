@@ -18,7 +18,16 @@ const REFS = JSON.parse(
 const REQUIRED: Capabilities = {
   ...REFS,
   model_id: 'fake-required',
-  slots: [{ name: 'characterImages', role: 'identity', required: true }],
+  slots: [
+    {
+      name: 'characterImages',
+      role: 'identity',
+      min: 1,
+      max: 1,
+      cost_affecting: false,
+      array: true,
+    },
+  ],
 };
 const WEAPONS = '01JMOCKPACKWEAPONS00000000';
 const SLOTS = {

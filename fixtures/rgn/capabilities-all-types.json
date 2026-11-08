@@ -2,30 +2,191 @@
   "model_id": "fake-all-types",
   "operations": ["edit_masked"],
   "controls": [
-    { "name": "image", "type": "image", "role": "source", "min": null, "max": null, "step": null, "allowed": [], "default": null, "required": true, "cost_affecting": false },
-    { "name": "mask", "type": "mask", "role": "mask", "min": null, "max": null, "step": null, "allowed": [], "default": null, "required": true, "cost_affecting": false },
-    { "name": "text", "type": "string", "role": "prompt", "min": null, "max": null, "step": null, "allowed": [], "default": null, "required": true, "cost_affecting": false },
-    { "name": "num_samples", "type": "int", "role": "candidate_count", "min": 1, "max": 4, "step": 1, "allowed": [], "default": 2, "required": false, "cost_affecting": true },
-    { "name": "guidance", "type": "float", "role": "other", "min": 1, "max": 20, "step": 0.5, "allowed": [], "default": 7.5, "required": false, "cost_affecting": false },
-    { "name": "steps", "type": "int", "role": "other", "min": 10, "max": null, "step": 1, "allowed": [], "default": 30, "required": false, "cost_affecting": true },
-    { "name": "strength", "type": "float", "role": "other", "min": null, "max": 1, "step": null, "allowed": [], "default": 0.8, "required": false, "cost_affecting": false },
-    { "name": "mode", "type": "enum", "role": "other", "min": null, "max": null, "step": null, "allowed": ["fast", "quality", "creative"], "default": "fast", "required": false, "cost_affecting": true },
-    { "name": "style", "type": "enum", "role": "other", "min": null, "max": null, "step": null, "allowed": ["none", "painterly", "ink", "photo"], "default": null, "required": false, "cost_affecting": false },
-    { "name": "hd", "type": "bool", "role": "other", "min": null, "max": null, "step": null, "allowed": [], "default": false, "required": false, "cost_affecting": true },
-    { "name": "negative_prompt", "type": "string", "role": "other", "min": null, "max": null, "step": null, "allowed": [], "default": "", "required": false, "cost_affecting": false },
-    { "name": "seed", "type": "seed", "role": "seed", "min": 0, "max": 4294967295, "step": 1, "allowed": [], "default": null, "required": false, "cost_affecting": false },
-    { "name": "reference", "type": "image", "role": "reference", "min": null, "max": null, "step": null, "allowed": [], "default": null, "required": false, "cost_affecting": false }
+    {
+      "name": "image",
+      "type": "image",
+      "role": "source",
+      "min": null,
+      "max": null,
+      "step": null,
+      "allowed": [],
+      "default": null,
+      "required": true,
+      "cost_affecting": false
+    },
+    {
+      "name": "mask",
+      "type": "mask",
+      "role": "mask",
+      "min": null,
+      "max": null,
+      "step": null,
+      "allowed": [],
+      "default": null,
+      "required": true,
+      "cost_affecting": false
+    },
+    {
+      "name": "text",
+      "type": "string",
+      "role": "prompt",
+      "min": null,
+      "max": null,
+      "step": null,
+      "allowed": [],
+      "default": null,
+      "required": true,
+      "cost_affecting": false
+    },
+    {
+      "name": "num_samples",
+      "type": "int",
+      "role": "candidate_count",
+      "min": 1,
+      "max": 4,
+      "step": 1,
+      "allowed": [],
+      "default": 2,
+      "required": false,
+      "cost_affecting": true
+    },
+    {
+      "name": "guidance",
+      "type": "float",
+      "role": "other",
+      "min": 1,
+      "max": 20,
+      "step": 0.5,
+      "allowed": [],
+      "default": 7.5,
+      "required": false,
+      "cost_affecting": false
+    },
+    {
+      "name": "steps",
+      "type": "int",
+      "role": "other",
+      "min": 10,
+      "max": null,
+      "step": 1,
+      "allowed": [],
+      "default": 30,
+      "required": false,
+      "cost_affecting": true
+    },
+    {
+      "name": "strength",
+      "type": "float",
+      "role": "other",
+      "min": null,
+      "max": 1,
+      "step": null,
+      "allowed": [],
+      "default": 0.8,
+      "required": false,
+      "cost_affecting": false
+    },
+    {
+      "name": "mode",
+      "type": "enum",
+      "role": "other",
+      "min": null,
+      "max": null,
+      "step": null,
+      "allowed": ["fast", "quality", "creative"],
+      "default": "fast",
+      "required": false,
+      "cost_affecting": true
+    },
+    {
+      "name": "style",
+      "type": "enum",
+      "role": "other",
+      "min": null,
+      "max": null,
+      "step": null,
+      "allowed": ["none", "painterly", "ink", "photo"],
+      "default": null,
+      "required": false,
+      "cost_affecting": false
+    },
+    {
+      "name": "hd",
+      "type": "bool",
+      "role": "other",
+      "min": null,
+      "max": null,
+      "step": null,
+      "allowed": [],
+      "default": false,
+      "required": false,
+      "cost_affecting": true
+    },
+    {
+      "name": "negative_prompt",
+      "type": "string",
+      "role": "other",
+      "min": null,
+      "max": null,
+      "step": null,
+      "allowed": [],
+      "default": "",
+      "required": false,
+      "cost_affecting": false
+    },
+    {
+      "name": "seed",
+      "type": "seed",
+      "role": "seed",
+      "min": 0,
+      "max": 4294967295,
+      "step": 1,
+      "allowed": [],
+      "default": null,
+      "required": false,
+      "cost_affecting": false
+    },
+    {
+      "name": "reference",
+      "type": "image",
+      "role": "reference",
+      "min": null,
+      "max": null,
+      "step": null,
+      "allowed": [],
+      "default": null,
+      "required": false,
+      "cost_affecting": false
+    }
   ],
   "rules": [
-    { "if": { "control": "mode", "op": "eq", "value": "fast" }, "then": { "control": "strength", "hidden": true } },
-    { "if": { "control": "mode", "op": "eq", "value": "creative" }, "then": { "control": "style", "allowed": ["painterly", "ink"] } },
-    { "if": { "control": "mode", "op": "in", "value": ["quality", "creative"] }, "then": { "control": "style", "required": true } }
+    {
+      "if": { "control": "mode", "op": "eq", "value": "fast" },
+      "then": { "control": "strength", "hidden": true }
+    },
+    {
+      "if": { "control": "mode", "op": "eq", "value": "creative" },
+      "then": { "control": "style", "allowed": ["painterly", "ink"] }
+    },
+    {
+      "if": { "control": "mode", "op": "in", "value": ["quality", "creative"] },
+      "then": { "control": "style", "required": true }
+    }
   ],
   "mask": { "convention": "white_edit", "soft": { "rule": "pass_through" } },
   "input_px": { "min": 256, "max": 2048, "multiple_of": 8 },
   "max_bytes": 20971520,
   "seed": true,
   "prompt_required": true,
-  "slots": [{ "name": "reference", "role": "reference", "required": false }],
+  "slots": [
+    {
+      "name": "reference",
+      "role": null,
+      "min": 0,
+      "max": 1,
+      "cost_affecting": false,
+      "array": false
+    }
+  ],
   "warnings": ["Input \"lora\" has an unknown type (lora_ref) and was omitted."]
 }

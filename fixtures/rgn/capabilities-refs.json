@@ -100,7 +100,7 @@
       "min": 0,
       "max": 2,
       "cost_affecting": true,
-      "required": false
+      "array": true
     },
     {
       "name": "characterImages",
@@ -108,7 +108,7 @@
       "min": 0,
       "max": 1,
       "cost_affecting": false,
-      "required": false
+      "array": true
     }
   ],
   "warnings": []

@@ -258,8 +258,19 @@ export interface Capabilities {
   max_bytes: number;
   seed: boolean;
   prompt_required: boolean;
-  slots: { name: string; role: string | null; required: boolean }[];
+  slots: CapabilitySlot[];
   warnings: string[];
+}
+
+/** A reference image input of a model (FR-PRV-31, R49). `min` is 1 for a required input;
+ *  `array` = the input takes a list (`file_array`) rather than one file. */
+export interface CapabilitySlot {
+  name: string;
+  role: RefRole | null;
+  min: number;
+  max: number;
+  cost_affecting: boolean;
+  array: boolean;
 }
 
 /** One pyramid level (EDT Appendix B). `scale` = 1 / 2^level. */
