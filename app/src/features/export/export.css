@@ -1,0 +1,218 @@
+/* Export section (EXP §7). Theme tokens only; colour only for state. */
+.exp-panel {
+  border-bottom: 1px solid var(--pf-border);
+}
+
+.exp-panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: var(--pf-space-2) var(--pf-space-3);
+  text-align: left;
+  font-weight: 600;
+}
+
+.exp-chevron {
+  width: 10px;
+  color: var(--pf-text-dim);
+}
+
+.exp-header-progress {
+  margin-left: auto;
+}
+
+.exp-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+  padding: 0 var(--pf-space-3) var(--pf-space-3);
+}
+
+.exp-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.exp-fieldset:disabled {
+  opacity: 0.5;
+}
+
+.exp-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--pf-space-2);
+}
+
+.exp-row > .small {
+  align-self: center;
+  min-width: 32px;
+}
+
+.exp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.exp-field input[aria-invalid='true'] {
+  border-color: var(--pf-danger);
+}
+
+.exp-field input:disabled {
+  opacity: 0.45;
+}
+
+.exp-toggle {
+  display: inline-flex;
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  overflow: hidden;
+}
+
+.exp-toggle button {
+  border: none;
+  border-radius: 0;
+  background: var(--pf-bg-3);
+  font-size: var(--pf-font-size-meta);
+}
+
+.exp-toggle button[data-state='on'] {
+  background: var(--pf-accent-soft);
+  color: var(--pf-text);
+}
+
+.exp-formats {
+  display: flex;
+  gap: var(--pf-space-3);
+}
+
+.exp-format {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.exp-format[data-disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.exp-radio {
+  flex: 0 0 auto;
+  line-height: 0;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.exp-radio[data-state='checked'] {
+  border-color: var(--pf-accent);
+}
+
+.exp-radio-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pf-accent);
+}
+
+.exp-plan p {
+  margin: 0;
+}
+
+.exp-warnings {
+  margin: 2px 0 0;
+  padding-left: var(--pf-space-4);
+}
+
+.exp-actions,
+.exp-progress-row {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  flex-wrap: wrap;
+}
+
+.exp-progress {
+  flex: 1 1 100%;
+  height: 6px;
+  background: var(--pf-bg-3);
+  border-radius: var(--pf-radius);
+  overflow: hidden;
+}
+
+.exp-progress-fill {
+  height: 100%;
+  background: var(--pf-accent);
+  transition: width 120ms linear;
+}
+
+.exp-progress-row > button {
+  margin-left: auto;
+}
+
+.exp-error {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.exp-error > span {
+  flex: 1;
+}
+
+.exp-toast-viewport {
+  position: fixed;
+  right: var(--pf-space-4);
+  bottom: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+  width: 320px;
+  max-width: calc(100vw - 2 * var(--pf-space-4));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  z-index: 60;
+  outline: none;
+}
+
+.exp-toast {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--pf-bg-2);
+  border: 1px solid var(--pf-border);
+  border-left: 3px solid var(--pf-ok);
+  border-radius: var(--pf-radius);
+  padding: var(--pf-space-2) var(--pf-space-3);
+}
+
+.exp-toast p {
+  margin: 0;
+}
+
+.exp-toast-title {
+  font-weight: 600;
+}
+
+.exp-toast-path {
+  display: block;
+  overflow-wrap: anywhere;
+}

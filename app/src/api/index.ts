@@ -5,7 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 
-import type { CommandName, Commands, CoreErrorShape, Events } from './types';
+import type { CommandName, Commands, CoreErrorShape, Events, ExportSettingsInput } from './types';
 
 export type * from './types';
 
@@ -114,7 +114,16 @@ export const api = {
         ...(rebuild ? { rebuild: true } : {}),
       }),
   },
-  export: { getSettings: () => call('export_get_settings', {}) },
+  export: {
+    getSettings: () => call('export_get_settings', {}),
+    setSettings: (settings: ExportSettingsInput) => call('export_set_settings', { settings }),
+    plan: (settings: ExportSettingsInput) => call('export_plan', { settings }),
+    start: (settings: ExportSettingsInput, replace: boolean) =>
+      call('export_start', { settings, replace }),
+    cancel: (exportId: string) => call('export_cancel', { export_id: exportId }),
+    /** PRJ's command (FR-PRJ-42); EXP calls it when its panel opens (FR-EXP-28). */
+    prefetchOriginal: () => call('project_prefetch_original', {}),
+  },
   region: {
     fit: (
       projectId: string,
@@ -134,6 +143,19 @@ export const api = {
       call('rgn_job_estimate', { project_id: projectId, draft }),
     getSpend: () => call('rgn_spend_get', {}),
     setSpend: (spend: Commands['rgn_spend_set'][0]) => call('rgn_spend_set', spend),
+    submit: (input: Commands['rgn_job_submit'][0]) => call('rgn_job_submit', input),
+    cancel: (jobId: string) => call('rgn_job_cancel', { job_id: jobId }),
+    retryDraft: (jobId: string) => call('rgn_job_retry_draft', { job_id: jobId }),
+    dismiss: (jobId: string) => call('rgn_job_dismiss', { job_id: jobId }),
+    preview: (input: Commands['rgn_candidate_preview'][0]) => call('rgn_candidate_preview', input),
+    accept: (input: Commands['rgn_candidate_accept'][0]) => call('rgn_candidate_accept', input),
+    star: (jobId: string, candidateId: string, starred: boolean) =>
+      call('rgn_candidate_star', { job_id: jobId, candidate_id: candidateId, starred }),
+    discard: (jobId: string, candidateId: string) =>
+      call('rgn_candidate_discard', { job_id: jobId, candidate_id: candidateId }),
+    retune: (layerId: string, blend: Commands['rgn_patch_retune'][0]['blend']) =>
+      call('rgn_patch_retune', { layer_id: layerId, blend }),
+    iterations: () => call('rgn_iterations_list', {}),
   },
   mask: {
     read: (projectId: string, maskId: string) =>

@@ -85,6 +85,13 @@ export default defineConfig(
               allow: { to: { element: { type: 'shell' }, file: { path: '**/shell/icons.tsx' } } },
             },
             {
+              // AGENTS §9: a feature uses another feature only through its index.ts.
+              from: { element: { type: 'feature' } },
+              allow: {
+                to: { element: { type: 'feature' }, file: { path: '**/features/*/index.ts' } },
+              },
+            },
+            {
               from: { element: { type: 'feature' } },
               allow: {
                 to: {
