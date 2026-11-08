@@ -20,7 +20,10 @@ fn fr_prj_04_source_is_copied_into_working_and_left_unchanged() {
     let items = e.create(Kind::Map, std::slice::from_ref(&src));
     let dir = created(&items[0]);
     assert_eq!(dir, e.lib().join("Maps/crypt"));
-    assert_eq!(fsx::hash_file(&dir.join("working/crypt.png")).unwrap(), before.1);
+    assert_eq!(
+        fsx::hash_file(&dir.join("working/crypt.png")).unwrap(),
+        before.1
+    );
     let after = (
         std::fs::metadata(&src).unwrap().modified().unwrap(),
         fsx::hash_file(&src).unwrap(),
@@ -82,8 +85,20 @@ fn fr_prj_06_animated_and_too_large_are_skipped() {
     webp.extend_from_slice(&[10, 0, 0, 0, 0x02, 0, 0, 0]);
     let anim = e.outside("anim.webp", &webp);
     let items = e.create(Kind::Map, &[big, anim]);
-    assert!(matches!(items[0], CreateItem::Skipped { reason: SkipReason::TooLarge, .. }));
-    assert!(matches!(items[1], CreateItem::Skipped { reason: SkipReason::Animated, .. }));
+    assert!(matches!(
+        items[0],
+        CreateItem::Skipped {
+            reason: SkipReason::TooLarge,
+            ..
+        }
+    ));
+    assert!(matches!(
+        items[1],
+        CreateItem::Skipped {
+            reason: SkipReason::Animated,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -97,11 +112,20 @@ fn fr_prj_07_a_folder_makes_one_flat_project_per_image() {
     assert_eq!(items.len(), 3, "{items:?}");
     let mut names: Vec<_> = items
         .iter()
-        .map(|i| created(i).file_name().unwrap().to_string_lossy().into_owned())
+        .map(|i| {
+            created(i)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect();
     names.sort();
     assert_eq!(names, ["a", "b", "c"]);
-    assert!(e.lib().join("Tokens/b/working/b.png").is_file(), "no subfolders kept");
+    assert!(
+        e.lib().join("Tokens/b/working/b.png").is_file(),
+        "no subfolders kept"
+    );
 }
 
 #[test]
@@ -111,7 +135,11 @@ fn fr_prj_08_name_collisions_get_a_suffix_and_same_hash_is_already_in_library() 
     let b = e.outside("other/Map.png", &png_bytes(4, 4, 99));
     let items = e.create(Kind::Map, &[a.clone(), b, a.clone()]);
     assert_eq!(created(&items[0]), e.lib().join("Maps/map"));
-    assert_eq!(created(&items[1]), e.lib().join("Maps/Map (2)"), "case-insensitive");
+    assert_eq!(
+        created(&items[1]),
+        e.lib().join("Maps/Map (2)"),
+        "case-insensitive"
+    );
     assert_eq!(
         items[2],
         CreateItem::AlreadyInLibrary {
@@ -120,7 +148,10 @@ fn fr_prj_08_name_collisions_get_a_suffix_and_same_hash_is_already_in_library() 
         }
     );
     // Dedupe is per section: the same image is a new project in Tokens.
-    assert!(matches!(e.create(Kind::Token, &[a])[0], CreateItem::Created { .. }));
+    assert!(matches!(
+        e.create(Kind::Token, &[a])[0],
+        CreateItem::Created { .. }
+    ));
 }
 
 #[test]
@@ -136,7 +167,13 @@ fn fr_prj_44_awkward_names() {
     );
     let names: Vec<_> = items
         .iter()
-        .map(|i| created(i).file_name().unwrap().to_string_lossy().into_owned())
+        .map(|i| {
+            created(i)
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect();
     assert_eq!(names[0], "CON_");
     assert_eq!(names[1], "a b");
@@ -147,12 +184,24 @@ fn fr_prj_44_awkward_names() {
 fn fr_prj_09_no_partial_project_after_a_failed_creation() {
     let mut e = env();
     let src = e.outside("crypt.png", &png_bytes(8, 8, 1));
-    e.ctx.faults =
-        crate::context::Faults::parse("after_temp:project.json", crate::context::FaultAction::Error)
-            .unwrap();
+    e.ctx.faults = crate::context::Faults::parse(
+        "after_temp:project.json",
+        crate::context::FaultAction::Error,
+    )
+    .unwrap();
     let items = e.create(Kind::Map, &[src]);
-    assert!(matches!(items[0], CreateItem::Skipped { reason: SkipReason::Io, .. }));
-    assert_eq!(tree(&e.lib().join("Maps")), Vec::<String>::new(), "nothing left");
+    assert!(matches!(
+        items[0],
+        CreateItem::Skipped {
+            reason: SkipReason::Io,
+            ..
+        }
+    ));
+    assert_eq!(
+        tree(&e.lib().join("Maps")),
+        Vec::<String>::new(),
+        "nothing left"
+    );
 }
 
 #[test]
@@ -163,7 +212,10 @@ fn fr_prj_10_pasted_data_becomes_a_png_project() {
     assert_eq!(dir, e.lib().join("Maps/pasted-20270115-080000"));
     let png = dir.join("working/pasted-20270115-080000.png");
     let info = pf_imaging::probe_file(&png).unwrap();
-    assert_eq!((info.format, info.width, info.height), (pf_imaging::ImageFormat::Png, 10, 6));
+    assert_eq!(
+        (info.format, info.width, info.height),
+        (pf_imaging::ImageFormat::Png, 10, 6)
+    );
     let again = c.create_from_bytes(&png_bytes(4, 4, 1)).unwrap();
     assert_eq!(again, e.lib().join("Maps/pasted-20270115-080000 (2)"));
     assert_eq!(
@@ -212,7 +264,9 @@ fn fr_prj_01_creation_needs_an_available_root() {
 fn fr_prj_49_home_lists_the_section_newest_first_with_badges() {
     let mut e = env();
     let a = e.project("Older");
-    e.ctx.clock = Box::new(crate::context::ManualClock::new(crate::time::Timestamp(T0 + 60_000)));
+    e.ctx.clock = Box::new(crate::context::ManualClock::new(crate::time::Timestamp(
+        T0 + 60_000,
+    )));
     let b = e.project("Newer");
     std::fs::create_dir(e.lib().join("Maps/not a project")).unwrap();
     std::fs::create_dir(e.lib().join("Maps/.x.pf-tmp-01")).unwrap();
@@ -228,7 +282,11 @@ fn fr_prj_49_home_lists_the_section_newest_first_with_badges() {
     assert!(cards[1].badges.is_empty() && cards[1].id.parse::<ulid::Ulid>().is_ok());
     assert_eq!(cards[2].badges, [CardBadge::Unreadable]);
     assert_eq!(cards[0].iterations, 0);
-    assert!(library::list_projects(&e.ctx, &e.settings, Kind::Token).unwrap().is_empty());
+    assert!(
+        library::list_projects(&e.ctx, &e.settings, Kind::Token)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -243,10 +301,14 @@ fn fr_prj_17_home_hydrates_only_manifest_and_thumb() {
     e.fs.cloud_only.lock().unwrap().extend(cloud.clone());
     let cards = library::list_projects(&e.ctx, &e.settings, Kind::Map).unwrap();
     assert!(cards[0].thumb.is_some());
-    assert!(e.fs.is_cloud_only(&cloud[2]), "the original stays in the cloud");
+    assert!(
+        e.fs.is_cloud_only(&cloud[2]),
+        "the original stays in the cloud"
+    );
     assert!(!e.fs.is_cloud_only(&cloud[0]) && !e.fs.is_cloud_only(&cloud[1]));
     e.fs.cloud_only.lock().unwrap().insert(cloud[0].clone());
-    e.fs.offline.store(true, std::sync::atomic::Ordering::Relaxed);
+    e.fs.offline
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     let cards = library::list_projects(&e.ctx, &e.settings, Kind::Map).unwrap();
     assert_eq!(cards[0].badges, [CardBadge::NotAvailableOffline]);
 }
@@ -259,14 +321,30 @@ fn fr_prj_45_rename_a_closed_project() {
     let rename = |name: &str, open: Option<&Path>| {
         library::rename_project(&e.ctx, &e.settings, &dir, name, open)
     };
-    assert_eq!(rename("taken", None).unwrap_err().code, ErrorCode::NameTaken);
-    assert_eq!(rename("a:b", None).unwrap_err().code, ErrorCode::InvalidName);
-    assert_eq!(rename("CON", None).unwrap_err().code, ErrorCode::InvalidName);
-    assert_eq!(rename("Vault", Some(&dir)).unwrap_err().code, ErrorCode::ProjectOpen);
+    assert_eq!(
+        rename("taken", None).unwrap_err().code,
+        ErrorCode::NameTaken
+    );
+    assert_eq!(
+        rename("a:b", None).unwrap_err().code,
+        ErrorCode::InvalidName
+    );
+    assert_eq!(
+        rename("CON", None).unwrap_err().code,
+        ErrorCode::InvalidName
+    );
+    assert_eq!(
+        rename("Vault", Some(&dir)).unwrap_err().code,
+        ErrorCode::ProjectOpen
+    );
     let before = std::fs::read(dir.join(MANIFEST_FILE)).unwrap();
     let new = rename("Vault", None).unwrap();
     assert_eq!(new, e.lib().join("Maps/Vault"));
-    assert_eq!(std::fs::read(new.join(MANIFEST_FILE)).unwrap(), before, "nothing inside changes");
+    assert_eq!(
+        std::fs::read(new.join(MANIFEST_FILE)).unwrap(),
+        before,
+        "nothing inside changes"
+    );
     e.open(&new);
     let case_only = library::rename_project(&e.ctx, &e.settings, &new, "VAULT", None).unwrap();
     assert!(case_only.ends_with("VAULT"));

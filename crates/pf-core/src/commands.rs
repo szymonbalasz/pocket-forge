@@ -311,8 +311,12 @@ impl Command for ProjectCreateFromClipboard {
             .ok_or_else(|| CoreError::invalid("data_b64", "not valid base64"))?;
         let _one_at_a_time = core.create_lock.lock().unwrap_or_else(|e| e.into_inner());
         let settings = core.state().settings.clone();
-        let mut creator =
-            create::Creator::new(&core.ctx, &settings, input.section.into(), Some(&core.thumbs))?;
+        let mut creator = create::Creator::new(
+            &core.ctx,
+            &settings,
+            input.section.into(),
+            Some(&core.thumbs),
+        )?;
         let path = creator.create_from_bytes(&bytes)?;
         Ok(PathOutput { path })
     }
@@ -769,6 +773,13 @@ impl Command for EdtTilesOpen {
     }
 }
 
+// ---------------------------------------------------------------- region edit
+
+/// Region-edit commands live in their own module (region-edit spec §9).
+pub use crate::region_edit::commands::{
+    RgnControlsEvaluate, RgnJobEstimate, RgnRegionFit, RgnSpendGet, RgnSpendSet,
+};
+
 // ---------------------------------------------------------------- registry (append-only)
 
 /// A registry row: command name → JSON adapter.
@@ -805,6 +816,11 @@ registry![
     ProviderGetCapabilities,
     ProviderBalance,
     ProviderFakeSetCase,
+    RgnRegionFit,
+    RgnControlsEvaluate,
+    RgnJobEstimate,
+    RgnSpendGet,
+    RgnSpendSet,
     LibraryListProjects,
     ProjectCreate,
     ProjectCreateCancel,
@@ -876,11 +892,17 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.field.as_deref(), Some("paths[0]"));
         let e = core
-            .dispatch("project_create", json!({"section": "dungeons", "paths": ["a"]}))
+            .dispatch(
+                "project_create",
+                json!({"section": "dungeons", "paths": ["a"]}),
+            )
             .unwrap_err();
         assert_eq!(e.field.as_deref(), Some("input"));
         for retired in ["import_paths", "recent_list", "import_clipboard_image"] {
-            assert_eq!(core.dispatch(retired, json!({})).unwrap_err().code, ErrorCode::NotFound);
+            assert_eq!(
+                core.dispatch(retired, json!({})).unwrap_err().code,
+                ErrorCode::NotFound
+            );
         }
         let e = core
             .dispatch("project_save_revision", json!({}))
@@ -938,8 +960,11 @@ mod tests {
         let res = core.serve_scheme(scheme_path);
         assert_eq!((res.status, res.content_type), (200, Some("image/png")));
 
-        core.dispatch("project_put_draft", json!({"draft": {"final_prompt": "moss"}}))
-            .unwrap();
+        core.dispatch(
+            "project_put_draft",
+            json!({"draft": {"final_prompt": "moss"}}),
+        )
+        .unwrap();
         let rev = core.dispatch("project_save_revision", json!({})).unwrap();
         assert_eq!(rev["reason"], "save");
         core.dispatch("project_close", json!({})).unwrap();
@@ -949,7 +974,12 @@ mod tests {
             "keys unregistered on close"
         );
 
-        assert_eq!(core.serve_scheme(&thumb[thumb.find("/i/").unwrap()..]).status, 200, "library keys survive close");
+        assert_eq!(
+            core.serve_scheme(&thumb[thumb.find("/i/").unwrap()..])
+                .status,
+            200,
+            "library keys survive close"
+        );
         let again = core
             .dispatch("project_open", json!({"path": path}))
             .unwrap();

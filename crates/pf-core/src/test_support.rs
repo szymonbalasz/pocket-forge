@@ -37,7 +37,10 @@ pub fn rgba_png(w: u32, h: u32, rgba: [u8; 4]) -> Vec<u8> {
 pub fn jpeg_bytes(w: u32, h: u32) -> Vec<u8> {
     let mut out = Vec::new();
     image::RgbImage::from_pixel(w, h, image::Rgb([90, 60, 30]))
-        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Jpeg)
+        .write_to(
+            &mut std::io::Cursor::new(&mut out),
+            image::ImageFormat::Jpeg,
+        )
         .unwrap();
     out
 }
@@ -99,7 +102,9 @@ impl Env {
     /// Creates a Maps project from a generated 40×30 PNG named `<name>.png`; returns its folder.
     pub fn project(&self, name: &str) -> PathBuf {
         // A shade per name, so two projects never share a hash (FR-PRJ-08 dedupe).
-        let shade = name.bytes().fold(7u8, |a, b| a.wrapping_mul(31).wrapping_add(b));
+        let shade = name
+            .bytes()
+            .fold(7u8, |a, b| a.wrapping_mul(31).wrapping_add(b));
         let src = self.outside(&format!("{name}.png"), &png_bytes(40, 30, shade));
         match &self.create(Kind::Map, &[src])[0] {
             CreateItem::Created { path, .. } => path.clone(),

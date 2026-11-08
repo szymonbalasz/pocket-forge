@@ -258,8 +258,15 @@ fn find_orphans(p: &OpenProject) -> Vec<String> {
     masks.extend(m.draft.as_ref().and_then(|d| d.mask_id));
     masks.extend(m.layers.iter().filter_map(|l| l.mask_id));
     masks.extend(p.jobs.values().filter_map(|j| j.mask_id));
-    let in_trash: HashSet<&str> = m.trash.iter().flat_map(|i| i.files.iter().map(String::as_str)).collect();
-    let id_png = |name: &str| name.strip_suffix(".png").and_then(|s| s.parse::<Ulid>().ok());
+    let in_trash: HashSet<&str> = m
+        .trash
+        .iter()
+        .flat_map(|i| i.files.iter().map(String::as_str))
+        .collect();
+    let id_png = |name: &str| {
+        name.strip_suffix(".png")
+            .and_then(|s| s.parse::<Ulid>().ok())
+    };
 
     let mut orphans = vec![];
     for (dir, keep) in [(LAYERS_DIR, &layers), (MASKS_DIR, &masks)] {

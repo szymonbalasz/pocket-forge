@@ -728,8 +728,10 @@ pub fn register_library_image(core: &Core, path: &Path) -> Option<String> {
         if s.library.keys().count() >= LIBRARY_MAX_KEYS {
             s.library.clear();
         }
-        s.library
-            .register(key.clone(), ServedImage::file(path.to_path_buf(), mime, ext));
+        s.library.register(
+            key.clone(),
+            ServedImage::file(path.to_path_buf(), mime, ext),
+        );
     }
     Some(format!("{}/i/{key}.{ext}", core.ctx.tiles_base_url))
 }

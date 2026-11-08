@@ -14,7 +14,8 @@ const RESERVED: [&str; 22] = [
 fn trim_name(s: &str) -> &str {
     // Trailing dots and spaces are invalid on Windows. Leading dots would make the folder
     // hidden (and look like the app's own `.pforge` and temp folders), so they go too.
-    s.trim_end_matches(['.', ' ']).trim_start_matches(['.', ' '])
+    s.trim_end_matches(['.', ' '])
+        .trim_start_matches(['.', ' '])
 }
 
 fn is_reserved(s: &str) -> bool {
@@ -37,10 +38,7 @@ pub fn sanitise_name(raw: &str) -> String {
             }
         })
         .collect();
-    let mut name: String = trim_name(&replaced)
-        .chars()
-        .take(MAX_NAME_CHARS)
-        .collect();
+    let mut name: String = trim_name(&replaced).chars().take(MAX_NAME_CHARS).collect();
     name = trim_name(&name).to_owned();
     if is_reserved(&name) {
         if name.chars().count() >= MAX_NAME_CHARS {
@@ -181,7 +179,11 @@ mod tests {
         let long = "a".repeat(80);
         assert_eq!(sanitise_name(&long).chars().count(), 64);
         let dots = format!("{}. x", "b".repeat(63));
-        assert_eq!(sanitise_name(&dots), "b".repeat(63), "trimmed again after the cut");
+        assert_eq!(
+            sanitise_name(&dots),
+            "b".repeat(63),
+            "trimmed again after the cut"
+        );
         assert!(is_valid_name("Crypt"));
         assert!(!is_valid_name("a:b"));
         assert!(!is_valid_name(""));

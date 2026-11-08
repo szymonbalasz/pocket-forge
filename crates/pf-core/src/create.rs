@@ -113,7 +113,10 @@ fn known_originals(ctx: &Context, settings: &Settings, kind: Kind) -> Vec<Known>
         for entry in std::fs::read_dir(&section).into_iter().flatten().flatten() {
             let dir = entry.path();
             let manifest = dir.join(MANIFEST_FILE);
-            if entry.file_name().to_string_lossy().contains(fsx::TEMP_MARKER)
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .contains(fsx::TEMP_MARKER)
                 || std::fs::symlink_metadata(&manifest).is_err()
                 || library::hydrate_if_needed(ctx, &manifest).is_err()
             {
@@ -288,9 +291,7 @@ impl<'a> Creator<'a> {
 
     fn free_name(&self, raw: &str) -> String {
         let base = naming::sanitise_name(raw);
-        naming::first_free(&base, |c| {
-            name_taken(self.ctx, self.settings, self.kind, c)
-        })
+        naming::first_free(&base, |c| name_taken(self.ctx, self.settings, self.kind, c))
     }
 
     fn finish(&mut self, dir: &Path, m: &Manifest) {
@@ -370,7 +371,10 @@ impl<'a> Creator<'a> {
             bytes
         } else {
             let img = image::load_from_memory(bytes).map_err(|e| {
-                CoreError::new(ErrorCode::Corrupt, format!("the pasted image won't decode: {e}"))
+                CoreError::new(
+                    ErrorCode::Corrupt,
+                    format!("the pasted image won't decode: {e}"),
+                )
             })?;
             let mut out = Vec::new();
             img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
@@ -418,7 +422,10 @@ pub fn create_projects(
     let mut items = Vec::with_capacity(total);
     for (i, source) in sources.iter().enumerate() {
         if cancel.load(Ordering::Relaxed) {
-            ctx.emit("import:done", json!({ "total": total, "done": i, "canceled": true }));
+            ctx.emit(
+                "import:done",
+                json!({ "total": total, "done": i, "canceled": true }),
+            );
             return Err(CoreError::new(
                 ErrorCode::Canceled,
                 format!("canceled after {i} of {total}"),
@@ -428,7 +435,10 @@ pub fn create_projects(
         items.push(creator.create_one(source));
         ctx.emit("import:progress", json!({ "done": i + 1, "total": total }));
     }
-    ctx.emit("import:done", json!({ "total": total, "done": total, "canceled": false }));
+    ctx.emit(
+        "import:done",
+        json!({ "total": total, "done": total, "canceled": false }),
+    );
     Ok(items)
 }
 

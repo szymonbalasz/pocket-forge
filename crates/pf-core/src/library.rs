@@ -277,7 +277,11 @@ pub fn hydrate_if_needed(ctx: &Context, path: &Path) -> CoreResult<()> {
 
 /// `library_list_projects(section)` (FR-PRJ-49): every project folder in that section of every
 /// root, newest first. Reads only `project.json` and the thumbnail of each.
-pub fn list_projects(ctx: &Context, settings: &Settings, kind: Kind) -> CoreResult<Vec<ProjectCard>> {
+pub fn list_projects(
+    ctx: &Context,
+    settings: &Settings,
+    kind: Kind,
+) -> CoreResult<Vec<ProjectCard>> {
     let roots = require_available(ctx, settings)?;
     let mut cards = vec![];
     for root in roots {
@@ -339,9 +343,9 @@ fn card_for(ctx: &Context, dir: &Path, name: String, kind: Kind) -> Option<Proje
         card.id = id.to_string();
     }
     card.last_edited = v["commit"]["at"].as_str().and_then(|s| s.parse().ok());
-    card.iterations = v["jobs"]
-        .as_array()
-        .map_or(0, |jobs| jobs.iter().filter(|j| j["iteration"].is_u64()).count());
+    card.iterations = v["jobs"].as_array().map_or(0, |jobs| {
+        jobs.iter().filter(|j| j["iteration"].is_u64()).count()
+    });
     match v["schema_version"].as_u64() {
         Some(n) if n > u64::from(MANIFEST_SCHEMA_VERSION) => card.badges.push(CardBadge::ReadOnly),
         Some(_) if project_id.is_some() => {}
@@ -357,9 +361,9 @@ fn card_for(ctx: &Context, dir: &Path, name: String, kind: Kind) -> Option<Proje
 /// True if the folder holds a sync conflict copy of `project.json` (FR-PRJ-34).
 pub fn has_conflict_copy(dir: &Path) -> bool {
     std::fs::read_dir(dir).is_ok_and(|entries| {
-        entries.flatten().any(|e| {
-            naming::is_conflict_copy(&e.file_name().to_string_lossy(), MANIFEST_FILE)
-        })
+        entries
+            .flatten()
+            .any(|e| naming::is_conflict_copy(&e.file_name().to_string_lossy(), MANIFEST_FILE))
     })
 }
 
@@ -447,7 +451,10 @@ pub fn rename_project(
 pub fn not_a_project(dir: &Path) -> CoreError {
     CoreError::new(
         ErrorCode::NotAProject,
-        format!("{} is not an asset project (no project.json)", dir.display()),
+        format!(
+            "{} is not an asset project (no project.json)",
+            dir.display()
+        ),
     )
 }
 

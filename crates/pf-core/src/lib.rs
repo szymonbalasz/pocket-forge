@@ -19,6 +19,7 @@ pub mod manifest;
 pub mod naming;
 pub mod project;
 mod provider_commands;
+pub mod region_edit;
 pub mod settings;
 pub mod thumb;
 pub mod tiles;

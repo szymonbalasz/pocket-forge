@@ -35,7 +35,10 @@ fn fr_prj_12_fr_prj_09_creation_writes_the_folder_layout_and_r0() {
         ".pforge/jobs/",
         ".pforge/trash/",
     ] {
-        assert!(files.iter().any(|f| f == expected), "{expected} in {files:?}");
+        assert!(
+            files.iter().any(|f| f == expected),
+            "{expected} in {files:?}"
+        );
     }
     let r0 = p.manifest.revisions[0].clone();
     assert_eq!((r0.seq, r0.reason), (0, RevisionReason::Create));
@@ -53,9 +56,15 @@ fn fr_prj_14_open_takes_a_project_folder_only() {
     let e = env();
     let dir = e.project("Crypt");
     let open_err = |p: &Path| open(&e.ctx, &e.settings, p, None).unwrap_err().code;
-    assert_eq!(open_err(&dir.join("working/Crypt.png")), ErrorCode::NotAProject);
+    assert_eq!(
+        open_err(&dir.join("working/Crypt.png")),
+        ErrorCode::NotAProject
+    );
     std::fs::create_dir(e.lib().join("Maps/empty")).unwrap();
-    assert_eq!(open_err(&e.lib().join("Maps/empty")), ErrorCode::NotAProject);
+    assert_eq!(
+        open_err(&e.lib().join("Maps/empty")),
+        ErrorCode::NotAProject
+    );
     assert_eq!(open_err(&e.lib().join("Maps/none")), ErrorCode::NotFound);
     let outside = e.dir.path().join("outside");
     assert_eq!(open_err(&outside), ErrorCode::OutsideLibrary);
@@ -93,7 +102,8 @@ fn fr_prj_19_r30_draft_save_carries_export_settings() {
     let e = env();
     let dir = e.project("Crypt");
     let mut p = e.open(&dir);
-    let settings = serde_json::json!({"grid": {"mode": "px", "source_px_per_square": 70}, "format": "webp"});
+    let settings =
+        serde_json::json!({"grid": {"mode": "px", "source_px_per_square": 70}, "format": "webp"});
     put_draft(
         &e.ctx,
         e.install(),
@@ -146,7 +156,10 @@ fn fr_prj_20_crash_after_manifest_temp_reopens_the_state_before() {
     let committed = e.open(&dir).manifest;
     e.ctx.faults = Faults::parse("after_temp:project.json", FaultAction::Error).unwrap();
     assert!(draft(&e, &mut p, "after").is_err());
-    assert_eq!(p.manifest, committed, "in-memory state unchanged on failure");
+    assert_eq!(
+        p.manifest, committed,
+        "in-memory state unchanged on failure"
+    );
     // Simulate the kill leaving temp files behind.
     std::fs::write(dir.join(".project.json.pf-tmp-x"), b"partial").unwrap();
     std::fs::write(dir.join(".pforge/layers/.a.png.pf-tmp-y"), b"partial").unwrap();
@@ -197,7 +210,10 @@ fn fr_prj_26_newer_schema_opens_read_only_and_writes_nothing() {
     let before = tree(&dir);
     let mut p = e.open(&dir);
     assert_eq!(p.read_only, Some(ReadOnlyReason::NewerVersion));
-    assert_eq!(draft(&e, &mut p, "x").unwrap_err().code, ErrorCode::ReadOnly);
+    assert_eq!(
+        draft(&e, &mut p, "x").unwrap_err().code,
+        ErrorCode::ReadOnly
+    );
     assert_eq!(tree(&dir), before, "nothing written, not even temp cleanup");
 }
 
@@ -244,7 +260,10 @@ fn fr_prj_16_missing_original_relinks_by_hash_into_working() {
     let mut p = e.open(&dir);
     assert_eq!(p.read_only, Some(ReadOnlyReason::OriginalMissing));
     assert_eq!(p.warnings[0].code, "original_missing");
-    assert_eq!(draft(&e, &mut p, "x").unwrap_err().code, ErrorCode::ReadOnly);
+    assert_eq!(
+        draft(&e, &mut p, "x").unwrap_err().code,
+        ErrorCode::ReadOnly
+    );
     let err = relink_original(&e.ctx, e.install(), &mut p, &wrong).unwrap_err();
     assert_eq!(err.code, ErrorCode::HashMismatch);
     relink_original(&e.ctx, e.install(), &mut p, &keep).unwrap();
@@ -260,10 +279,12 @@ fn fr_prj_17_cloud_only_original_is_hydrated_on_open_or_offline() {
     let dir = e.project("Crypt");
     let orig = dir.join("working/Crypt.png");
     e.fs.cloud_only.lock().unwrap().insert(orig.clone());
-    e.fs.offline.store(true, std::sync::atomic::Ordering::Relaxed);
+    e.fs.offline
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     let err = open(&e.ctx, &e.settings, &dir, None).unwrap_err();
     assert_eq!(err.code, ErrorCode::NotAvailableOffline);
-    e.fs.offline.store(false, std::sync::atomic::Ordering::Relaxed);
+    e.fs.offline
+        .store(false, std::sync::atomic::Ordering::Relaxed);
     e.open(&dir);
     assert!(!e.fs.is_cloud_only(&orig), "hydrated once");
 }
@@ -358,13 +379,22 @@ fn fr_prj_47_fr_prj_48_user_folders_list_and_add_copies() {
     let src = e.outside("mood.PNG", b"another");
     let after = folder_add(&e.ctx, &p, "references", &[src.clone(), src]).unwrap();
     let names: Vec<_> = after.iter().map(|f| f.name.as_str()).collect();
-    assert_eq!(names, ["mood (2).PNG", "mood (3).PNG", "mood.PNG", "sub/notes.txt"]);
-    assert_eq!(std::fs::read(dir.join("references/mood.PNG")).unwrap(), png_bytes(4, 4, 1));
+    assert_eq!(
+        names,
+        ["mood (2).PNG", "mood (3).PNG", "mood.PNG", "sub/notes.txt"]
+    );
+    assert_eq!(
+        std::fs::read(dir.join("references/mood.PNG")).unwrap(),
+        png_bytes(4, 4, 1)
+    );
     assert_eq!(
         folder_add(&e.ctx, &p, "working", &[]).unwrap_err().code,
         ErrorCode::UnknownFolder
     );
-    assert_eq!(folder_list(&p, "../x").unwrap_err().code, ErrorCode::UnknownFolder);
+    assert_eq!(
+        folder_list(&p, "../x").unwrap_err().code,
+        ErrorCode::UnknownFolder
+    );
     assert_eq!(folder_list(&p, "working").unwrap()[0].name, "Crypt.png");
 }
 
@@ -376,9 +406,15 @@ fn fr_prj_17_folder_list_never_hydrates() {
     std::fs::write(&f, b"x").unwrap();
     e.fs.cloud_only.lock().unwrap().insert(f);
     let p = e.open(&dir);
-    let calls = e.fs.hydrate_calls.load(std::sync::atomic::Ordering::Relaxed);
+    let calls =
+        e.fs.hydrate_calls
+            .load(std::sync::atomic::Ordering::Relaxed);
     folder_list(&p, "references").unwrap();
-    assert_eq!(e.fs.hydrate_calls.load(std::sync::atomic::Ordering::Relaxed), calls);
+    assert_eq!(
+        e.fs.hydrate_calls
+            .load(std::sync::atomic::Ordering::Relaxed),
+        calls
+    );
 }
 
 #[test]
@@ -395,7 +431,11 @@ fn r48_3_resolve_image_gives_the_original_by_its_stable_id() {
             kind: ImageKind::Original
         }
     );
-    assert_eq!(e.open(&dir).snapshot().original_image_id, id, "stable across reopen");
+    assert_eq!(
+        e.open(&dir).snapshot().original_image_id,
+        id,
+        "stable across reopen"
+    );
     assert_eq!(
         p.resolve_image(Ulid::from_parts(5, 5)).unwrap_err().code,
         ErrorCode::UnknownId
@@ -422,7 +462,11 @@ fn fr_prj_50_thumbnail_is_written_after_creation_and_rebuilt_when_missing() {
     let thumb = dir.join(THUMB_FILE);
     let img = image::open(&thumb).unwrap();
     assert_eq!((img.width(), img.height()), (512, 256));
-    assert!(e.events.names().contains(&"project:thumb-updated".to_owned()));
+    assert!(
+        e.events
+            .names()
+            .contains(&"project:thumb-updated".to_owned())
+    );
     std::fs::remove_file(&thumb).unwrap();
     open(&e.ctx, &e.settings, dir, Some(thumbs)).unwrap();
     assert!(thumb.is_file(), "rebuilt on open");

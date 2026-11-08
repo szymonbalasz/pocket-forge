@@ -117,6 +117,8 @@ pub struct ProjectSnapshot {
     pub layers: Vec<Layer>,
     pub draft: Option<Draft>,
     pub revisions: Vec<RevisionEntry>,
+    /// The manifest's candidate records (R44), for RGN's tracker and EDT's picker.
+    pub candidates: Vec<Candidate>,
     pub head_revision: Ulid,
     pub commit_seq: u64,
     /// Always true: a project exists on disk from its creation (FR-PRJ-09). Kept for the UI.
@@ -145,6 +147,7 @@ impl OpenProject {
             layers: m.layers.clone(),
             draft: m.draft.clone(),
             revisions: m.revisions.clone(),
+            candidates: m.candidates.clone(),
             head_revision: m.head_revision,
             commit_seq: self.last_commit.map_or(0, |c| c.0),
             saved: true,
@@ -239,8 +242,8 @@ pub fn open(
     let mut read_only = None;
     let manifest = if std::fs::symlink_metadata(&manifest_path).is_ok() {
         library::hydrate_if_needed(ctx, &manifest_path)?;
-        let bytes = std::fs::read(&manifest_path)
-            .map_err(|e| CoreError::io("reading project.json", &e))?;
+        let bytes =
+            std::fs::read(&manifest_path).map_err(|e| CoreError::io("reading project.json", &e))?;
         let version = peek_schema_version(&bytes);
         if version.is_some_and(|v| v > u64::from(MANIFEST_SCHEMA_VERSION)) {
             read_only = Some(ReadOnlyReason::NewerVersion);
@@ -354,8 +357,7 @@ fn check_original(ctx: &Context, p: &mut OpenProject) -> CoreResult<()> {
     let meta = std::fs::metadata(&path).unwrap_or(meta);
     let o = &p.manifest.original;
     if meta.len() != o.size || mtime_of(&meta) != o.mtime || racily_clean(&p.dir, o.mtime) {
-        let hash =
-            fsx::hash_file(&path).map_err(|e| CoreError::io("hashing the original", &e))?;
+        let hash = fsx::hash_file(&path).map_err(|e| CoreError::io("hashing the original", &e))?;
         if hash != o.content_hash {
             p.read_only.get_or_insert(ReadOnlyReason::OriginalChanged);
             p.warnings.push(Warning::new(
@@ -645,7 +647,9 @@ pub fn put_draft(
     if let Some(id) = draft.mask_id
         && !p.manifest.masks.iter().any(|m| m.id == id)
     {
-        return Err(CoreError::new(ErrorCode::UnknownId, "unknown mask").with_field("draft.mask_id"));
+        return Err(
+            CoreError::new(ErrorCode::UnknownId, "unknown mask").with_field("draft.mask_id")
+        );
     }
     commit(ctx, install_id, p, |ctx, _, m, _| {
         let extra = m
@@ -700,8 +704,7 @@ pub fn relink_original(
             .map_err(|e| CoreError::io(format!("creating {}", parent.display()), &e))?;
     }
     fsx::copy_atomic_new(ctx, source, &target)?;
-    let meta =
-        std::fs::metadata(&target).map_err(|e| CoreError::io("reading the original", &e))?;
+    let meta = std::fs::metadata(&target).map_err(|e| CoreError::io("reading the original", &e))?;
     let was = p.read_only.take();
     let result = commit(ctx, install_id, p, |_, _, m, _| {
         m.original.size = meta.len();

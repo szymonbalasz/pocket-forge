@@ -79,9 +79,8 @@ impl DecodedOriginal {
                 .name("pf-decode-original".into())
                 .spawn(move || job.run(&*events));
             if let Err(e) = spawned {
-                *self.lock() = State::Failed(CoreError::internal(format!(
-                    "can't start the decode: {e}"
-                )));
+                *self.lock() =
+                    State::Failed(CoreError::internal(format!("can't start the decode: {e}")));
             }
         }
     }
@@ -142,7 +141,10 @@ mod tests {
         let d = DecodedOriginal::new(Ulid::from_parts(0, 1), path);
         assert!(!d.is_ready());
         let img = d.get(&ctx).unwrap();
-        assert_eq!((img.width(), img.height(), img.get_pixel(0, 0).0), (8, 4, [1, 2, 3]));
+        assert_eq!(
+            (img.width(), img.height(), img.get_pixel(0, 0).0),
+            (8, 4, [1, 2, 3])
+        );
         assert_eq!(events.names(), ["project:original-ready"]);
         d.get(&ctx).unwrap();
         assert_eq!(events.names().len(), 1, "decoded once");
@@ -185,7 +187,10 @@ mod tests {
         let path = dir.path().join("o.png");
         let mut bytes = Vec::new();
         image::RgbImage::new(64, 64)
-            .write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
             .unwrap();
         bytes.truncate(bytes.len() / 2);
         std::fs::write(&path, bytes).unwrap();

@@ -12,6 +12,7 @@ mod compose;
 mod encode;
 mod probe;
 pub mod pyramid;
+mod region;
 mod resize;
 mod rgb_source;
 mod sizing;
@@ -29,11 +30,15 @@ pub use encode::{
     encode_png,
 };
 pub use probe::{
-    ImageFormat, ImageInfo, MAX_SIDE, ProbeError, check_complete, has_image_extension,
-    probe_bytes, probe_file, probe_file_complete, sniff,
+    ImageFormat, ImageInfo, MAX_SIDE, ProbeError, check_complete, has_image_extension, probe_bytes,
+    probe_file, probe_file_complete, sniff,
 };
-pub use rgb_source::decode_rgb8;
+pub use region::{
+    GreyDecodeError, box_resample_grey, decode_grey8_png, encode_grey8_png, encode_rgb8_png,
+    pad_grey,
+};
 pub use resize::resize_lanczos3;
+pub use rgb_source::decode_rgb8;
 pub use sizing::{
     GridInput, InvalidSetting, Limit, MAX_CELLS, MAX_OUTPUT_SIDE, MAX_PX_PER_SQUARE, MAX_SCALE,
     MIN_PX_PER_SQUARE, SizeWarning, Sizing, format_unavailable, plan_size, source_px_per_square,

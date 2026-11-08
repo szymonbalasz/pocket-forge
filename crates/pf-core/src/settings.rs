@@ -184,7 +184,8 @@ pub fn section_put(
     name: &str,
     value: Value,
 ) -> CoreResult<()> {
-    let bad = |e: serde_json::Error| CoreError::invalid(name, format!("invalid {name} settings: {e}"));
+    let bad =
+        |e: serde_json::Error| CoreError::invalid(name, format!("invalid {name} settings: {e}"));
     let mut next = settings.clone();
     match name {
         "library" => next.library = serde_json::from_value(value).map_err(bad)?,

@@ -376,23 +376,35 @@ mod tests {
 
         let mut jpeg = Vec::new();
         image::RgbImage::new(16, 16)
-            .write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg)
+            .write_to(
+                &mut std::io::Cursor::new(&mut jpeg),
+                image::ImageFormat::Jpeg,
+            )
             .unwrap();
         let j = dir.path().join("a.jpg");
         std::fs::write(&j, &jpeg).unwrap();
         probe_file_complete(&j).unwrap();
         std::fs::write(&j, &jpeg[..jpeg.len() - 2]).unwrap();
-        assert!(matches!(probe_file_complete(&j), Err(ProbeError::Corrupt(_))));
+        assert!(matches!(
+            probe_file_complete(&j),
+            Err(ProbeError::Corrupt(_))
+        ));
 
         let mut webp = Vec::new();
         image::RgbaImage::new(8, 8)
-            .write_to(&mut std::io::Cursor::new(&mut webp), image::ImageFormat::WebP)
+            .write_to(
+                &mut std::io::Cursor::new(&mut webp),
+                image::ImageFormat::WebP,
+            )
             .unwrap();
         let w = dir.path().join("a.webp");
         std::fs::write(&w, &webp).unwrap();
         probe_file_complete(&w).unwrap();
         std::fs::write(&w, &webp[..webp.len() - 4]).unwrap();
-        assert!(matches!(probe_file_complete(&w), Err(ProbeError::Corrupt(_))));
+        assert!(matches!(
+            probe_file_complete(&w),
+            Err(ProbeError::Corrupt(_))
+        ));
     }
 
     #[test]

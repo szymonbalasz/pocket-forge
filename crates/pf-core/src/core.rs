@@ -42,6 +42,8 @@ pub struct State {
     pub settings: Settings,
     pub settings_warnings: Vec<SettingsWarning>,
     pub project: Option<OpenProject>,
+    /// Region edit's memory-only state (session spend, estimates).
+    pub rgn: crate::region_edit::RgnState,
 }
 
 /// The core: seams plus state. One per app process.
@@ -76,6 +78,7 @@ impl Core {
                 settings,
                 settings_warnings,
                 project: None,
+                rgn: Default::default(),
             }),
             served: Arc::default(),
             create_cancel: AtomicBool::new(false),

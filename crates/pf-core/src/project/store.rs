@@ -105,7 +105,10 @@ fn untrash_candidate(m: &mut Manifest, idx: usize) {
 
 /// True if a trashed candidate's file can still be restored (not purged).
 fn restorable(p: &OpenProject, c: &Candidate) -> bool {
-    match c.trash_id.and_then(|t| p.manifest.trash.iter().find(|i| i.id == t)) {
+    match c
+        .trash_id
+        .and_then(|t| p.manifest.trash.iter().find(|i| i.id == t))
+    {
         Some(item) => p.path(&item.trashed_path(&c.file)).is_file() || p.path(&c.file).is_file(),
         None => c.trash_id.is_none() && p.path(&c.file).is_file(),
     }
@@ -121,7 +124,9 @@ fn trash_unkept(ctx: &Context, m: &mut Manifest, job_id: Ulid, reason: &str) {
                 && c.trash_id.is_none()
                 && matches!(
                     c.status,
-                    CandidateStatus::Dismissed | CandidateStatus::Discarded | CandidateStatus::Invalid
+                    CandidateStatus::Dismissed
+                        | CandidateStatus::Discarded
+                        | CandidateStatus::Invalid
                 )
         })
         .collect();
@@ -147,7 +152,13 @@ fn trash_inputs_if_unkept(ctx: &Context, m: &mut Manifest, job: &JobFile) {
         .iter()
         .any(|t| t.files.iter().any(|f| inputs.contains(f)));
     if !kept && !already {
-        trash_files(ctx, m, TrashKind::JobInputs, inputs, "job ended with nothing kept");
+        trash_files(
+            ctx,
+            m,
+            TrashKind::JobInputs,
+            inputs,
+            "job ended with nothing kept",
+        );
     }
 }
 
@@ -456,7 +467,10 @@ pub fn add_candidates(
     if job.state != JobState::Succeeded {
         return Err(CoreError::invalid(
             "job_id",
-            format!("candidates are added to a succeeded job, not a {} one", job.state.as_str()),
+            format!(
+                "candidates are added to a succeeded job, not a {} one",
+                job.state.as_str()
+            ),
         ));
     }
     if candidates.is_empty() {
@@ -468,10 +482,18 @@ pub fn add_candidates(
         write_job(ctx, p, &job)?;
         p.jobs.insert(job_id, job.clone());
     }
-    let dir = job.iteration.as_ref().map(|i| i.dir.clone()).unwrap_or_default();
+    let dir = job
+        .iteration
+        .as_ref()
+        .map(|i| i.dir.clone())
+        .unwrap_or_default();
     let n = job.iteration.as_ref().map(|i| i.n);
-    let referenced: HashSet<String> =
-        p.manifest.candidates.iter().map(|c| c.file.clone()).collect();
+    let referenced: HashSet<String> = p
+        .manifest
+        .candidates
+        .iter()
+        .map(|c| c.file.clone())
+        .collect();
     let mut records = vec![];
     let mut files = vec![];
     for (index, c) in candidates.into_iter().enumerate() {
@@ -490,7 +512,11 @@ pub fn add_candidates(
             index: index as u32,
             file: file.clone(),
             format: probe.map_or_else(
-                || pf_imaging::sniff(&c.bytes).map_or("unknown", |f| f.as_str()).into(),
+                || {
+                    pf_imaging::sniff(&c.bytes)
+                        .map_or("unknown", |f| f.as_str())
+                        .into()
+                },
                 |i| i.format.as_str().into(),
             ),
             width: probe.map_or(0, |i| i.width),
@@ -553,7 +579,10 @@ pub fn resolve_job(
     if !(current.state == JobState::Fetched || current.state.is_terminal()) {
         return Err(CoreError::invalid(
             "job_id",
-            format!("a {} job can't be resolved; cancel it first", current.state.as_str()),
+            format!(
+                "a {} job can't be resolved; cancel it first",
+                current.state.as_str()
+            ),
         ));
     }
     let mut next = current.clone();
@@ -611,7 +640,10 @@ pub fn set_star(
             "the candidate's file was purged from the trash",
         ));
     }
-    let resolved = p.jobs.get(&c.job_id).is_some_and(|j| j.resolved_at.is_some());
+    let resolved = p
+        .jobs
+        .get(&c.job_id)
+        .is_some_and(|j| j.resolved_at.is_some());
     commit(ctx, install_id, p, |ctx, _, m, _| {
         m.candidates[idx].starred = starred;
         if starred {
@@ -719,10 +751,16 @@ pub fn accept_candidate(
     let idx = candidate_index(&p.manifest, candidate_id)?;
     let cand = p.manifest.candidates[idx].clone();
     if cand.job_id != job_id {
-        return Err(CoreError::invalid("candidate_id", "the candidate belongs to another job"));
+        return Err(CoreError::invalid(
+            "candidate_id",
+            "the candidate belongs to another job",
+        ));
     }
     if cand.status == CandidateStatus::Invalid {
-        return Err(CoreError::invalid("candidate_id", "the candidate won't decode"));
+        return Err(CoreError::invalid(
+            "candidate_id",
+            "the candidate won't decode",
+        ));
     }
     let repick = match job.state {
         JobState::Fetched => false,
@@ -769,7 +807,9 @@ pub fn accept_candidate(
             }
             trash_unkept(ctx, m, job_id, "not accepted");
             let mut closed = job.clone();
-            closed.transition(JobState::Closed, now).map_err(CoreError::internal)?;
+            closed
+                .transition(JobState::Closed, now)
+                .map_err(CoreError::internal)?;
             closed.resolved_at = Some(now);
             if let Some(row) = m.jobs.iter_mut().find(|r| r.id == job_id) {
                 row.state = JobState::Closed;
@@ -804,7 +844,9 @@ pub fn replace_patch_layer(
         .position(|l| l.id == layer_id && l.kind == LayerKind::Patch)
         .ok_or_else(|| unknown("layer_id", "patch layer"))?;
     let old = p.manifest.layers[pos].clone();
-    let job_id = old.job_id.ok_or_else(|| CoreError::internal("a patch layer without a job"))?;
+    let job_id = old
+        .job_id
+        .ok_or_else(|| CoreError::internal("a patch layer without a job"))?;
     let job = job(p, job_id)?.clone();
     let new_id = ctx.new_id();
     let mut layer = patch_layer(new_id, &patch, &job, old.candidate_id.unwrap_or(job_id))?;
@@ -858,7 +900,10 @@ pub fn next_purge_at(p: &OpenProject) -> Option<Timestamp> {
     p.manifest
         .trash
         .iter()
-        .map(|t| t.trashed_at.plus(std::time::Duration::from_secs(30 * 86_400)))
+        .map(|t| {
+            t.trashed_at
+                .plus(std::time::Duration::from_secs(30 * 86_400))
+        })
         .min()
 }
 
