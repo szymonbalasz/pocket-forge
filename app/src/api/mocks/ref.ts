@@ -279,7 +279,11 @@ export function refMock(
   };
 
   // ── ref_resolve (FR-REF-16..19), mirroring pf-core `references::resolve::reconcile` ──────
+  /** pf-core `Resolved::lost_on` of the last resolve: ticked items now gone or corrupt
+   *  (FR-REF-21; `__ref_prepare` fails on them). */
+  let lostOn: { key: string; reason: 'missing' | 'corrupt' }[] = [];
   const resolve = (modelId: string, prev: DraftReferences | null): RefResolved | Promise<never> => {
+    lostOn = [];
     const slots = seed.slots?.[modelId];
     if (!slots) return fail('unknown_model', `Unknown model ${modelId}`);
     const readOnly = !!seed.readOnly;
@@ -369,6 +373,8 @@ export function refMock(
         badges,
         checkable,
       };
+      if (before?.on && !checkable && a.state === 'corrupt')
+        lostOn.push({ key: a.key, reason: 'corrupt' });
       return { item, slot, kept: before ? before.on && checkable : null };
     });
     const count = slots.map(() => 0);
@@ -415,6 +421,7 @@ export function refMock(
         });
         keptDraft.push({ ...it, key });
       } else if (it.retry_of) {
+        if (it.on) lostOn.push({ key, reason: 'missing' });
         // Restored by Retry (FR-REF-26): a file that can't be found shows as missing.
         const project = key.startsWith('project:');
         const pack = project
@@ -435,12 +442,14 @@ export function refMock(
           checkable: false,
         });
         keptDraft.push({ ...it, key, on: false });
-      } else
+      } else {
+        if (it.on) lostOn.push({ key, reason: 'missing' });
         notices.push({
           code: 'dropped',
           message: `${key.split(':').pop()} is no longer available`,
           key,
         });
+      }
     }
     const outSlots = slots.map((s, i) => ({
       name: s.name,
@@ -616,6 +625,17 @@ export function refMock(
         (input.references as DraftReferences | null) ?? null,
       );
       if (!r.visible) return [];
+      // FR-REF-21: a ticked item that is gone or now corrupt is never dropped silently.
+      const lost = lostOn[0];
+      if (lost) {
+        const file = lost.key.split(':').pop();
+        const why = lost.reason === 'missing' ? "it can't be found" : "it can't be read";
+        return Promise.reject({
+          code: 'reference_unavailable',
+          message: `The reference ${file} can't be sent: ${why}`,
+          detail: { key: lost.key, reason: lost.reason },
+        });
+      }
       for (const s of r.slots)
         if (s.on < s.min)
           return Promise.reject({

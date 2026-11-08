@@ -329,6 +329,13 @@ pub struct Resolved {
     pub ready: bool,
     /// Read-only project (FR-REF-27): shown but disabled.
     pub read_only: bool,
+    /// Items the draft has `on` that can't be sent now (the file is gone or corrupt), with their
+    /// state. `prepare` fails on these (FR-REF-21); the block shows them (notice or badge) and
+    /// the reconciled draft turns them off. Items of a picked pack that can't be found are not
+    /// here: they stay `on` in the draft for when it comes back, shown `missing` under the
+    /// persistent `pack_unavailable` notice (Appendix A step 9).
+    #[serde(skip)]
+    pub lost_on: Vec<(String, ItemState)>,
 }
 
 /// FR-REF-17 … 19, pure. `prev` = the draft's `references` (`None` = defaults).
@@ -339,6 +346,7 @@ pub fn reconcile(
     prev: Option<&DraftReferences>,
 ) -> Resolved {
     let mut notices = vec![];
+    let mut lost_on: Vec<(String, ItemState)> = vec![];
     if slots.is_empty() {
         return Resolved {
             visible: false,
@@ -348,6 +356,7 @@ pub fn reconcile(
             references: prev.cloned().unwrap_or_default(),
             ready: true,
             read_only: false,
+            lost_on: vec![],
         };
     }
     // Keys of a pack found by name under a new id are carried over (FR-REF-26).
@@ -419,6 +428,12 @@ pub fn reconcile(
             }
         })
         .collect();
+    // A ticked item that can't be ticked any more (now corrupt) is lost, not silently off.
+    for r in &rows {
+        if r.kept == Some(false) && prev_items.get(&r.out.key).is_some_and(|p| p.on) {
+            lost_on.push((r.out.key.clone(), r.out.state));
+        }
+    }
     // Kept ticks first; over a (lowered) limit the last ones in list order go off.
     let mut count = vec![0u32; slots.len()];
     for r in rows.iter_mut() {
@@ -493,6 +508,9 @@ pub fn reconcile(
                     ..item.clone()
                 });
             } else if item.retry_of().is_some() {
+                if item.on {
+                    lost_on.push((key.clone(), ItemState::Missing));
+                }
                 // Restored by Retry (FR-REF-26): a file that can't be found shows as missing.
                 let (source, pack_id, pack_name, file) = match key.strip_prefix("project:") {
                     Some(f) => (Source::Project, None, None, f.to_owned()),
@@ -532,6 +550,9 @@ pub fn reconcile(
                     ..item.clone()
                 });
             } else {
+                if item.on {
+                    lost_on.push((key.clone(), ItemState::Missing));
+                }
                 notices.push(Notice {
                     code: "dropped",
                     message: format!("{} is no longer available", key_file(&key)),
@@ -593,6 +614,7 @@ pub fn reconcile(
         },
         ready,
         read_only: false,
+        lost_on,
     }
 }
 

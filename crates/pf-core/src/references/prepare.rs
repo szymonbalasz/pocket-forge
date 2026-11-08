@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ulid::Ulid;
 
-use super::resolve::{self, DraftReferences, Notice, ProbeCache, Slot, Source};
+use super::resolve::{self, DraftReferences, ItemState, Notice, ProbeCache, Slot, Source};
 use super::*;
 
 /// Long-side cap for sent references (OQ-REF-04 A).
@@ -212,16 +212,17 @@ pub enum UnavailableReason {
 }
 
 fn unavailable(key: &str, reason: UnavailableReason) -> CoreError {
+    // The file name, not the key (`pack:<id>:<file>`): the message is shown as is.
+    let file = key.rsplit_once(':').map_or(key, |(_, f)| f);
+    let why = match reason {
+        UnavailableReason::Missing => "it can't be found",
+        UnavailableReason::NotAvailableOffline => "it isn't available offline",
+        UnavailableReason::Corrupt => "it can't be read",
+        UnavailableReason::Locked => "another app is using it",
+    };
     CoreError::new(
         ErrorCode::ReferenceUnavailable,
-        format!(
-            "the reference {} can't be sent ({})",
-            key,
-            serde_json::to_value(reason)
-                .ok()
-                .and_then(|v| v.as_str().map(str::to_owned))
-                .unwrap_or_default()
-        ),
+        format!("The reference {file} can't be sent: {why}"),
     )
     .with_detail(serde_json::json!({ "key": key, "reason": reason }))
 }
@@ -310,6 +311,15 @@ pub fn prepare(
     let resolved = resolve::resolve(ctx, settings, &session.probes, project_dir, slots, refs);
     if !resolved.visible {
         return Ok(Prepared::default());
+    }
+    // A ticked item that is gone (deleted, moved, its pack lost) or now corrupt fails the call:
+    // the reconcile turns it off for the block, but it must never be dropped silently here.
+    if let Some((key, state)) = resolved.lost_on.first() {
+        let reason = match state {
+            ItemState::Corrupt => UnavailableReason::Corrupt,
+            _ => UnavailableReason::Missing,
+        };
+        return Err(unavailable(key, reason));
     }
     let on: Vec<_> = resolved.items.iter().filter(|i| i.on).collect();
     // Limits first, so nothing is hydrated or read for a request that can't be sent.

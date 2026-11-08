@@ -7,6 +7,7 @@ export {
   referencesCostKey,
   referencesDraft,
   referencesForSend,
+  refreshReferences,
   reloadReferences,
   restoreReferences,
   settleReferences,

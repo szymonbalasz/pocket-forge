@@ -268,6 +268,9 @@ export function referencesBlocker(): string | null {
 export const restoreReferences = (refs: DraftReferences | null): void => block.restore(refs);
 /** RGN after a restore or a resolved conflict: the draft's selection, without a save. */
 export const reloadReferences = (refs: DraftReferences | null): void => block.reload(refs);
+/** RGN after `reference_unavailable` (FR-REF-21): resolve again, so the item that can't be
+ *  sent shows its badge or notice. */
+export const refreshReferences = (): void => void resolve();
 /** RGN after a successful submit: clears the Retry flags. */
 export const settleReferences = (): void => block.settle();
 
