@@ -23,7 +23,8 @@
 | Re-walk fixes N1–N4 | — | merged | done | — |
 | REF 6 (RGN integration) | — | merged | done | — |
 | Generate-loop walkthrough (RGN, EDT 5, PRV fake, EXP 3–5) | `walk-rgn` | `test/rgn-walk` | in progress | — |
-| Reference packs walkthrough | `walk-ref` | `test/ref-walk` | in progress | — |
+| Reference packs walkthrough | — | — | passed with defects R1–R7 | — |
+| REF walk fixes R1–R7 | `fix-ref` | `fix/walk-ref` | in progress | — |
 
 ## Pending owner decisions
 - OQ-IMG-12: file the image-webp bug upstream? (not urgent)
