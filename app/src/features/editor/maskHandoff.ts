@@ -88,12 +88,13 @@ export class MaskSync {
     this.refresh();
   }
 
-  /** Any content change (dabs, fill, clear, region, undo, stroke end): restart the debounce. */
+  /** Any content change (dabs, fill, clear, region, undo, stroke end): restart the debounce.
+   *  Called per dab, so O(1): the exact comparison waits for the timer or a flush. */
   changed(): void {
     if (this.disposed) return;
-    this.refresh();
-    if (this.status.kind === 'unsaved' && this.status.reason === 'read_only') return;
-    if (this.isClean()) return;
+    this.refresh(false);
+    if (!this.deps.buffer() || this.deps.readOnly()) return;
+    if (this.deps.version() === this.savedVersion) return;
     this.schedule();
   }
 
@@ -146,12 +147,14 @@ export class MaskSync {
     this.timer = null;
   }
 
-  /** True when the live mask equals what the store holds (or there is nothing to save). */
-  private isClean(): boolean {
+  /** True when the live mask equals what the store holds (or there is nothing to save).
+   *  `exact: false` only compares versions (cheap; a changed version counts as dirty). */
+  private isClean(exact = true): boolean {
     const m = this.deps.buffer();
     if (!m) return true;
     const v = this.deps.version();
     if (v === this.savedVersion) return true;
+    if (!exact) return false;
     const clean = this.saved
       ? sameRect(this.saved.rect, m.rect) && sameBytes(this.saved.data, m.data)
       : allZero(m.data); // An empty new mask isn't worth a file.
@@ -159,13 +162,13 @@ export class MaskSync {
     return clean;
   }
 
-  private refresh(): void {
+  private refresh(exact = true): void {
     const m = this.deps.buffer();
     let next: MaskStatus;
     if (!m) next = { kind: 'none' };
     else if (this.deps.readOnly()) next = unsaved('read_only');
     else if (this.inFlight) next = { kind: 'saving' };
-    else if (this.isClean()) next = this.saved ? { kind: 'saved' } : { kind: 'none' };
+    else if (this.isClean(exact)) next = this.saved ? { kind: 'saved' } : { kind: 'none' };
     else if (this.failed && this.status.kind === 'unsaved') next = this.status;
     else next = unsaved('pending');
     this.setStatus(next);

@@ -267,3 +267,20 @@ describe('validated region from RGN', () => {
     expect(ctl.buffer!.data[region.inner.w - 1]).toBe(0);
   });
 });
+
+describe('cost per dab', () => {
+  test('FR-EDT-28 §12 a dab never scans the buffer; the debounce checks it once', async () => {
+    const r = rig();
+    // A new, never-saved 4096² mask: the "is it still empty?" check is a full scan.
+    r.ctl.changeRegion({ inner: { x: 0, y: 0, w: 4096, h: 4096 }, outer: region.outer });
+    const every = vi.spyOn(Uint8Array.prototype, 'every');
+    r.ctl.beginStroke({ x: 100, y: 100 }, 'paint', 8, 1);
+    for (let i = 0; i < 50; i++) r.ctl.moveStroke({ x: 100 + i * 4, y: 100 });
+    r.ctl.endStroke();
+    expect(every).not.toHaveBeenCalled();
+    expect(r.sync.current).toEqual({ kind: 'unsaved', reason: 'pending' });
+    await vi.advanceTimersByTimeAsync(MASK_SUBMIT_DEBOUNCE_MS);
+    expect(every).toHaveBeenCalledTimes(1);
+    expect(r.sent).toHaveLength(1);
+  });
+});
