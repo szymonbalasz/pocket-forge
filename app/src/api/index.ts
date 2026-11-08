@@ -5,7 +5,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 
-import type { CommandName, Commands, CoreErrorShape, Events } from './types';
+import type {
+  CommandName,
+  Commands,
+  CoreErrorShape,
+  Events,
+  ExportSettingsInput,
+} from './types';
 
 export type * from './types';
 
@@ -114,7 +120,16 @@ export const api = {
         ...(rebuild ? { rebuild: true } : {}),
       }),
   },
-  export: { getSettings: () => call('export_get_settings', {}) },
+  export: {
+    getSettings: () => call('export_get_settings', {}),
+    setSettings: (settings: ExportSettingsInput) => call('export_set_settings', { settings }),
+    plan: (settings: ExportSettingsInput) => call('export_plan', { settings }),
+    start: (settings: ExportSettingsInput, replace: boolean) =>
+      call('export_start', { settings, replace }),
+    cancel: (exportId: string) => call('export_cancel', { export_id: exportId }),
+    /** PRJ's command (FR-PRJ-42); EXP calls it when its panel opens (FR-EXP-28). */
+    prefetchOriginal: () => call('project_prefetch_original', {}),
+  },
   region: {
     fit: (projectId: string, inner: Commands['rgn_region_fit'][0]['inner'], margin?: number) =>
       call('rgn_region_fit', {
