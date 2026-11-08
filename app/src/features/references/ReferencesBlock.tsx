@@ -317,9 +317,11 @@ function PackPicker({ disabled }: { disabled: boolean }) {
                   disabled={notReady && !on}
                   onChange={() => (on && id ? block.unpickPack(id) : block.pickPack(p))}
                 />
-                <span>{p.name}</span>
+                <span className="ref-popover-name" title={p.name}>
+                  {p.name}
+                </span>
                 <span className="pf-spacer" />
-                <span className="muted small tabular">
+                <span className="muted small tabular ref-popover-count">
                   {notReady ? 'not ready' : p.image_count}
                 </span>
               </label>

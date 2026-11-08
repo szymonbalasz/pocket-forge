@@ -157,8 +157,9 @@ test('FR-REF-21 FR-RGN-45 walk R1/R2: the confirm counts the current ticks; a ti
   expect(
     await page.evaluate(
       () =>
-        (window as unknown as { __pfRgnMock: { state: () => { jobs: unknown[] } } }).__pfRgnMock
-          .state().jobs.length,
+        (
+          window as unknown as { __pfRgnMock: { state: () => { jobs: unknown[] } } }
+        ).__pfRgnMock.state().jobs.length,
     ),
   ).toBe(0);
   // The block resolves again and says which one.
@@ -166,4 +167,50 @@ test('FR-REF-21 FR-RGN-45 walk R1/R2: the confirm counts the current ticks; a ti
     page.getByTestId('ref-block-notice').and(page.locator('[data-code="dropped"]')),
   ).toHaveText(/mood-b\.png is no longer available/);
   await expect(item(page, 'project:mood-b.png')).toHaveCount(0);
+});
+
+test('walk R3 layout: block rows show their file names; + Pack lists names on one line', async ({
+  page,
+}) => {
+  const seed = refSeed({ slots: SLOTS, projectRefs: [{ file: 'mood-a.png' }] });
+  seed.packs = [
+    ...(seed.packs ?? []),
+    { name: 'Swatch pack - Copy', pack_id: '01JMOCKPACKSWATCHCOPY00000', images: [] },
+  ];
+  await mockRefs(page, seed);
+  await openRgn(page, {
+    models: [{ id: 'fake-refs', name: 'Refs' }],
+    capabilities: { 'fake-refs': REFS },
+  });
+  const row = item(page, 'project:mood-a.png');
+  await expect(row).toBeVisible();
+  const box = async (l: ReturnType<Page['locator']>) => (await l.boundingBox())!;
+  const rowBox = await box(row);
+  const checkBox = await box(row.getByTestId('ref-block-item-check'));
+  const file = row.locator('.ref-block-file');
+  const fileBox = await box(file);
+  // The global text-field rule stretched the checkbox to the row and squeezed the name to 0 px.
+  expect(checkBox.width).toBeLessThan(24);
+  expect(fileBox.width).toBeGreaterThan(40);
+  expect(fileBox.x).toBeGreaterThan(checkBox.x + checkBox.width);
+  expect(fileBox.x + fileBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);
+  await expect(file).toHaveText('mood-a.png');
+
+  await page.getByTestId('ref-block-pack-picker').click();
+  const options = page.getByTestId('ref-block-pack-option');
+  await expect(options).toHaveCount(seed.packs.length);
+  for (const o of await options.all()) {
+    const optionBox = await box(o);
+    const nameBox = await box(o.locator('.ref-popover-name'));
+    const lineHeight = await o
+      .locator('.ref-popover-name')
+      .evaluate((e) => parseFloat(getComputedStyle(e).lineHeight) || 18);
+    expect(nameBox.height).toBeLessThan(lineHeight * 1.5); // one line, no wrap
+    // Not squeezed: these names fit the popover, so each shows in full.
+    const name = o.locator('.ref-popover-name');
+    expect(await name.evaluate((e) => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
+    expect(nameBox.width).toBeGreaterThan(20);
+    expect((await box(o.getByRole('checkbox'))).width).toBeLessThan(24);
+    expect(optionBox.height).toBeLessThan(32);
+  }
 });
