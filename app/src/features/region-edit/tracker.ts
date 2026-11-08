@@ -43,6 +43,8 @@ export interface TrackerCandidate {
   status: 'ready' | 'invalid';
   starred: boolean;
   accepted: boolean;
+  /** FR-RGN-24: the aspect differs from the sent one by > 1 % (resized to the outer rect). */
+  aspectWarning: boolean;
 }
 
 /** FR-RGN-40: the iteration's non-trashed candidates, in provider order (index 1-based). */
@@ -56,6 +58,7 @@ export function iterationCandidates(all: CandidateRecord[], jobId: string): Trac
       status: c.status === 'invalid' ? 'invalid' : 'ready',
       starred: c.starred,
       accepted: c.status === 'accepted',
+      aspectWarning: c.aspect_warning === true,
     }));
 }
 

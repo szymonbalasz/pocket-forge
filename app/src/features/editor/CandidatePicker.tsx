@@ -83,6 +83,17 @@ export function EditorPicker() {
             ) : (
               <span className="muted">{c.status === 'pending' ? '…' : 'Invalid'}</span>
             )}
+            {c.warning && (
+              <span
+                className="edt-picker-warning"
+                data-testid="edt-picker-warning"
+                role="img"
+                aria-label={c.warning}
+                title={c.warning}
+              >
+                !
+              </span>
+            )}
           </div>
           <div className="edt-picker-meta">
             <span className="tabular" title={i < 9 ? `Key ${i + 1}` : undefined}>

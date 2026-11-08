@@ -80,6 +80,23 @@ test('FR-RGN-27 region → controls → prompt → estimate → confirm → prog
   await expect(page.getByTestId('rgn-status-job')).toBeHidden();
 });
 
+test('FR-RGN-24 a candidate in another aspect shows the warning badge in the picker (walk D3)', async ({
+  page,
+}) => {
+  await openRgn(page);
+  await drawRegion(page, [400, 500], [800, 900]);
+  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
+  await page.getByTestId('rgn-panel-submit').click();
+  await page.getByTestId('rgn-confirm-ok').click();
+  await drive(page, 'finish', 3, [], [1]);
+  const picks = page.getByTestId('edt-picker-item');
+  await expect(picks).toHaveCount(3);
+  await expect(page.getByTestId('edt-picker-warning')).toHaveCount(1);
+  const badge = picks.nth(1).getByTestId('edt-picker-warning');
+  await expect(badge).toHaveAttribute('title', /Aspect differs/);
+});
+
 test('FR-RGN-14 over-cap dialog: spend, estimate and cap; an explicit raise, then submit', async ({
   page,
 }) => {

@@ -130,6 +130,9 @@ export const DEFAULT_BLEND: RgnBlend = { feather_px: 48, colour_match: true };
 /** FR-PRJ-19: the draft is saved ≥ 2 s after the last change. */
 export const DRAFT_SAVE_MS = 2000;
 const PREVIEW_DEBOUNCE_MS = 150;
+/** FR-RGN-24: the picker badge's text. */
+export const ASPECT_WARNING =
+  'Aspect differs from the sent region by more than 1 %; resized to fit the outer rect.';
 
 const initial: RgnState = {
   projectId: null,
@@ -562,6 +565,7 @@ function syncPicker(): void {
       c.id === s.selectedCandidateId && s.preview
         ? { url: s.preview.url, rect: s.preview.rect }
         : null,
+    warning: c.aspectWarning ? ASPECT_WARNING : null,
   }));
   const selected = list.some((c) => c.id === s.selectedCandidateId) ? s.selectedCandidateId : null;
   editorBridge.setCandidates(candidates, pickerHandlers, selected);

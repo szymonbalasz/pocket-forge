@@ -56,6 +56,7 @@ export function installRgnMock(seed: RgnMockSeed): void {
     trash_id: string | null;
     width: number;
     height: number;
+    aspect_warning?: boolean;
   }
 
   const w = window as unknown as Rec;
@@ -670,8 +671,9 @@ export function installRgnMock(seed: RgnMockSeed): void {
       j.progress = progress;
       jobEvent(j, extra);
     },
-    /** → succeeded → fetched with `n` candidates (index `invalid` ones won't decode). */
-    finish(count?: number, invalid: number[] = []) {
+    /** → succeeded → fetched with `n` candidates (index `invalid` ones won't decode, index
+     *  `odd` ones came back in another aspect, FR-RGN-24). */
+    finish(count?: number, invalid: number[] = [], odd: number[] = []) {
       const j = active();
       if (!j) return;
       j.state = 'succeeded';
@@ -693,6 +695,7 @@ export function installRgnMock(seed: RgnMockSeed): void {
           trash_id: null,
           width: j.outer.w,
           height: j.outer.h,
+          ...(odd.includes(i) ? { aspect_warning: true } : {}),
         };
         s.cands.push(cand);
       }

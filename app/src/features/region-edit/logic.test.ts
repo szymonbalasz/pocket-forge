@@ -381,11 +381,15 @@ describe('iteration tracker logic', () => {
       cand('C', 'J1', 2, { status: 'dismissed', trash_id: 'T1' }),
       cand('D', 'J1', 3, { status: 'invalid' }),
       cand('E', 'J2', 0),
+      cand('F', 'J1', 4, { aspect_warning: true }),
     ];
+    const ok = { starred: false, accepted: false, aspectWarning: false };
     expect(iterationCandidates(all, 'J1')).toEqual([
-      { id: 'A', index: 1, status: 'ready', starred: false, accepted: true },
-      { id: 'B', index: 2, status: 'ready', starred: true, accepted: false },
-      { id: 'D', index: 4, status: 'invalid', starred: false, accepted: false },
+      { ...ok, id: 'A', index: 1, status: 'ready', accepted: true },
+      { ...ok, id: 'B', index: 2, status: 'ready', starred: true },
+      { ...ok, id: 'D', index: 4, status: 'invalid' },
+      // FR-RGN-24: the core's aspect warning reaches the picker.
+      { ...ok, id: 'F', index: 5, status: 'ready', aspectWarning: true },
     ]);
   });
 
