@@ -1,6 +1,6 @@
 // FR-EDT-19: on reopen the draft's mask is loaded, pixel-identical; a different draft region keeps
 // the overlap. edt_mask_read is mocked (the real one lands with EDT slice 5).
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 import { hook, openMap } from './edt-mock';
 
@@ -89,4 +89,67 @@ test('EDT §11 a corrupt saved mask starts empty with a warning', async ({ page 
   await openMap(page);
   await expect(page.getByTestId('edt-mask-warning')).toBeVisible();
   expect((await hook<{ sum: number }>(page, 'mask')).sum).toBe(0);
+});
+
+/** Konva nodes of class Image with `name` on the live stage, and whether their layer drew them
+ *  (the layer canvas has alpha at the node's centre). A Layer named "mask" doesn't count. */
+async function drawnImage(page: Page, name: string) {
+  return page.evaluate((name) => {
+    const stage = window.__pfTest!.stage!();
+    const node = stage.findOne(
+      (n: { getClassName: () => string; hasName: (s: string) => boolean }) =>
+        n.getClassName() === 'Image' && n.hasName(name),
+    );
+    if (!node || node.getStage() !== stage || !node.isVisible())
+      return { found: !!node, drawn: false };
+    const layer = node.getLayer()!;
+    const r = node.getClientRect();
+    const ratio = layer.getCanvas().getPixelRatio();
+    const ctx = layer.getNativeCanvasElement().getContext('2d')!;
+    const a = ctx.getImageData(
+      Math.round((r.x + r.width / 2) * ratio),
+      Math.round((r.y + r.height / 2) * ratio),
+      1,
+      1,
+    ).data[3]!;
+    return { found: true, drawn: a > 0 };
+  }, name);
+}
+
+test('FR-EDT-14 FR-EDT-24 after close and reopen the mask tint and the compare image are drawn', async ({
+  page,
+}) => {
+  await openMap(page);
+  await page.getByTestId('prj-toolbar-close').click();
+  await page.getByTestId('prj-home-recent-item').first().click();
+  await expect(page.getByTestId('edt-canvas-stage')).toHaveAttribute('data-image-loaded', 'true');
+  await hook(page, 'setView', { scale: 0.5, tx: 0, ty: 0 });
+
+  // Mask: a region, filled → the tint image is on the stage and drawn.
+  await page.keyboard.press('r');
+  const b = (await page.getByTestId('edt-canvas-stage').boundingBox())!;
+  await page.mouse.move(b.x + 50, b.y + 50);
+  await page.mouse.down();
+  await page.mouse.move(b.x + 150, b.y + 100, { steps: 8 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await hook<{ inner: { w: number } } | null>(page, 'region'))?.inner.w)
+    .toBe(200);
+  await page.getByTestId('edt-toolbar-fill').click();
+  await expect.poll(() => drawnImage(page, 'mask')).toEqual({ found: true, drawn: true });
+
+  // Compare: selecting a candidate draws its after-image.
+  const rect = { x: 400, y: 400, w: 600, h: 400 };
+  await hook(page, 'setCandidates', [
+    {
+      id: 'C1',
+      index: 1,
+      status: 'ready',
+      starred: false,
+      thumbUrl: 'http://pf-tiles.localhost/i/th1.png',
+      preview: { url: 'http://pf-tiles.localhost/i/pv1.png', rect },
+    },
+  ]);
+  await page.keyboard.press('1');
+  await expect.poll(() => drawnImage(page, 'compare-after')).toEqual({ found: true, drawn: true });
 });

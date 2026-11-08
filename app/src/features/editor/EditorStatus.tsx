@@ -1,5 +1,6 @@
 // Status-bar part of the editor (FR-EDT-04): zoom readout and the Fit / Actual / Display presets.
 import { actions } from './actions';
+import { noMouseFocus } from './shortcuts';
 import { useEditor } from './store';
 import { Tip } from './Tip';
 import { displayScale, zoomPercent } from './view';
@@ -9,7 +10,7 @@ export function EditorStatus() {
   if (!image) return null;
   const display = displayScale(pxPerSquare.source, pxPerSquare.target);
   return (
-    <div className="edt-status">
+    <div className="edt-status" onMouseDown={noMouseFocus}>
       <Tip text="Fit (Ctrl+0)" side="top">
         <button type="button" data-testid="edt-view-fit" onClick={actions.fit}>
           Fit

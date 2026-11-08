@@ -11,7 +11,9 @@ function tintRgb(): [number, number, number] {
   return m ? [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)] : [74, 144, 226];
 }
 
-export function konvaMaskView(layer: Konva.Layer): MaskView & { node: () => Konva.Image | null } {
+export function konvaMaskView(
+  layer: Konva.Layer,
+): MaskView & { node: () => Konva.Image | null; destroy: () => void } {
   let canvas: HTMLCanvasElement | null = null;
   let ctx: CanvasRenderingContext2D | null = null;
   let node: Konva.Image | null = null;
@@ -67,6 +69,13 @@ export function konvaMaskView(layer: Konva.Layer): MaskView & { node: () => Konv
     update(m, b) {
       paint(m, b);
       layer.batchDraw();
+    },
+    /** Drops the tint node and canvas (the layer is being replaced or unmounted). */
+    destroy() {
+      node?.destroy();
+      node = null;
+      canvas = null;
+      ctx = null;
     },
   };
 }

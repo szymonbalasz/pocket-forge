@@ -191,3 +191,39 @@ test('FR-EDT-30 tool shortcuts are ignored while a text field has focus', async 
   await expect(page.getByTestId('edt-toolbar-size')).toHaveAttribute('data-value', '70');
   expect((await calls(page)).some((c) => c.cmd === 'edt_tiles_open')).toBe(true);
 });
+
+test('FR-EDT-03 R41 Space pans right after a mouse click on a tool or preset button', async ({
+  page,
+}) => {
+  await openMap(page);
+  const box = await stageBox(page);
+  const c = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const focused = () => page.evaluate(() => document.activeElement?.getAttribute('data-testid'));
+  const spaceDrag = async (dy: number) => {
+    const v0 = await view(page);
+    await page.keyboard.down('Space');
+    await page.mouse.move(c.x, c.y);
+    await page.mouse.down();
+    await page.mouse.move(c.x, c.y + dy, { steps: 3 });
+    await page.mouse.up();
+    await page.keyboard.up('Space');
+    const v = await view(page);
+    return v.ty - v0.ty;
+  };
+
+  // Click the brush tool: the tool changes, the button doesn't keep focus, Space+drag pans.
+  await page.getByTestId('edt-toolbar-brush').click();
+  await expect(page.getByTestId('edt-toolbar-brush')).toHaveAttribute('aria-pressed', 'true');
+  expect(await focused()).not.toBe('edt-toolbar-brush');
+  expect(await spaceDrag(40)).toBeCloseTo(40, 6);
+  await expect(page.getByTestId('edt-toolbar-brush')).toHaveAttribute('aria-pressed', 'true');
+
+  // The same after a view preset.
+  await page.getByTestId('edt-view-fit').click();
+  expect(await focused()).not.toBe('edt-view-fit');
+  expect(await spaceDrag(30)).toBeCloseTo(30, 6);
+
+  // Keyboard focus is unchanged: a focused button still gets Space first (#48).
+  await page.getByTestId('edt-view-fit').focus();
+  expect(await focused()).toBe('edt-view-fit');
+});
