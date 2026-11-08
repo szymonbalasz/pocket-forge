@@ -62,6 +62,7 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .register_asynchronous_uri_scheme_protocol("pf-tiles", |ctx, req, responder| {
             let app = ctx.app_handle().clone();
             let path = req.uri().path().to_owned();

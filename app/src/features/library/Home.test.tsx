@@ -277,3 +277,48 @@ test('FR-PRJ-49 R45 an unreadable project card has no last-edited time, sorts la
   expect(within(broken).getByTestId('prj-home-card-edited').textContent).toBe('');
   expect(within(broken).getByTestId('prj-home-card-badge').dataset.badge).toBe('unreadable');
 });
+
+test('FR-PRJ-03 #53 + New opens the native image dialog and creates the picked files; Cancel creates nothing', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  const handlers = prjMock(samplePrjSeed(LIB), { emit: core.emit }).handlers;
+  let picked: string[] | null = ['D:/a/One.png', 'D:/a/Two.png'];
+  core.useHandlers({ ...handlers, 'plugin:dialog|open': () => picked });
+  fireEvent.click(screen.getByTestId('prj-home-new'));
+  await waitFor(() => expect(cardNames()).toEqual(expect.arrayContaining(['One', 'Two'])));
+  expect(screen.queryByTestId('prj-home-new-paths')).toBeNull();
+  const opts = core.calls.find((c) => c.cmd === 'plugin:dialog|open')?.input.options as Record<
+    string,
+    unknown
+  >;
+  expect(opts).toMatchObject({
+    multiple: true,
+    directory: false,
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp'] }],
+  });
+
+  picked = null;
+  const before = cards().length;
+  fireEvent.click(screen.getByTestId('prj-home-new'));
+  await waitFor(() =>
+    expect(core.names().filter((n) => n === 'plugin:dialog|open')).toHaveLength(2),
+  );
+  expect(screen.queryByTestId('prj-home-new-paths')).toBeNull();
+  expect(cards()).toHaveLength(before);
+});
+
+test('FR-PRJ-01 #53 Browse… picks the library folder with the native folder dialog', async () => {
+  setup({ configured: false });
+  await screen.findByTestId('prj-setup');
+  const handlers = prjMock(
+    { ...samplePrjSeed(LIB), configured: false },
+    { emit: core.emit },
+  ).handlers;
+  core.useHandlers({ ...handlers, 'plugin:dialog|open': () => LIB });
+  fireEvent.click(screen.getByTestId('prj-setup-browse'));
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  expect(core.calls.find((c) => c.cmd === 'plugin:dialog|open')?.input.options).toMatchObject({
+    directory: true,
+  });
+  expect(core.calls.find((c) => c.cmd === 'library_set_roots')?.input).toEqual({ roots: [LIB] });
+});
