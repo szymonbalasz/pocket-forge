@@ -244,6 +244,20 @@ describe('Generate panel (RGN slice 6)', { timeout: 20_000 }, () => {
     ).toBe(prompt);
   });
 
+  test('FR-RGN-10 the seed is random (null) or pinned, and the pinned value is sent', async () => {
+    await setup();
+    await typePrompt('x');
+    await estimated();
+    expect((fake.callsOf('rgn_job_estimate').at(-1)!.draft as { seed: unknown }).seed).toBeNull();
+    fireEvent.click(screen.getByTestId('rgn-panel-seed-pin'));
+    fireEvent.change(screen.getByTestId('rgn-panel-seed-value'), { target: { value: '42' } });
+    expect(rgn.get().seed).toBe(42);
+    fireEvent.click(screen.getByTestId('rgn-panel-submit'));
+    fireEvent.click(await screen.findByTestId('rgn-confirm-ok'));
+    await waitFor(() => expect(fake.callsOf('rgn_job_submit')).toHaveLength(1));
+    expect((fake.callsOf('rgn_job_submit')[0]!.draft as { seed: unknown }).seed).toBe(42);
+  });
+
   test('FR-RGN-38 read-only: no estimates, submit disabled with the reason', async () => {
     await setup({ readOnly: true });
     await typePrompt('x');
@@ -509,6 +523,27 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
       expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(
         /Only the newest iteration/,
       ),
+    );
+  });
+
+  test('FR-RGN-29 re-tune the accepted patch with new blend values', async () => {
+    await submitted();
+    act(() => mockControls().finish(2));
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(2));
+    fireEvent.click(screen.getAllByTestId('edt-picker-item')[0]!);
+    await waitFor(() => expect(fake.callsOf('rgn_candidate_preview')).toHaveLength(1));
+    fireEvent.click(screen.getByTestId('edt-picker-accept'));
+    await waitFor(() => expect(screen.getByTestId('rgn-blend-retune')).toBeTruthy());
+    fireEvent.change(screen.getByTestId('rgn-blend-feather'), { target: { value: '32' } });
+    fireEvent.click(screen.getByTestId('rgn-blend-colour'));
+    fireEvent.click(screen.getByTestId('rgn-blend-retune'));
+    await waitFor(() => expect(fake.callsOf('rgn_patch_retune')).toHaveLength(1));
+    expect(fake.callsOf('rgn_patch_retune')[0]!.blend).toEqual({
+      feather_px: 32,
+      colour_match: false,
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('rgn-tracker-notice').textContent).toBe('Patch re-tuned.×'),
     );
   });
 
