@@ -11,7 +11,7 @@ use super::packs;
 use super::prepare::{self, RefSession, SENT_MAX_SIDE, estimate_inputs};
 use super::resolve::{self, DraftItem, DraftPack, DraftReferences, ItemState, Slot, Source};
 use super::*;
-use crate::test_support::{Env, env, png_bytes};
+use crate::test_support::{Env, env, png_bytes, rename_dir};
 
 fn slot(name: &str, role: Option<ReferenceRole>, min: u32, max: u32, cost: bool) -> Slot {
     Slot {
@@ -530,7 +530,7 @@ fn fr_ref_26_renamed_and_deleted_packs() {
     let r = resolve(&e, &s, &dir, &one_slot(2), Some(&prev));
     let draft = r.references.clone();
     // Renamed in Explorer: found by id.
-    std::fs::rename(&p.dir, p.dir.with_file_name("Swords")).unwrap();
+    rename_dir(&p.dir, &p.dir.with_file_name("Swords"));
     let r = resolve(&e, &s, &dir, &one_slot(2), Some(&draft));
     assert_eq!(on_keys(&r).len(), 1);
     assert_eq!(r.references.packs[0].name, "Swords");

@@ -136,7 +136,7 @@ mod tests {
     use crate::context::Context;
     use crate::core::Core;
     use crate::error::ErrorCode;
-    use crate::test_support::T0;
+    use crate::test_support::{T0, rename_dir};
     use crate::time::Timestamp;
 
     fn core_with_project() -> (tempfile::TempDir, Core) {
@@ -236,7 +236,7 @@ mod tests {
     fn fr_prj_21_edge_close_after_the_folder_moved_asks_then_force_closes() {
         let (d, core) = core_with_project();
         let dir = core.state().project.as_ref().unwrap().dir.clone();
-        std::fs::rename(&dir, dir.with_file_name("Elsewhere")).unwrap();
+        rename_dir(&dir, &dir.with_file_name("Elsewhere"));
         let e = core
             .dispatch(
                 "project_put_draft",
