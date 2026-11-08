@@ -479,8 +479,14 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
   const [usage, setUsage] = useState<DiskUsage | null>(null);
   const [trash, setTrash] = useState<TrashItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
   const load = useCallback(() => {
-    api.project.diskUsage().then(setUsage, (e: unknown) => setError(errorOf(e).message));
+    api.project.diskUsage().then(setUsage, (e: unknown) => {
+      const err = errorOf(e);
+      // `ipc`: the core doesn't register the command yet (PRJ slice 5): say so quietly.
+      setError(err.code === 'ipc' ? null : err.message);
+      setUnavailable(err.code === 'ipc');
+    });
     api.project.trashList().then(setTrash, () => setTrash([]));
   }, []);
   useEffect(load, [load, revision]);
@@ -489,6 +495,11 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
   return (
     <Section id="storage" label="Storage">
       {error && <p className="error small">{error}</p>}
+      {unavailable && (
+        <p className="muted small" data-testid="prj-panel-storage-unavailable">
+          Disk use and trash aren’t available yet.
+        </p>
+      )}
       {usage && (
         <>
           <dl className="prj-usage tabular" data-testid="prj-panel-storage-usage">

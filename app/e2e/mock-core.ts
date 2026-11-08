@@ -61,7 +61,8 @@ export async function mockCore(page: Page, seed: MockSeed = defaultSeed): Promis
     now: '2026-11-08T12:00:00.000Z',
     ...seed.prj,
   };
-  // PRJ handlers first: feature mocks added later (window.__pfMockHandlers) still win.
+  // PRJ handlers never replace one a feature mock registered already (e.g. rgn-mock installs
+  // before mockCore); feature mocks added later overwrite them as usual.
   await page.addInitScript({
     content: `(() => {
       const w = window;
@@ -70,7 +71,8 @@ export async function mockCore(page: Page, seed: MockSeed = defaultSeed): Promis
         snapshotOverride: () => w.__pfMockSnapshot,
       });
       w.__pfPrjMock = m.state;
-      Object.assign((w.__pfMockHandlers ??= {}), m.handlers);
+      const h = (w.__pfMockHandlers ??= {});
+      for (const [k, v] of Object.entries(m.handlers)) if (!(k in h)) h[k] = v;
     })();`,
   });
   await page.addInitScript((image: { w: number; h: number }) => {

@@ -448,7 +448,6 @@ export function prjMock(
       if (p.read_only === 'original_missing') p.read_only = null;
       return {};
     },
-    rgn_iterations_list: () => [],
   };
 
   return { handlers, state };
