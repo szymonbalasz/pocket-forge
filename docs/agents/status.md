@@ -30,7 +30,7 @@
 | Single-output cap, empty-mask hint, Mask whole region, blend instruction (#55) | — | merged | done (R72, R73) | walkthrough running |
 | Keep every result, easy discard (#56) | — | merged | done (R65–R67) | walkthrough with rgn-ux |
 | Backlog BL-30/31/32/35/36, BL-27 StrictMode | — | merged | done (R69, R70) | — |
-| Seam asymmetry (BL-33) | `fix-seam` | metric change (R68) | no asymmetry found | — |
+| Seam asymmetry (BL-33) | — | merged | done: no asymmetry; smoothed metric (R68) | FR-RGN-32 / EXP step 5 wording at the gate |
 | Conflict view draws layer stacks (BL-22) | — | merged | done (R71) | walkthrough step 7 later |
 
 ## Pending owner decisions
