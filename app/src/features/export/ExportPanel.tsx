@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Collapsible, RadioGroup, Toast, ToggleGroup, Tooltip } from 'radix-ui';
 
 import type { ExportFormat } from '../../api';
+import { useSlotIdle } from '../../shared/slot';
 import { useProjectState } from '../../store/project';
 import { exportStore, useExportState } from './store';
 import {
@@ -133,6 +134,7 @@ export function ExportPanel() {
   const s = useExportState();
   const body = useRef<HTMLDivElement>(null);
   const projectId = project?.project_id ?? null;
+  useSlotIdle(!project);
 
   useEffect(() => {
     void exportStore.listen();

@@ -40,6 +40,7 @@
 - **Left panel** (240–360 px, resizable): the project's folders (Working, References, Structure, Parts, Results), then History (revisions) and Storage (disk use). Owner: PRJ.
 - **Canvas, toolbar, status bar, candidate picker:** editor-canvas (EDT).
 - **Right panel** (300–380 px): Generate (region-edit, RGN), then Export (EXP), as collapsible sections. Inside Generate, the **References block** (owned by REF, rendered by RGN through REF's `index.ts`) sits between Model and Prompt and is hidden when the model has no reference slots. The multi-select pack picker uses Radix Popover.
+- The right panel hides itself while every component in it reports idle through `useSlotIdle(idle)` (`app/src/shared/slot.ts`), for example on Home with no project open (BL-15). A component that doesn't call it keeps the panel open.
 - **Iteration tracker:** the bottom strip lists iterations (`results/NNN`). Owner: RGN, using EDT's picker for the selected iteration.
 - **Status bar** is shared: features register **segments** (EDT zoom and mask, PRJ save state, RGN job state, PRV provider chip) through the feature registry, ordered by a `priority` number. EDT owns the bar itself.
 - Slots live in `app/src/shell/Layout.tsx`; features register into a slot (or a status-bar segment) through the feature registry. A feature never renders into another feature's slot.

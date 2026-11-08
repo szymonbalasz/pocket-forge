@@ -8,9 +8,13 @@
 //   │    │           │ bottom                     │             │
 //   │    │           │ status                     │             │
 //   └────┴───────────┴────────────────────────────┴─────────────┘
-import { useCallback, useRef, useState, type ReactNode } from 'react';
+//
+// The right panel collapses while every component in it reports idle (`shared/slot.ts`), e.g. on
+// Home with no project open (BL-15).
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import type { Feature, Slot, StatusSegment } from '../shared/feature';
+import { SlotIdleContext } from '../shared/slot';
 
 export function slotComponents(features: readonly Feature[], slot: Slot) {
   return features.flatMap((f) => {
@@ -27,6 +31,39 @@ function SlotView({ features, slot }: { features: readonly Feature[]; slot: Slot
       ))}
     </>
   );
+}
+
+/** A slot whose components report idle (`useSlotIdle`); `idle` is true once all of them are. */
+function useIdleSlot(features: readonly Feature[], slot: Slot) {
+  const ids = useMemo(() => slotComponents(features, slot).map((c) => c.id), [features, slot]);
+  const [idleIds, setIdleIds] = useState<ReadonlySet<string>>(() => new Set());
+  const reporters = useMemo(
+    () =>
+      new Map(
+        ids.map((id) => [
+          id,
+          (idle: boolean) =>
+            setIdleIds((prev) => {
+              if (prev.has(id) === idle) return prev;
+              const next = new Set(prev);
+              if (idle) next.add(id);
+              else next.delete(id);
+              return next;
+            }),
+        ]),
+      ),
+    [ids],
+  );
+  const view = (
+    <>
+      {slotComponents(features, slot).map(({ id, C }) => (
+        <SlotIdleContext.Provider key={id} value={reporters.get(id)!}>
+          <C />
+        </SlotIdleContext.Provider>
+      ))}
+    </>
+  );
+  return { idle: ids.length > 0 && ids.every((id) => idleIds.has(id)), view };
 }
 
 /** Every registered status segment, by priority then registry order. */
@@ -100,6 +137,7 @@ export function Layout({
 }) {
   const left = useResizableWidth(280);
   const has = (slot: Slot) => slotComponents(features, slot).length > 0;
+  const right = useIdleSlot(features, 'right');
 
   return (
     <div className="pf-layout" data-testid="app-shell">
@@ -143,8 +181,8 @@ export function Layout({
         <StatusBar features={features} />
       </div>
       {has('right') && (
-        <aside className="pf-right" data-testid="app-slot-right">
-          <SlotView features={features} slot="right" />
+        <aside className="pf-right" data-testid="app-slot-right" hidden={right.idle}>
+          {right.view}
         </aside>
       )}
     </div>
