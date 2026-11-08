@@ -437,9 +437,11 @@ export function ExportPanel() {
             </div>
           )}
         </Collapsible.Content>
+        {/* Inline under the section, never over it: the toast must not cover Replace while
+            the user tweaks and re-exports (walkthrough D1). Shown even when collapsed. */}
+        <Toast.Viewport className="exp-toast-viewport" data-testid="exp-toast-viewport" />
       </Collapsible.Root>
       <ExportToast />
-      <Toast.Viewport className="exp-toast-viewport" />
     </Toast.Provider>
   );
 }

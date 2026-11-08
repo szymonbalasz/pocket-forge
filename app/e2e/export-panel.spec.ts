@@ -88,7 +88,16 @@ test('FR-EXP-19 FR-EXP-27 Start → progress → done toast with copy path, then
   await expect(page.getByTestId('exp-panel-replace-note')).toHaveText(
     /^Replaces Crypt_70px\.png \(\d+(\.\d)? MB, now\)$/,
   );
-  await start(page).click();
+  // The toast sits below the section's controls, so Replace works while it shows (D1).
+  await expect(toast).toBeVisible();
+  const [toastBox, startBox, noteBox] = await Promise.all([
+    toast.boundingBox(),
+    start(page).boundingBox(),
+    page.getByTestId('exp-panel-replace-note').boundingBox(),
+  ]);
+  expect(toastBox!.y).toBeGreaterThanOrEqual(startBox!.y + startBox!.height);
+  expect(toastBox!.y).toBeGreaterThanOrEqual(noteBox!.y + noteBox!.height);
+  await start(page).click({ timeout: 2_000 });
   await expect(page.getByTestId('exp-panel-progress')).toBeVisible();
   const st = await exportState(page);
   expect(st.starts.map((s) => s.replace)).toEqual([false, true]);
