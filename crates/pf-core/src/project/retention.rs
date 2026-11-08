@@ -168,8 +168,11 @@ pub fn trash_restore(
         for c in m.candidates.iter_mut() {
             if c.trash_id == Some(item_id) {
                 c.trash_id = None;
-                if c.status == CandidateStatus::Trashed {
-                    // A sweep put it there; back to an ordinary leftover.
+                if matches!(
+                    c.status,
+                    CandidateStatus::Trashed | CandidateStatus::Discarded
+                ) {
+                    // A sweep or a discard put it there; back to an ordinary kept result (#56).
                     c.status = CandidateStatus::Dismissed;
                 }
             }
