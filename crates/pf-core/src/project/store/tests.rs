@@ -82,6 +82,7 @@ impl S {
                 seed: Some(i as i64),
                 provider_meta: serde_json::json!({"i": i}),
                 invalid: false,
+                ..Default::default()
             })
             .collect();
         let out =
