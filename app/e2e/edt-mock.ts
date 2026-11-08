@@ -11,6 +11,9 @@ export interface EdtMockOptions {
   pxPerSquare?: { source: number | null; target: number | null };
   readOnly?: boolean;
   seed?: MockSeed;
+  /** Like a small real pyramid (D1): nothing built at open, and the whole build is reported
+   *  (every level, then ready or failed) before `edt_tiles_open` returns. */
+  buildOnOpen?: 'ready' | 'failed';
 }
 
 /** The mocked map: 2048×2560 → levels 0–3 (4×5, 2×3, 1×2, 1×1 tiles). Every tile is the fixture
@@ -39,7 +42,7 @@ export async function openMap(page: Page, opts: EdtMockOptions = {}): Promise<vo
           const lh = Math.ceil(ht / 2 ** level);
           const cols = Math.ceil(lw / 512);
           const rows = Math.ceil(lh / 512);
-          const complete = rebuilt || !(o.incomplete ?? []).includes(level);
+          const complete = rebuilt || (!o.buildOnOpen && !(o.incomplete ?? []).includes(level));
           levels.push({
             level,
             scale: 1 / 2 ** level,
@@ -49,6 +52,18 @@ export async function openMap(page: Page, opts: EdtMockOptions = {}): Promise<vo
             complete,
           });
           if (cols === 1 && rows === 1) break;
+        }
+        if (o.buildOnOpen && !rebuilt) {
+          const m = (window as unknown as { __pfMock: { emit: (e: string, p: unknown) => void } })
+            .__pfMock;
+          if (o.buildOnOpen === 'failed') {
+            const error = { code: 'corrupt', message: 'image body is unreadable' };
+            m.emit('edt:tiles-failed', { key, error });
+          } else {
+            for (let i = levels.length - 1; i >= 0; i--)
+              m.emit('edt:tiles-progress', { key, level: i });
+            m.emit('edt:tiles-ready', { key });
+          }
         }
         return {
           key,
@@ -70,6 +85,7 @@ export async function openMap(page: Page, opts: EdtMockOptions = {}): Promise<vo
   );
   await page.goto('/');
   await openFirstCard(page);
+  if (opts.buildOnOpen === 'failed') return;
   await expect(page.getByTestId('edt-canvas-stage')).toHaveAttribute('data-image-loaded', 'true');
   await page.waitForFunction(() => !!window.__pfTest?.view);
 }

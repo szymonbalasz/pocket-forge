@@ -562,6 +562,8 @@ export function installRgnMock(seed: RgnMockSeed): void {
       return rows.reverse();
     },
     project_put_draft: (input: Rec) => {
+      const f = failOnce('project_put_draft');
+      if (f) return f;
       if (snap.read_only) return fail('read_only', 'The project is read-only.');
       snap.draft = { ...(snap.draft as Rec), ...(input.draft as Rec) };
       return { seq: s.nextId++ };
@@ -584,8 +586,11 @@ export function installRgnMock(seed: RgnMockSeed): void {
     },
     project_restore_revision: (input: Rec) => {
       const r = s.revs.find((x) => x.id === input.rev_id);
-      if (input.rev_id === 'r0') s.layers = [original];
-      else if (!r) return fail('unknown_id', 'no such revision');
+      // r0's draft is null (a fresh project); the mock doesn't keep later revisions' drafts.
+      if (input.rev_id === 'r0') {
+        s.layers = [original];
+        snap.draft = null;
+      } else if (!r) return fail('unknown_id', 'no such revision');
       else s.layers = r.layers.map((l) => ({ ...l }));
       const rev = {
         id: id('01JREV'),

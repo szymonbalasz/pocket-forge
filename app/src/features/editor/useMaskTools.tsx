@@ -67,7 +67,11 @@ export function useMaskTools({
       region?: { inner?: Rect; margin?: number } | null;
     } | null;
     const inner = draft?.region?.inner;
-    if (inner && image) {
+    const restored = () => {
+      if (ctl.current === c) editorStore.set({ regionFor: project.project_id });
+    };
+    if (!inner) restored();
+    else {
       void (async () => {
         try {
           const r = await fitRegion(project.project_id, inner, draft?.region?.margin);
@@ -87,6 +91,7 @@ export function useMaskTools({
         } catch {
           // The saved region no longer fits: start without one.
         }
+        restored();
       })();
     }
     return undefined;
@@ -96,6 +101,8 @@ export function useMaskTools({
     () => () => {
       ctl.current = null;
       undoStack.clear(); // KQ-16: history is per session.
+      // The region left behind is this session's; a reopen restores it again first.
+      editorStore.set({ regionFor: null });
     },
     [],
   );
