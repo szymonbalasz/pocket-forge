@@ -22,3 +22,5 @@ Small items for idle slots (see [process.md](../process.md)). The planned work a
 | BL-16 | EDT `library` keys serve user-folder images at full size: add a `max_side` copy (OQ-PRJ-16 said ≤ 512 px) | XS | `pf-core` tiles.rs | — | open |
 | BL-17 | Flaky: `fr_prj_15_changed_original_opens_read_only` depends on an mtime tick (seen by the PRJ UI builder after the racily-clean fix) | XS | `pf-core` project tests | PRJ retention build | open |
 | BL-18 | FR-PRJ-21: closing with `unsaved` shows the error but doesn't ask first | XS | `features/project` | PRJ retention build | open |
+| BL-19 | Move the feather/colour-match bake from `pf-core` `region_edit/blend.rs` into `pf-imaging` (ADR 0004 puts blend there) | S | `pf-imaging`, `pf-core` region_edit | RGN, REF 6 builds | open |
+| BL-20 | FR-RGN-18 `long_running` at 180 s has no test (clock seam) | XS | `pf-core` region_edit tests | RGN builds | open |
