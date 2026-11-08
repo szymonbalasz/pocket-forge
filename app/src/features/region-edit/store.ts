@@ -334,6 +334,10 @@ async function refreshProject(): Promise<void> {
     const p = await api.project.get();
     if (!p || p.project_id !== state.projectId) return;
     const extra = p as ProjectSnapshot & { candidates?: CandidateRecord[] };
+    // A restore (History, or undo of an accept) brings back that revision's draft (FR-PRJ-23).
+    const restored =
+      p.head_revision !== state.headRevision &&
+      p.revisions.find((r) => r.id === p.head_revision)?.reason === 'restore';
     set({
       candidates: extra.candidates ?? [],
       layers: p.layers,
@@ -344,10 +348,24 @@ async function refreshProject(): Promise<void> {
           ? state.maskId
           : (p.draft?.mask_id ?? state.maskId),
     });
+    if (restored) applyRestoredDraft(p.draft);
     syncPicker();
   } catch {
     // Keep the last snapshot; the next commit event retries.
   }
+}
+
+/** Shows a restored revision's draft (walk D4). No draft save: the restore already wrote it. EDT
+ *  keeps its region and mask. */
+function applyRestoredDraft(d: ProjectSnapshot['draft']): void {
+  set({
+    prompt: d?.final_prompt ?? '',
+    seedMode: d?.seed !== null && d?.seed !== undefined ? 'pinned' : 'random',
+    seed: d?.seed ?? null,
+  });
+  const model = d?.model_id ?? state.modelId;
+  if (model) void selectModel(model, d?.controls ?? null);
+  else schedule();
 }
 
 async function refreshIterations(): Promise<void> {
