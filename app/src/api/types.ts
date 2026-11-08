@@ -227,6 +227,76 @@ export interface RegionFit {
   scale: number;
 }
 
+/** One control as the Generate panel renders it (`rgn_controls_evaluate`, FR-RGN-33). */
+export interface ControlState {
+  name: string;
+  type: Capabilities['controls'][number]['type'];
+  role: Capabilities['controls'][number]['role'];
+  min: number | null;
+  max: number | null;
+  step: number | null;
+  default: unknown;
+  cost_affecting: boolean;
+  /** False when a rule hides it: neither shown nor sent. */
+  visible: boolean;
+  /** Effective allowed values (empty = any value in range). */
+  allowed: unknown[];
+  required: boolean;
+  /** The value to show: the user's, or the default after a reset; null = unset. */
+  value: unknown;
+  /** The user's value was rejected and reset; show a notice. */
+  reset: boolean;
+  error?: { control: string; code: string; message: string };
+}
+
+/** `rgn_controls_evaluate` result. Image inputs (source, mask, reference) are never listed. */
+export interface ControlsEvaluation {
+  model_id: string;
+  controls: ControlState[];
+  /** Required controls without a value: submit is disabled, naming them. */
+  required_missing: string[];
+  /** Given names this model has no control for (dropped with a notice, FR-RGN-11). */
+  unknown: string[];
+  warnings: string[];
+  prompt_required: boolean;
+  seed: boolean;
+}
+
+/** The job draft estimate and submit act on (RGN §9). */
+export interface JobDraft {
+  region: { inner: RectPx; margin?: number };
+  mask_id: string;
+  model_id: string;
+  final_prompt: string;
+  /** Control name → value, as the user set them (FR-RGN-34). */
+  controls: Record<string, unknown>;
+  /** Pinned seed, or null = random. */
+  seed: number | null;
+}
+
+export type SpendNeed = 'threshold' | 'unknown_cost' | 'set_cap';
+
+/** `rgn_job_estimate` result (FR-RGN-12..16). */
+export interface JobEstimate {
+  estimate_id: string;
+  cost: { amount: number | 'unknown'; unit: string };
+  fit: RegionFit;
+  candidate_count: number;
+  spend: number;
+  cap: number | null;
+  threshold: number | null;
+  needs: SpendNeed[];
+  /** spend + estimate > cap: submit fails with `over_spend_cap` until the cap is raised. */
+  over_cap: boolean;
+}
+
+/** `rgn_spend_get` / `rgn_spend_set` result. */
+export interface Spend {
+  spend: number;
+  cap: number | null;
+  threshold: number | null;
+}
+
 /** `edt_mask_submit` result (FR-EDT-18). */
 export interface MaskRef {
   mask_id: string;
@@ -274,6 +344,14 @@ export interface Commands {
   provider_get_capabilities: [{ model_id: string }, Capabilities];
   provider_balance: [Record<string, never>, Balance];
   provider_fake_set_case: [{ case: string }, Record<string, never>];
+  rgn_controls_evaluate: [
+    { model_id: string; values: Record<string, unknown> },
+    ControlsEvaluation,
+  ];
+  rgn_job_estimate: [{ project_id?: string; draft: JobDraft }, JobEstimate];
+  rgn_spend_get: [Record<string, never>, Spend];
+  /** A missing field keeps its value; null clears it. */
+  rgn_spend_set: [{ cap?: number | null; threshold?: number | null }, Spend];
 }
 
 export type CommandName = keyof Commands;
@@ -287,4 +365,5 @@ export interface Events {
   'edt:tiles-failed': { key: string; error: CoreErrorShape | string };
   'export:settings-changed': { source: number | null; target: number | null };
   'provider:status-changed': { connectivity: Connectivity };
+  'rgn:spend': { spend: number; cap: number | null };
 }

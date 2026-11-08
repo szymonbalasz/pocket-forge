@@ -70,7 +70,7 @@ export function useMaskTools({
     if (inner && image) {
       void (async () => {
         try {
-          const r = await fitRegion(project.project_id, inner, image, draft?.region?.margin);
+          const r = await fitRegion(project.project_id, inner, draft?.region?.margin);
           let m: MaskBuffer | null = null;
           if (draft?.mask_id) {
             try {
@@ -148,7 +148,7 @@ export function useMaskTools({
       const img = editorStore.get().image;
       if (!img) return;
       try {
-        const r = await fitRegion(project.project_id, inner, img);
+        const r = await fitRegion(project.project_id, inner);
         setRegionError(null);
         ctl.current?.changeRegion(r);
       } catch (e) {
