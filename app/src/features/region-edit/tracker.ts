@@ -74,16 +74,6 @@ export function iterationCandidates(all: CandidateRecord[], jobId: string): Trac
     }));
 }
 
-/** §7 confirm dialog: unstarred `new` candidates of the previous (fetched) job, which the next
- *  submit trashes (FR-RGN-28). */
-export function trashOnSubmit(rows: RgnIteration[], all: CandidateRecord[]): number {
-  const first = orderRows(rows)[0];
-  if (!first || first.state !== 'fetched') return 0;
-  return all.filter(
-    (c) => c.job_id === first.job_id && c.status === 'new' && !c.starred && c.trash_id === null,
-  ).length;
-}
-
 /** FR-RGN-45: the `N refs` chip tooltip, one line per file sent: name, "project" or its pack,
  *  and its role when it has one. */
 export function refsTooltip(row: RgnIteration): string {

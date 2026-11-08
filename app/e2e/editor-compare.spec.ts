@@ -64,6 +64,40 @@ test('FR-EDT-25 keys and clicks select ready candidates and emit onSelect; Enter
   await expect(items.nth(0)).toHaveAttribute('aria-selected', 'true');
 });
 
+test('owner #56 X discards the selected candidate, Delete the focused one; the selection moves on', async ({
+  page,
+}) => {
+  const items = page.getByTestId('edt-picker-item');
+  await page.keyboard.press('1');
+  await page.keyboard.press('x');
+  // C1 discarded: the next ready candidate (C2) takes the selection.
+  await expect(items.nth(1)).toHaveAttribute('aria-selected', 'true');
+  await items.nth(3).focus();
+  await page.keyboard.press('Delete');
+  // C4 (invalid) discarded from its focused item; focus moves to the previous ready one (C2).
+  await expect(items.nth(1)).toBeFocused();
+  expect(await events(page)).toEqual([
+    ['select', 'C1'],
+    ['discard', 'C1'],
+    ['select', 'C2'],
+    ['discard', 'C4'],
+    ['select', 'C2'],
+  ]);
+  // Nothing is accepted: no "Discard the rest".
+  await expect(page.getByTestId('edt-picker-discard-rest')).toHaveCount(0);
+});
+
+test('owner #56 "Discard the rest" shows once a candidate is accepted; the accepted one has no Discard', async ({
+  page,
+}) => {
+  await hook(page, 'setCandidates', [{ ...cand(1), accepted: true }, cand(2), cand(3)]);
+  await expect(page.getByTestId('edt-picker-discard').nth(0)).toBeDisabled();
+  await page.keyboard.press('1');
+  await page.keyboard.press('x'); // the accepted one: nothing
+  await page.getByTestId('edt-picker-discard-rest').click();
+  expect(await events(page)).toEqual([['select', 'C1'], ['discard-rest']]);
+});
+
 test('FR-EDT-24 compare follows the selection: split divider drag, C switches to flip, hold \\ for before', async ({
   page,
 }) => {

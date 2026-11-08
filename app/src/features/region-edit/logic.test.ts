@@ -32,7 +32,6 @@ import {
   retryJobId,
   shownState,
   stripJobId,
-  trashOnSubmit,
 } from './tracker';
 
 const ctl = (name: string) => ALL_TYPES.controls.find((c) => c.name === name)!;
@@ -251,8 +250,8 @@ const stored = { cap: 20, threshold: 5 };
 describe('confirm dialog logic (FR-RGN-14..16, §7)', () => {
   test('FR-RGN-45 the confirm plan carries the references sent ("with N references")', () => {
     const e = est(3, { references: 2 });
-    expect(confirmPlan(e, stored, initialForm(e, 5), 0).references).toBe(2);
-    expect(confirmPlan(est(3), stored, initialForm(est(3), 5), 0).references).toBe(0);
+    expect(confirmPlan(e, stored, initialForm(e, 5)).references).toBe(2);
+    expect(confirmPlan(est(3), stored, initialForm(est(3), 5)).references).toBe(0);
   });
 
   test('FR-RGN-45 walk R2 "with N references" follows the current selection, not the reused estimate', () => {
@@ -264,7 +263,7 @@ describe('confirm dialog logic (FR-RGN-14..16, §7)', () => {
         { code: 'duplicate', message: 'b is a; sent once', key: 'project:b.png' },
       ],
     });
-    const plan = (keys: string[] | null) => confirmPlan(e, stored, initialForm(e, 5), 0, keys);
+    const plan = (keys: string[] | null) => confirmPlan(e, stored, initialForm(e, 5), keys);
     expect(plan(null).references).toBe(1);
     expect(plan(['project:a.png', 'project:b.png', 'pack:P:face.png']).references).toBe(2);
     expect(plan(['project:a.png', 'pack:P:face.png', 'pack:P:hand.png']).references).toBe(3);
@@ -273,7 +272,7 @@ describe('confirm dialog logic (FR-RGN-14..16, §7)', () => {
 
   test('FR-RGN-14 within cap and threshold: Enter confirms, nothing extra is sent', () => {
     const e = est(3);
-    const p = confirmPlan(e, stored, initialForm(e, 5), 0);
+    const p = confirmPlan(e, stored, initialForm(e, 5));
     expect(p).toMatchObject({
       spendAfter: 7,
       overCap: false,
@@ -289,11 +288,11 @@ describe('confirm dialog logic (FR-RGN-14..16, §7)', () => {
   test('FR-RGN-14 over the cap: blocked until the cap is raised explicitly, then stored', () => {
     const e = est(3, { spend: 19 });
     const form = initialForm(e, 5);
-    const p = confirmPlan(e, stored, form, 0);
+    const p = confirmPlan(e, stored, form);
     expect(p.overCap).toBe(true);
     expect(p.canConfirm).toBe(false);
     expect(p.blocker).toMatch(/Raise the cap/);
-    const raised = confirmPlan(e, stored, { ...form, cap: '30' }, 0);
+    const raised = confirmPlan(e, stored, { ...form, cap: '30' });
     expect(raised.overCap).toBe(false);
     expect(raised.canConfirm).toBe(true);
     expect(raised.saveSpend).toEqual({ cap: 30, threshold: 5 });
@@ -302,14 +301,14 @@ describe('confirm dialog logic (FR-RGN-14..16, §7)', () => {
   test('FR-RGN-15 above the threshold: a second explicit confirmation; Enter never confirms', () => {
     const e = est(8, { needs: ['threshold'] });
     const form = initialForm(e, 5);
-    const p = confirmPlan(e, stored, form, 0);
+    const p = confirmPlan(e, stored, form);
     expect(p).toMatchObject({
       overThreshold: true,
       needsSecond: true,
       enterConfirms: false,
       canConfirm: false,
     });
-    const second = confirmPlan(e, stored, { ...form, second: true }, 0);
+    const second = confirmPlan(e, stored, { ...form, second: true });
     expect(second.canConfirm).toBe(true);
     expect(second.enterConfirms).toBe(false);
     expect(second.confirmations).toEqual(['threshold']);
@@ -317,7 +316,7 @@ describe('confirm dialog logic (FR-RGN-14..16, §7)', () => {
 
   test('FR-RGN-15 an unknown cost always needs the second confirmation', () => {
     const e = est('unknown', { needs: ['unknown_cost'] });
-    const p = confirmPlan(e, stored, { ...initialForm(e, 5), second: true }, 0);
+    const p = confirmPlan(e, stored, { ...initialForm(e, 5), second: true });
     expect(p).toMatchObject({
       unknownCost: true,
       needsSecond: true,
@@ -332,18 +331,17 @@ describe('confirm dialog logic (FR-RGN-14..16, §7)', () => {
     const none = { cap: null, threshold: null };
     const form = initialForm(e, null);
     expect(form).toEqual({ cap: '', threshold: '', second: false });
-    const p = confirmPlan(e, none, form, 0);
+    const p = confirmPlan(e, none, form);
     expect(p.setup).toBe(true);
     expect(p.canConfirm).toBe(false);
-    const filled = confirmPlan(e, none, { ...form, cap: '50', threshold: '2' }, 0);
+    const filled = confirmPlan(e, none, { ...form, cap: '50', threshold: '2' });
     // The new threshold applies to this job: 3 > 2 asks twice.
     expect(filled.overThreshold).toBe(true);
     expect(filled.canConfirm).toBe(false);
-    const ok = confirmPlan(e, none, { cap: '50', threshold: '2', second: true }, 3);
+    const ok = confirmPlan(e, none, { cap: '50', threshold: '2', second: true });
     expect(ok.canConfirm).toBe(true);
     expect(ok.saveSpend).toEqual({ cap: 50, threshold: 2 });
     expect(ok.confirmations).toEqual(['set_cap', 'threshold']);
-    expect(ok.trashCount).toBe(3);
   });
 });
 
@@ -451,10 +449,12 @@ describe('iteration tracker logic', () => {
     expect(refsTooltip(row('J2', 2, 'fetched'))).toBe('');
   });
 
-  test('§7 confirm: unstarred new candidates of the previous fetched job go to the trash', () => {
-    const rows = [row('J1', 1, 'fetched')];
-    const all = [cand('A', 'J1', 0), cand('B', 'J1', 1, { starred: true }), cand('C', 'J1', 2)];
-    expect(trashOnSubmit(rows, all)).toBe(2);
-    expect(trashOnSubmit([row('J1', 1, 'closed')], all)).toBe(0);
+  test('owner #56 the picker keeps dismissed results; only discarded ones leave it', () => {
+    const all = [
+      cand('A', 'J1', 0, { status: 'accepted' }),
+      cand('B', 'J1', 1, { status: 'dismissed' }),
+      cand('C', 'J1', 2, { status: 'discarded', trash_id: 'T1' }),
+    ];
+    expect(iterationCandidates(all, 'J1').map((c) => c.id)).toEqual(['A', 'B']);
   });
 });

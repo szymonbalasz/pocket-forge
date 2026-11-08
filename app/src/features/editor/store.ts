@@ -46,6 +46,8 @@ export interface PickerCandidate {
   index: number;
   status: 'pending' | 'ready' | 'invalid';
   starred: boolean;
+  /** The accepted one can't be discarded (#56). */
+  accepted?: boolean;
   /** Thumbnail URL (`edt_image_open` with `max_side` 256, FR-EDT-32); none while pending. */
   thumbUrl?: string | null;
   /** RGN's baked preview, shown by compare while this candidate is selected (R16). */
@@ -59,6 +61,8 @@ export interface PickerHandlers {
   onAccept?: (id: string) => void;
   onStar?: (id: string, starred: boolean) => void;
   onDiscard?: (id: string) => void;
+  /** #56: "Discard the rest"; the button shows only while this is set. */
+  onDiscardRest?: () => void;
 }
 
 export interface PickerState {
