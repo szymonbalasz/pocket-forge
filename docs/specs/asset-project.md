@@ -2,7 +2,7 @@
 feature: asset-project
 prefix: PRJ
 owner: rev-asset-project
-status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: []
 ---
 
@@ -12,13 +12,13 @@ depends_on: []
 The **library** is plain folders the user picks, usually cloud-synced (#5, #13). Each **library root** holds three **sections**, `Maps/`, `Tokens/` and `Items/`, and each **asset project** is a visible **project folder** in one of them (#44). This spec covers the folder layout, "new from image" (a copy; the source is never touched), the home grid, section rail and left project panel (#45, [ui-guidelines](../architecture/ui-guidelines.md)), crash-safe commits, sync and locked files, retention and **trash** (#18), the **local cache** split (#19), app settings and the decoded original. Every other spec reads and writes project state through PRJ's store API. Field shapes live in [manifest-schema](../architecture/manifest-schema.md) (R26).
 
 ## 2. Scope
-Tier S ([feature-tiers](../feature-tiers.md)): *Open an existing image as an asset project*, *Save and reopen the asset project*, and *Sections, project-as-folder layout, home grid* (#44, #45), plus the storage side of #16, #18, #19, #20, KQ-13, KQ-16, KQ-17. Includes a minimal revision list and relink (#40).
+Tier S ([feature-tiers](../feature-tiers.md)): *Open an existing image as an asset project*, *Save and reopen the asset project*, and *Sections, project-as-folder layout, home grid* (#44, #45), plus the storage side of #16, #18, #19, #20, KQ-13, KQ-16, KQ-17. Includes a minimal revision list and relink (#40). For reference packs (#51) it adds the `References/` folder in each root and the rail entry (FR-PRJ-51–54); packs themselves are [reference-packs](reference-packs.md) (REF).
 
 ## 3. Goals
 Browsable in Explorer: one folder per project, a home for references and results · zero-dialog creation (drop, paste, multi-file, folder) · pixel-identical reopen (#35), crash-safe commits · sync-friendly files (write-once, relative paths, conflict detection) · bounded, visible disk growth.
 
 ## 4. Non-goals
-Search, tags, collections (tier A) · using `references/`, `structure/` or `parts/` in generation, placing parts (tier A, #45) · moving a project between sections in the app · blank projects · several machines editing at once (KQ-13) · record-level conflict merge (#39) · persisted undo (KQ-16) · "empty trash now" · a file watcher.
+Search, tags, collections (tier A) · using `structure/` or `parts/` in generation, placing parts (tier A, #45); sending `references/` is REF's (#51) · moving a project between sections in the app · blank projects · several machines editing at once (KQ-13) · record-level conflict merge (#39) · persisted undo (KQ-16) · "empty trash now" · a file watcher.
 
 ## 5. User stories
 - I drop three maps on the Maps home. Each becomes a project card with its thumbnail; my source files stay where they were. In Explorer I see `Maps/Crypt/results/003 kitchen/` with the candidates I kept, and I drop mood images into `Maps/Crypt/references/`; the project panel lists them.
@@ -79,10 +79,14 @@ FRs marked (#44) were rewritten for the project-as-folder model; retired ones ke
 | FR-PRJ-48 | (#44) User folders are listed on open, when the window regains focus and on Refresh: supported images with a thumbnail, other files by name. Files dropped there in Explorer appear without a restart. |
 | FR-PRJ-49 | (#44, #45) `library_list_projects(section)` reads only `project.json` and the thumbnail of each project folder in every root. Cards: thumbnail, name, iteration count, last edited (`commit.at`), newest first, with badges read-only, conflict, unreadable, not available offline. A folder without `project.json` is ignored. |
 | FR-PRJ-50 | (#44) The **thumbnail** `.pforge/thumb.jpg` (≤ 512 px long side, JPEG q80) of the **working image** is written in the background after creation and after each commit that changes `layers[]`, temp → rename, outside the commit (OQ-PRJ-13). Missing or older than the last layer change → rebuilt on open. It never blocks a commit. |
+| FR-PRJ-51 | (#51) Setting a root also creates a missing `References/` in it. It is **not a section**: `library_list_projects` never lists it, `project_create` never targets it, and a `project.json` found under it is ignored. Its contents are REF's (FR-REF-01). |
+| FR-PRJ-52 | (#51) The rail has a **References** entry between Items and Settings (`prj-rail-references`). Selecting it shows REF's packs home in the home slot; REF registers that view through the UI feature registry. |
+| FR-PRJ-53 | (#51) REF may read files in a project's `references/` to send them with a job and may hydrate a cloud-only one at that moment (amends FR-PRJ-17's list). FR-PRJ-47 still holds: the app never moves, renames or deletes there. |
+| FR-PRJ-54 | (#51) The draft carries REF's `references` and the job record its `references[]` ([schema §4.5, §4.6](../architecture/manifest-schema.md#45-draft)); `put_draft`, `record_job` and the rebuild of FR-PRJ-24 keep them verbatim. |
 
 ## 7. UI/UX notes
 Slots per [ui-guidelines](../architecture/ui-guidelines.md); PRJ owns the section rail, the home grid and the left panel.
-- **Section rail** (`prj-rail-{maps,tokens,items,settings}`): picks the section; the home grid shows it. **First run:** "Choose your library folder" (`prj-setup-pick-root`); **library unavailable:** banner with "Choose again".
+- **Section rail** (`prj-rail-{maps,tokens,items,references,settings}`): picks the section; the home grid shows it. References shows REF's packs home instead (FR-PRJ-52). **First run:** "Choose your library folder" (`prj-setup-pick-root`); **library unavailable:** banner with "Choose again".
 - **Home** (no project open): project cards (`prj-home-card`, `data-record-id` = project id; open on click; Rename in the context menu), **+ New** (`prj-home-new`), full-area drop zone (`prj-home-dropzone`), paste. Empty section: "Drop an image to start a map / token / item".
 - **Creation:** toast "12 / 40" with Cancel (`prj-import-cancel`); the summary lists created, already in library (with Open), skipped + reason. No confirmation dialog.
 - **Left panel** (`prj-panel-*`): Working, References, Structure, Parts (file lists, **Add…** copies in, Refresh), Results (iterations, RGN's tracker selects them), then History (revisions `r<seq>`, label, Restore) and Storage (disk use, trash count, size, next purge date, trashed items with Restore).
@@ -93,6 +97,7 @@ Slots per [ui-guidelines](../architecture/ui-guidelines.md); PRJ owns the sectio
 ## 8. Data and file effects
 Full tree and field tables: [manifest-schema](../architecture/manifest-schema.md). In short:
 - **Synced, per project** `<library-root>/<Maps|Tokens|Items>/<name>/`: `project.json` (mutable, commit point) · `working/<file>` (the original) · `references/`, `structure/`, `parts/` (user-owned) · `results/NNN <slug>/NN.<ext>` (write-once) · `exports/` (EXP) · `.pforge/`: write-once `revisions/`, `layers/`, `masks/`, mutable `jobs/<id>/job.json` + write-once inputs, `trash/`, `thumb.jpg` (rebuildable).
+- **Synced, per root** `<library-root>/References/`: reference packs, owned by REF (FR-PRJ-51).
 - **Local (`<data-dir>`):** `settings.json`, `cache/tiles/` (EDT), `cache/provider/` (PRV), `pending/` (spool). `recent.json` is retired (OQ-PRJ-14).
 - **Growth and recovery:** each re-tune writes a new layer PNG kept by its revision; acceptable (#18), shown in disk use. A lost manifest is rebuilt (FR-PRJ-24). Trash restores for 30 days. The original and accepted candidates are never deleted. The thumbnail rebuilds. A lost `<data-dir>` costs re-picking roots, the spend cap, cache rebuilds, and any unreplayed spool.
 - **Migration:** none. No real projects exist yet (only dev data in `.pf-dev/`, which is deleted), so manifest v1 is redefined in place and there is no migration code. `library.import_dest` is dropped from `settings.json`; an old value is kept as an unknown field and ignored.
@@ -158,6 +163,7 @@ N/A: no provider calls. PRJ persists the job record ADR 0001 requires (KQ-17) an
 | 4 | Store API: jobs, candidates (iteration folders), masks, patch layers, revisions, draft, export; roll-forward; undo via restore | manifest schema (add fields), command registry | 3. RGN, EDT, EXP build on it |
 | 5 | Retention: trash, purge, restore, disk use; History and Storage in the left panel | command registry (append) | 4 |
 | 6 | Conflicts: copy + seq detection, spool, conflict view, resolve, status bar | command registry (append) | 4 |
+| 7 | (#51) `References/` on root set, not a section (51); rail entry (52); draft/job fields (54). Built inside REF slices 1, 3 and 6 | manifest schema (add fields), UI registry | 2, 4 |
 
 ## 15. Open questions
 None open.

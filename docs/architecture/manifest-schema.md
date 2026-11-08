@@ -35,6 +35,13 @@
       thumb.jpg                          home-grid thumbnail, ≤ 512 px, rebuildable (FR-PRJ-50)
       project.v<N>.json                  pre-migration copy (§6)
   Maps/.Crypt.pf-tmp-<ulid>/             a project being created (FR-PRJ-09)
+  References/                            reference packs (#51); not a section (FR-PRJ-51)
+    Swords/                              a pack; folder name = pack name (FR-REF-02)
+      pack.json                          mutable: pack id, notes, roles (§4.12)
+      longsword.png                      pack images, user files, top level only
+      .pforge/thumb.jpg                  pack thumbnail, rebuildable (FR-REF-13)
+    .pforge/trash/<item-id>/             References trash: item.json + files, 30-day purge (§4.13)
+    .Swords.pf-tmp-<ulid>/               a pack being created (FR-REF-07)
 <data-dir>/                              local, per machine, never synced (#19)
   settings.json                          §5
   cache/tiles/…                          tile pyramids; key, cap, eviction owned by EDT (R5)
@@ -100,7 +107,7 @@
 `id`, `file` (`.pforge/masks/<id>.png`), `rect` (the region, inner), `created_at`.
 
 ### 4.5 Draft
-`final_prompt`, `model_id`, `controls{}` (keyed by capability control `name`, #37), `seed` (int \| null), `region` (`{inner, margin}` \| null), `mask_id` (latest mask, R7) \| null, `updated_at`.
+`final_prompt`, `model_id`, `controls{}` (keyed by capability control `name`, #37), `seed` (int \| null), `region` (`{inner, margin}` \| null), `mask_id` (latest mask, R7) \| null, `references` (#51, REF: `{packs: [{pack_id, name}], items: [{key, on, role \| null}]}` \| null; null = REF's defaults, FR-REF-17), `updated_at`.
 
 ### 4.6 Job (`.pforge/jobs/<id>/job.json`)
 | Field | Type | Notes |
@@ -116,6 +123,7 @@
 | `fit` | `{sent_w, sent_h, scale}` | |
 | `mask_id` | ULID | the draft mask the job was built from |
 | `inputs` | `{region: "region.png", mask: "mask.png"}` | as sent (R2) |
+| `references[]` | `{source: project\|pack, pack_id \| null, pack_name \| null, path, content_hash, slot, role \| null, sent: {w, h, bytes, hash, resized}}` | #51, FR-REF-25: the files sent, in request order; `path` = `references/<file>` or `References/<pack>/<file>`; hashes only, no copies (OQ-REF-02). `[]` when none. Written with `requested`, never changed |
 | `estimate`, `cost` | `{amount \| unknown, unit}` | PRV's generic `Cost` |
 | `provider` | object | **opaque**; shape in [provider](../specs/provider.md) Appendix B (incl. the job handle, OQ-PRV-22 pick A). Persisted verbatim on every transition |
 | `iteration` | `{n, dir}` \| null | set by `add_candidates` before any candidate file is written: `n` = 1 + the highest `n` in the project, `dir` = `results/NNN <slug>` ([region-edit](../specs/region-edit.md) FR-RGN-39) |
@@ -191,6 +199,22 @@ Terminal = `failed | canceled | lost | closed`. A re-pick (RGN FR-RGN-36) accept
 ### 4.11 Revision file (`revisions/<id>.json`, write-once)
 `schema_version`, `id`, `seq` (`r<seq>`; `r0` = 0), `created_at`, `reason` (`create|accept|save|restore|retune|conflict`), `label` \| null, `parent` (ULID \| null: the revision it descends from; undo restores it, FR-PRJ-43), `layers[]` (§4.3, the stack at that point), `draft` (§4.5 \| null). The manifest's `revisions[]` row is `{id, seq, created_at, reason, label?}` of this file.
 
+### 4.12 Reference pack (`pack.json`)
+Owner of the meaning: [reference-packs](../specs/reference-packs.md) (REF). In `<library-root>/References/<pack>/`, mutable, temp → rename, unknown fields kept.
+
+| Field | Type | Notes |
+|---|---|---|
+| `schema_version` | int | 1 |
+| `pack_id` | ULID | stable across renames; a duplicate gets a new one (FR-REF-05) |
+| `created_at`, `updated_at` | time | `updated_at` decides a conflict copy (FR-REF-28) |
+| `notes` | string | ≤ 2000 chars; never sent (#9) |
+| `images` | `{<file name>: {role: style\|structure\|identity}}` | optional per-image default role; entries for absent files are kept |
+
+No `name`: the folder name is the pack name (OQ-REF-01).
+
+### 4.13 References trash item
+`<library-root>/References/.pforge/trash/<item-id>/item.json` = `{schema_version, id, kind: pack|images, pack_id, from, files[], trashed_at}` (`from` = `References/<pack>` for a pack, the file names for images), plus the moved files under the same folder. `item.json` is written first; the move is rolled forward at startup. Purged when `trashed_at` + 30 days < now (FR-REF-12).
+
 ## 5. `settings.json` (R8)
 | Section | Fields | Owner of the meaning |
 |---|---|---|
@@ -202,7 +226,7 @@ Terminal = `failed | canceled | lost | closed`. A re-pick (RGN FR-RGN-36) accept
 Corrupt or unreadable → defaults + a warning; the bad file is kept as `settings.corrupt-<UTC>.json`. Unknown sections are kept.
 
 ## 6. Versioning and migration
-- `schema_version` is an integer on `project.json`, `job.json`, revision files and `settings.json`. v1 is the first (redefined in place by #44 before any real project existed).
+- `schema_version` is an integer on `project.json`, `job.json`, revision files, `settings.json`, `pack.json` and References trash `item.json`. v1 is the first (redefined in place by #44 before any real project existed).
 - Load runs pure migrations vN → vN+1 in order. A mutable file is written migrated at its next write; the pre-migration manifest is kept once as `.pforge/project.v<N>.json`. Write-once files are migrated in memory only.
 - Newer than supported → the project opens **read-only** ("Made by a newer Pocket Forge"); nothing is written (FR-PRJ-26).
 - Each migration has a fixture from the previous version and a `fr_prj_25_*` test.

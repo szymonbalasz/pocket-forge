@@ -2,7 +2,7 @@
 feature: provider
 prefix: PRV
 owner: rev-provider
-status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [asset-project]
 ---
 
@@ -12,7 +12,7 @@ depends_on: [asset-project]
 The `pf-provider` crate implements the [ADR 0001](../architecture/adr/0001-provider-integration.md) adapter (#14). It has two implementations: **Scenario** over REST, and a deterministic **fake provider**, the default in dev and test builds (KQ-24, AGENTS §3.7). It owns credentials (KQ-05), the full **model capabilities** normaliser plus the **model overlay** (#15, #37), mask polarity conversion, error normalisation, the poll schedule, uploads (#20, R15) and the recording format. [region-edit](region-edit.md) (RGN) consumes it through generic types only.
 
 ## 2. Scope
-Tier S ([feature-tiers](../feature-tiers.md)): "Localised edit of a masked region via Scenario", "Visible job status and cost; user-controlled retry" (provider side) and "Model capability discovery (controls reflect the model)" in full (#37). Only `edit_masked` is implemented. The other ADR operations exist in the request type but return `invalid_request(operation)` until their tier.
+Tier S ([feature-tiers](../feature-tiers.md)): "Localised edit of a masked region via Scenario", "Visible job status and cost; user-controlled retry" (provider side) and "Model capability discovery (controls reflect the model)" in full (#37). Reference inputs for [reference-packs](reference-packs.md) (#51): FR-PRV-31–35. Only `edit_masked` is implemented. The other ADR operations exist in the request type but return `invalid_request(operation)` until their tier.
 
 ## 3. Goals
 - Keep RGN and the UI free of Scenario concepts; swap fake ⇄ Scenario with no other code change. The controls RGN shows are exactly the selected model's inputs, conditional rules included (#37).
@@ -20,7 +20,7 @@ Tier S ([feature-tiers](../feature-tiers.md)): "Localised edit of a masked regio
 - Masks reach every model in its **mask convention**, with a golden per convention and soft rule.
 
 ## 4. Non-goals
-- Model browsing/search, text-to-image, reference images with roles (tier A). MCP or the TS SDK (#14). Webhooks.
+- Model browsing/search, text-to-image (tier A). Choosing, preparing and recording references (REF; PRV only maps and uploads them, FR-PRV-31–35). MCP or the TS SDK (#14). Webhooks.
 - The poll loop and job persistence (RGN, R14). Mask padding, fit resampling and validation (RGN, R1). Job request composition, the spend cap and confirmation (#23), job and candidate commands (RGN, R4).
 - Persisting jobs, candidates and settings (PRJ). Deleting provider-side uploads (OQ-PRV-06 → keep).
 
@@ -61,6 +61,11 @@ Tier S ([feature-tiers](../feature-tiers.md)): "Localised edit of a masked regio
 | FR-PRV-28 | Real calls need `PF_PROVIDER=scenario` + credentials. Real-call tests need cargo feature `real-call` + `PF_REAL_CALL=1`, and CI fails if either is set. The recorder spends only with `--allow-spend <CU>`. |
 | FR-PRV-29 | Team and project ids are read and written only through PRJ's `settings_get/put` as the `provider` section of `<data-dir>/settings.json` (R8). PRV writes no settings file of its own. |
 | FR-PRV-30 | `Capabilities::evaluate(values)` is pure and applies `rules[]`: it returns the visible controls, their effective allowed values and required flags, and per-control errors. RGN uses it at its command boundary (#37). |
+| FR-PRV-31 | (#51) Each `slots[]` entry (derived from a control with `role: reference`, R31) has `name`, `role` (`style\|structure\|identity` from the overlay row's `slot_roles`, else null), `min` (1 if required, else 0), `max` (`file` → 1; `file_array` → the input's `max`; no `max` → the overlay row's `slot_max`, else 1, with a warning) and `cost_affecting` (from `costImpact`). One fixture test per overlay row. |
+| FR-PRV-32 | (#51) A model with a required reference slot **is offered** (amends FR-PRV-10/11/25 and Appendix C). It is no longer blocked; meeting `min` is the caller's job (FR-REF-18). |
+| FR-PRV-33 | (#51) `JobRequest.references[]` = `{slot, role?, bytes, hash}`, bytes as sent (PNG/JPEG/WebP). In `estimate` and `submit`, before any network call: an unknown slot, a count outside `min`–`max`, a file over `max_bytes` or an unsniffable format → `invalid_request(reference)` with zero network calls (backstop, as FR-PRV-13). The body sets each slot's input to its asset refs, in request order: an array for `file_array`, one ref for `file`. Slots with no references are omitted. |
+| FR-PRV-34 | (#51) References are uploaded with purpose `reference` through FR-PRV-14 (at most once per `hash` per session) and covered by the re-upload of FR-PRV-15. With `dry_run_assets: true`, estimate uploads them too. Their refs go into `provider{}.asset_refs.references` (Appendix B). |
+| FR-PRV-35 | (#51) Fake slots: `fake-white-edit` gains `style_refs` (`file_array`, max 3, not cost-affecting); `fake-black-edit` gains `style_refs` (max 2, cost-affecting: +1 CU per ref in the fake estimate) and `identity_ref` (`file`, optional); `fake-alpha-edit` has none. Fake candidates mix the ordered reference hashes into the seed pattern, so different references give different candidates. With no references, candidates are byte-identical to before (FR-PRV-03 goldens unchanged). The fake exposes the last request's reference hashes to tests. |
 
 ## 7. UI/UX notes
 - **Provider settings** (`app/src/features/provider/`): key and secret as password fields (cleared after Save), Save, Clear, Test connection, optional team and project id. Test ids `prv-settings-key|secret|team|project|save|clear|test`.
@@ -77,6 +82,7 @@ Field tables live in [manifest-schema](../architecture/manifest-schema.md) (PRJ)
 | Upload ref cache | memory, per session | Rebuilt by re-upload (#20) |
 | `provider{}` on the job | `jobs/<id>/job.json`, opaque to PRJ/RGN, inner shape in Appendix B | With the project |
 | Job inputs | `jobs/<id>/region.png` + `mask.png` as sent (after fit, before polarity conversion, R2); PRV gets the bytes from RGN and never opens project files | With the project |
+| Reference inputs | bytes prepared by REF (FR-REF-21/22), recorded as hashes on the job (`references[]`, FR-REF-25); PRV never opens pack or project files | Hashes with the project; the files are the user's |
 | Fixtures | `fixtures/provider/<model>/<case>.json`; images from a committed generator (KQ-22) | Repo |
 
 PRV writes nothing into the library.
@@ -125,8 +131,8 @@ graph LR
 - Fake jobs: zero wall time under the fake clock in tests, ~2 s per job in dev.
 
 ## 13. Test plan
-- **Unit (Rust):** the normaliser over every input type and `role` (R28), both conditional forms, malformed and drift fixtures (FR-10); `evaluate` rule tables (30); mask goldens per convention × soft rule, plus the wrong-size error (12); limit backstops with zero network (13); `poll_delay` under a fake clock (19); the error map (23); the retry policy (24); `Secret` redaction (08); fake determinism and every case (03–05).
-- **Contract (Rust):** `ScenarioProvider` over `ReplayTransport` per recording: requests match (method, path, body shape, no auth on signed URLs) and so do the generic outputs. Covers both upload paths, upload once per hash (14), re-upload (15), dry run with and without assets (16), submit, the status sequence, cancel, fetch with an expired URL, and balance.
+- **Unit (Rust):** the normaliser over every input type and `role` (R28), both conditional forms, malformed and drift fixtures (FR-10); slot `min`/`max`/`role` per overlay row and a required slot offered (31, 32); reference backstops with zero network (33); fake reference determinism (35); `evaluate` rule tables (30); mask goldens per convention × soft rule, plus the wrong-size error (12); limit backstops with zero network (13); `poll_delay` under a fake clock (19); the error map (23); the retry policy (24); `Secret` redaction (08); fake determinism and every case (03–05).
+- **Contract (Rust):** `ScenarioProvider` over `ReplayTransport` per recording: requests match (method, path, body shape, no auth on signed URLs) and so do the generic outputs. Covers both upload paths, upload once per hash (14), re-upload (15), a body with style + identity references and their upload dedupe (33, 34), dry run with and without assets (16), submit, the status sequence, cancel, fetch with an expired URL, and balance.
 - **Integration:** the credential store on `windows-latest` with a throwaway target (06); the log capture (08); the cache stale/corrupt paths (25); settings through a fake PRJ settings store (29). **Thin e2e** (Playwright, mocked commands): settings save/clear/test, the chip states, the fake badge.
 - **Fixtures:** a generated 512 px "room" image with disc and ramp masks, synthetic error recordings, and recorded free calls (`get-model`, `dry-run`) per overlay model. No personal art.
 - **App walkthrough** (test agent, dev build, `PF_DATA_DIR` and `PF_LIBRARY_DIR` in `.pf-dev/`):
@@ -146,6 +152,7 @@ graph LR
 | 3 | Transport, auth, error map, retry, normaliser + rules + `evaluate`, overlay, list/capabilities/cache, recorder (free calls) | none | 1 |
 | 4 | Mask convert, upload + ref cache, estimate, submit, status, cancel, fetch, balance, re-upload; contract tests | none | 3 |
 | 5 | Real-call mode + gated tests + owner's recorded paid fixtures | none | 2, 4 |
+| 6 | (#51) Reference slots, required slot offered, references in estimate/submit + uploads, fake slots (FR-PRV-31–35) | none | 4 (REF slice 2) |
 
 ## 15. Open questions
 Closed questions (✅) are in [Appendix E](#appendix-e-closed-open-questions).
@@ -158,10 +165,10 @@ Closed questions (✅) are in [Appendix E](#appendix-e-closed-open-questions).
 `{format_version, provider, model, case, recorded_on, source: recorded|synthetic, exchanges: [{request: {method, path, query, body}, response: {status, headers (subset), body}}]}`. Ids become `<team-id>`/`<asset-N>`, URLs become `fake://asset/N`, and image bytes become `{"fixture": "<name>.png"}`.
 
 ## Appendix B: `provider{}` on the job record
-`{v: 1, name: "scenario"|"fake", model: <provider model id>, job_handle?: <id>, asset_refs: {image?, mask?, hash_image?, hash_mask?}, request: <body as sent, redacted>, raw_status?: <last provider state>, cost_raw?: <billing object>}`. `asset_refs` is a disposable cache (#20). RGN persists the object verbatim on every transition and passes it back to `status`, `cancel` and `fetch_candidates`; nothing outside `pf-provider` reads its fields.
+`{v: 1, name: "scenario"|"fake", model: <provider model id>, job_handle?: <id>, asset_refs: {image?, mask?, hash_image?, hash_mask?, references?: [{slot, hash, ref}]}, request: <body as sent, redacted>, raw_status?: <last provider state>, cost_raw?: <billing object>}`. `asset_refs` is a disposable cache (#20). RGN persists the object verbatim on every transition and passes it back to `status`, `cancel` and `fetch_candidates`; nothing outside `pf-provider` reads its fields.
 
 ## Appendix C: generic shapes
-- **Capabilities:** `{model_id, operations[], controls[{name, type, role, min, max, step, allowed[], default, required, cost_affecting}], rules[{if: {control, op: eq|in, value}, then: {control, required? | allowed? | hidden?}}], mask: {convention, soft}, input_px: {min, max, multiple_of}, max_bytes, seed: bool, prompt_required, slots[], warnings[]}`. `slots[]` lists extra image inputs; none are sent in tier S, and a required one means the model isn't offered.
+- **Capabilities:** `{model_id, operations[], controls[{name, type, role, min, max, step, allowed[], default, required, cost_affecting}], rules[{if: {control, op: eq|in, value}, then: {control, required? | allowed? | hidden?}}], mask: {convention, soft}, input_px: {min, max, multiple_of}, max_bytes, seed: bool, prompt_required, slots[], warnings[]}`. `slots[{name, role, min, max, cost_affecting}]` lists the reference inputs (FR-PRV-31); a required slot no longer blocks the model (FR-PRV-32).
 - **Status map:** `queued`/`warming-up`/`pending` → `queued`; `in-progress`/`finalizing` → `running`; `success` → `succeeded`; `failure` → `failed`(hint); `canceled` → `canceled`; offline → `unknown`.
 - **Error map:**
 
@@ -174,13 +181,13 @@ Closed questions (✅) are in [Appendix E](#appendix-e-closed-open-questions).
 | `provider_failure(hint)` | 5xx after retries; job `failure` + `hint`; malformed JSON |
 | `offline` / `timeout` | connect/DNS error / request timeout |
 
-- **Overlay rows** (Scenario docs, #15; each row also records the input name per `role` where Scenario doesn't mark it (source, mask, prompt, candidate count, R28), max px, `dry_run_assets`, doc URL and checked date):
+- **Overlay rows** (Scenario docs, #15; each row also records the input name per `role` where Scenario doesn't mark it (source, mask, prompt, candidate count, R28), max px, `dry_run_assets`, `slot_roles` and `slot_max` (FR-PRV-31), doc URL and checked date):
 
-| Model | Convention | `soft` |
-|---|---|---|
-| GPT Image 2 / 2.5 | `alpha_transparent_edit` | `pass-through` |
-| Ideogram 4.5 / 4.5 Precise Edit | `white_edit` | `threshold(128)` |
-| Ideogram V3 / Character | `black_edit` | `threshold(128)` |
+| Model | Convention | `soft` | `slot_roles` (#51) |
+|---|---|---|---|
+| GPT Image 2 / 2.5 | `alpha_transparent_edit` | `pass-through` | none recorded |
+| Ideogram 4.5 / 4.5 Precise Edit | `white_edit` | `threshold(128)` | `styleReferenceImages` → style |
+| Ideogram V3 / Character | `black_edit` | `threshold(128)` | `styleReferenceImages` → style; `characterReferenceImages` → identity (Character: required, max 1) |
 
 The `soft` values are picks confirmed against Scenario's docs when each row is recorded.
 
