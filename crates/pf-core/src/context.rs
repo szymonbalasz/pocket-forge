@@ -250,6 +250,8 @@ pub enum FaultAction {
     Abort,
     /// Return an I/O error (unit tests).
     Error,
+    /// Return a "file locked" error (unit tests, FR-PRJ-21).
+    Locked,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -326,6 +328,10 @@ impl Faults {
             FaultAction::Error => Err(std::io::Error::other(format!(
                 "injected fault at {point:?}"
             ))),
+            FaultAction::Locked => Err(std::io::Error::new(
+                std::io::ErrorKind::ResourceBusy,
+                format!("injected lock at {point:?}"),
+            )),
         }
     }
 

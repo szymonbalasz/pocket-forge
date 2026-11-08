@@ -48,6 +48,13 @@ export function errorOf(e: unknown): { code: string; message: string } {
     : { code: 'ui', message: String(e) };
 }
 
+/** The save-state code of a failed save: `folder_moved` (§11, `not_found` with that
+ *  `detail.reason`), else the error code. */
+function saveCode(e: unknown): string {
+  const reason = e instanceof ApiError ? (e.detail as { reason?: unknown } | null)?.reason : null;
+  return reason === 'folder_moved' ? 'folder_moved' : errorOf(e).code;
+}
+
 function savedAt(p: ProjectSnapshot): string {
   return p.committed_at ?? p.revisions.at(-1)?.created_at ?? '';
 }
@@ -78,7 +85,11 @@ function listen(): void {
   );
   on(
     onEvent('project:conflict', () => {
+      // FR-PRJ-35: found mid-session; the snapshot's warnings now carry `conflict` too.
       if (state.project) set({ save: { kind: 'conflict' } });
+      void projectStore.reload().then(() => {
+        if (state.project) set({ save: { kind: 'conflict' } });
+      });
     }),
   );
 }
@@ -110,10 +121,10 @@ export const projectStore = {
     }
   },
 
-  /** Back to the home grid. */
-  async close(): Promise<void> {
+  /** Back to the home grid. `force` closes although a save is still pending (FR-PRJ-21). */
+  async close(force = false): Promise<void> {
     try {
-      await api.project.close();
+      await api.project.close(force);
     } catch (e) {
       // `unsaved` (FR-PRJ-21): stay open and say why.
       const err = errorOf(e);
@@ -155,7 +166,7 @@ export const projectStore = {
             ? { kind: 'unchanged', at }
             : err.code === 'conflict'
               ? { kind: 'conflict' }
-              : { kind: 'failed', ...err, retrying: false },
+              : { kind: 'failed', ...err, code: saveCode(e), retrying: false },
       });
     }
     bump();
@@ -170,7 +181,26 @@ export const projectStore = {
       const project = await api.project.get();
       set({ project: project ?? state.project, save: { kind: 'saved', at: rev.created_at } });
     } catch (e) {
-      set({ error: errorOf(e), save: { kind: 'saved', at: savedAt(state.project) } });
+      const code = saveCode(e);
+      set({
+        error: errorOf(e),
+        save:
+          code === 'folder_moved'
+            ? { kind: 'failed', code, message: '', retrying: false }
+            : { kind: 'saved', at: savedAt(state.project) },
+      });
+    }
+    bump();
+  },
+
+  /** After `project_resolve_conflict` (FR-PRJ-36): re-reads the project, saved again. */
+  async resolved(): Promise<void> {
+    if (!state.project) return;
+    try {
+      const project = await api.project.get();
+      if (project) set({ project, save: { kind: 'saved', at: savedAt(project) } });
+    } catch (e) {
+      set({ error: errorOf(e) });
     }
     bump();
   },

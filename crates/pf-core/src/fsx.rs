@@ -102,12 +102,18 @@ pub fn copy_atomic_new(ctx: &Context, source: &Path, target: &Path) -> CoreResul
 
 /// Renames with the FR-PRJ-21 lock retry (≤ 3 s of backoff, then the error).
 pub fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {
+    retry_while_locked(LOCK_RETRY_FOR, || fs::rename(from, to))
+}
+
+/// Runs `op` until it succeeds, fails with something other than a lock, or `budget` is spent
+/// (backoff from 25 ms, doubling, ≤ 500 ms). FR-PRJ-21.
+fn retry_while_locked(budget: Duration, mut op: impl FnMut() -> io::Result<()>) -> io::Result<()> {
     let start = std::time::Instant::now();
     let mut delay = Duration::from_millis(25);
     loop {
-        match fs::rename(from, to) {
+        match op() {
             Ok(()) => return Ok(()),
-            Err(e) if is_locked(&e) && start.elapsed() < LOCK_RETRY_FOR => {
+            Err(e) if is_locked(&e) && start.elapsed() < budget => {
                 std::thread::sleep(delay);
                 delay = (delay * 2).min(Duration::from_millis(500));
             }
@@ -332,6 +338,34 @@ mod tests {
         fs::write(&a, b"again").unwrap();
         assert!(move_file(&a, &b).is_err());
         assert!(!remove_dir_if_empty(&dir.path().join("x")));
+    }
+
+    #[test]
+    fn fr_prj_21_lock_retry_k_failures_then_success_or_give_up() {
+        let busy = || io::Error::new(io::ErrorKind::ResourceBusy, "locked");
+        let mut calls = 0;
+        retry_while_locked(Duration::from_secs(3), || {
+            calls += 1;
+            if calls <= 3 { Err(busy()) } else { Ok(()) }
+        })
+        .unwrap();
+        assert_eq!(calls, 4, "three locked attempts, then success");
+        let start = std::time::Instant::now();
+        let e = retry_while_locked(Duration::from_millis(100), || Err(busy())).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::ResourceBusy);
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "gives up after the budget"
+        );
+        let mut other = 0;
+        assert!(
+            retry_while_locked(Duration::from_secs(3), || {
+                other += 1;
+                Err(io::Error::other("disk"))
+            })
+            .is_err()
+        );
+        assert_eq!(other, 1, "only locks are retried");
     }
 
     #[test]

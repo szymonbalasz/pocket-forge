@@ -95,6 +95,10 @@ pub enum ErrorCode {
     ReferencesRequired,
     /// A reference slot over its maximum; `detail{slot, max}` (FR-REF-18).
     TooManyReferences,
+    /// `project_conflict_get` / `project_resolve_conflict` without a conflict (FR-PRJ-36).
+    NoConflict,
+    /// The version to keep needs files that haven't synced yet (FR-PRJ-36).
+    FilesMissing,
 }
 
 impl ErrorCode {
@@ -151,6 +155,8 @@ impl ErrorCode {
             ErrorCode::ReferenceUnavailable => "reference_unavailable",
             ErrorCode::ReferencesRequired => "references_required",
             ErrorCode::TooManyReferences => "too_many_references",
+            ErrorCode::NoConflict => "no_conflict",
+            ErrorCode::FilesMissing => "files_missing",
         }
     }
 }
@@ -234,7 +240,9 @@ impl From<pf_provider::ProviderError> for CoreError {
 pub fn is_locked(e: &std::io::Error) -> bool {
     // ERROR_SHARING_VIOLATION (32), ERROR_LOCK_VIOLATION (33), ERROR_ACCESS_DENIED (5) on rename
     // over a file another process has open.
-    cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33))
+    // `ResourceBusy` (EBUSY elsewhere) is treated the same, and is what the `Locked` fault returns.
+    (cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33)))
+        || e.kind() == std::io::ErrorKind::ResourceBusy
 }
 
 #[cfg(test)]

@@ -160,6 +160,82 @@ test('FR-PRJ-33 FR-PRJ-31 FR-PRJ-32 Storage shows disk use, trash count, next pu
   });
 });
 
+test('FR-PRJ-21 closing with a save still pending asks first; Close anyway closes', async () => {
+  await openCrypt({ pendingSave: true });
+  fireEvent.click(screen.getByTestId('prj-panel-close'));
+  const banner = await screen.findByTestId('prj-error');
+  expect(banner.dataset.code).toBe('unsaved');
+  expect(projectStore.get().project).not.toBeNull();
+  fireEvent.click(screen.getByTestId('prj-panel-close-anyway'));
+  await waitFor(() => expect(projectStore.get().project).toBeNull());
+  expect(core.calls.filter((c) => c.cmd === 'project_close').map((c) => c.input)).toEqual([
+    {},
+    { force: true },
+  ]);
+});
+
+test('FR-PRJ-35 FR-PRJ-36 a conflict found mid-session shows the banner and the view resolves it', async () => {
+  await openCrypt();
+  const side = (which: 'this' | 'other', machine: 'this' | 'other') => ({
+    side: which,
+    file: which === 'this' ? null : 'project.json',
+    readable: true,
+    committed_at: '2026-11-07T10:00:00.000Z',
+    seq: which === 'this' ? 3 : 9,
+    machine,
+    layers: [],
+    newest_revision: null,
+    missing_files: [],
+    can_keep: true,
+  });
+  const p = mock.projects.get(CRYPT)!;
+  p.conflict = { source: 'seq', this: side('this', 'this'), other: side('other', 'other') };
+  act(() => core.emit('project:conflict', {}));
+  const open = await screen.findByTestId('prj-panel-conflict-open');
+  fireEvent.click(open);
+  fireEvent.click(await screen.findByTestId('prj-conflict-keep-other'));
+  await waitFor(() => expect(screen.queryByTestId('prj-conflict')).toBeNull());
+  await waitFor(() => expect(screen.queryByTestId('prj-panel-conflict-open')).toBeNull());
+  expect(core.calls.find((c) => c.cmd === 'project_resolve_conflict')?.input).toEqual({
+    keep: 'other',
+  });
+  expect(screen.getByTestId('prj-status-save').dataset.state).toBe('saved');
+});
+
+test('FR-PRJ-21 walkthrough D3: a folder moved while open shows the reason and a banner, Save shows no raw path, Back to home asks', async () => {
+  await openCrypt({ pendingSave: true });
+  const raw = 'reading C:/pf-mock/library/Maps/Crypt/.pforge/revisions/r.json (os error 3)';
+  core.useHandlers({
+    ...core.handlersSnapshot(),
+    project_save_revision: () =>
+      Promise.reject({
+        code: 'not_found',
+        message:
+          'The project folder was moved or renamed outside Pocket Forge. Reopen it from home.',
+        detail: { reason: 'folder_moved' },
+      }),
+  });
+  // The background draft save failed (RGN's debounced save doesn't show errors itself).
+  act(() => core.emit('project:save-failed', { reason: 'folder_moved', retrying: true }));
+  const status = screen.getByTestId('prj-status-save');
+  expect(status.dataset.state).toBe('failed');
+  expect(status.textContent).toContain('Save failed, project folder moved, retrying');
+  const banner = await screen.findByTestId('prj-panel-reopen-home');
+  expect(banner.closest('[data-code]')?.getAttribute('data-code')).toBe('folder_moved');
+
+  fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+  await waitFor(() => expect(core.names()).toContain('project_save_revision'));
+  await waitFor(() => expect(status.textContent).toContain('Save failed, project folder moved'));
+  expect(status.textContent).not.toContain('os error');
+  expect(document.body.textContent).not.toContain(raw);
+
+  fireEvent.click(screen.getByTestId('prj-panel-reopen-home'));
+  expect((await screen.findByTestId('prj-error')).dataset.code).toBe('unsaved');
+  expect(projectStore.get().project).not.toBeNull();
+  fireEvent.click(screen.getByTestId('prj-panel-close-anyway'));
+  await waitFor(() => expect(projectStore.get().project).toBeNull());
+});
+
 test('FR-PRJ-41 FR-PRJ-15 a read-only project shows why and disables Add, Save and Restore', async () => {
   await openCrypt({ read_only: 'original_changed' });
   const w = await screen.findByTestId('prj-panel-warning');

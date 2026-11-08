@@ -7,6 +7,14 @@ const READ_ONLY: Record<ReadOnlyReason, string> = {
   original_missing: 'Read-only (original missing)',
 };
 
+/** Why a save failed, by `project:save-failed` reason / error code. */
+const FAILED: Record<string, string> = {
+  locked: 'file locked',
+  folder_moved: 'project folder moved',
+  io: 'disk error',
+  not_found: 'file missing',
+};
+
 /** `HH:MM` of an ISO time, or '' when unknown. */
 function timeOf(at: string): string {
   const d = new Date(at);
@@ -34,10 +42,11 @@ export function saveLabel(save: SaveStatus, readOnly: ReadOnlyReason | null): st
       const base = t ? `Saved · ${t}` : 'Saved';
       return save.kind === 'unchanged' ? `${base} · no changes` : base;
     }
-    case 'failed':
-      if (save.code === 'locked')
-        return save.retrying ? 'Save failed, file locked, retrying' : 'Save failed, file locked';
-      return `Save failed (${save.message || save.code})${save.retrying ? ', retrying' : ''}`;
+    case 'failed': {
+      // From the code only: core messages can carry OS text and paths (walkthrough D3).
+      const why = FAILED[save.code] ?? save.code.replace(/_/g, ' ');
+      return `Save failed, ${why}${save.retrying ? ', retrying' : ''}`;
+    }
     case 'conflict':
       return 'Conflict';
   }

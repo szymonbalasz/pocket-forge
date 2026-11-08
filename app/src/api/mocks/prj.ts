@@ -6,6 +6,7 @@
 // imports are fine. Production code never imports this file.
 import type {
   CardBadge,
+  ConflictView,
   CreateItem,
   DiskUsage,
   FolderFile,
@@ -33,6 +34,10 @@ export interface PrjMockProject {
   noThumb?: boolean;
   /** `project.json` unreadable: the card has no `last_edited` and the `unreadable` badge (R45). */
   unreadable?: boolean;
+  /** A save still pending after `locked`: `project_close` answers `unsaved` (FR-PRJ-21). */
+  pendingSave?: boolean;
+  /** A sync conflict (FR-PRJ-36): `project_conflict_get` returns it; add a `conflict` warning. */
+  conflict?: ConflictView;
 }
 
 export interface PrjMockSeed {
@@ -155,6 +160,8 @@ export function prjMock(
         ...(p.folders ?? {}),
       },
       trash: p.trash ?? [],
+      pendingSave: !!p.pendingSave,
+      conflict: p.conflict ?? null,
       revisions: [
         { id: nextRev(), seq: 0, created_at: p.last_edited, reason: 'create' },
       ] as RevisionEntry[],
@@ -330,7 +337,10 @@ export function prjMock(
       const p = open();
       return p ? snapshot(p) : null;
     },
-    project_close: () => {
+    project_close: (input) => {
+      const p = open();
+      if (p?.pendingSave && !input.force)
+        return fail('unsaved', 'A save is still pending (the file is locked); close anyway?');
       state.openPath = null;
       return {};
     },
@@ -438,6 +448,34 @@ export function prjMock(
           ? new Date(new Date(oldest).getTime() + 30 * 86400_000).toISOString()
           : null,
       };
+    },
+    project_conflict_get: () => {
+      const p = open();
+      if (!p) return fail('no_project', 'No asset project is open');
+      if (!p.conflict) return fail('no_conflict', 'This project has no conflict');
+      return p.conflict;
+    },
+    project_resolve_conflict: (input) => {
+      const p = open();
+      if (!p) return fail('no_project', 'No asset project is open');
+      const c = p.conflict as ConflictView | null;
+      if (!c) return fail('no_conflict', 'This project has no conflict');
+      const side = input.keep === 'other' ? c.other : c.this;
+      if (!side.can_keep)
+        return fail('files_missing', 'Still syncing', { detail: { files: side.missing_files } });
+      const lost = input.keep === 'other' ? c.this : c.other;
+      const revisions = p.revisions as RevisionEntry[];
+      const rev: RevisionEntry = {
+        id: nextRev(),
+        seq: revisions.length,
+        created_at: seed.now,
+        reason: 'conflict',
+        label: `Not kept (${lost.machine === 'this' ? 'this machine' : 'other machine'})`,
+      };
+      revisions.push(rev);
+      p.conflict = null;
+      p.warnings = (p.warnings as Rec[]).filter((w) => w.code !== 'conflict');
+      return rev;
     },
     project_relink_original: (input) => {
       const p = open();

@@ -111,12 +111,14 @@ export async function pickPaths(opts: PickOptions): Promise<string[]> {
   }
 }
 
-/** Tells the app the UI has rendered (ends the process in `tauri:smoke` runs). */
-export async function appReady(ok: boolean, detail: string): Promise<void> {
+/** Tells the app the UI has rendered (ends the process in `tauri:smoke` runs). In a debug smoke
+ *  run with a tile step the app answers with the image to open next (R46); otherwise null. */
+export async function appReady(ok: boolean, detail: string): Promise<string | null> {
   try {
-    await invoke('app_ready', { ok, detail });
+    return (await invoke<string | null>('app_ready', { ok, detail })) ?? null;
   } catch {
     // Not fatal: only the smoke run depends on it.
+    return null;
   }
 }
 
@@ -130,7 +132,7 @@ export const api = {
   },
   project: {
     open: (path: string) => call('project_open', { path }),
-    close: () => call('project_close', {}),
+    close: (force = false) => call('project_close', force ? { force: true } : {}),
     get: () => call('project_get', {}),
     putDraft: (draft: Commands['project_put_draft'][0]['draft']) =>
       call('project_put_draft', { draft }),
@@ -150,6 +152,8 @@ export const api = {
     trashRestore: (itemId: string) => call('project_trash_restore', { item_id: itemId }),
     diskUsage: () => call('project_disk_usage', {}),
     relinkOriginal: (path: string) => call('project_relink_original', { path }),
+    conflictGet: () => call('project_conflict_get', {}),
+    resolveConflict: (keep: 'this' | 'other') => call('project_resolve_conflict', { keep }),
   },
   editor: {
     imageOpen: (projectId: string, imageId: string, maxSide?: number) =>
