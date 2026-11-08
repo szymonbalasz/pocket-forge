@@ -321,7 +321,7 @@ test('FR-PRJ-36 after a resolved conflict the form reloads the kept settings (wa
     format: 'webp',
     source_px_per_square: 420,
   });
-  await projectStore.resolved();
+  await projectStore.resolved('other');
   await vi.waitFor(() => expect(exportStore.get().form.format).toBe('webp'));
   expect(h.exp.setSettings.mock.calls.at(-1)?.[0]).toMatchObject({ format: 'webp' });
   projectStore.reset();

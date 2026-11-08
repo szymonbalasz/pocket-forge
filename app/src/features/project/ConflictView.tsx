@@ -31,7 +31,7 @@ function Body({ onClose }: { onClose: () => void }) {
     setError(null);
     api.project.resolveConflict(side).then(
       async () => {
-        await projectStore.resolved();
+        await projectStore.resolved(side);
         onClose();
       },
       (e: unknown) => {

@@ -139,9 +139,9 @@ export const exportStore = {
     if (!guarding) {
       guarding = true;
       projectStore.addCloseGuard(closeGuard);
-      // Walk 2 N1: the kept version's settings, so the form can't send the other ones back.
-      projectStore.onResolved((p) => {
-        if (p.project_id === state.projectId) void exportStore.reloadSettings();
+      // Walk 2 N1, Keep other: the kept version's settings, so the form can't send ours back.
+      projectStore.onResolved((p, keep) => {
+        if (keep === 'other' && p.project_id === state.projectId) void exportStore.reloadSettings();
       });
     }
     listening ??= (async () => {

@@ -2,7 +2,7 @@
 // Holds no domain logic: every change is a core command, and the store keeps its result.
 import { useSyncExternalStore } from 'react';
 
-import { api, ApiError, hasCore, onEvent, type ProjectSnapshot } from '../api';
+import { api, ApiError, hasCore, onEvent, type ConflictKeep, type ProjectSnapshot } from '../api';
 
 /** The PRJ status-bar segment's states (asset-project §7). */
 export type SaveStatus =
@@ -42,10 +42,11 @@ let listening = false;
 export type CloseGuard = (proceed: () => void, cancel: () => void) => boolean;
 const closeGuards = new Set<CloseGuard>();
 
-/** Called with the snapshot after a sync conflict is resolved (FR-PRJ-36): features that keep
- *  draft state (RGN, REF, EXP) reload it from the kept version, so a later save can't write
- *  the version not kept back over it (walk 2 N1). */
-export type ResolvedListener = (project: ProjectSnapshot) => void;
+/** Called with the snapshot after a sync conflict is resolved (FR-PRJ-36). On Keep other,
+ *  features that keep draft state (RGN, REF, EXP, EDT's mask) reload it from the kept version,
+ *  so a later save can't write the version not kept back over it (walk 2 N1). On Keep this
+ *  their state is this machine's version already, and saves again. */
+export type ResolvedListener = (project: ProjectSnapshot, keep: ConflictKeep) => void;
 const resolvedListeners = new Set<ResolvedListener>();
 
 /** Asks the guards in turn; a held guard's `proceed` asks the ones after it. Runs `go` once all
@@ -271,13 +272,13 @@ export const projectStore = {
 
   /** After `project_resolve_conflict` (FR-PRJ-36): re-reads the project and has the features
    *  reload their draft state from the kept version. */
-  async resolved(): Promise<void> {
+  async resolved(keep: ConflictKeep): Promise<void> {
     if (!state.project) return;
     try {
       const project = await api.project.get();
       if (project) {
         set({ project, save: settled(project) });
-        for (const l of resolvedListeners) l(project);
+        for (const l of resolvedListeners) l(project, keep);
       }
     } catch (e) {
       set({ error: errorOf(e) });

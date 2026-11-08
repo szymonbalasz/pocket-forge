@@ -618,9 +618,11 @@ function subscribe(): void {
     }),
     onEventSafe('provider:status-changed', () => void refreshProvider()),
     Promise.resolve(
-      projectStore.onResolved((p) => {
-        if (p.project_id !== state.projectId) return;
-        set({ headRevision: p.head_revision });
+      // Keep other (walk 2 N1): the kept draft. Keep this: the panel is this version already
+      // (the core saved the refused draft; a save still waiting now succeeds).
+      projectStore.onResolved((p, keep) => {
+        if (p.project_id !== state.projectId || keep !== 'other') return;
+        set({ headRevision: p.head_revision, maskId: p.draft?.mask_id ?? null });
         applyRestoredDraft(p.draft);
       }),
     ),
