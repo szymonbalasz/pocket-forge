@@ -2,7 +2,7 @@
 // Holds no domain logic: every change is a core command, and the store keeps its result.
 import { useSyncExternalStore } from 'react';
 
-import { api, ApiError, hasCore, onEvent, type ProjectSnapshot } from '../api';
+import { api, ApiError, hasCore, onEvent, type ConflictKeep, type ProjectSnapshot } from '../api';
 
 /** The PRJ status-bar segment's states (asset-project §7). */
 export type SaveStatus =
@@ -42,6 +42,13 @@ let listening = false;
 export type CloseGuard = (proceed: () => void, cancel: () => void) => boolean;
 const closeGuards = new Set<CloseGuard>();
 
+/** Called with the snapshot after a sync conflict is resolved (FR-PRJ-36). On Keep other,
+ *  features that keep draft state (RGN, REF, EXP, EDT's mask) reload it from the kept version,
+ *  so a later save can't write the version not kept back over it (walk 2 N1). On Keep this
+ *  their state is this machine's version already, and saves again. */
+export type ResolvedListener = (project: ProjectSnapshot, keep: ConflictKeep) => void;
+const resolvedListeners = new Set<ResolvedListener>();
+
 /** Asks the guards in turn; a held guard's `proceed` asks the ones after it. Runs `go` once all
  *  allowed it, `cancel` if one cancels. */
 function askGuards(go: () => void, cancel: () => void): void {
@@ -75,6 +82,13 @@ function saveCode(e: unknown): string {
 
 function savedAt(p: ProjectSnapshot): string {
   return p.committed_at ?? p.revisions.at(-1)?.created_at ?? '';
+}
+
+/** The save segment for a freshly read snapshot: Conflict while one is open (§7), else Saved. */
+function settled(p: ProjectSnapshot): SaveStatus {
+  return p.warnings.some((w) => w.code === 'conflict')
+    ? { kind: 'conflict' }
+    : { kind: 'saved', at: savedAt(p) };
 }
 
 /** The banner text for `project:spool-dropped`, from codes only (no paths). */
@@ -132,7 +146,8 @@ async function openNow(path: string): Promise<boolean> {
   try {
     if (state.project) await api.project.close().catch(() => undefined);
     const project = await api.project.open(path);
-    set({ project, save: { kind: 'saved', at: savedAt(project) }, busy: false, opening: null });
+    // A conflict found at open shows as Conflict, not Saved (walk 2 N3).
+    set({ project, save: settled(project), busy: false, opening: null });
     bump();
     return true;
   } catch (e) {
@@ -249,12 +264,22 @@ export const projectStore = {
     bump();
   },
 
-  /** After `project_resolve_conflict` (FR-PRJ-36): re-reads the project, saved again. */
-  async resolved(): Promise<void> {
+  /** Registers a `ResolvedListener`; returns its removal. */
+  onResolved(listener: ResolvedListener): () => void {
+    resolvedListeners.add(listener);
+    return () => resolvedListeners.delete(listener);
+  },
+
+  /** After `project_resolve_conflict` (FR-PRJ-36): re-reads the project and has the features
+   *  reload their draft state from the kept version. */
+  async resolved(keep: ConflictKeep): Promise<void> {
     if (!state.project) return;
     try {
       const project = await api.project.get();
-      if (project) set({ project, save: { kind: 'saved', at: savedAt(project) } });
+      if (project) {
+        set({ project, save: settled(project) });
+        for (const l of resolvedListeners) l(project, keep);
+      }
     } catch (e) {
       set({ error: errorOf(e) });
     }

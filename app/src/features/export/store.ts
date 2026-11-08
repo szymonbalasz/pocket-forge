@@ -139,6 +139,10 @@ export const exportStore = {
     if (!guarding) {
       guarding = true;
       projectStore.addCloseGuard(closeGuard);
+      // Walk 2 N1, Keep other: the kept version's settings, so the form can't send ours back.
+      projectStore.onResolved((p, keep) => {
+        if (keep === 'other' && p.project_id === state.projectId) void exportStore.reloadSettings();
+      });
     }
     listening ??= (async () => {
       await onEvent('project:original-ready', () => {
@@ -187,6 +191,21 @@ export const exportStore = {
     } catch {
       // No settings yet (or EXP unavailable): keep the empty form.
     }
+    await exportStore.sync();
+  },
+
+  /** Re-reads the settings in effect (after a resolved conflict) and re-plans. */
+  async reloadSettings(): Promise<void> {
+    const projectId = state.projectId;
+    if (!projectId) return;
+    let form = emptyForm;
+    try {
+      form = formOf(await api.export.getSettings());
+    } catch {
+      // No settings: the empty form, as on open.
+    }
+    if (state.projectId !== projectId) return;
+    set({ form });
     await exportStore.sync();
   },
 

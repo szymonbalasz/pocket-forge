@@ -170,6 +170,8 @@ function Warnings({ project }: { project: ProjectSnapshot }) {
             role="status"
           >
             {WARNING_TEXT[code] ?? w?.message ?? code}
+            {/* A space before the link (walk 2 N4: "machine. Compare versions"). */}
+            {(code === 'folder_moved' || code === 'conflict') && ' '}
             {code === 'original_missing' && <Relink />}
             {code === 'folder_moved' && (
               // §11: closing asks first when the draft couldn't be saved (FR-PRJ-21).
@@ -601,7 +603,7 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
                   onClick={() =>
                     api.project
                       .trashRestore(t.id)
-                      .then(load, (e: unknown) => setError(errorOf(e).message))
+                      .then(load, (e: unknown) => setError(sentence(errorOf(e).message)))
                   }
                 >
                   Restore
@@ -613,4 +615,10 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
       )}
     </Section>
   );
+}
+
+/** A core message as a sentence for the panel (walk 2 N2: no raw lower-case text). */
+function sentence(message: string): string {
+  const m = message.trim();
+  return m ? `${m[0]!.toUpperCase()}${m.slice(1)}${/[.!?]$/.test(m) ? '' : '.'}` : m;
 }

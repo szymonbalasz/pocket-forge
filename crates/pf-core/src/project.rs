@@ -98,7 +98,8 @@ pub struct OpenProject {
     pub decoded: DecodedOriginal,
     /// Where thumbnails are queued (`None` in unit tests that don't need them).
     pub thumbs: Option<Thumbnails>,
-    /// A draft save that failed with `locked`, retried every 10 s (FR-PRJ-21).
+    /// A draft save that failed with `locked` (retried every 10 s, FR-PRJ-21) or `conflict` (saved
+    /// by the resolve).
     pub pending_draft: Option<PendingDraft>,
     /// Set while a sync conflict is open: every commit is refused with `conflict` until
     /// `project_resolve_conflict` (FR-PRJ-34 … 36).
@@ -779,8 +780,11 @@ pub fn put_draft(
             p.pending_draft = Some(keep);
             emit_save_failed(ctx, save_failed_reason(e), true);
         }
-        // Shown by the read-only and conflict states already.
-        Err(e) if matches!(e.code, ErrorCode::ReadOnly | ErrorCode::Conflict) => {}
+        // Walk 2 N1: kept until the resolve, which saves it with this machine's version (kept, or
+        // the `conflict` revision); closing asks meanwhile. The conflict state shows it.
+        Err(e) if e.code == ErrorCode::Conflict => p.pending_draft = Some(keep),
+        // Shown by the read-only state already.
+        Err(e) if e.code == ErrorCode::ReadOnly => {}
         // Anything else is surfaced too: the UI's debounced draft save doesn't show its errors
         // (walkthrough D3).
         Err(e) => emit_save_failed(ctx, save_failed_reason(e), false),
@@ -790,9 +794,13 @@ pub fn put_draft(
 
 /// Retries what a `locked` failure left behind (FR-PRJ-21): the pending draft. (RGN's runner
 /// replays the spool on every tick, R48.) Called every [`SAVE_RETRY_EVERY`]. Returns true while something is still
-/// pending. A draft that now fails for another reason (`conflict`, `read_only`) is dropped:
-/// the UI saves its draft again on the next change.
+/// pending. While a conflict is open the draft waits for the resolve. A draft that now fails for
+/// another reason (`read_only`, …) is dropped: the UI saves its draft again on the next change.
 pub fn retry_pending(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> bool {
+    if p.conflict.is_some() {
+        // Waits for the resolve (walk 2 N1).
+        return p.pending_draft.is_some();
+    }
     if let Some(pending) = p.pending_draft.take() {
         match put_draft_once(
             ctx,
@@ -806,6 +814,11 @@ pub fn retry_pending(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> bo
             Err(e) if keeps_draft(&e) => {
                 p.pending_draft = Some(pending);
                 emit_save_failed(ctx, save_failed_reason(&e), true);
+                return true;
+            }
+            // Found by this retry: waits for the resolve too.
+            Err(e) if e.code == ErrorCode::Conflict => {
+                p.pending_draft = Some(pending);
                 return true;
             }
             Err(e) => {
@@ -851,28 +864,39 @@ fn put_draft_once(
         );
     }
     commit(ctx, install_id, p, |ctx, _, m, _| {
-        let extra = m
-            .draft
-            .as_ref()
-            .map(|d| d.extra.clone())
-            .unwrap_or_default();
-        let kept_mask = m.draft.as_ref().and_then(|d| d.mask_id);
-        m.draft = Some(Draft {
-            final_prompt: draft.final_prompt,
-            model_id: draft.model_id,
-            controls: draft.controls,
-            seed: draft.seed,
-            region: draft.region,
-            mask_id: draft.mask_id.unwrap_or(kept_mask),
-            references: draft.references,
-            updated_at: ctx.now(),
-            extra,
-        });
-        if let Some(settings) = export_settings {
-            store::merge_export(m, settings);
-        }
+        apply_draft(ctx, m, draft, export_settings);
         Ok(())
     })
+}
+
+/// Writes a draft (and EXP's unsaved settings) into a manifest, keeping the draft's unknown
+/// fields.
+pub(crate) fn apply_draft(
+    ctx: &Context,
+    m: &mut Manifest,
+    draft: DraftInput,
+    export_settings: Option<serde_json::Map<String, Value>>,
+) {
+    let extra = m
+        .draft
+        .as_ref()
+        .map(|d| d.extra.clone())
+        .unwrap_or_default();
+    let kept_mask = m.draft.as_ref().and_then(|d| d.mask_id);
+    m.draft = Some(Draft {
+        final_prompt: draft.final_prompt,
+        model_id: draft.model_id,
+        controls: draft.controls,
+        seed: draft.seed,
+        region: draft.region,
+        mask_id: draft.mask_id.unwrap_or(kept_mask),
+        references: draft.references,
+        updated_at: ctx.now(),
+        extra,
+    });
+    if let Some(settings) = export_settings {
+        store::merge_export(m, settings);
+    }
 }
 
 // ---------------------------------------------------------------- relink

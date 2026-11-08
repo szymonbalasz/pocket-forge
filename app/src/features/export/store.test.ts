@@ -15,7 +15,7 @@ const h = vi.hoisted(() => {
       cancel: vi.fn(),
       prefetchOriginal: vi.fn(),
     },
-    prj: { close: vi.fn() },
+    prj: { close: vi.fn(), open: vi.fn(), get: vi.fn() },
   };
 });
 
@@ -304,3 +304,25 @@ function doneEvent(id: string, p: Record<string, unknown> = {}) {
     ...p,
   };
 }
+
+test('FR-PRJ-36 after a resolved conflict the form reloads the kept settings (walk 2 N1)', async () => {
+  const snap = { project_id: 'p1', warnings: [], revisions: [], committed_at: null };
+  h.prj.open.mockResolvedValue(snap);
+  h.prj.get.mockResolvedValue(snap);
+  await projectStore.open('<library-root>/Maps/Crypt');
+  await bound();
+  await exportStore.edit({ format: 'jpeg' });
+  expect(exportStore.get().form.format).toBe('jpeg');
+
+  // Keep other: the core now reports the kept version's settings.
+  h.exp.getSettings.mockResolvedValue({
+    grid: { mode: 'cells', cols: 10, rows: 12 },
+    target_px_per_square: null,
+    format: 'webp',
+    source_px_per_square: 420,
+  });
+  await projectStore.resolved('other');
+  await vi.waitFor(() => expect(exportStore.get().form.format).toBe('webp'));
+  expect(h.exp.setSettings.mock.calls.at(-1)?.[0]).toMatchObject({ format: 'webp' });
+  projectStore.reset();
+});

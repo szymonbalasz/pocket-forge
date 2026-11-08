@@ -7,6 +7,7 @@ export {
   referencesCostKey,
   referencesDraft,
   referencesForSend,
+  reloadReferences,
   restoreReferences,
   settleReferences,
 } from './blockStore';

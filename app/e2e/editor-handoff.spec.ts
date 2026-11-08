@@ -245,3 +245,79 @@ test('BL-26 a restored draft region reaches EDT through the region setter; the o
   await page.waitForTimeout(2500);
   expect(await drafts()).toBe(before);
 });
+
+test('FR-PRJ-36 walk 2 N1 Keep other loads the kept mask; this machine’s unsaved mask is not submitted over it', async ({
+  page,
+}) => {
+  await openMap(page);
+  // A sync conflict is open: every mask write is refused until the user picks a version.
+  await page.evaluate(() => {
+    type Rec = Record<string, unknown>;
+    const w = window as unknown as Rec & { __pfMockHandlers: Record<string, (i: Rec) => unknown> };
+    const submit = w.__pfMockHandlers.edt_mask_submit!;
+    w.__pfConflictOpen = true;
+    w.__pfMockHandlers.edt_mask_submit = (input) =>
+      w.__pfConflictOpen
+        ? Promise.reject({ code: 'conflict', message: 'also changed on another machine' })
+        : submit(input);
+  });
+  await regionAndStroke(page);
+  await expect(status(page)).toHaveAttribute('data-state', /unsaved/, { timeout: 5000 });
+  expect((await liveBytes(page)).some((v) => v === 255)).toBe(true);
+
+  // Keep other: the kept draft has the same region and an empty mask of its own.
+  await page.evaluate(() => {
+    type Rec = Record<string, unknown>;
+    const w = window as unknown as Rec & {
+      __pfMock: { emit: (e: string, p: unknown) => void };
+      __pfMockHandlers: Record<string, (i: Rec) => unknown>;
+      __pfEdtMasks: Record<string, Rec>;
+      __pfPrjMock: { projects: Map<string, Rec>; openPath: string };
+    };
+    const rect = { x: 400, y: 500, w: 200, h: 100 };
+    w.__pfEdtMasks.KEPT = { rect, data_b64: btoa('\0'.repeat(rect.w * rect.h)) };
+    const p = w.__pfPrjMock.projects.get(w.__pfPrjMock.openPath)!;
+    p.warnings = [{ code: 'conflict', message: 'changed elsewhere' }];
+    const side = (s: string) => ({
+      side: s,
+      file: s === 'this' ? null : 'project.json',
+      readable: true,
+      committed_at: '2026-11-08T12:00:00.000Z',
+      seq: 3,
+      machine: s,
+      layers: [],
+      newest_revision: null,
+      missing_files: [],
+      can_keep: true,
+    });
+    p.conflict = { source: 'seq', this: side('this'), other: side('other') };
+    w.__pfMockHandlers.project_resolve_conflict = () => {
+      w.__pfConflictOpen = false;
+      p.conflict = null;
+      p.warnings = [];
+      w.__pfMockSnapshot = {
+        ...(w.__pfMockSnapshot as Rec),
+        draft: {
+          final_prompt: 'theirs',
+          model_id: null,
+          controls: {},
+          seed: null,
+          region: { inner: rect, margin: 128 },
+          mask_id: 'KEPT',
+          updated_at: '2026-11-08T12:00:00.000Z',
+        },
+      };
+      w.__pfMock.emit('project:committed', { seq: 50 });
+      return { id: 'R9', seq: 9, created_at: '2026-11-08T12:00:00.000Z', reason: 'conflict' };
+    };
+    w.__pfMock.emit('project:conflict', {});
+  });
+  await page.getByTestId('prj-panel-conflict-open').click();
+  const before = (await submits(page)).length;
+  await page.getByTestId('prj-conflict-keep-other').click();
+  await expect(page.getByTestId('prj-conflict')).toBeHidden();
+
+  await expect.poll(async () => (await liveBytes(page)).some((v) => v !== 0)).toBe(false);
+  await page.waitForTimeout(2500);
+  expect(await submits(page)).toHaveLength(before);
+});

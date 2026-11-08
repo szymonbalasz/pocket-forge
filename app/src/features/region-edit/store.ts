@@ -40,6 +40,7 @@ import {
   referencesCostKey,
   referencesDraft,
   referencesForSend,
+  reloadReferences,
   restoreReferences,
   settleReferences,
 } from '../references';
@@ -368,10 +369,14 @@ async function refreshProject(): Promise<void> {
   }
 }
 
-/** Shows a restored revision's draft (walk D4). No draft save: the restore already wrote it.
- *  BL-26: its region goes back to EDT, validated (`refit` → `editorBridge.setRegion`); EDT keeps
- *  the overlapping mask and hands it off again. */
+/** Shows a restored revision's draft (walk D4), or the kept version's after a conflict is
+ *  resolved (walk 2 N1). No draft save: the core already wrote it, and a save still waiting
+ *  would write the replaced draft back. BL-26: its region goes back to EDT, validated (`refit` →
+ *  `editorBridge.setRegion`); EDT keeps the overlapping mask and hands it off again. */
 function applyRestoredDraft(d: ProjectSnapshot['draft']): void {
+  if (draftTimer) clearTimeout(draftTimer);
+  draftTimer = null;
+  reloadReferences(d?.references ?? null);
   const region = d?.region as { inner?: RectPx; margin?: number } | null | undefined;
   const inner = region?.inner ?? null;
   const margin = region?.margin ?? state.margin;
@@ -612,6 +617,15 @@ function subscribe(): void {
       void refreshIterations();
     }),
     onEventSafe('provider:status-changed', () => void refreshProvider()),
+    Promise.resolve(
+      // Keep other (walk 2 N1): the kept draft. Keep this: the panel is this version already
+      // (the core saved the refused draft; a save still waiting now succeeds).
+      projectStore.onResolved((p, keep) => {
+        if (p.project_id !== state.projectId || keep !== 'other') return;
+        set({ headRevision: p.head_revision, maskId: p.draft?.mask_id ?? null });
+        applyRestoredDraft(p.draft);
+      }),
+    ),
   ];
   unsubscribe = () =>
     subs.forEach(

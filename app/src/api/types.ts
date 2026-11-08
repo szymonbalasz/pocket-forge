@@ -97,7 +97,8 @@ export interface TrashItem {
   /** `trashed_at` + 30 days (FR-PRJ-32). */
   purge_at?: string;
   reason?: string;
-  /** Restore is offered only when true: `candidates`, `job_inputs`, `conflict_copy` (R51). */
+  /** Restore is offered only when true: `candidates`, `job_inputs`, `conflict_copy` (R51), but
+   *  never a `project.json` conflict copy (R57). */
   restorable: boolean;
 }
 

@@ -103,6 +103,16 @@ export function useMaskTools({
   // FR-EDT-19: reopen loads the draft's mask once per controller, when the image size is known;
   // a different draft region keeps the overlap.
   const draftLoadedFor = useRef<MaskController | null>(null);
+  // Walk 2 N1, Keep other: load the kept draft's mask as at reopen, so a retried submit can't
+  // write this machine's mask over it (RGN sends the kept region, BL-26). Keep this keeps the
+  // mask and its retry.
+  useEffect(
+    () =>
+      projectStore.onResolved((p, keep) => {
+        if (keep === 'other' && p.project_id === project.project_id) draftLoadedFor.current = null;
+      }),
+    [project.project_id],
+  );
   useEffect(() => {
     const c = ctl.current;
     // BL-10: with the original missing, the draft loads after the relink.

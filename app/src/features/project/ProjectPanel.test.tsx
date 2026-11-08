@@ -163,7 +163,7 @@ test('FR-PRJ-33 FR-PRJ-31 FR-PRJ-32 Storage shows disk use, trash count, next pu
   const trash = await screen.findByTestId('prj-panel-storage-trash');
   expect(trash.textContent).toContain('Trash: 1 item, 3.0 MB');
   expect(trash.textContent).toContain(
-    `next purge ${new Date('2026-12-01T00:00:00Z').toLocaleDateString()}`,
+    `next purge ${new Date('2026-12-01T00:00:00Z').toLocaleDateString([], { month: 'short', day: 'numeric' })}`,
   );
   expect(screen.getByTestId('prj-panel-storage-total').textContent).toBe('3.0 MB');
   fireEvent.click(screen.getByTestId('prj-panel-storage-restore'));
@@ -198,6 +198,29 @@ test('FR-PRJ-31 Restore is offered only for restorable trash items (R51)', async
   const row = (id: string) => items.find((i) => i.dataset.recordId === id)!;
   expect(within(row('T1')).queryByTestId('prj-panel-storage-restore')).not.toBeNull();
   expect(within(row('T2')).queryByTestId('prj-panel-storage-restore')).toBeNull();
+});
+
+test('FR-PRJ-31 a failed restore says why as a sentence, not raw core text (walk 2 N2)', async () => {
+  await openCrypt({
+    trash: [
+      {
+        id: 'T1',
+        path: 'jobs/J1/job (2).json',
+        kind: 'conflict_copy',
+        bytes: 1024,
+        trashed_at: '2026-11-01T00:00:00Z',
+        restorable: true,
+      },
+    ],
+  });
+  core.useHandlers({
+    ...core.handlersSnapshot(),
+    project_trash_restore: () => {
+      throw { code: 'conflict', message: 'jobs/J1/job.json exists again' };
+    },
+  });
+  fireEvent.click(await screen.findByTestId('prj-panel-storage-restore'));
+  expect(await screen.findByText('Jobs/J1/job.json exists again.')).not.toBeNull();
 });
 
 test('FR-PRJ-40 a spooled write refused for good shows a banner (BL-25)', async () => {
@@ -260,6 +283,10 @@ test('FR-PRJ-35 FR-PRJ-36 a conflict found mid-session shows the banner and the 
   p.conflict = { source: 'seq', this: side('this', 'this'), other: side('other', 'other') };
   act(() => core.emit('project:conflict', {}));
   const open = await screen.findByTestId('prj-panel-conflict-open');
+  // Walk 2 N4: the text and its link don't run together.
+  expect(open.closest('[data-code="conflict"]')!.textContent).toBe(
+    'This project was also changed on another machine. Compare versions',
+  );
   fireEvent.click(open);
   fireEvent.click(await screen.findByTestId('prj-conflict-keep-other'));
   await waitFor(() => expect(screen.queryByTestId('prj-conflict')).toBeNull());
@@ -268,6 +295,14 @@ test('FR-PRJ-35 FR-PRJ-36 a conflict found mid-session shows the banner and the 
     keep: 'other',
   });
   expect(screen.getByTestId('prj-status-save').dataset.state).toBe('saved');
+});
+
+test('FR-PRJ-34 a conflict copy found at open shows Conflict in the status bar, not Saved (walk 2 N3)', async () => {
+  await openCrypt({
+    warnings: [{ code: 'conflict', message: 'This project was also changed on another machine.' }],
+  });
+  expect(await screen.findByTestId('prj-panel-conflict-open')).not.toBeNull();
+  expect(screen.getByTestId('prj-status-save').dataset.state).toBe('conflict');
 });
 
 test('FR-PRJ-21 walkthrough D3: a folder moved while open shows the reason and a banner, Save shows no raw path, Back to home asks', async () => {

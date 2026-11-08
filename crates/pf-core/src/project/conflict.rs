@@ -331,7 +331,12 @@ pub fn resolve_conflict(
     keep: Keep,
 ) -> CoreResult<RevisionEntry> {
     p.require_writable()?;
-    let s = sides(p)?;
+    let mut s = sides(p)?;
+    // Walk 2 N1: a draft refused during the conflict is this machine's newest state. It goes with
+    // this version: current if kept, else in the `conflict` revision. Never dropped silently.
+    if let (Some(pending), Some(this)) = (p.pending_draft.clone(), s.this.as_mut()) {
+        super::apply_draft(ctx, this, pending.draft, pending.export);
+    }
     let (kept, lost) = match keep {
         Keep::This => (s.this, s.other),
         Keep::Other => (s.other, s.this),
@@ -377,7 +382,7 @@ pub fn resolve_conflict(
             Some(l) if l.commit.install_id == install_id => "this machine",
             _ => "other machine",
         };
-        commit_with(ctx, install_id, p, true, |ctx, _, m, plan| {
+        commit_with(ctx, install_id, p, true, |ctx, op, m, plan| {
             if let Some(l) = &lost {
                 let rev = RevisionFile {
                     schema_version: REVISION_SCHEMA_VERSION,
@@ -398,7 +403,8 @@ pub fn resolve_conflict(
                 m.revisions.push(rev.entry());
                 plan.revisions.push(rev);
             }
-            if let Some(copy) = &s.copy {
+            // A copy that's gone already (deleted, or synced away) leaves no empty trash item.
+            if let Some(copy) = s.copy.as_ref().filter(|c| op.path(c).is_file()) {
                 super::store::trash_files(
                     ctx,
                     m,
@@ -420,6 +426,7 @@ pub fn resolve_conflict(
         return Err(e);
     }
     p.warnings.retain(|w| w.code != "conflict");
+    p.pending_draft = None;
     p.request_thumbnail(ctx);
     let entry = p
         .manifest

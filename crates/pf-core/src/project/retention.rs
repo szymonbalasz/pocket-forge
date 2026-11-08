@@ -16,6 +16,7 @@ use crate::error::{CoreError, CoreResult, ErrorCode};
 use crate::fsx;
 use crate::job::JOB_FILE;
 use crate::manifest::*;
+use crate::naming;
 use crate::time::Timestamp;
 
 /// How long a trash item is kept (FR-PRJ-32, #18).
@@ -63,6 +64,17 @@ pub fn restorable_kind(kind: TrashKind) -> bool {
     )
 }
 
+/// R57 (amends R51): whether `project_trash_restore` takes this item. A `project.json` conflict
+/// copy never is: the version not kept is already a `conflict` revision, and putting the copy back
+/// would only put the project in conflict again. `job.json` and thumbnail copies still are.
+pub fn restorable(t: &TrashItem) -> bool {
+    restorable_kind(t.kind)
+        && !(t.kind == TrashKind::ConflictCopy
+            && t.files
+                .iter()
+                .any(|f| !f.contains('/') && naming::is_conflict_copy(f, MANIFEST_FILE)))
+}
+
 /// `project_trash_list`: the trash, newest first.
 pub fn trash_list(p: &OpenProject) -> Vec<TrashRow> {
     let mut rows: Vec<TrashRow> = p
@@ -78,7 +90,7 @@ pub fn trash_list(p: &OpenProject) -> Vec<TrashRow> {
             trashed_at: t.trashed_at,
             purge_at: purge_at(t),
             reason: t.reason.clone(),
-            restorable: restorable_kind(t.kind),
+            restorable: restorable(t),
         })
         .collect();
     rows.sort_by_key(|r| std::cmp::Reverse((r.trashed_at, r.id)));
@@ -104,7 +116,7 @@ fn item_bytes(p: &OpenProject, t: &TrashItem) -> u64 {
 // ---------------------------------------------------------------- restore
 
 /// `project_trash_restore` (FR-PRJ-31): brings every file of an item back to its old path and
-/// removes the item, in one commit. Only R51's kinds are restored (`not_restorable` otherwise,
+/// removes the item, in one commit. Only R51's kinds are restored, less R57's `project.json` copies (`not_restorable` otherwise,
 /// `detail.kind` names the kind). Candidates of the item leave the trash (`trash_id` cleared;
 /// their status is unchanged). Files move **before** the commit, so a crash in between leaves
 /// the item indexed and the next open moves them back into the trash (state before).
@@ -124,13 +136,15 @@ pub fn trash_restore(
         .ok_or_else(|| {
             CoreError::new(ErrorCode::UnknownId, "unknown trash item").with_field("item_id")
         })?;
-    if !restorable_kind(item.kind) {
-        return Err(CoreError::new(
-            ErrorCode::NotRestorable,
-            "this trash item holds files nothing uses; it can't be restored",
-        )
-        .with_field("item_id")
-        .with_detail(json!({ "kind": item.kind })));
+    if !restorable(&item) {
+        let message = if restorable_kind(item.kind) {
+            "the version not kept is already a revision in the history; restore that instead"
+        } else {
+            "this trash item holds files nothing uses; it can't be restored"
+        };
+        return Err(CoreError::new(ErrorCode::NotRestorable, message)
+            .with_field("item_id")
+            .with_detail(json!({ "kind": item.kind })));
     }
     for from in &item.files {
         if p.path(&item.trashed_path(from)).is_file() && p.path(from).exists() {
