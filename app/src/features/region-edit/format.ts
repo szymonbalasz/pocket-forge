@@ -1,0 +1,77 @@
+// Labels for the Generate panel, the tracker and the status bar. Pure.
+import type { CostValue, JobState, RegionFit } from '../../api';
+
+/** FR-RGN-05: "sent unresampled" or "patch N.N× softer" (outer ÷ sent, one decimal). */
+export function fitLabel(fit: Pick<RegionFit, 'outer' | 'sent_w' | 'sent_h'>): string {
+  if (fit.sent_w === fit.outer.w && fit.sent_h === fit.outer.h) return 'sent unresampled';
+  const ratio = Math.max(fit.outer.w / fit.sent_w, fit.outer.h / fit.sent_h);
+  return `patch ${ratio.toFixed(1)}× softer`;
+}
+
+const num = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
+
+export const amountLabel = (n: number, unit: string): string => `${num.format(n)} ${unit}`;
+
+/** A cost in provider units, or "unknown" (FR-RGN-12). */
+export function costLabel(cost: CostValue | null | undefined): string {
+  if (!cost || cost.amount === 'unknown') return 'unknown';
+  return amountLabel(cost.amount, cost.unit);
+}
+
+export function elapsedLabel(ms: number): string {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+export const STATE_LABEL: Record<JobState, string> = {
+  requested: 'Requested',
+  submitted: 'Submitted',
+  queued: 'Queued',
+  running: 'Running',
+  succeeded: 'Fetching',
+  fetched: 'Ready',
+  closed: 'Closed',
+  failed: 'Failed',
+  canceled: 'Canceled',
+  unknown: 'Unknown (offline)',
+  lost: 'Lost',
+};
+
+export const iterationNumber = (n: number): string => String(n).padStart(3, '0');
+
+/** FR-RGN-20: the normalised error + hint; `insufficient_balance` gets its own message. */
+export function jobErrorText(e: { code: string; hint?: string; message?: string }): string {
+  if (e.code === 'insufficient_balance')
+    return 'Not enough provider balance for this job. Top up your Scenario account, then retry.';
+  const base = e.message && e.message !== e.code ? e.message : e.code.replace(/_/g, ' ');
+  return e.hint ? `${base}. ${e.hint}` : base;
+}
+
+/** Messages for command errors the panel shows inline. */
+export function errorText(code: string, message: string): string {
+  switch (code) {
+    case 'region_too_small':
+    case 'region_too_large':
+    case 'out_of_bounds':
+      return message;
+    case 'mask_invalid':
+      return 'Paint a mask inside the region first.';
+    case 'original_unavailable':
+      return 'The original is still loading. Try again in a moment.';
+    case 'offline':
+      return 'The provider can’t be reached (offline).';
+    case 'auth':
+    case 'not_configured':
+      return 'The provider isn’t set up.';
+    case 'job_active':
+      return 'A job is already running in this project.';
+    case 'read_only':
+      return 'The project is read-only.';
+    case 'repick_unavailable':
+      return 'Only the newest iteration can be accepted (after undoing its accept). Compare, star and discard still work.';
+    case 'estimate_stale':
+      return 'The settings changed since the estimate; estimating again.';
+    default:
+      return message || code;
+  }
+}

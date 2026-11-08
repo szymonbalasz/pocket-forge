@@ -143,6 +143,19 @@ export const api = {
       call('rgn_job_estimate', { project_id: projectId, draft }),
     getSpend: () => call('rgn_spend_get', {}),
     setSpend: (spend: Commands['rgn_spend_set'][0]) => call('rgn_spend_set', spend),
+    submit: (input: Commands['rgn_job_submit'][0]) => call('rgn_job_submit', input),
+    cancel: (jobId: string) => call('rgn_job_cancel', { job_id: jobId }),
+    retryDraft: (jobId: string) => call('rgn_job_retry_draft', { job_id: jobId }),
+    dismiss: (jobId: string) => call('rgn_job_dismiss', { job_id: jobId }),
+    preview: (input: Commands['rgn_candidate_preview'][0]) => call('rgn_candidate_preview', input),
+    accept: (input: Commands['rgn_candidate_accept'][0]) => call('rgn_candidate_accept', input),
+    star: (jobId: string, candidateId: string, starred: boolean) =>
+      call('rgn_candidate_star', { job_id: jobId, candidate_id: candidateId, starred }),
+    discard: (jobId: string, candidateId: string) =>
+      call('rgn_candidate_discard', { job_id: jobId, candidate_id: candidateId }),
+    retune: (layerId: string, blend: Commands['rgn_patch_retune'][0]['blend']) =>
+      call('rgn_patch_retune', { layer_id: layerId, blend }),
+    iterations: () => call('rgn_iterations_list', {}),
   },
   mask: {
     read: (projectId: string, maskId: string) =>

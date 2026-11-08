@@ -343,6 +343,69 @@ export interface MaskRead {
   bytes: number[] | ArrayBuffer;
 }
 
+// ── Region edit (RGN §9) ──────────────────────────────────────────────────────────────────────
+
+/** PRV's generic cost (`Cost`): provider units, or "unknown". */
+export interface CostValue {
+  amount: number | 'unknown';
+  unit: string;
+}
+
+export type JobState =
+  | 'requested'
+  | 'submitted'
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'fetched'
+  | 'closed'
+  | 'failed'
+  | 'canceled'
+  | 'unknown'
+  | 'lost';
+
+/** `rgn_iterations_list` row (FR-RGN-40). The active job before it has candidates has
+ *  `n`, `dir` and `slug` null. */
+export interface RgnIteration {
+  job_id: string;
+  n: number | null;
+  dir: string | null;
+  slug: string | null;
+  state: JobState;
+  kept: number;
+  returned: number;
+  cost: CostValue | null;
+  accepted_in_stack: boolean;
+}
+
+export interface RgnBlend {
+  feather_px: number;
+  colour_match: boolean;
+}
+
+/** `rgn_candidate_preview` (R16). `url` is the transient key's URL: the UI never builds hosts
+ *  (EDT Appendix A). */
+export interface RgnPreview {
+  key: string;
+  url: string;
+  rect: RectPx;
+}
+
+/** A manifest candidate (schema §4.7) as `project_get` returns it. */
+export interface CandidateRecord {
+  id: string;
+  job_id: string;
+  index: number;
+  file: string;
+  status: 'new' | 'accepted' | 'dismissed' | 'discarded' | 'trashed' | 'invalid';
+  starred: boolean;
+  trash_id: string | null;
+  width?: number;
+  height?: number;
+  /** Aspect differs from the sent one by > 1 % (FR-RGN-24). */
+  aspect_warning?: boolean;
+}
+
 /** Core command name → [input, output]. Append new commands. */
 export interface Commands {
   app_info: [Record<string, never>, AppInfo];
@@ -386,6 +449,28 @@ export interface Commands {
   rgn_spend_get: [Record<string, never>, Spend];
   /** A missing field keeps its value; null clears it. */
   rgn_spend_set: [{ cap?: number | null; threshold?: number | null }, Spend];
+  rgn_job_submit: [
+    { draft: JobDraft; estimate_id: string; confirmations: SpendNeed[] },
+    { job_id: string },
+  ];
+  rgn_job_cancel: [{ job_id: string }, { result: 'canceled' | 'not_cancellable' }];
+  rgn_job_retry_draft: [{ job_id: string }, JobDraft];
+  rgn_job_dismiss: [{ job_id: string }, { trashed: number }];
+  rgn_candidate_preview: [{ job_id: string; candidate_id: string; blend: RgnBlend }, RgnPreview];
+  rgn_candidate_accept: [
+    { job_id: string; candidate_id: string; blend: RgnBlend },
+    { layer_id: string; revision_id: string },
+  ];
+  rgn_candidate_star: [
+    { job_id: string; candidate_id: string; starred: boolean },
+    Record<string, never>,
+  ];
+  rgn_candidate_discard: [{ job_id: string; candidate_id: string }, Record<string, never>];
+  rgn_patch_retune: [
+    { layer_id: string; blend: RgnBlend },
+    { layer_id: string; revision_id: string },
+  ];
+  rgn_iterations_list: [Record<string, never>, RgnIteration[]];
   export_set_settings: [{ settings: ExportSettingsInput }, ExportSettings];
   export_plan: [{ settings: ExportSettingsInput }, ExportPlan];
   export_start: [{ settings: ExportSettingsInput; replace: boolean }, { export_id: string }];
@@ -404,6 +489,16 @@ export interface Events {
   'edt:tiles-failed': { key: string; error: CoreErrorShape | string };
   'export:settings-changed': { source: number | null; target: number | null };
   'provider:status-changed': { connectivity: Connectivity };
+  'rgn:job-state': {
+    job_id: string;
+    state: JobState;
+    progress: number | null;
+    cost: CostValue | null;
+    error?: { code: string; hint?: string; message?: string } | null;
+    /** FR-PRV-19 `long_running` (from 180 s). */
+    long_running?: boolean;
+  };
+  'rgn:candidate-ready': { job_id: string; candidate_id: string; status: 'ready' | 'invalid' };
   'rgn:spend': { spend: number; cap: number | null };
   'project:original-ready': Record<string, never> | null;
   'export:progress': { export_id: string; phase: ExportPhase; fraction: number };
