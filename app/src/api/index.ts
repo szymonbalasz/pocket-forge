@@ -10,9 +10,11 @@ import type {
   CommandName,
   Commands,
   CoreErrorShape,
+  DraftReferences,
   Events,
   ExportSettingsInput,
   ProjectFolder,
+  RefRole,
   Section,
 } from './types';
 
@@ -224,5 +226,23 @@ export const api = {
     getCapabilities: (modelId: string) => call('provider_get_capabilities', { model_id: modelId }),
     balance: () => call('provider_balance', {}),
     fakeSetCase: (fakeCase: string) => call('provider_fake_set_case', { case: fakeCase }),
+  },
+  references: {
+    listPacks: () => call('ref_list_packs', {}),
+    getPack: (packId: string) => call('ref_pack_get', { pack_id: packId }),
+    create: (name: string, paths?: string[]) =>
+      call('ref_pack_create', paths?.length ? { name, paths } : { name }),
+    rename: (packId: string, name: string) => call('ref_pack_rename', { pack_id: packId, name }),
+    update: (packId: string, patch: { notes?: string; roles?: Record<string, RefRole | null> }) =>
+      call('ref_pack_update', { pack_id: packId, ...patch }),
+    addImages: (packId: string, paths: string[]) =>
+      call('ref_pack_add_images', { pack_id: packId, paths }),
+    removeImages: (packId: string, files: string[]) =>
+      call('ref_pack_remove_images', { pack_id: packId, files }),
+    delete: (packId: string) => call('ref_pack_delete', { pack_id: packId }),
+    trashList: () => call('ref_trash_list', {}),
+    trashRestore: (itemId: string) => call('ref_trash_restore', { item_id: itemId }),
+    resolve: (modelId: string, references: DraftReferences | null) =>
+      call('ref_resolve', { model_id: modelId, references }),
   },
 };

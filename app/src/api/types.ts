@@ -132,6 +132,8 @@ export interface Draft {
   seed: number | null;
   region: unknown;
   mask_id: string | null;
+  /** REF's selection (schema §4.5, #51); null = REF's defaults (FR-REF-17). */
+  references?: DraftReferences | null;
   updated_at: string;
 }
 
@@ -186,6 +188,8 @@ export interface DraftInput {
   seed?: number | null;
   region?: unknown;
   mask_id?: string | null;
+  /** REF's selection (FR-REF-20, FR-PRJ-54). Sent only once the user changed it. */
+  references?: DraftReferences | null;
 }
 
 export interface ImageOpen {
@@ -562,6 +566,21 @@ export interface Commands {
   project_trash_restore: [{ item_id: string }, Record<string, never>];
   project_disk_usage: [Record<string, never>, DiskUsage];
   project_relink_original: [{ path: string }, Record<string, never>];
+  // reference-packs §9 (#51, #54)
+  ref_list_packs: [Record<string, never>, PackCard[]];
+  ref_pack_get: [{ pack_id: string }, Pack];
+  ref_pack_create: [{ name: string; paths?: string[] }, { pack: Pack; items: PackAddItem[] }];
+  ref_pack_rename: [{ pack_id: string; name: string }, Pack];
+  ref_pack_update: [
+    { pack_id: string; notes?: string; roles?: Record<string, RefRole | null> },
+    Pack,
+  ];
+  ref_pack_add_images: [{ pack_id: string; paths: string[] }, { items: PackAddItem[] }];
+  ref_pack_remove_images: [{ pack_id: string; files: string[] }, { item_id: string }];
+  ref_pack_delete: [{ pack_id: string }, { item_id: string }];
+  ref_trash_list: [Record<string, never>, RefTrashItem[]];
+  ref_trash_restore: [{ item_id: string }, { path: string }];
+  ref_resolve: [{ model_id: string; references: DraftReferences | null }, RefResolved];
 }
 
 export type CommandName = keyof Commands;
@@ -605,4 +624,107 @@ export interface Events {
   'project:conflict': Record<string, never>;
   'project:recovered': Record<string, never>;
   'project:thumb-updated': { project_id: string };
+  'ref:packs-changed': Record<string, never> | null;
+  'ref:add-progress': { done: number; total: number };
+  'ref:thumb-updated': { pack_id: string };
+  'ref:trash-purged': { count: number; bytes: number };
+}
+
+// ── Reference packs (REF §9, #51, #54) ────────────────────────────────────────────────────────
+
+/** A per-image role (FR-REF-11); `null` = none. */
+export type RefRole = 'style' | 'structure' | 'identity';
+
+export type PackBadge = 'not_ready' | 'not_available_offline' | 'conflict';
+
+/** A packs-home card (FR-REF-06), from `pack.json`, the thumbnail and a directory listing. */
+export interface PackCard {
+  pack_id: string;
+  /** The folder name (OQ-REF-01). */
+  name: string;
+  image_count: number;
+  /** The first line of the notes ("" when none). */
+  notes_line: string;
+  /** `References/<pack>/.pforge/thumb.jpg` on the `pf-tiles` scheme, or null (placeholder). */
+  thumb_url: string | null;
+  badges: PackBadge[];
+}
+
+export type PackImageState = 'ok' | 'cloud_only' | 'corrupt' | 'unsupported';
+
+/** A pack image (`ref_pack_get`, FR-REF-01, 14). */
+export interface PackImage {
+  file: string;
+  bytes: number;
+  mtime: string;
+  w?: number;
+  h?: number;
+  role?: RefRole | null;
+  state: PackImageState;
+  /** ≤ 256 px thumbnail on the `pf-tiles` scheme (EDT `library` keys, FR-REF-14); null = none. */
+  thumb_url?: string | null;
+}
+
+export interface Pack {
+  pack_id: string;
+  name: string;
+  notes: string;
+  images: PackImage[];
+}
+
+/** One source of `ref_pack_create` / `ref_pack_add_images` (FR-REF-07, 08). */
+export type PackAddItem =
+  | { status: 'added'; source: string; file: string }
+  | { status: 'already_in_pack'; source: string; file: string }
+  | { status: 'skipped'; source: string; reason: SkipReason };
+
+/** A References trash item (schema §4.13, FR-REF-12). */
+export interface RefTrashItem {
+  id: string;
+  kind: 'pack' | 'images';
+  pack_id: string;
+  /** `References/<pack>` for a pack; the pack folder for images. */
+  from: string;
+  files: string[];
+  trashed_at: string;
+}
+
+/** The draft's `references` (schema §4.5). */
+export interface DraftReferences {
+  packs: { pack_id: string; name: string }[];
+  items: { key: string; on: boolean; role: RefRole | null }[];
+}
+
+/** A model reference slot as `ref_resolve` reports it; `on` = items ticked in it. */
+export interface RefSlot {
+  name: string;
+  role: RefRole | null;
+  min: number;
+  max: number;
+  on: number;
+}
+
+export type RefItemState = 'ok' | 'cloud_only' | 'corrupt' | 'missing';
+
+/** An available item (FR-REF-16). Badges: `cloud`, `missing`, `duplicate`, `corrupt`,
+ *  `changed_since:<NNN>`. */
+export interface RefItem {
+  /** `project:<file>` or `pack:<pack_id>:<file>`. */
+  key: string;
+  source: 'project' | 'pack';
+  pack_id?: string;
+  pack_name?: string;
+  file: string;
+  role?: RefRole | null;
+  on: boolean;
+  state: RefItemState;
+  badges: string[];
+  thumb_key?: string;
+  thumb_url?: string | null;
+}
+
+export interface RefResolved {
+  slots: RefSlot[];
+  items: RefItem[];
+  notices: { code: string; message: string }[];
 }
