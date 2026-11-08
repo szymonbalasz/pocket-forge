@@ -30,6 +30,7 @@ import {
   orderRows,
   refsTooltip,
   retryJobId,
+  shownState,
   stripJobId,
   trashOnSubmit,
 } from './tracker';
@@ -373,6 +374,15 @@ describe('iteration tracker logic', () => {
     expect(defaultSelection(rows, 'gone')).toBe('J3');
     expect(stripJobId(rows)).toBe('J3');
     expect(stripJobId([row('J1', 1, 'closed', true)])).toBeNull();
+  });
+
+  test('FR-RGN-28 walk D6 a job closed by the next submit shows Closed, not its last live state', () => {
+    const live = { state: 'fetched' as const };
+    expect(shownState(row('J1', 1, 'closed'), live)).toBe('closed');
+    expect(shownState(row('J1', 1, 'failed'), { state: 'running' })).toBe('failed');
+    // A live event still leads while the core's row isn't final yet.
+    expect(shownState(row('J2', null, 'submitted'), { state: 'running' })).toBe('running');
+    expect(shownState(row('J2', 2, 'fetched'), undefined)).toBe('fetched');
   });
 
   test('FR-RGN-21 R62 Retry on the newest job in any final state, closed included; never an older one', () => {

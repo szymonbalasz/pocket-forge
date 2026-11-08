@@ -7,6 +7,11 @@ export const isTerminal = (s: JobState): boolean => TERMINAL.includes(s);
 /** Running: submit is disabled and the job strip shows progress. */
 export const isActive = (s: JobState): boolean => !isTerminal(s) && s !== 'fetched';
 
+/** The state a chip shows: the live event's, unless the core's row is already final. A job
+ *  closed by the next submit emits no event, so its last live state ("Ready") is stale (walk D6). */
+export const shownState = (row: RgnIteration, live: { state: JobState } | undefined): JobState =>
+  isTerminal(row.state) ? row.state : (live?.state ?? row.state);
+
 /** Newest first: the active job without candidates (n = null) leads, then by `n` descending. */
 export function orderRows(rows: RgnIteration[]): RgnIteration[] {
   return [...rows].sort((a, b) => {

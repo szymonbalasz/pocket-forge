@@ -16,6 +16,7 @@ import {
   orderRows,
   refsTooltip,
   retryJobId,
+  shownState,
   stripJobId,
 } from './tracker';
 import type { RgnIteration } from '../../api';
@@ -32,7 +33,7 @@ export function useNow(on: boolean): number {
 }
 
 function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined }) {
-  const state = live?.state ?? row.state;
+  const state = shownState(row, live);
   const running = isActive(state);
   const now = useNow(running);
   const progress = live?.progress ?? null;
@@ -158,7 +159,7 @@ export function IterationTracker() {
       >
         {rows.map((r) => {
           const live = s.live[r.job_id];
-          const state = live?.state ?? r.state;
+          const state = shownState(r, live);
           return (
             <div
               key={r.job_id}

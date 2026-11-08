@@ -100,6 +100,26 @@ test('FR-RGN-21 R62 Retry is offered on the newest job once it is closed by an a
   await expect(page.getByTestId('rgn-panel-prompt')).toHaveValue('A stone well');
 });
 
+test('FR-RGN-28 a job closed by the next submit shows Closed on its chip (walk D6)', async ({
+  page,
+}) => {
+  await openRgn(page);
+  await drawRegion(page, [400, 500], [800, 900]);
+  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
+  await page.getByTestId('rgn-panel-submit').click();
+  await page.getByTestId('rgn-confirm-ok').click();
+  await drive(page, 'finish', 3);
+  const first = page.getByTestId('rgn-tracker-item');
+  await expect(first).toHaveAttribute('data-state', 'fetched');
+  await page.getByTestId('rgn-panel-submit').click();
+  await page.getByTestId('rgn-confirm-ok').click();
+  await expect(page.getByTestId('rgn-tracker-item')).toHaveCount(2);
+  const old = page.getByTestId('rgn-tracker-item').nth(1);
+  await expect(old).toHaveAttribute('data-state', 'closed');
+  await expect(old).toContainText('Closed');
+});
+
 test('FR-RGN-24 a candidate in another aspect shows the warning badge in the picker (walk D3)', async ({
   page,
 }) => {

@@ -2,7 +2,7 @@
 // there is no job to report.
 import { STATE_LABEL } from './format';
 import { useRgn } from './store';
-import { orderRows, stripJobId } from './tracker';
+import { orderRows, shownState, stripJobId } from './tracker';
 
 export function JobStatus() {
   const s = useRgn((x) => x);
@@ -11,7 +11,7 @@ export function JobStatus() {
   if (!id) return null;
   const row = orderRows(s.iterations)[0]!;
   const live = s.live[id];
-  const state = live?.state ?? row.state;
+  const state = shownState(row, live);
   const progress = live?.progress ?? null;
   return (
     <span
