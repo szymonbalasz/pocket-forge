@@ -283,7 +283,11 @@ fn fr_ref_21_a_ticked_reference_gone_before_submit_fails_without_spend() {
             spend,
             "{what}: no spend"
         );
-        assert_eq!(lab.fake().last_reference_hashes(), calls, "{what}: no provider call");
+        assert_eq!(
+            lab.fake().last_reference_hashes(),
+            calls,
+            "{what}: no provider call"
+        );
     };
 
     // Moved out of the pack in Explorer.
@@ -314,7 +318,11 @@ fn fr_ref_21_a_ticked_reference_gone_before_submit_fails_without_spend() {
     no_spend("deleted");
 
     // Now corrupt: it can't be ticked any more, and is not dropped silently either.
-    std::fs::write(lab.project_dir.join("references").join("a.png"), b"not a png").unwrap();
+    std::fs::write(
+        lab.project_dir.join("references").join("a.png"),
+        b"not a png",
+    )
+    .unwrap();
     std::fs::write(lab.project_dir.join("references").join("b.png"), swatch(20)).unwrap();
     let err = submit(&d);
     assert_eq!(
@@ -339,7 +347,13 @@ fn fr_ref_21_a_ticked_reference_gone_before_submit_fails_without_spend() {
         .dispatch("ref_pack_delete", json!({"pack_id": pack}))
         .unwrap();
     let r = resolve(&lab, "fake-white-edit", &r["references"]);
-    assert!(r["notices"].as_array().unwrap().iter().any(|n| n["code"] == "pack_unavailable"));
+    assert!(
+        r["notices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n["code"] == "pack_unavailable")
+    );
     let id = lab
         .submit_draft(draft(&lab, "fake-white-edit", r["references"].clone()))
         .unwrap();

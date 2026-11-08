@@ -472,11 +472,7 @@ impl Command for RefResolve {
         );
         resolve::mark_duplicates(&mut out.items, |p| core.refs.prepared.content_hash_of(p));
         for item in &mut out.items {
-            if let Some(url) = item
-                .path
-                .as_deref()
-                .and_then(|p| image_thumb(core, p))
-            {
+            if let Some(url) = item.path.as_deref().and_then(|p| image_thumb(core, p)) {
                 item.thumb_key = url
                     .rsplit_once("/i/")
                     .and_then(|(_, k)| k.split_once('.'))

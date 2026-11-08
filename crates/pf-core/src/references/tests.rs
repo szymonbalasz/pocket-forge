@@ -565,7 +565,11 @@ fn fr_ref_28_pack_json_conflict_copy_later_updated_at_wins() {
     assert!(!t[0].restorable);
     let err = trash::restore(&e.ctx, &e.settings, t[0].id).unwrap_err();
     assert_eq!(err.code, ErrorCode::NotRestorable);
-    assert_eq!(trash::list(&e.ctx, &e.settings).len(), 1, "still in the trash");
+    assert_eq!(
+        trash::list(&e.ctx, &e.settings).len(),
+        1,
+        "still in the trash"
+    );
     assert!(!dir.join("pack (2).json").exists());
     // An older conflict copy loses.
     let mut older = newer.clone();
@@ -690,7 +694,10 @@ fn fr_ref_14_image_thumbnails_are_256_px() {
     let got = core
         .dispatch("ref_pack_get", json!({"pack_id": id}))
         .unwrap();
-    assert_eq!(size(got["images"][0]["thumb_url"].as_str().unwrap()), (256, 240));
+    assert_eq!(
+        size(got["images"][0]["thumb_url"].as_str().unwrap()),
+        (256, 240)
+    );
 
     // The References block over a project with the same file in references/.
     let dir = e.project("Crypt");
@@ -702,5 +709,8 @@ fn fr_ref_14_image_thumbnails_are_256_px() {
             json!({"model_id": "fake-white-edit", "references": null}),
         )
         .unwrap();
-    assert_eq!(size(r["items"][0]["thumb_url"].as_str().unwrap()), (256, 240));
+    assert_eq!(
+        size(r["items"][0]["thumb_url"].as_str().unwrap()),
+        (256, 240)
+    );
 }
