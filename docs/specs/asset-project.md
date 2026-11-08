@@ -2,7 +2,7 @@
 feature: asset-project
 prefix: PRJ
 owner: rev-asset-project
-status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: []
 ---
 
@@ -160,14 +160,9 @@ N/A: no provider calls. PRJ persists the job record ADR 0001 requires (KQ-17) an
 | 6 | Conflicts: copy + seq detection, spool, conflict view, resolve, status bar | command registry (append) | 4 |
 
 ## 15. Open questions
-| ID | Question | Options (tradeoff) | Blocking? |
-|---|---|---|---|
-| OQ-PRJ-13 | Where does the home thumbnail live? | **A. `.pforge/thumb.jpg`, synced: other machines show it without the big image; small sync churn** / B. local cache: no churn, but a new machine must hydrate and decode every original | No (slice 2) |
-| OQ-PRJ-14 | Keep the recent-projects list (#40)? | **A. Retire it: the home grid sorted by last edited replaces it; less code** / B. keep a cross-section "Recent" row: one more list to maintain | No |
-| OQ-PRJ-15 | Should `working/` also hold a flattened current image? | **A. No: `working/` holds the untouched original; the current state is seen in the thumbnail and `exports/`; no 16k flatten per accept** / B. yes, rewritten on each accept: Explorer shows edits, but seconds per accept and sync churn | No |
-| OQ-PRJ-16 | Home thumbnails and user-folder files need image URLs outside the open project's manifest; EDT's `/i/` keys (FR-EDT-31/32) are per open project. Names [editor-canvas](editor-canvas.md). | **A. EDT adds a `library` key space: a core fn registers a file (≤ 512 px copy) and returns `/i/<key>`; released when the view closes** / B. PRJ serves its own scheme: a second URI handler to secure | No (slice 2) |
+None open.
 
-**Resolved:** OQ-PRJ-01 ✅ superseded by #44 (project folder) · OQ-PRJ-02 ✅ superseded by #44 (copy into the project's `working/`) · OQ-PRJ-03 ✅ superseded by #44 (creation writes `r0`) · OQ-PRJ-04 ✅ A, commit every change, draft after 2 s idle (#40) · OQ-PRJ-05 ✅ A, `sha2` (#38) · OQ-PRJ-06 ✅ restore the parent revision (R3, FR-PRJ-43) · OQ-PRJ-07 ✅ A, minimal revision list and relink (#40); recent list → OQ-PRJ-14 · OQ-PRJ-08 ✅ glossary (R27) · OQ-PRJ-09 ✅ EDT owns the tile cache, 2 GiB (R5) · OQ-PRJ-12 ✅ A (R29) · OQ-PRJ-10 ✅ A, the later `job.json` wins (#41) · OQ-PRJ-11 ✅ A, EDT draws a given layer stack read-only (#41) · OQ-EDT-14 ✅ A (#41).
+**Resolved:** OQ-PRJ-01 ✅ superseded by #44 (project folder) · OQ-PRJ-02 ✅ superseded by #44 (copy into the project's `working/`) · OQ-PRJ-03 ✅ superseded by #44 (creation writes `r0`) · OQ-PRJ-04 ✅ A, commit every change, draft after 2 s idle (#40) · OQ-PRJ-05 ✅ A, `sha2` (#38) · OQ-PRJ-06 ✅ restore the parent revision (R3, FR-PRJ-43) · OQ-PRJ-07 ✅ A, minimal revision list and relink (#40); recent list → OQ-PRJ-14 · OQ-PRJ-08 ✅ glossary (R27) · OQ-PRJ-09 ✅ EDT owns the tile cache, 2 GiB (R5) · OQ-PRJ-12 ✅ A (R29) · OQ-PRJ-10 ✅ A, the later `job.json` wins (#41) · OQ-PRJ-11 ✅ A, EDT draws a given layer stack read-only (#41) · OQ-EDT-14 ✅ A (#41). · OQ-PRJ-13 ✅ A, `.pforge/thumb.jpg` synced (#49) · OQ-PRJ-14 ✅ A, recent list retired; the home grid replaces it (#49) · OQ-PRJ-15 ✅ A, no flattened copy in `working/` (#49) · OQ-PRJ-16 ✅ A, EDT adds a `library` key space on `/i/` (#49)
 
 ## Appendix A: walkthrough
 `PF_DATA_DIR` + `PF_LIBRARY_DIR` in `.pf-dev/`, fake provider.

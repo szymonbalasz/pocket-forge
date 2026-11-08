@@ -2,7 +2,7 @@
 feature: region-edit
 prefix: RGN
 owner: rev-region-edit
-status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [asset-project, editor-canvas, provider, export]
 ---
 
@@ -161,12 +161,7 @@ PRJ owns storage, names and the atomic commit; fields are defined once in [manif
 | 6 | Generate section with Appendix A controls, iteration tracker with job strip, confirm dialog (mocked commands, parallel to 2–5) | UI feature registry (append) | EDT region tool, mask hand-off, picker |
 
 ## 15. Open questions
-| ID | Question | Options (tradeoff) | Blocking? |
-|---|---|---|---|
-| OQ-RGN-15 | The tracker shows older iterations. May the user accept a candidate from one? | **A. No, keep R32: older iterations are compare, star and discard only; no new semantics** / B. yes, any kept candidate: natural with the tracker, but reopens #41 and R32 | No |
-| OQ-RGN-16 | Does a trashed result leave `results/`? | **A. Yes, it moves to `.pforge/trash/`: `results/` shows only what was kept; same trash as everything else (#18)** / B. it stays until the 30-day purge: browsable rejects and fewer file moves, but `results/` fills with rejects | No (slice 5) |
-
-Answered ones are in [Appendix C](#appendix-c-closed-open-questions).
+None open. Answered ones are in [Appendix C](#appendix-c-closed-open-questions).
 
 ## Appendix A: capability-driven controls
 Rendered from PRV's generic `controls[]` (FR-PRV-10, PRV Appendix C). Each control carries PRV's `role` (R28); RGN binds the source, mask and prompt by role, never by input name.
@@ -237,5 +232,7 @@ stateDiagram-v2
 | OQ-RGN-10 | Crash before the handle is saved | ✅ `lost` + possible-charge notice (#40) |
 | OQ-RGN-11 | Input constraints beyond max px | ✅ PRV exposes `input_px`; RGN fits to it (R20) |
 | OQ-RGN-12 | Glossary terms | ✅ Added (R27) |
+| OQ-RGN-15 | Accept from an older iteration | ✅ A, no: compare, star and discard only (#49, R32) |
+| OQ-RGN-16 | Does a trashed result leave `results/`? | ✅ A, yes: it moves to `.pforge/trash/` (#49) |
 | OQ-RGN-13 | Accept another candidate after undoing an accept | ✅ B as a re-pick that keeps `closed` terminal (#41, R32, FR-RGN-36) |
 | OQ-RGN-14 | Which control is the source, mask, prompt or candidate count | ✅ PRV's `role` field; RGN binds by role (R28) |

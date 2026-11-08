@@ -2,7 +2,7 @@
 feature: editor-canvas
 prefix: EDT
 owner: rev-editor-canvas
-status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [asset-project, export]
 ---
 
