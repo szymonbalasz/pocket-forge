@@ -37,6 +37,16 @@ let state: ProjectState = initial;
 const listeners = new Set<() => void>();
 let listening = false;
 
+/** A feature's say before the open project closes (EXP's "Cancel the export and close?").
+ *  Returns true to allow it now; false to hold the close and call `proceed` later. */
+export type CloseGuard = (proceed: () => void) => boolean;
+const closeGuards = new Set<CloseGuard>();
+
+function guardsAllow(proceed: () => void): boolean {
+  for (const g of closeGuards) if (!g(proceed)) return false;
+  return true;
+}
+
 function set(patch: Partial<ProjectState>): void {
   state = { ...state, ...patch };
   for (const l of listeners) l();
@@ -95,8 +105,20 @@ export const projectStore = {
     set(initial);
   },
 
-  /** Opens a project folder (FR-PRJ-14). */
-  async open(path: string): Promise<boolean> {
+  /** Registers a close guard (see `CloseGuard`); returns its removal. */
+  addCloseGuard(guard: CloseGuard): () => void {
+    closeGuards.add(guard);
+    return () => closeGuards.delete(guard);
+  },
+
+  /** Opens a project folder (FR-PRJ-14). Closing the open one asks the close guards first. */
+  async open(path: string, opts: { force?: boolean } = {}): Promise<boolean> {
+    if (
+      state.project &&
+      !opts.force &&
+      !guardsAllow(() => void projectStore.open(path, { force: true }))
+    )
+      return false;
     set({ busy: true, error: null, opening: path });
     try {
       if (state.project) await api.project.close().catch(() => undefined);
@@ -110,8 +132,9 @@ export const projectStore = {
     }
   },
 
-  /** Back to the home grid. */
-  async close(): Promise<void> {
+  /** Back to the home grid. The close guards are asked first unless `force`. */
+  async close(opts: { force?: boolean } = {}): Promise<void> {
+    if (!opts.force && !guardsAllow(() => void projectStore.close({ force: true }))) return;
     try {
       await api.project.close();
     } catch (e) {

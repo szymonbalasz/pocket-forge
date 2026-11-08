@@ -48,7 +48,7 @@ impl Validate for NoInput {}
 #[derive(Debug, Default, Serialize)]
 pub struct Ok_ {}
 
-fn no_project() -> CoreError {
+pub(crate) fn no_project() -> CoreError {
     CoreError::new(ErrorCode::NoProject, "no asset project is open")
 }
 
@@ -395,6 +395,7 @@ impl Command for ProjectOpen {
             Some(core.thumbs.clone()),
         )?;
         let snap = p.snapshot();
+        crate::export::on_project_close(&core.ctx, &mut state);
         if let Some(old) = state.project.take() {
             old.decoded.release();
         }
@@ -411,9 +412,11 @@ impl Command for ProjectClose {
     type Input = NoInput;
     type Output = Ok_;
 
-    /// Releases the decoded original (R11) and the served images.
+    /// Releases the decoded original (R11) and the served images. EXP's close hook first
+    /// commits pending export settings and cancels a running export (FR-PRJ-19, OQ-EXP-09).
     fn run(core: &Core, _: NoInput) -> CoreResult<Ok_> {
         let mut state = core.state();
+        crate::export::on_project_close(&core.ctx, &mut state);
         if let Some(p) = state.project.take() {
             p.decoded.release();
         }
@@ -487,8 +490,17 @@ impl Command for ProjectPutDraft {
     fn run(core: &Core, input: Self::Input) -> CoreResult<SeqOutput> {
         let mut state = core.state();
         let install_id = state.settings.install_id;
-        let p = state.project.as_mut().ok_or_else(no_project)?;
-        let seq = project::put_draft(&core.ctx, install_id, p, input.draft, input.export)?;
+        let crate::core::State { project, exp, .. } = &mut *state;
+        let p = project.as_mut().ok_or_else(no_project)?;
+        // R30: the same commit carries EXP's unsaved session settings.
+        let from_session = input.export.is_none();
+        let export = input
+            .export
+            .or_else(|| crate::export::pending_fields(exp, p));
+        let seq = project::put_draft(&core.ctx, install_id, p, input.draft, export)?;
+        if from_session {
+            crate::export::clear_pending(exp);
+        }
         Ok(SeqOutput { seq })
     }
 }
@@ -595,14 +607,21 @@ impl Command for ProjectRelinkOriginal {
 
 pub struct ProjectPrefetchOriginal;
 
+/// `project_prefetch_original` result: whether the original is decoded already.
+#[derive(Debug, Serialize)]
+pub struct PrefetchOutput {
+    pub ready: bool,
+}
+
 impl Command for ProjectPrefetchOriginal {
     const NAME: &'static str = "project_prefetch_original";
     type Input = NoInput;
-    type Output = Ok_;
+    type Output = PrefetchOutput;
 
-    /// FR-PRJ-42, R11: starts the background decode; `project:original-ready` follows. A decode
-    /// that already failed reports its error (`corrupt`, …).
-    fn run(core: &Core, _: NoInput) -> CoreResult<Ok_> {
+    /// FR-PRJ-42, R11: starts the background decode; `project:original-ready` follows. When the
+    /// original is decoded already, the event is sent again (R43). A decode that already failed
+    /// reports its error (`corrupt`, …).
+    fn run(core: &Core, _: NoInput) -> CoreResult<PrefetchOutput> {
         let decoded = {
             let state = core.state();
             let p = state.project.as_ref().ok_or_else(no_project)?;
@@ -615,9 +634,20 @@ impl Command for ProjectPrefetchOriginal {
             library::hydrate_if_needed(&core.ctx, &p.original_path())?;
             p.decoded.clone()
         };
+        let was_ready = decoded.is_ready();
         match decoded.get(&core.ctx) {
-            Ok(_) => Ok(Ok_ {}),
-            Err(e) if e.code == ErrorCode::OriginalUnavailable => Ok(Ok_ {}),
+            Ok(_) => {
+                if was_ready {
+                    core.ctx.emit(
+                        "project:original-ready",
+                        serde_json::json!({ "project_id": decoded.project_id() }),
+                    );
+                }
+                Ok(PrefetchOutput { ready: true })
+            }
+            Err(e) if e.code == ErrorCode::OriginalUnavailable => {
+                Ok(PrefetchOutput { ready: false })
+            }
             Err(e) => Err(e),
         }
     }
@@ -780,6 +810,13 @@ pub use crate::region_edit::commands::{
     RgnControlsEvaluate, RgnJobEstimate, RgnRegionFit, RgnSpendGet, RgnSpendSet,
 };
 
+// ---------------------------------------------------------------- export
+
+/// Export commands live in their own module (export spec §9).
+pub use crate::export::commands::{
+    ExportCancel, ExportGetSettings, ExportPlan, ExportSetSettings, ExportStart,
+};
+
 // ---------------------------------------------------------------- registry (append-only)
 
 /// A registry row: command name → JSON adapter.
@@ -831,6 +868,11 @@ registry![
     ProjectPrefetchOriginal,
     ProjectFolderList,
     ProjectFolderAdd,
+    ExportGetSettings,
+    ExportSetSettings,
+    ExportPlan,
+    ExportStart,
+    ExportCancel,
 ];
 
 #[cfg(test)]

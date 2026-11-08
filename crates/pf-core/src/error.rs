@@ -85,6 +85,22 @@ pub enum ErrorCode {
     Canceled,
     /// A re-pick that's no longer possible (R32, FR-RGN-36).
     RepickUnavailable,
+    /// An export setting out of its limits; `field` + `detail.limit{min|max|requires}` (R43).
+    InvalidSettings,
+    /// The export destination exists and `replace` wasn't set; `detail{bytes, mtime}` (FR-EXP-15).
+    Exists,
+    /// An export (or a region job fetching/baking) is already running (FR-EXP-21, R31).
+    Busy,
+    /// The library root is offline or the project folder isn't writable (EXP §9).
+    DestUnavailable,
+    /// A layer file is missing or undecodable; `detail.layer_id` (FR-EXP-22).
+    LayerUnreadable,
+    /// The disk filled up during a write (EXP §11).
+    DiskFull,
+    /// A large buffer couldn't be reserved (FR-EXP-23).
+    OutOfMemory,
+    /// An encoder failed (EXP §9).
+    EncodeFailed,
 }
 
 impl ErrorCode {
@@ -136,6 +152,14 @@ impl ErrorCode {
             ErrorCode::HashMismatch => "hash_mismatch",
             ErrorCode::Canceled => "canceled",
             ErrorCode::RepickUnavailable => "repick_unavailable",
+            ErrorCode::InvalidSettings => "invalid_settings",
+            ErrorCode::Exists => "exists",
+            ErrorCode::Busy => "busy",
+            ErrorCode::DestUnavailable => "dest_unavailable",
+            ErrorCode::LayerUnreadable => "layer_unreadable",
+            ErrorCode::DiskFull => "disk_full",
+            ErrorCode::OutOfMemory => "out_of_memory",
+            ErrorCode::EncodeFailed => "encode_failed",
         }
     }
 }

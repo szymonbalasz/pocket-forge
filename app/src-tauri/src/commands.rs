@@ -68,6 +68,11 @@ tauri_commands! {
     project_prefetch_original => c::ProjectPrefetchOriginal,
     project_folder_list => c::ProjectFolderList,
     project_folder_add => c::ProjectFolderAdd,
+    export_get_settings => c::ExportGetSettings,
+    export_set_settings => c::ExportSetSettings,
+    export_plan => c::ExportPlan,
+    export_start => c::ExportStart,
+    export_cancel => c::ExportCancel,
 }
 
 #[cfg(test)]

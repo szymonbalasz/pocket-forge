@@ -11,6 +11,7 @@ mod core;
 pub mod create;
 pub mod decoded;
 pub mod error;
+pub mod export;
 pub mod fsx;
 pub mod images;
 pub mod job;

@@ -44,13 +44,17 @@ pub struct State {
     pub project: Option<OpenProject>,
     /// Region edit's memory-only state (session spend, estimates).
     pub rgn: crate::region_edit::RgnState,
+    /// Export's session settings and running export (EXP §8).
+    pub exp: crate::export::ExpState,
 }
 
 /// The core: seams plus state. One per app process.
 #[derive(Debug)]
 pub struct Core {
-    pub ctx: Context,
-    state: Mutex<State>,
+    /// Shared, so background work (an export, EXP) can commit through PRJ when it finishes.
+    pub ctx: Arc<Context>,
+    /// Shared with background work for the same reason; take it through [`Core::state`].
+    state: Arc<Mutex<State>>,
     /// The `pf-tiles` registry, behind its own lock so serving never waits for a command
     /// (EDT). Lock order: `state` first, then `served`.
     pub(crate) served: Arc<Mutex<Served>>,
@@ -73,13 +77,14 @@ impl Core {
         ctx.provider.set_account(settings.provider.account());
         Ok(Core {
             thumbs: Thumbnails::new(&ctx),
-            ctx,
-            state: Mutex::new(State {
+            ctx: Arc::new(ctx),
+            state: Arc::new(Mutex::new(State {
                 settings,
                 settings_warnings,
                 project: None,
                 rgn: Default::default(),
-            }),
+                exp: Default::default(),
+            })),
             served: Arc::default(),
             create_cancel: AtomicBool::new(false),
             create_lock: Mutex::new(()),
@@ -89,6 +94,11 @@ impl Core {
     /// The state lock. Commands hold it for their whole run, so they're serialised.
     pub fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The state lock's shared handle, for background work that outlives a command (EXP).
+    pub(crate) fn state_handle(&self) -> Arc<Mutex<State>> {
+        self.state.clone()
     }
 
     /// Validates the input and runs a command.

@@ -32,6 +32,7 @@ vi.mock('../../api', async (importOriginal) => {
 
 const { ApiError } = await import('../../api');
 const { exportStore } = await import('./store');
+const { projectStore } = await import('../../store/project');
 
 const plan = (p: Partial<ExportPlan> = {}): ExportPlan => ({
   width: 4200,
@@ -207,6 +208,28 @@ describe('export store', () => {
     h.emit('export:canceled', { export_id: 'e1' });
     expect(exportStore.get().run).toBeNull();
     expect(exportStore.get().error).toBeNull();
+  });
+
+  test('OQ-EXP-09 closing during an export asks first; confirm cancels, then closes', async () => {
+    await bound();
+    await exportStore.start();
+    const close = vi.spyOn(projectStore, 'close');
+    await projectStore.close();
+    expect(exportStore.get().closeAsk).toBe(true);
+    exportStore.keepExporting();
+    expect(exportStore.get().closeAsk).toBe(false);
+    expect(h.exp.cancel).not.toHaveBeenCalled();
+    await projectStore.close();
+    await exportStore.confirmClose();
+    expect(h.exp.cancel).toHaveBeenCalledWith('e1');
+    expect(close).toHaveBeenLastCalledWith({ force: true });
+    h.emit('export:canceled', { export_id: 'e1' });
+    // Nothing running: the guard lets a close straight through.
+    close.mockClear();
+    await projectStore.close();
+    expect(exportStore.get().closeAsk).toBe(false);
+    expect(close).toHaveBeenCalledTimes(1);
+    close.mockRestore();
   });
 
   test('FR-EXP-18 a failed export shows its message and Retry starts again', async () => {
