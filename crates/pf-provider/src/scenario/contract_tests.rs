@@ -402,8 +402,7 @@ fn fr_prv_16_ip_detection_is_stripped_even_if_the_model_lists_it() {
         269,
         json!({"creativeUnitsCost": 3}),
     );
-    dry.request.body =
-        Some(json!({"image": "", "mask": "", "numOutputs": 0, "prompt": "", "seed": 0}));
+    dry.request.body = Some(json!({"image": "", "mask": "", "prompt": "", "seed": 0})); // real V3: no numOutputs
     let r = rig_with(vec![model, up(1), up(2), dry], &[V3]);
     let mut req = request(V3);
     req.controls.insert("ipDetection".into(), json!(true));
@@ -600,7 +599,11 @@ fn fr_prv_13_limits_are_checked_before_any_network_call() {
     }
     // A file over max_bytes: GPT Image's max is 50 MB; shrink it through the source's maxSize.
     let mut model = get_model(V3);
-    model.response.body["model"]["inputs"][1]["maxSize"] = json!(1000);
+    let inputs = model.response.body["model"]["inputs"]
+        .as_array_mut()
+        .unwrap();
+    let image = inputs.iter_mut().find(|i| i["name"] == "image").unwrap();
+    image["maxSize"] = json!(1000);
     let r = rig_with(vec![model], &[V3]);
     assert_eq!(
         block_on(r.p.estimate(&request(V3))).unwrap_err(),
