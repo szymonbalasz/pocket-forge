@@ -19,7 +19,8 @@
 | Packs UI + References block (REF 3, 5) | — | merged | done | — |
 | Asset-project walkthrough (steps 1–6, 9) | — | — | passed with defects (spinner race, draft rewrite, rename-while-open) | — |
 | Walkthrough fixes (spinner, draft) | — | merged | done | — |
-| Asset-project re-walk (spinner on real app, steps 7–8) | `walk-prj2` | `test/prj-walk-2` | in progress | — |
+| Asset-project re-walk | — | — | spinner fixed (44 opens); N1–N4 found | — |
+| Re-walk fixes N1–N4 | `fix-prj2` | `fix/walk-prj-2` | in progress | — |
 | REF 6 (RGN integration) | — | merged | done | REF walkthrough next |
 
 ## Pending owner decisions
