@@ -281,9 +281,24 @@ function PromptSection({ s }: { s: RgnState }) {
       {draft && (
         <details className="rgn-final" data-testid="rgn-panel-final">
           <summary className="muted small">Final prompt (as sent)</summary>
-          <pre className="small" data-testid="rgn-panel-final-prompt">
-            {finalPrompt(s) || '—'}
-          </pre>
+          {s.prompt.trim() === '' ? (
+            // BL-39: no prompt yet (e.g. cleared after an accept): an empty prompt, not the
+            // instruction alone next to "Required: prompt".
+            <>
+              <pre className="small muted" data-testid="rgn-panel-final-prompt" data-empty="true">
+                —
+              </pre>
+              {s.blendInstruction && s.blendText?.trim() && (
+                <p className="muted small" data-testid="rgn-panel-final-blend-note">
+                  + blend instruction at send
+                </p>
+              )}
+            </>
+          ) : (
+            <pre className="small" data-testid="rgn-panel-final-prompt">
+              {finalPrompt(s)}
+            </pre>
+          )}
         </details>
       )}
       {s.caps?.seed && seedCtl && (

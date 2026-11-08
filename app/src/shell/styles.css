@@ -224,8 +224,12 @@ h2 {
 }
 
 .pf-status-grow {
-  /* Grows, but never shrinks below its content, so the bar wraps rather than overlaps. */
-  flex: 1 0 auto;
+  /* Takes the free space, but never forces a wrap (BL-38): a long text (e.g. "Save failed,
+     project folder moved, retrying") ellipsises so the segments after it (the provider chip)
+     stay on the line. The other segments still wrap rather than overlap. */
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .pf-status-segment:empty {
