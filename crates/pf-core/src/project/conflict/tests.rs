@@ -4,7 +4,7 @@ use super::*;
 use crate::context::{FaultAction, Faults};
 use crate::project::store::tests::{S, setup};
 use crate::project::store::{JobUpdate, NewCandidate, add_candidates, update_job};
-use crate::project::{DraftInput, put_draft, retry_pending, spool};
+use crate::project::{DraftInput, ImageKind, put_draft, retry_pending, spool};
 use crate::test_support::*;
 
 fn other_pc() -> String {
@@ -519,4 +519,55 @@ fn fr_prj_36_keep_this_after_the_copy_vanished_adds_no_trash_item() {
     resolve_conflict(&s.e.ctx, s.e.install(), &mut s.p, Keep::This).unwrap();
     assert!(s.p.conflict.is_none());
     assert!(s.p.manifest.trash.is_empty(), "{:?}", s.p.manifest.trash);
+}
+
+#[test]
+fn bl_22_oq_prj_11_either_versions_layers_resolve_while_in_conflict() {
+    let mut s = setup();
+    draft(&mut s, "mine").unwrap();
+    let copy = make_copy(&s, "theirs");
+    let mut v = read_value(&copy);
+    let theirs = Ulid::from_parts(1, 98);
+    let mut layer = Layer::original(theirs, 40, 30);
+    layer.kind = LayerKind::Patch;
+    layer.file = Some(layer_file(theirs));
+    v["layers"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::to_value(&layer).unwrap());
+    write_value(&copy, &v);
+    std::fs::create_dir_all(s.dir.join(LAYERS_DIR)).unwrap();
+    std::fs::write(s.dir.join(layer_file(theirs)), b"png").unwrap();
+    let stranger = Ulid::from_parts(1, 97);
+    assert_eq!(
+        s.p.resolve_image(theirs).unwrap_err().code,
+        ErrorCode::UnknownId,
+        "no conflict yet: only this version's stack"
+    );
+
+    s.reopen();
+    assert!(s.p.conflict.is_some());
+    let r = s.p.resolve_image(theirs).unwrap();
+    assert_eq!(r.kind, ImageKind::Layer);
+    assert_eq!(r.path, s.dir.join(layer_file(theirs)));
+    let original = s.p.manifest.original_image_id().unwrap();
+    assert_eq!(
+        s.p.resolve_image(original).unwrap().kind,
+        ImageKind::Original
+    );
+    assert_eq!(
+        s.p.resolve_image(stranger).unwrap_err().code,
+        ErrorCode::UnknownId
+    );
+
+    // A copy whose original points outside the project folder doesn't resolve.
+    let mut v = read_value(&copy);
+    let other_original = Ulid::from_parts(1, 96);
+    v["layers"][0]["id"] = Value::from(other_original.to_string());
+    v["original"]["file"] = Value::from("../outside.png");
+    write_value(&copy, &v);
+    assert_eq!(
+        s.p.resolve_image(other_original).unwrap_err().code,
+        ErrorCode::UnknownId
+    );
 }

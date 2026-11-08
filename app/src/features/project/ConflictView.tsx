@@ -1,12 +1,13 @@
 // The conflict view (asset-project §7, FR-PRJ-36, #39): both versions side by side with their time,
 // machine and layer stack, and Keep this / Keep other. A side whose files haven't synced shows
-// "Still syncing" and can't be kept. EDT can't draw a given layer stack read-only yet
-// (OQ-PRJ-11 A), so each side lists its layers as text (the B fallback).
+// "Still syncing" and can't be kept. EDT draws each side's layer stack read-only (OQ-PRJ-11 A,
+// BL-22); the text list stays as its caption, and is all that shows when a file is missing.
 import { useEffect, useState } from 'react';
 import { Dialog } from 'radix-ui';
 
 import { api, type ConflictSide, type ConflictView as View, type ConflictKeep } from '../../api';
-import { errorOf, projectStore } from '../../store/project';
+import { errorOf, projectStore, useProjectState } from '../../store/project';
+import { LayerStack } from '../editor';
 import { revisionLabel, timeLabel } from './format';
 
 export function ConflictView({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -94,6 +95,7 @@ function Pane({
   busy: boolean;
   onKeep: (side: ConflictKeep) => void;
 }) {
+  const projectId = useProjectState().project?.project_id ?? null;
   const syncing = !side.readable || side.missing_files.length > 0;
   const rev = side.newest_revision;
   return (
@@ -113,14 +115,22 @@ function Pane({
           Newest revision r{rev.seq} · {revisionLabel(rev)}
         </p>
       )}
-      <ol className="prj-conflict-layers" data-testid={`prj-conflict-${side.side}-layers`}>
-        {side.layers.map((l, i) => (
-          <li key={l.id} data-record-id={l.id}>
-            {l.kind === 'original' ? 'Original' : `Patch ${i}`}
-            {l.visible ? '' : ' (hidden)'}
-          </li>
-        ))}
-      </ol>
+      <LayerStack
+        projectId={projectId}
+        layers={side.layers}
+        missingFiles={side.missing_files}
+        testId={`prj-conflict-${side.side}-stack`}
+        caption={
+          <ol className="prj-conflict-layers" data-testid={`prj-conflict-${side.side}-layers`}>
+            {side.layers.map((l, i) => (
+              <li key={l.id} data-record-id={l.id}>
+                {l.kind === 'original' ? 'Original' : `Patch ${i}`}
+                {l.visible ? '' : ' (hidden)'}
+              </li>
+            ))}
+          </ol>
+        }
+      />
       {syncing && (
         <p className="muted small" data-testid={`prj-conflict-${side.side}-syncing`}>
           Still syncing

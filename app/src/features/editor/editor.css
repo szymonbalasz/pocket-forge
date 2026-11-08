@@ -348,3 +348,34 @@
   line-height: 14px;
   text-align: center;
 }
+
+/* BL-22 (OQ-PRJ-11 A): a layer stack drawn read-only at fit-to-pane size. */
+.edt-stack {
+  --edt-stack-max-h: 40vh;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+}
+
+.edt-stack-box {
+  position: relative;
+  overflow: hidden;
+  background: var(--pf-bg-1);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+}
+
+.edt-stack-original {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.edt-stack-layer {
+  position: absolute;
+  max-width: none;
+  transform-origin: center;
+  pointer-events: none;
+}
