@@ -28,7 +28,7 @@
 | Reference packs walkthrough | — | — | passed with defects R1–R7 | — |
 | REF walk fixes R1–R7 | — | merged | done | BL-34 open |
 | Single-output cap, empty-mask hint, Mask whole region, blend instruction (#55) | `rgn-ux` | building | — | — |
-| Keep every result, easy discard (#56) | `rgn-keep` | building | — | — |
+| Keep every result, easy discard (#56) | — | merged | done (R65–R67) | walkthrough with rgn-ux |
 | Backlog BL-30/31/32/35/36, BL-27 StrictMode | `fix-bl5` | building | — | — |
 | Seam asymmetry (BL-33) | `fix-seam` | building | — | — |
 | Conflict view draws layer stacks (BL-22) | `conflict-stack` | building | — | — |
