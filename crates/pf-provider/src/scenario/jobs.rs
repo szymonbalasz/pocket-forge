@@ -3,10 +3,12 @@
 //! (FR-PRV-20), fetch (FR-PRV-21) and balance (FR-PRV-22). References (#51) go through the
 //! same uploads and re-upload, into their slots' inputs (FR-PRV-33/34).
 //!
-//! Scenario shapes (research doc): `POST /assets {image: data-url, name, hide}` →
-//! `{asset: {id}}`; `POST /uploads {fileName, contentType, kind, fileSize, parts}` →
+//! Scenario shapes (docs.scenario.com, checked 2026-11-08): `POST /assets {image: data-url,
+//! name, hide}` → `{asset: {id}}`; `POST /uploads {fileName, contentType, kind, fileSize, parts,
+//! assetOptions: {hide}}` →
 //! `{upload: {id, parts: [{number, url}]}}`, then `PUT` each part and
-//! `POST /uploads/{id}/action {action: "complete", parts}` → `{upload: {status, assetId}}`;
+//! `POST /uploads/{id}/action {action: "complete"}` → `{upload: {status, entityId, errorMessage}}`
+//! (poll `GET /uploads/{id}` while pending/validating; the asset id is `entityId`);
 //! `POST /generate/custom/{model}[?dryRun=true]` → 269 `{creativeUnitsCost, costDetails}` or
 //! 200 `{job: {jobId, status}}`; `GET /jobs/{id}` → `{job: {status, progress, metadata:
 //! {assetIds, error, hint, input}, billing: {cuCost}}}`; `GET /assets/{id}` → `{asset: {url}}`;
@@ -46,6 +48,50 @@ const PARALLEL_DOWNLOADS: usize = 4;
 fn invalid(field: &str) -> ProviderError {
     ProviderError::InvalidRequest {
         field: field.into(),
+    }
+}
+
+/// Upload polling after `complete` (validation can take a while): 1 s, then doubling to 8 s,
+/// for at most 60 s of waiting in total.
+const UPLOAD_POLL_FIRST: Duration = Duration::from_secs(1);
+const UPLOAD_POLL_MAX: Duration = Duration::from_secs(8);
+const UPLOAD_POLL_BUDGET: Duration = Duration::from_secs(60);
+
+enum UploadState {
+    /// The asset the upload became.
+    Done(String),
+    /// Still pending or validating; holds the status for the timeout hint.
+    Waiting(String),
+}
+
+/// Reads an Upload object (`{upload: {status, entityId, errorMessage}}`). The asset id is
+/// `entityId` (`assetId` is a fallback for older bodies). `failed` surfaces `errorMessage`;
+/// a finished upload without an id is an error rather than a wait.
+fn upload_state(out: &Value, creds: &Credentials) -> ProviderResult<UploadState> {
+    let u = out
+        .get("upload")
+        .ok_or_else(|| malformed("upload response"))?;
+    let status = u.get("status").and_then(Value::as_str).unwrap_or("unknown");
+    if status == "failed" {
+        let why = u
+            .get("errorMessage")
+            .and_then(Value::as_str)
+            .map(|m| super::api::clean_hint(m, Some(creds)))
+            .unwrap_or_else(|| "no reason given".into());
+        return Err(ProviderError::ProviderFailure {
+            hint: format!("the provider rejected the upload: {why}"),
+        });
+    }
+    let id = ["entityId", "assetId"]
+        .iter()
+        .find_map(|k| u.get(*k).and_then(Value::as_str))
+        .filter(|id| !id.is_empty());
+    match (id, status) {
+        (Some(id), _) => Ok(UploadState::Done(id.to_owned())),
+        (None, "complete" | "imported") => Err(ProviderError::ProviderFailure {
+            hint: format!("the upload finished ({status}) without an asset id"),
+        }),
+        (None, _) => Ok(UploadState::Waiting(status.to_owned())),
     }
 }
 
@@ -217,7 +263,7 @@ impl ScenarioProvider {
         let parts = bytes.len().div_ceil(PART_SIZE).max(1);
         let init = json!({
             "fileName": name, "contentType": format.mime(), "kind": "image",
-            "fileSize": bytes.len(), "parts": parts,
+            "fileSize": bytes.len(), "parts": parts, "assetOptions": {"hide": true},
         });
         let (_, out) = self
             .api
@@ -239,16 +285,24 @@ impl ScenarioProvider {
             .and_then(Value::as_array)
             .filter(|p| p.len() == parts)
             .ok_or_else(|| malformed("upload part list"))?;
-        let mut done = vec![];
-        for (i, (part, chunk)) in urls.iter().zip(bytes.chunks(PART_SIZE)).enumerate() {
-            let url = part
-                .get("url")
-                .and_then(Value::as_str)
-                .ok_or_else(|| malformed("upload part url"))?;
-            let number = part
-                .get("number")
-                .and_then(Value::as_u64)
-                .unwrap_or(i as u64 + 1);
+        // Each part URL carries its part number; send chunk N to part N whatever the list order.
+        let mut urls = urls
+            .iter()
+            .enumerate()
+            .map(|(i, part)| {
+                let url = part
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| malformed("upload part url"))?;
+                let number = part
+                    .get("number")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(i as u64 + 1);
+                Ok((number, url))
+            })
+            .collect::<ProviderResult<Vec<_>>>()?;
+        urls.sort_by_key(|(n, _)| *n);
+        for ((_, url), chunk) in urls.into_iter().zip(bytes.chunks(PART_SIZE)) {
             // Presigned: never the auth header (FR-PRV-09).
             let resp = self
                 .api
@@ -267,8 +321,8 @@ impl ScenarioProvider {
             if !resp.is_success() {
                 return Err(map_error(&resp, Some(creds), false));
             }
-            done.push(json!({"number": number, "etag": resp.header("etag").unwrap_or("")}));
         }
+        // The documented complete body is only the action; Scenario lists the parts itself.
         let path = self.path(&format!("/uploads/{}/action", seg(&upload_id)));
         let (_, out) = self
             .api
@@ -276,38 +330,38 @@ impl ScenarioProvider {
                 creds,
                 Method::Post,
                 &path,
-                Some(json!({"action": "complete", "parts": done})),
+                Some(json!({"action": "complete"})),
                 Retry::Idempotent,
             )
             .await?;
-        let mut asset = out
-            .pointer("/upload/assetId")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
-        // Completion may still be validating: poll the upload a few times.
-        for _ in 0..5 {
-            if asset.is_some() {
-                break;
+        // Validation runs after completion: poll the upload until it names its asset.
+        let mut waited = Duration::ZERO;
+        let mut delay = UPLOAD_POLL_FIRST;
+        let mut out = out;
+        loop {
+            match upload_state(&out, creds)? {
+                UploadState::Done(id) => return Ok(id),
+                UploadState::Waiting(status) => {
+                    if waited >= UPLOAD_POLL_BUDGET {
+                        return Err(ProviderError::ProviderFailure {
+                            hint: format!(
+                                "the upload did not complete within {} s (last status: {status})",
+                                UPLOAD_POLL_BUDGET.as_secs()
+                            ),
+                        });
+                    }
+                }
             }
-            self.api.sleeper.sleep(Duration::from_secs(1)).await;
+            self.api.sleeper.sleep(delay).await;
+            waited += delay;
+            delay = (delay * 2).min(UPLOAD_POLL_MAX);
             let path = self.path(&format!("/uploads/{}", seg(&upload_id)));
-            let (_, out) = self
+            out = self
                 .api
                 .json(creds, Method::Get, &path, None, Retry::Idempotent)
-                .await?;
-            if out.pointer("/upload/status").and_then(Value::as_str) == Some("failed") {
-                return Err(ProviderError::ProviderFailure {
-                    hint: "the provider rejected the upload".into(),
-                });
-            }
-            asset = out
-                .pointer("/upload/assetId")
-                .and_then(Value::as_str)
-                .map(str::to_owned);
+                .await?
+                .1;
         }
-        asset.ok_or_else(|| ProviderError::ProviderFailure {
-            hint: "the upload did not complete".into(),
-        })
     }
 
     /// Uploads the image, the mask and every reference (once per content hash, FR-PRV-34).
