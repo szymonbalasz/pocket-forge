@@ -452,3 +452,92 @@ fn fr_edt_32_max_side_copy_and_use_tiles() {
         (Some(256), Some(1))
     );
 }
+
+#[test]
+fn bl_16_library_keys_serve_a_512_px_copy_made_on_first_view() {
+    let e = env();
+    let big = e.dir.path().join("ref-big.png");
+    std::fs::write(&big, png_bytes(1300, 900, &pattern(1300, 900))).unwrap();
+    let url = register_library_image(&e.core, &big).unwrap();
+    assert!(url.contains("/i/l-") && url.ends_with(".png"), "{url}");
+    let key = url.rsplit('/').next().unwrap().trim_end_matches(".png");
+    let copy = cache_root(&e.core.ctx.data_dir).join(key).join(COPY_FILE);
+    assert!(!copy.exists(), "registration reads metadata only");
+
+    let res = e.core.serve_scheme(scheme_path(&url));
+    assert_eq!((res.status, res.content_type), (200, Some("image/png")));
+    let img = image::load_from_memory(&res.body).unwrap();
+    assert_eq!((img.width(), img.height()), (512, 354));
+    assert!(copy.is_file(), "cached for the next view");
+    assert_eq!(e.core.serve_scheme(scheme_path(&url)).body, res.body);
+
+    // Another limit (REF pack thumbnails) is another key.
+    let small_url = register_library_image_sized(&e.core, &big, 256).unwrap();
+    assert_ne!(small_url, url);
+    let img = image::load_from_memory(&e.core.serve_scheme(scheme_path(&small_url)).body).unwrap();
+    assert_eq!(img.width(), 256);
+
+    // A file that already fits is served as it is, with its own type.
+    let thumb = e.dir.path().join("thumb.jpg");
+    let mut jpg = Vec::new();
+    image::RgbImage::from_pixel(300, 200, image::Rgb([90, 60, 30]))
+        .write_to(
+            &mut std::io::Cursor::new(&mut jpg),
+            image::ImageFormat::Jpeg,
+        )
+        .unwrap();
+    std::fs::write(&thumb, &jpg).unwrap();
+    let t = e.core.serve_scheme(scheme_path(
+        &register_library_image(&e.core, &thumb).unwrap(),
+    ));
+    assert_eq!((t.status, t.content_type), (200, Some("image/jpeg")));
+    assert_eq!(t.body, jpg);
+
+    // The key follows the file; a vanished or broken file is a 404, never a crash.
+    std::fs::write(&big, png_bytes(600, 600, &pattern(600, 600))).unwrap();
+    assert_ne!(register_library_image(&e.core, &big).unwrap(), url);
+    let gone = e.dir.path().join("gone.png");
+    std::fs::write(&gone, png_bytes(700, 10, &pattern(700, 10))).unwrap();
+    let gone_url = register_library_image(&e.core, &gone).unwrap();
+    std::fs::write(&gone, b"not an image").unwrap();
+    assert_eq!(e.core.serve_scheme(scheme_path(&gone_url)).status, 404);
+    std::fs::remove_file(&gone).unwrap();
+    assert_eq!(e.core.serve_scheme(scheme_path(&gone_url)).status, 404);
+    assert!(register_library_image(&e.core, &gone).is_none());
+    assert!(register_library_image(&e.core, &e.dir.path().join("x.gif")).is_none());
+}
+
+#[test]
+fn fr_edt_10_d4_reopening_an_unsaved_project_reuses_the_pyramid() {
+    let e = env();
+    let snap = open_png(&e, "keep.png", 700, 500);
+    assert_eq!(snap["original_image_id"], snap["layers"][0]["id"]);
+    let first = tiles_open(&e, &snap, false);
+    wait_built(&e, first["key"].as_str().unwrap());
+    let path = snap["project_dir"].as_str().unwrap().to_owned();
+    e.core.dispatch("project_close", json!({})).unwrap();
+    let again = e
+        .core
+        .dispatch("project_open", json!({"path": path}))
+        .unwrap();
+    assert_eq!(again["original_image_id"], snap["original_image_id"]);
+    let second = e
+        .core
+        .dispatch(
+            "edt_tiles_open",
+            json!({"project_id": again["project_id"], "image_id": again["original_image_id"]}),
+        )
+        .unwrap();
+    assert_eq!(second["key"], first["key"]);
+    assert!(
+        second["levels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|l| l["complete"] == true)
+    );
+    let entries = std::fs::read_dir(cache_root(&e.core.ctx.data_dir))
+        .unwrap()
+        .count();
+    assert_eq!(entries, 1, "no orphaned pyramid");
+}

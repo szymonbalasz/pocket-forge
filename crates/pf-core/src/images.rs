@@ -13,6 +13,13 @@ pub enum ImageBody {
     File(PathBuf),
     /// In-memory bytes: a transient image (FR-EDT-31).
     Bytes(Arc<Vec<u8>>),
+    /// A `library` key (OQ-PRJ-16, BL-16): `src` fitted within `max_side`, made on the first
+    /// request and cached at `dst`. A source that already fits is served as it is.
+    Copy {
+        src: PathBuf,
+        dst: PathBuf,
+        max_side: u32,
+    },
 }
 
 /// An image registered for the open asset project.
@@ -154,6 +161,9 @@ pub fn ok(content_type: &'static str, body: Vec<u8>) -> SchemeResponse {
 pub fn read_image(key: &str, img: &ServedImage) -> SchemeResponse {
     match &img.body {
         ImageBody::Bytes(b) => ok(img.mime, b.as_ref().clone()),
+        ImageBody::Copy { src, dst, max_side } => {
+            crate::tiles::serve_copy(key, src, dst, *max_side)
+        }
         ImageBody::File(path) => match std::fs::read(path) {
             Ok(body) => ok(img.mime, body),
             Err(e) => {
