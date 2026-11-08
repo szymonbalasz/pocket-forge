@@ -116,12 +116,24 @@ export const api = {
   },
   export: { getSettings: () => call('export_get_settings', {}) },
   region: {
-    fit: (projectId: string, inner: Commands['rgn_region_fit'][0]['inner'], margin?: number) =>
+    fit: (
+      projectId: string,
+      inner: Commands['rgn_region_fit'][0]['inner'],
+      margin?: number,
+      modelId?: string,
+    ) =>
       call('rgn_region_fit', {
         project_id: projectId,
         inner,
         ...(margin === undefined ? {} : { margin }),
+        ...(modelId === undefined ? {} : { model_id: modelId }),
       }),
+    evaluateControls: (modelId: string, values: Record<string, unknown>) =>
+      call('rgn_controls_evaluate', { model_id: modelId, values }),
+    estimate: (projectId: string, draft: Commands['rgn_job_estimate'][0]['draft']) =>
+      call('rgn_job_estimate', { project_id: projectId, draft }),
+    getSpend: () => call('rgn_spend_get', {}),
+    setSpend: (spend: Commands['rgn_spend_set'][0]) => call('rgn_spend_set', spend),
   },
   mask: {
     read: (projectId: string, maskId: string) =>

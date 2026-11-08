@@ -435,6 +435,13 @@ impl Command for EdtTilesOpen {
     }
 }
 
+// ---------------------------------------------------------------- region edit
+
+/// Region-edit commands live in their own module (region-edit spec §9).
+pub use crate::region_edit::commands::{
+    RgnControlsEvaluate, RgnJobEstimate, RgnRegionFit, RgnSpendGet, RgnSpendSet,
+};
+
 // ---------------------------------------------------------------- registry (append-only)
 
 /// A registry row: command name → JSON adapter.
@@ -473,6 +480,11 @@ registry![
     ProviderGetCapabilities,
     ProviderBalance,
     ProviderFakeSetCase,
+    RgnRegionFit,
+    RgnControlsEvaluate,
+    RgnJobEstimate,
+    RgnSpendGet,
+    RgnSpendSet,
 ];
 
 #[cfg(test)]
