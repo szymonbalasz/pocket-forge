@@ -884,6 +884,67 @@ fn fr_rgn_21_retry_draft_prefills_with_a_new_seed_unless_pinned() {
     assert_eq!(lab.manifest()["jobs"].as_array().unwrap().len(), 2);
 }
 
+/// Walk owner-UX M1: the count is sent as `candidate_count`, not in the job's `controls`, so
+/// Retry must put it back under the count control's name, or it falls back to the default.
+#[test]
+fn fr_rgn_21_retry_restores_the_candidate_count_the_user_set() {
+    let lab = Lab::new();
+    let mut d = lab.draft("four");
+    d["controls"] = json!({"num_samples": 4});
+    let id = lab.submit_draft(d).unwrap();
+    lab.drive();
+    let job = lab.job(id);
+    assert_eq!(job.candidate_count, 4);
+    assert!(
+        job.controls.is_empty(),
+        "the count isn't a sent `other` control"
+    );
+    let draft = lab
+        .core
+        .dispatch("rgn_job_retry_draft", json!({"job_id": id}))
+        .unwrap();
+    assert_eq!(draft["controls"], json!({"num_samples": 4}));
+    // The restored draft estimates and submits as the job did.
+    let id2 = lab.submit_draft(draft).unwrap();
+    assert_eq!(lab.job(id2).candidate_count, 4);
+}
+
+/// FR-RGN-11: a remembered count the model now rejects (a single-output model, or a lower
+/// maximum) is dropped / reset by `rgn_controls_evaluate`, which drives the panel's notice.
+#[test]
+fn fr_rgn_11_a_restored_count_the_capabilities_reject_resets_with_a_notice() {
+    let lab = Lab::new();
+    let mut d = lab.draft("four");
+    d["controls"] = json!({"num_samples": 4});
+    let id = lab.submit_draft(d).unwrap();
+    lab.drive();
+    let draft = lab
+        .core
+        .dispatch("rgn_job_retry_draft", json!({"job_id": id}))
+        .unwrap();
+    let values: std::collections::BTreeMap<String, Value> =
+        serde_json::from_value(draft["controls"].clone()).unwrap();
+    let mut caps = pf_provider::block_on(pf_provider::Provider::get_capabilities(
+        &FakeProvider::default(),
+        "fake-white-edit",
+    ))
+    .unwrap();
+    let mut lower = caps.clone();
+    for c in &mut lower.controls {
+        if c.role == pf_provider::ControlRole::CandidateCount {
+            c.max = Some(3.0);
+        }
+    }
+    let e = super::controls::evaluate_controls(&lower, &values);
+    let count = e.controls.iter().find(|c| c.name == "num_samples").unwrap();
+    assert!(count.reset, "notice: reset to the default");
+    assert_eq!(count.value, Some(json!(3)), "the default");
+    caps.controls
+        .retain(|c| c.role != pf_provider::ControlRole::CandidateCount);
+    let e = super::controls::evaluate_controls(&caps, &values);
+    assert_eq!(e.unknown, vec!["num_samples".to_owned()], "notice: dropped");
+}
+
 #[test]
 fn fr_rgn_38_read_only_project_refuses_submit_and_dismiss() {
     let lab = Lab::new();

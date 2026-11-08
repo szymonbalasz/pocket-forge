@@ -11,7 +11,7 @@ import { GeneratePanel } from './GeneratePanel';
 import { IterationTracker } from './IterationTracker';
 import { JobStatus } from './JobStatus';
 import { rgn } from './store';
-import { mockControls, mockCore, polyfillRadix, SIMPLE } from './testUtils';
+import { ALL_TYPES, mockControls, mockCore, polyfillRadix, SIMPLE } from './testUtils';
 
 const Picker = editorFeature.slots.bottom!;
 const REGION = { x: 400, y: 400, w: 512, h: 512 };
@@ -587,6 +587,46 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     await waitFor(() => expect(fake.callsOf('rgn_job_estimate').length).toBe(before + 1), {
       timeout: 2000,
     });
+  });
+
+  test('FR-RGN-21 retry restores the count the user set; FR-RGN-11 the draft keeps it', async () => {
+    await setup();
+    act(() => rgn.setValue('num_samples', 4));
+    await typePrompt('four please');
+    await estimated();
+    fireEvent.click(screen.getByTestId('rgn-panel-submit'));
+    fireEvent.click(await screen.findByTestId('rgn-confirm-ok'));
+    await waitFor(() => expect(screen.getAllByTestId('rgn-tracker-item')).toHaveLength(1));
+    act(() => mockControls().fail());
+    await waitFor(() => expect(screen.getByTestId('rgn-job-retry')).toBeTruthy());
+    act(() => rgn.setValue('num_samples', 1));
+    fireEvent.click(screen.getByTestId('rgn-job-retry'));
+    await waitFor(() => expect(rgn.get().values.num_samples).toBe(4));
+    expect(rgn.get().touched).toContain('num_samples');
+    // The draft written after the retry keeps it (FR-RGN-11).
+    await waitFor(
+      () => {
+        const saved = fake.callsOf('project_put_draft').at(-1) as {
+          draft: { controls: Record<string, unknown> };
+        };
+        expect(saved.draft.controls.num_samples).toBe(4);
+      },
+      { timeout: 4000 },
+    );
+  });
+
+  test('FR-RGN-11 a restored count a single-output model rejects is dropped with a notice', async () => {
+    const all = structuredClone(ALL_TYPES);
+    await submitted({ capabilities: { 'fake-all-types': all, 'fake-simple': SIMPLE } });
+    act(() => mockControls().fail());
+    await waitFor(() => expect(screen.getByTestId('rgn-job-retry')).toBeTruthy());
+    all.controls = all.controls.filter((c) => c.role !== 'candidate_count');
+    fireEvent.click(screen.getByTestId('rgn-job-retry'));
+    await waitFor(() =>
+      expect(rgn.get().notices.some((n) => n.startsWith('num_samples:'))).toBe(true),
+    );
+    expect(rgn.get().values.num_samples).toBeUndefined();
+    expect(screen.getByTestId('rgn-panel-count-single')).toBeTruthy();
   });
 
   test('FR-RGN-40 tracker: iterations newest first with kept/returned, cost, ✓; the picker shows the selected one', async () => {
