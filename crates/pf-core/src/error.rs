@@ -99,6 +99,9 @@ pub enum ErrorCode {
     NoConflict,
     /// The version to keep needs files that haven't synced yet (FR-PRJ-36).
     FilesMissing,
+    /// `project_trash_restore` of an item kind the next sweep would trash again (R51, BL-24);
+    /// `detail.kind` names it.
+    NotRestorable,
     /// An export setting out of its limits; `field` + `detail.limit{min|max|requires}` (R43).
     InvalidSettings,
     /// The export destination exists and `replace` wasn't set; `detail{bytes, mtime}` (FR-EXP-15).
@@ -173,6 +176,7 @@ impl ErrorCode {
             ErrorCode::TooManyReferences => "too_many_references",
             ErrorCode::NoConflict => "no_conflict",
             ErrorCode::FilesMissing => "files_missing",
+            ErrorCode::NotRestorable => "not_restorable",
             ErrorCode::InvalidSettings => "invalid_settings",
             ErrorCode::Exists => "exists",
             ErrorCode::Busy => "busy",

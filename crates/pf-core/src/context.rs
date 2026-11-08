@@ -265,6 +265,10 @@ struct FaultRule {
 /// Fault injection (AGENTS §9 `PF_FAULT`). Checks compile to nothing in release builds.
 #[derive(Debug, Default, Clone)]
 pub struct Faults {
+    #[cfg_attr(
+        not(debug_assertions),
+        expect(dead_code, reason = "`hit` compiles to nothing in release builds")
+    )]
     rule: Option<FaultRule>,
 }
 

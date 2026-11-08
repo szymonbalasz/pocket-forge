@@ -585,19 +585,21 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
             >
               <span className="prj-file-name">{t.path.split('/').pop()}</span>
               <span className="prj-file-size tabular">{bytesLabel(t.bytes)}</span>
-              <button
-                type="button"
-                className="link"
-                data-testid="prj-panel-storage-restore"
-                disabled={readOnly}
-                onClick={() =>
-                  api.project
-                    .trashRestore(t.id)
-                    .then(load, (e: unknown) => setError(errorOf(e).message))
-                }
-              >
-                Restore
-              </button>
+              {t.restorable && (
+                <button
+                  type="button"
+                  className="link"
+                  data-testid="prj-panel-storage-restore"
+                  disabled={readOnly}
+                  onClick={() =>
+                    api.project
+                      .trashRestore(t.id)
+                      .then(load, (e: unknown) => setError(errorOf(e).message))
+                  }
+                >
+                  Restore
+                </button>
+              )}
             </li>
           ))}
         </ul>

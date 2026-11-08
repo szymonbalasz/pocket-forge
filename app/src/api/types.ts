@@ -97,6 +97,8 @@ export interface TrashItem {
   /** `trashed_at` + 30 days (FR-PRJ-32). */
   purge_at?: string;
   reason?: string;
+  /** Restore is offered only when true: `candidates`, `job_inputs`, `conflict_copy` (R51). */
+  restorable: boolean;
 }
 
 export type DiskCategory =
@@ -431,6 +433,8 @@ export interface JobDraft {
   controls: Record<string, unknown>;
   /** Pinned seed, or null = random. */
   seed: number | null;
+  /** REF's selection (FR-RGN-41, schema §4.5); null/absent = REF's defaults (FR-REF-17). */
+  references?: DraftReferences | null;
 }
 
 export type SpendNeed = 'threshold' | 'unknown_cost' | 'set_cap';
@@ -447,6 +451,10 @@ export interface JobEstimate {
   needs: SpendNeed[];
   /** spend + estimate > cap: submit fails with `over_spend_cap` until the cap is raised. */
   over_cap: boolean;
+  /** References that will be sent, after dedupe (confirm text, FR-RGN-45). */
+  references: number;
+  /** REF's prepare notices (`duplicate`: identical bytes sent once, FR-REF-21). */
+  reference_notices: RefNotice[];
 }
 
 /** `rgn_spend_get` / `rgn_spend_set` result. */
@@ -501,6 +509,10 @@ export interface RgnIteration {
   returned: number;
   cost: CostValue | null;
   accepted_in_stack: boolean;
+  /** `references[]` count for the chip (FR-RGN-45). */
+  references: number;
+  /** The chip tooltip: each file sent, its pack (null = the project) and role (FR-RGN-45). */
+  reference_files: { file: string; pack_name: string | null; role: RefRole | null }[];
 }
 
 export interface RgnBlend {
@@ -527,6 +539,8 @@ export interface CandidateRecord {
   status: 'new' | 'accepted' | 'dismissed' | 'discarded' | 'trashed' | 'invalid';
   starred: boolean;
   trash_id: string | null;
+  /** Set when the 30-day purge deleted the file (BL-23); `trash_id` then names the purged item. */
+  purged_at?: string;
   width?: number;
   height?: number;
   /** Aspect differs from the sent one by > 1 % (FR-RGN-24). */
@@ -674,6 +688,14 @@ export interface Events {
   'export:canceled': { export_id: string };
   'import:progress': { done: number; total: number };
   'project:save-failed': { reason: string; retrying: boolean };
+  /** A spooled job write the store refused for good was deleted (BL-25). */
+  'project:spool-dropped': {
+    project_id: string;
+    job_id: string;
+    seq: number;
+    op: 'update_job' | 'add_candidates';
+    code: string;
+  };
   'project:conflict': Record<string, never>;
   'project:recovered': Record<string, never>;
   'project:thumb-updated': { project_id: string };
@@ -763,10 +785,17 @@ export interface RefTrashItem {
   purge_at: string;
 }
 
-/** The draft's `references` (schema §4.5). */
+/** The draft's `references` (schema §4.5). Retry (FR-REF-26) marks restored items with
+ *  `retry_of` (the iteration `NNN`) and `changed` (bytes differ from what that job sent). */
 export interface DraftReferences {
   packs: { pack_id: string; name: string }[];
-  items: { key: string; on: boolean; role: RefRole | null }[];
+  items: {
+    key: string;
+    on: boolean;
+    role: RefRole | null;
+    retry_of?: string;
+    changed?: boolean;
+  }[];
 }
 
 /** A model reference slot as `ref_resolve` reports it; `on` = items ticked in it. */
@@ -781,8 +810,8 @@ export interface RefSlot {
 
 export type RefItemState = 'ok' | 'cloud_only' | 'corrupt' | 'missing';
 
-/** An available item (FR-REF-16). Badges: `cloud`, `missing`, `corrupt`, `duplicate`
- *  (slice 6 adds `changed_since:<NNN>`). */
+/** An available item (FR-REF-16). Badges: `cloud`, `missing`, `corrupt`, `duplicate`,
+ *  `changed_since:<NNN>` (FR-REF-26). */
 export interface RefItem {
   /** `project:<file>` or `pack:<pack_id>:<file>`. */
   key: string;

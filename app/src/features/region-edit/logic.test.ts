@@ -28,6 +28,7 @@ import {
   defaultSelection,
   iterationCandidates,
   orderRows,
+  refsTooltip,
   stripJobId,
   trashOnSubmit,
 } from './tracker';
@@ -236,11 +237,19 @@ const est = (cost: number | 'unknown', patch: Partial<JobEstimate> = {}): JobEst
   threshold: 5,
   needs: [],
   over_cap: false,
+  references: 0,
+  reference_notices: [],
   ...patch,
 });
 const stored = { cap: 20, threshold: 5 };
 
 describe('confirm dialog logic (FR-RGN-14..16, §7)', () => {
+  test('FR-RGN-45 the confirm plan carries the references sent ("with N references")', () => {
+    const e = est(3, { references: 2 });
+    expect(confirmPlan(e, stored, initialForm(e, 5), 0).references).toBe(2);
+    expect(confirmPlan(est(3), stored, initialForm(est(3), 5), 0).references).toBe(0);
+  });
+
   test('FR-RGN-14 within cap and threshold: Enter confirms, nothing extra is sent', () => {
     const e = est(3);
     const p = confirmPlan(e, stored, initialForm(e, 5), 0);
@@ -332,6 +341,8 @@ const row = (
   returned: 2,
   cost: { amount: 2, unit: 'CU' },
   accepted_in_stack: accepted,
+  references: 0,
+  reference_files: [],
 });
 const cand = (
   id: string,
@@ -383,6 +394,19 @@ describe('iteration tracker logic', () => {
     expect(canRetry('running')).toBe(false);
     expect(canDismiss('fetched') && canDismiss('failed')).toBe(true);
     expect(canDismiss('closed') || canDismiss('running')).toBe(false);
+  });
+
+  test('FR-RGN-45 the refs chip tooltip lists each file, project or its pack, and role', () => {
+    const r: RgnIteration = {
+      ...row('J1', 1, 'fetched'),
+      references: 2,
+      reference_files: [
+        { file: 'mood.png', pack_name: null, role: 'style' },
+        { file: 'sword.png', pack_name: 'Blades', role: null },
+      ],
+    };
+    expect(refsTooltip(r)).toBe('mood.png · project · style\nsword.png · Blades');
+    expect(refsTooltip(row('J2', 2, 'fetched'))).toBe('');
   });
 
   test('§7 confirm: unstarred new candidates of the previous fetched job go to the trash', () => {

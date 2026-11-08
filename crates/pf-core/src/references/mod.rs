@@ -26,6 +26,7 @@ pub mod commands;
 pub mod packs;
 pub mod prepare;
 pub mod resolve;
+pub mod retry;
 pub mod thumb;
 pub mod trash;
 

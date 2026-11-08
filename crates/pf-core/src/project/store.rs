@@ -563,6 +563,7 @@ pub fn add_candidates(
             },
             starred: false,
             trash_id: None,
+            purged_at: None,
             extra: c.extra,
         });
         files.push((file, c.bytes));

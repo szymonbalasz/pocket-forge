@@ -18,8 +18,7 @@
 | Asset-project walkthrough (steps 1–6, 9) | — | — | passed with defects (spinner race, draft rewrite, rename-while-open) | — |
 | Walkthrough fixes (spinner, draft) | — | merged | done | — |
 | Asset-project re-walk (spinner on real app, steps 7–8) | `walk-prj2` | `test/prj-walk-2` | in progress | — |
-| Backlog: BL-21/23/24/25 | `backlog3` | `fix/backlog-3` | in progress | — |
-| REF 6 (RGN integration) | `ref-rgn` | `build/reference-packs-rgn` | in progress | — |
+| REF 6 (RGN integration) | — | merged | done | REF walkthrough next |
 
 ## Pending owner decisions
 - OQ-IMG-12: file the image-webp bug upstream? (not urgent)

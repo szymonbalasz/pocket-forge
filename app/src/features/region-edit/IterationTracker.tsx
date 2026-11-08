@@ -3,11 +3,20 @@
 // (FR-RGN-18..21): state, progress, elapsed, cost, Cancel / Retry / Dismiss. Selecting a chip
 // shows its candidates in EDT's picker (R19), which renders below in its own slot.
 import { useEffect, useState, type KeyboardEvent } from 'react';
+import { Tooltip } from 'radix-ui';
 
 import { IconCheck } from '../../shell/icons';
 import { costLabel, elapsedLabel, iterationNumber, jobErrorText, STATE_LABEL } from './format';
 import { rgn, useRgn, type LiveJob } from './store';
-import { canCancel, canDismiss, canRetry, isActive, orderRows, stripJobId } from './tracker';
+import {
+  canCancel,
+  canDismiss,
+  canRetry,
+  isActive,
+  orderRows,
+  refsTooltip,
+  stripJobId,
+} from './tracker';
 import type { RgnIteration } from '../../api';
 
 /** Ticks once a second while `on` (the elapsed time of a running job). */
@@ -105,6 +114,32 @@ function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined 
   );
 }
 
+/** FR-RGN-45: `N refs` on a chip whose job sent references, with the files in a tooltip. */
+function RefsChip({ row }: { row: RgnIteration }) {
+  const text = refsTooltip(row);
+  return (
+    <Tooltip.Provider>
+      <Tooltip.Root>
+        <Tooltip.Trigger asChild>
+          <span
+            className="rgn-tracker-refs muted small tabular"
+            data-testid="rgn-tracker-refs"
+            data-tooltip={text}
+            aria-label={`${row.references} references: ${text.replace(/\n/g, ', ')}`}
+          >
+            {row.references} {row.references === 1 ? 'ref' : 'refs'}
+          </span>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Content className="pf-tooltip rgn-refs-tooltip" side="top" sideOffset={6}>
+            {text}
+          </Tooltip.Content>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
+  );
+}
+
 export function IterationTracker() {
   const s = useRgn((x) => x);
   if (!s.projectId || s.iterations.length === 0) return null;
@@ -149,6 +184,7 @@ export function IterationTracker() {
                 <span className="rgn-tracker-slug" title={r.dir ?? undefined}>
                   {r.slug ?? 'job'}
                 </span>
+                {(r.references ?? 0) > 0 && <RefsChip row={r} />}
                 {r.accepted_in_stack && (
                   <span
                     className="rgn-tracker-check"

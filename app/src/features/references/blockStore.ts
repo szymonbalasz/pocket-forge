@@ -5,6 +5,8 @@ import { useSyncExternalStore } from 'react';
 
 import {
   api,
+  hasCore,
+  onEvent,
   type DraftReferences,
   type PackCard,
   type RefResolved,
@@ -61,6 +63,11 @@ function watchClose(): void {
   projectStore.subscribe(() => {
     if (!projectStore.get().project && state.projectId) block.reset();
   });
+  // A pack created, renamed, deleted or restored, or files changed in Explorer while the app was
+  // in the background: resolve again so the items and badges are current (FR-REF-26 restore,
+  // reference-packs Appendix A step 9). Resolve reads no image bytes (§12).
+  if (hasCore()) onEvent('ref:packs-changed', () => void resolve()).catch(() => undefined);
+  if (typeof window !== 'undefined') window.addEventListener('focus', () => void resolve());
 }
 
 async function resolve(): Promise<void> {
@@ -115,6 +122,31 @@ export const block = {
     if (projectId === state.projectId) return;
     token++;
     set({ ...initial, projectId, refs, packs: state.packs });
+  },
+
+  /** Retry replaced the draft (FR-RGN-44, FR-REF-26): the job's selection, with its
+   *  `changed since NNN` / `missing` flags, is resolved and saved with the draft. */
+  restore(refs: DraftReferences | null): void {
+    token++;
+    set({ refs, error: null, notices: [] });
+    changed(true);
+    if (state.modelId) void resolve();
+  },
+
+  /** After a submit the Retry flags are history: they are cleared, and restored items that
+   *  were missing leave the selection. */
+  settle(): void {
+    const refs = state.refs;
+    if (!refs?.items.some((i) => i.retry_of !== undefined)) return;
+    const missing = new Set(
+      (state.resolved?.items ?? []).filter((i) => i.state === 'missing').map((i) => i.key),
+    );
+    edit({
+      ...refs,
+      items: refs.items
+        .filter((i) => !(i.retry_of !== undefined && missing.has(i.key)))
+        .map((i) => ({ key: i.key, on: i.on, role: i.role })),
+    });
   },
 
   /** The model changed (null = none, or one without slots: hidden, FR-REF-15). */
@@ -198,6 +230,23 @@ export function referencesDraft(): { references?: DraftReferences } {
   return { references: current() };
 }
 
+/** The selection estimate and submit send (FR-RGN-41): null = REF's defaults (FR-REF-17). */
+export function referencesForSend(): DraftReferences | null {
+  return state.projectId ? state.refs : null;
+}
+
+/** FR-RGN-42: the ticked items of cost-affecting slots, in order. RGN re-estimates when it
+ *  changes; other slots never do (FR-REF-24). */
+export function referencesCostKey(): string {
+  const r = state.resolved;
+  if (!state.modelId || !r?.visible) return '';
+  const costly = new Set(r.slots.filter((s) => s.cost_affecting).map((s) => s.name));
+  return r.items
+    .filter((i) => i.on && costly.has(i.slot))
+    .map((i) => `${i.slot}=${i.key}`)
+    .join(',');
+}
+
 /** FR-REF-18 `references_required(slot, min)`: why submit is disabled, or null. */
 export function referencesBlocker(): string | null {
   const r = state.resolved;
@@ -206,6 +255,11 @@ export function referencesBlocker(): string | null {
   if (!under.length) return null;
   return `References: ${under.map((s) => `${slotName(s)} needs at least ${s.min}`).join(', ')}.`;
 }
+
+/** RGN's Retry (FR-RGN-44): replaces the selection with the job's. */
+export const restoreReferences = (refs: DraftReferences | null): void => block.restore(refs);
+/** RGN after a successful submit: clears the Retry flags. */
+export const settleReferences = (): void => block.settle();
 
 export function useBlock(): BlockState {
   return useSyncExternalStore(block.subscribe, block.get, block.get);

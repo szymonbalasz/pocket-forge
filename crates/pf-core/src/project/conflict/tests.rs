@@ -288,6 +288,37 @@ fn fr_prj_40_spool_survives_a_crash_and_replays_in_order_once_writable() {
 }
 
 #[test]
+fn fr_prj_40_a_spool_entry_refused_for_good_is_dropped_and_reported() {
+    // BL-25: a transition the job already passed is dropped, and the user is told.
+    let mut s = setup();
+    let job = succeeded(&mut s);
+    add_candidates(&s.e.ctx, s.e.install(), &mut s.p, job.id, vec![cand(1)]).unwrap();
+    let pid = s.p.manifest.project_id;
+    let u = spool::SpoolUpdate {
+        state: Some(JobState::Running),
+        ..Default::default()
+    };
+    spool::push_update(&s.e.ctx, pid, job.id, &u).unwrap();
+    let r = spool::replay(&s.e.ctx, s.e.install(), &mut s.p).unwrap();
+    assert_eq!(r.entries, 0);
+    assert_eq!(r.dropped.len(), 1);
+    let d = &r.dropped[0];
+    assert_eq!((d.job_id, d.op), (job.id, "update_job"));
+    assert_eq!(spool::pending_count(&s.e.ctx, pid), 0, "deleted");
+    assert_eq!(s.p.jobs[&job.id].state, JobState::Fetched, "unchanged");
+    let events = s.e.events.0.lock().unwrap();
+    let (_, payload) = events
+        .iter()
+        .rev()
+        .find(|(n, _)| n == spool::EVENT_SPOOL_DROPPED)
+        .expect("project:spool-dropped fired");
+    assert_eq!(payload["job_id"], job.id.to_string());
+    assert_eq!(payload["op"], "update_job");
+    assert_eq!(payload["code"], d.code.as_str());
+    assert_eq!(payload["project_id"], pid.to_string());
+}
+
+#[test]
 fn fr_prj_21_fr_prj_40_locked_candidates_wait_in_the_spool_until_unlocked() {
     let mut s = setup();
     let job = succeeded(&mut s);

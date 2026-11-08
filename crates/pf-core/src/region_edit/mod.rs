@@ -5,7 +5,8 @@
 //! Slice 3: submit, cancel, retry draft, dismiss ([`jobs`]) and the job runner ([`runner`]),
 //! with the interim write spool ([`spool`]). Slices 4–5: candidate preview, accept / re-pick,
 //! star, discard, re-tune and the iteration list ([`candidates`]) over the patch bake
-//! ([`blend`]). Commands are re-exported from [`crate::commands`].
+//! ([`blend`]). Slice 7 (REF slice 6): references in estimate, submit, the job record and Retry
+//! through REF's `prepare_for_send` and `retry`. Commands are re-exported from [`crate::commands`].
 //!
 //! RGN reads pixels through [`pixels::PixelSource`] (PRJ's decoded original and mask store) and
 //! writes only through PRJ's store API (R4).
@@ -25,6 +26,8 @@ pub mod spool;
 
 #[cfg(test)]
 mod job_tests;
+#[cfg(test)]
+mod ref_tests;
 #[cfg(test)]
 mod tests;
 

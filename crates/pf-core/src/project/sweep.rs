@@ -397,6 +397,7 @@ fn candidates_from_jobs(
                 },
                 starred: false,
                 trash_id: None,
+                purged_at: None,
                 extra: Extra::new(),
             });
         }
