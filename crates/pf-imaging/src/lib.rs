@@ -12,6 +12,7 @@ mod compose;
 mod encode;
 mod probe;
 pub mod pyramid;
+pub mod reference;
 mod region;
 mod resize;
 mod rgb_source;

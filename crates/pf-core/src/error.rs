@@ -89,6 +89,12 @@ pub enum ErrorCode {
     InvalidCandidate,
     /// A file a re-tune or retry needs is gone (purged from the trash, RGN §9).
     SourceMissing,
+    /// A ticked reference can't be read; `detail{key, reason}` (FR-REF-21).
+    ReferenceUnavailable,
+    /// A reference slot under its minimum; `detail{slot, min}` (FR-REF-18).
+    ReferencesRequired,
+    /// A reference slot over its maximum; `detail{slot, max}` (FR-REF-18).
+    TooManyReferences,
 }
 
 impl ErrorCode {
@@ -142,6 +148,9 @@ impl ErrorCode {
             ErrorCode::RepickUnavailable => "repick_unavailable",
             ErrorCode::InvalidCandidate => "invalid_candidate",
             ErrorCode::SourceMissing => "source_missing",
+            ErrorCode::ReferenceUnavailable => "reference_unavailable",
+            ErrorCode::ReferencesRequired => "references_required",
+            ErrorCode::TooManyReferences => "too_many_references",
         }
     }
 }
