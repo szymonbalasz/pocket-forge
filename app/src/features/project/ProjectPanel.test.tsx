@@ -281,6 +281,14 @@ test('FR-PRJ-35 FR-PRJ-36 a conflict found mid-session shows the banner and the 
   expect(screen.getByTestId('prj-status-save').dataset.state).toBe('saved');
 });
 
+test('FR-PRJ-34 a conflict copy found at open shows Conflict in the status bar, not Saved (walk 2 N3)', async () => {
+  await openCrypt({
+    warnings: [{ code: 'conflict', message: 'This project was also changed on another machine.' }],
+  });
+  expect(await screen.findByTestId('prj-panel-conflict-open')).not.toBeNull();
+  expect(screen.getByTestId('prj-status-save').dataset.state).toBe('conflict');
+});
+
 test('FR-PRJ-21 walkthrough D3: a folder moved while open shows the reason and a banner, Save shows no raw path, Back to home asks', async () => {
   await openCrypt({ pendingSave: true });
   const raw = 'reading C:/pf-mock/library/Maps/Crypt/.pforge/revisions/r.json (os error 3)';

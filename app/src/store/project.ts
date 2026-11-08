@@ -138,7 +138,8 @@ async function openNow(path: string): Promise<boolean> {
   try {
     if (state.project) await api.project.close().catch(() => undefined);
     const project = await api.project.open(path);
-    set({ project, save: { kind: 'saved', at: savedAt(project) }, busy: false, opening: null });
+    // A conflict found at open shows as Conflict, not Saved (walk 2 N3).
+    set({ project, save: settled(project), busy: false, opening: null });
     bump();
     return true;
   } catch (e) {
