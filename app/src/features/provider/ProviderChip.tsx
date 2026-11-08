@@ -2,13 +2,13 @@
 // provider settings, which also open from the rail's Settings entry (`shared/settings.ts`).
 import { useEffect } from 'react';
 
-import { chipOf } from './chip';
+import { chipOf, realBadgeOf } from './chip';
 import { ProviderSettings } from './ProviderSettings';
 import { providerStore, useProviderState } from './store';
 import './provider.css';
 
 export function ProviderChip() {
-  const { status, balance } = useProviderState();
+  const { status, balance, spend } = useProviderState();
 
   useEffect(() => {
     void providerStore.refresh();
@@ -16,8 +16,19 @@ export function ProviderChip() {
   }, []);
 
   const chip = status ? chipOf(status, balance) : null;
+  const real = status ? realBadgeOf(status, spend) : null;
   return (
     <>
+      {real && (
+        <span
+          className={`prv-real${real.capSet ? '' : ' prv-real-nocap'}`}
+          data-testid="prv-status-real"
+          data-cap-set={real.capSet}
+          title="Scenario is the active provider: submitted jobs spend real credits. The session spend cap applies."
+        >
+          {real.label}
+        </span>
+      )}
       {chip && (
         <button
           type="button"

@@ -14,6 +14,21 @@
   color: var(--pf-warn);
 }
 
+/* Real provider (FR-PRV-28): always visible in scenario mode. */
+.prv-real {
+  font-size: var(--pf-font-size-meta);
+  border: 1px solid var(--pf-warn);
+  border-radius: 10px;
+  padding: 1px var(--pf-space-2);
+  color: var(--pf-warn);
+  font-variant-numeric: tabular-nums;
+}
+
+.prv-real-nocap {
+  color: var(--pf-danger);
+  border-color: var(--pf-danger);
+}
+
 .prv-chip-auth_error {
   color: var(--pf-danger);
 }

@@ -3,7 +3,7 @@
   "provider": "scenario",
   "model": "model_ideogram-v4-5-precise-edit",
   "case": "get-model",
-  "recorded_on": "2026-11-07",
+  "recorded_on": "2026-11-08",
   "source": "synthetic",
   "exchanges": [
     {
@@ -126,7 +126,7 @@
                 }
               },
               {
-                "name": "styleReferenceImages",
+                "name": "referenceImages",
                 "type": "file_array",
                 "kind": "image",
                 "max": 4

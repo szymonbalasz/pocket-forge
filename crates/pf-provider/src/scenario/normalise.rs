@@ -23,6 +23,9 @@ use crate::{
 pub struct Normalised {
     pub name: String,
     pub capabilities: Capabilities,
+    /// Inputs that take a list of files (the body sends an array for these, even for the
+    /// source image).
+    pub array_inputs: Vec<String>,
 }
 
 fn malformed(why: &str) -> ProviderError {
@@ -204,6 +207,7 @@ pub fn normalise(
     let mut blocked = false;
     let mut controls: Vec<Control> = vec![];
     let mut slots: Vec<Slot> = vec![];
+    let mut array_inputs: Vec<String> = vec![];
     let mut rules = vec![];
     let mut max_bytes = row.map_or(50 * 1024 * 1024, |r| r.max_bytes);
     let mut input_px = row.map_or(
@@ -228,7 +232,15 @@ pub fn normalise(
             warnings.push(format!("input #{i} has no name; ignored"));
             continue;
         };
+        // The adapter fills these itself (overlay `fixed` / `size_inputs`): never a control.
+        if row.is_some_and(|r| r.fills(name)) {
+            continue;
+        }
         let ty = input.get("type").and_then(Value::as_str).unwrap_or("");
+        let array = matches!(ty, "file_array" | "files" | "image_array");
+        if array {
+            array_inputs.push(name.to_owned());
+        }
         let required_v = input.get("required");
         let always = match required_v {
             Some(Value::Bool(b)) => *b,
@@ -290,7 +302,8 @@ pub fn normalise(
             if let Some(b) = num(input.get("maxSize")).filter(|b| *b > 0.0) {
                 max_bytes = max_bytes.min(b as u64);
             }
-            if role == ControlRole::Source {
+            // An array's min/max are counts, not pixels.
+            if role == ControlRole::Source && !array {
                 if let Some(m) = min.filter(|m| *m > 0.0) {
                     input_px.min = input_px.min.max(m as u32);
                 }
@@ -323,14 +336,16 @@ pub fn normalise(
     }
 
     rules.retain(|r: &Rule| {
+        let filled =
+            row.is_some_and(|row| row.fills(&r.when.control) || row.fills(&r.then.control));
         let known = controls.iter().any(|c| c.name == r.when.control);
-        if !known {
+        if !known && !filled {
             warnings.push(format!(
                 "rule on unknown input {:?} for {:?}; ignored",
                 r.when.control, r.then.control
             ));
         }
-        known
+        known && !filled
     });
 
     let has = |role| controls.iter().any(|c| c.role == role);
@@ -379,6 +394,7 @@ pub fn normalise(
             slots,
             warnings,
         },
+        array_inputs,
     })
 }
 
@@ -413,7 +429,7 @@ mod tests {
             {"name": "refs", "type": "file_array", "kind": "image", "max": 3},
             {"name": "note", "type": "string", "futureField": {"x": 1}}
         ]}});
-        let n = normalise("x", &body, row("model_ideogram-v3")).unwrap();
+        let n = normalise("x", &body, row("model_ideogram-v3-balanced")).unwrap();
         let c = &n.capabilities;
         assert_eq!(n.name, "X");
         let kinds: Vec<_> = c
@@ -478,7 +494,7 @@ mod tests {
             {"name": "region", "type": "string", "required": {"conditionalValues": {"mode": "inpaint"}}},
             {"name": "extra", "type": "string", "required": {"ifDefined": "mode"}}
         ]});
-        let c = normalise("m", &body, row("model_ideogram-v3"))
+        let c = normalise("m", &body, row("model_ideogram-v3-balanced"))
             .unwrap()
             .capabilities;
         assert_eq!(
@@ -498,18 +514,26 @@ mod tests {
         let base = json!([{"name": "image", "type": "file"}, {"name": "mask", "type": "file", "maskFrom": "image"}]);
         let mut inputs = base.as_array().unwrap().clone();
         inputs.push(json!({"name": "lora", "type": "model_ref"}));
-        let c = normalise("m", &json!({"inputs": inputs}), row("model_ideogram-v3"))
-            .unwrap()
-            .capabilities;
+        let c = normalise(
+            "m",
+            &json!({"inputs": inputs}),
+            row("model_ideogram-v3-balanced"),
+        )
+        .unwrap()
+        .capabilities;
         assert!(c.controls.iter().all(|x| x.name != "lora"));
         assert_eq!(c.operations, [Operation::EditMasked]);
         assert!(c.warnings.iter().any(|w| w.contains("model_ref")));
 
         inputs
             .push(json!({"name": "palette", "type": "colour_list", "required": {"always": true}}));
-        let c = normalise("m", &json!({"inputs": inputs}), row("model_ideogram-v3"))
-            .unwrap()
-            .capabilities;
+        let c = normalise(
+            "m",
+            &json!({"inputs": inputs}),
+            row("model_ideogram-v3-balanced"),
+        )
+        .unwrap()
+        .capabilities;
         assert!(
             c.operations.is_empty(),
             "a required unknown input → not offered"
@@ -548,7 +572,7 @@ mod tests {
         ]});
         static ROW: std::sync::LazyLock<OverlayRow> = std::sync::LazyLock::new(|| OverlayRow {
             slot_max: &[("styleReferenceImages", 6)],
-            ..*row_in(&SCENARIO_ROWS, "model_ideogram-v3").unwrap()
+            ..*row_in(&SCENARIO_ROWS, "model_ideogram-v3-balanced").unwrap()
         });
         let c = normalise("m", &body, Some(&ROW)).unwrap().capabilities;
         let s = |n| {
@@ -584,12 +608,19 @@ mod tests {
         use ReferenceRole::{Identity, Style};
         type Want = &'static [(&'static str, Option<ReferenceRole>, u32, u32, bool)];
         let style4: Want = &[("styleReferenceImages", Some(Style), 0, 4, false)];
-        let table: [(&str, Want); 9] = [
+        let table: [(&str, Want); 12] = [
             ("model_openai-gpt-image-2", &[]),
-            ("model_openai-gpt-image-2-5", &[]),
-            ("model_ideogram-v4-5", style4),
-            ("model_ideogram-v4-5-precise-edit", style4),
-            ("model_ideogram-v3", style4),
+            ("model_openai-gpt-image-2-5-flare", &[]),
+            ("model_openai-gpt-image-2-5-sunburst", &[]),
+            // 4.5's `referenceImages` carries the source (overlay role), so it is no slot.
+            ("model_ideogram-v4-5", &[]),
+            (
+                "model_ideogram-v4-5-precise-edit",
+                &[("referenceImages", Some(Style), 0, 4, false)],
+            ),
+            ("model_ideogram-v3-balanced", style4),
+            ("model_ideogram-v3-quality", style4),
+            ("model_ideogram-v3-turbo", style4),
             (
                 "model_ideogram-character",
                 &[
@@ -660,13 +691,13 @@ mod tests {
                 .is_empty()
         );
         assert!(
-            normalise("m", &no_mask, row("model_ideogram-v3"))
+            normalise("m", &no_mask, row("model_ideogram-v3-balanced"))
                 .unwrap()
                 .capabilities
                 .operations
                 .is_empty()
         );
-        let ok = normalise("m", &with_mask, row("model_ideogram-v3"))
+        let ok = normalise("m", &with_mask, row("model_ideogram-v3-balanced"))
             .unwrap()
             .capabilities;
         assert_eq!(
@@ -702,20 +733,42 @@ mod tests {
                 "{}",
                 row.model_id
             );
+            // Role names the model lists get their role; a source and a mask are always there.
             for (name, role) in row.roles {
-                assert_eq!(control(&c, name).role, *role, "{}: {name}", row.model_id);
+                if let Some(x) = c.controls.iter().find(|x| x.name == *name) {
+                    assert_eq!(x.role, *role, "{}: {name}", row.model_id);
+                }
             }
+            for role in [ControlRole::Source, ControlRole::Mask] {
+                assert!(
+                    c.controls.iter().any(|x| x.role == role),
+                    "{}",
+                    row.model_id
+                );
+            }
+            // Inputs the adapter fills are never controls.
+            assert!(
+                c.controls.iter().all(|x| !row.fills(&x.name)),
+                "{}",
+                row.model_id
+            );
             assert!(c.warnings.is_empty(), "{}: {:?}", row.model_id, c.warnings);
         }
     }
 
     #[test]
     fn normalising_is_fast() {
-        let rec = crate::scenario::fixture_recording("model_ideogram-v3", "get-model").unwrap();
+        let rec =
+            crate::scenario::fixture_recording("model_ideogram-v3-balanced", "get-model").unwrap();
         let body = &rec.exchanges[0].response.body;
         let t = std::time::Instant::now();
         for _ in 0..100 {
-            normalise("model_ideogram-v3", body, row("model_ideogram-v3")).unwrap();
+            normalise(
+                "model_ideogram-v3-balanced",
+                body,
+                row("model_ideogram-v3-balanced"),
+            )
+            .unwrap();
         }
         assert!(t.elapsed().as_millis() < 1000, "< 10 ms each (spec §12)");
     }

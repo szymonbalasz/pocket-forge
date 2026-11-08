@@ -1,15 +1,15 @@
 {
   "format_version": 1,
   "provider": "scenario",
-  "model": "model_ideogram-v3",
+  "model": "model_ideogram-v3-turbo",
   "case": "get-model",
-  "recorded_on": "2026-11-07",
+  "recorded_on": "2026-11-08",
   "source": "synthetic",
   "exchanges": [
     {
       "request": {
         "method": "GET",
-        "path": "/models/model_ideogram-v3"
+        "path": "/models/model_ideogram-v3-turbo"
       },
       "response": {
         "status": 200,
@@ -18,8 +18,8 @@
         },
         "body": {
           "model": {
-            "id": "model_ideogram-v3",
-            "name": "Ideogram V3",
+            "id": "model_ideogram-v3-turbo",
+            "name": "Ideogram V3 Turbo",
             "type": "custom",
             "capabilities": [
               "img2img",

@@ -1,15 +1,15 @@
 {
   "format_version": 1,
   "provider": "scenario",
-  "model": "model_ideogram-v3",
-  "case": "dry-run-no-assets",
+  "model": "model_ideogram-v3-balanced",
+  "case": "get-model",
   "recorded_on": "2026-11-07",
   "source": "synthetic",
   "exchanges": [
     {
       "request": {
         "method": "GET",
-        "path": "/models/model_ideogram-v3"
+        "path": "/models/model_ideogram-v3-balanced"
       },
       "response": {
         "status": 200,
@@ -18,8 +18,8 @@
         },
         "body": {
           "model": {
-            "id": "model_ideogram-v3",
-            "name": "Ideogram V3",
+            "id": "model_ideogram-v3-balanced",
+            "name": "Ideogram V3 Balanced",
             "type": "custom",
             "capabilities": [
               "img2img",
@@ -129,88 +129,6 @@
                 "max": 4
               }
             ]
-          }
-        }
-      }
-    },
-    {
-      "request": {
-        "method": "POST",
-        "path": "/generate/custom/model_ideogram-v3",
-        "query": {
-          "dryRun": "true"
-        },
-        "body": {
-          "numOutputs": 2,
-          "prompt": "a mossy flagstone floor",
-          "seed": 7
-        }
-      },
-      "response": {
-        "status": 269,
-        "body": {}
-      }
-    },
-    {
-      "request": {
-        "method": "POST",
-        "path": "/assets",
-        "body": {
-          "hide": true,
-          "image": {
-            "fixture": "source-256.png"
-          },
-          "name": "pocket-forge-source.png"
-        }
-      },
-      "response": {
-        "status": 200,
-        "body": {
-          "asset": {
-            "id": "<asset-1>"
-          }
-        }
-      }
-    },
-    {
-      "request": {
-        "method": "POST",
-        "path": "/assets",
-        "body": {
-          "hide": true,
-          "image": {
-            "fixture": "mask-256.png"
-          },
-          "name": "pocket-forge-mask.png"
-        }
-      },
-      "response": {
-        "status": 200,
-        "body": {
-          "asset": {
-            "id": "<asset-2>"
-          }
-        }
-      }
-    },
-    {
-      "request": {
-        "method": "POST",
-        "path": "/generate/custom/model_ideogram-v3",
-        "body": {
-          "image": "<asset-1>",
-          "mask": "<asset-2>",
-          "numOutputs": 2,
-          "prompt": "a mossy flagstone floor",
-          "seed": 7
-        }
-      },
-      "response": {
-        "status": 200,
-        "body": {
-          "job": {
-            "jobId": "<job-1>",
-            "status": "queued"
           }
         }
       }
