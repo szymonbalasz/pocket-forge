@@ -4,6 +4,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
 import type {
   CommandName,
@@ -76,6 +77,36 @@ export function onFileDrop(handler: (event: DropEvent) => void): Promise<Unliste
     else if (p.type === 'leave') handler({ type: 'leave' });
     else handler({ type: 'over' });
   });
+}
+
+/** Images the app accepts (FR-PRJ-06), for the open dialog's filter. */
+export const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp'];
+
+export interface PickOptions {
+  title: string;
+  /** Pick folders instead of files. */
+  directory?: boolean;
+  multiple?: boolean;
+  /** Only images (FR-PRJ-06). */
+  images?: boolean;
+}
+
+/** The native open dialog (#53). Resolves to the picked paths ([] when canceled). Rejects with
+ *  an `ApiError` when no dialog is available (Vitest, Playwright): callers fall back to typed
+ *  paths. */
+export async function pickPaths(opts: PickOptions): Promise<string[]> {
+  try {
+    const picked = await openDialog({
+      title: opts.title,
+      directory: opts.directory ?? false,
+      multiple: opts.multiple ?? false,
+      ...(opts.images ? { filters: [{ name: 'Images', extensions: IMAGE_EXTENSIONS }] } : {}),
+    });
+    if (picked === null) return [];
+    return Array.isArray(picked) ? picked : [picked];
+  } catch (e) {
+    throw toApiError(e);
+  }
 }
 
 /** Tells the app the UI has rendered (ends the process in `tauri:smoke` runs). */

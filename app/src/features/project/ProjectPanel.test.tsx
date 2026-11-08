@@ -225,3 +225,12 @@ test('FR-PRJ-14 ← Home closes the project; the panel then shows the home hint'
   expect(screen.queryByTestId('prj-status-save')).toBeNull();
   expect(core.names()).toContain('project_close');
 });
+
+test('FR-PRJ-47 #53 Add… copies the files picked in the native dialog', async () => {
+  await openCrypt();
+  const handlers = core.handlersSnapshot();
+  core.useHandlers({ ...handlers, 'plugin:dialog|open': () => ['D:/ref/statue.png'] });
+  fireEvent.click(screen.getByTestId('prj-panel-parts-add'));
+  await waitFor(() => expect(files('parts')).toEqual(['statue.png']));
+  expect(screen.queryByTestId('prj-panel-parts-add-paths')).toBeNull();
+});

@@ -7,7 +7,7 @@
 | Specs: asset-project, editor-canvas, region-edit, provider, export, reference-packs | — | merged | complete (#54) | — |
 | Skeleton; provider 2–4; editor-canvas 1–4, 6; export 1–2, 4; region-edit 1–2, 6 | — | merged | done | provider slice 5 needs the owner |
 | Asset-project core + UI (slices 1–4) | — | merged | done | walkthrough pending |
-| Native file dialog (#53) | `prj-ui` | `build/asset-project-ui` | CI | — |
+| Native file dialog (#53) | — | merged | done | — |
 | Backlog: BL-04/06/07/09/11 | `backlog` | `fix/backlog-1` | BL-07 in-app smoke (R46) | — |
 | Region-edit jobs (RGN 3–5) | `rgn-jobs` | `build/region-edit-jobs` | in progress | — |
 | Export commands (EXP 3, 5) | `exp-cmd` | `build/export-commands` | in progress | — |
@@ -15,7 +15,8 @@
 | Asset-project retention + conflicts (PRJ 5–6) | `prj-ret` | `build/asset-project-retention` | in progress | — |
 | Reference packs core (REF 1, 4) | `ref-core` | `build/reference-packs-core` | in progress | REF 4 needs REF 2 |
 | Provider references (REF 2) | `prv-ref` | `build/provider-references` | in progress | — |
-| Next: packs UI (REF 3, 5), asset-project walkthrough | — | — | waiting | a free slot; REF 3 needs the dialog plugin |
+| Packs UI + References block (REF 3, 5) | `ref-ui` | `build/reference-packs-ui` | in progress | — |
+| Next: asset-project walkthrough | — | — | waiting | a free slot |
 | Later: REF 6 (RGN integration) | — | — | waiting | REF 4, 5 and RGN 3 merged |
 
 ## Pending owner decisions
@@ -26,7 +27,7 @@
 - R32–R46 (see `rulings-phase1b.md`)
 
 ## Shared-file locks
-- `app/package.json`, `app/src-tauri/Cargo.toml` (dialog plugin): asset-project UI
+- _none_
 
 ## Reserved FR ranges
 - _none_

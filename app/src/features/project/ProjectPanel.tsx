@@ -6,6 +6,7 @@ import { Popover } from 'radix-ui';
 
 import {
   api,
+  pickPaths,
   type DiskUsage,
   type FolderFile,
   type RgnIteration,
@@ -308,8 +309,8 @@ function Folder({
   );
 }
 
-/** Add… copies files into a user-owned folder (`project_folder_add`). A native file dialog needs
- *  `tauri-plugin-dialog` (not approved yet); until then it takes paths, one per line. */
+/** Add… copies files into a user-owned folder (`project_folder_add`) from the native multi-select
+ *  dialog (#53). Where no dialog is available (tests on the mocked core), a popover takes paths. */
 function AddFiles({
   folder,
   onAdd,
@@ -325,17 +326,26 @@ function AddFiles({
     .filter(Boolean);
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger asChild>
+      <Popover.Anchor asChild>
         <button
           type="button"
           className="prj-icon-button"
           data-testid={`prj-panel-${folder}-add`}
           title="Add… (copies files in)"
           aria-label={`Add files to ${folder}`}
+          aria-haspopup="dialog"
+          onClick={() =>
+            pickPaths({ title: `Add files to ${folder}`, multiple: true }).then(
+              (picked) => {
+                if (picked.length) void onAdd(picked);
+              },
+              () => setOpen(true),
+            )
+          }
         >
           <IconPlus />
         </button>
-      </Popover.Trigger>
+      </Popover.Anchor>
       <Popover.Portal>
         <Popover.Content className="prj-add-popover" side="right" align="start" sideOffset={6}>
           <form
