@@ -122,6 +122,32 @@ export const api = {
         inner,
         ...(margin === undefined ? {} : { margin }),
       }),
+    /** `rgn_region_fit` with the model, so the fit follows its `input_px` (FR-RGN-05). */
+    fitFor: (
+      projectId: string,
+      inner: Commands['rgn_region_fit'][0]['inner'],
+      margin: number,
+      modelId: string | null,
+    ) => call('rgn_region_fit', { project_id: projectId, inner, margin, model_id: modelId }),
+    evaluate: (modelId: string, controls: Record<string, unknown>) =>
+      call('rgn_controls_evaluate', { model_id: modelId, controls }),
+    estimate: (draft: Commands['rgn_job_estimate'][0]['draft']) =>
+      call('rgn_job_estimate', { draft }),
+    submit: (input: Commands['rgn_job_submit'][0]) => call('rgn_job_submit', input),
+    cancel: (jobId: string) => call('rgn_job_cancel', { job_id: jobId }),
+    retryDraft: (jobId: string) => call('rgn_job_retry_draft', { job_id: jobId }),
+    dismiss: (jobId: string) => call('rgn_job_dismiss', { job_id: jobId }),
+    preview: (input: Commands['rgn_candidate_preview'][0]) => call('rgn_candidate_preview', input),
+    accept: (input: Commands['rgn_candidate_accept'][0]) => call('rgn_candidate_accept', input),
+    star: (jobId: string, candidateId: string, starred: boolean) =>
+      call('rgn_candidate_star', { job_id: jobId, candidate_id: candidateId, starred }),
+    discard: (jobId: string, candidateId: string) =>
+      call('rgn_candidate_discard', { job_id: jobId, candidate_id: candidateId }),
+    retune: (layerId: string, blend: Commands['rgn_patch_retune'][0]['blend']) =>
+      call('rgn_patch_retune', { layer_id: layerId, blend }),
+    iterations: () => call('rgn_iterations_list', {}),
+    spendGet: () => call('rgn_spend_get', {}),
+    spendSet: (cap: number, threshold: number) => call('rgn_spend_set', { cap, threshold }),
   },
   mask: {
     read: (projectId: string, maskId: string) =>

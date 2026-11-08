@@ -4,9 +4,11 @@
 import { api } from '../../api';
 import {
   editorStore,
+  useEditor,
   type CompareSource,
   type PickerCandidate,
   type PickerHandlers,
+  type RegionState,
 } from './store';
 
 export const editorBridge = {
@@ -37,4 +39,9 @@ export const editorBridge = {
  *  (RGN) to fill `thumbUrl`; the picker itself never calls the core. */
 export async function thumbnailUrl(projectId: string, imageId: string): Promise<string> {
   return (await api.editor.imageOpen(projectId, imageId, 256)).url;
+}
+
+/** The validated region (R18) for RGN to fit and send; null while there is none. */
+export function useEditorRegion(): RegionState | null {
+  return useEditor((s) => s.region);
 }

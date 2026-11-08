@@ -239,6 +239,114 @@ export interface MaskRead {
   bytes: number[] | ArrayBuffer;
 }
 
+// ── Region edit (RGN §9) ──────────────────────────────────────────────────────────────────────
+
+/** PRV's generic cost (`Cost`): provider units, or "unknown". */
+export interface CostValue {
+  amount: number | 'unknown';
+  unit: string;
+}
+
+/** The region as the draft and the job keep it (schema §4.5). */
+export interface RgnRegion {
+  inner: RectPx;
+  margin: number;
+}
+
+/** What estimate and submit are built from (RGN §9). `controls` = the sent values
+ *  (FR-RGN-34); `seed` null = random (FR-RGN-10). */
+export interface RgnDraft {
+  region: RgnRegion;
+  mask_id: string | null;
+  model_id: string;
+  final_prompt: string;
+  controls: Record<string, unknown>;
+  seed: number | null;
+}
+
+/** `rgn_controls_evaluate`: one entry per capability control (FR-RGN-33). */
+export interface RgnControlState {
+  name: string;
+  visible: boolean;
+  /** Effective allowed values (empty = no restriction). */
+  allowed: unknown[];
+  required: boolean;
+  error?: { code: string; message: string };
+}
+
+export type EstimateNeed = 'threshold' | 'unknown_cost' | 'set_cap';
+
+export interface RgnEstimate {
+  /** Hash of the cost-affecting inputs (FR-RGN-13). */
+  estimate_id: string;
+  cost: CostValue;
+  /** Session spend so far (FR-RGN-14). */
+  spend: number;
+  cap: number | null;
+  needs: EstimateNeed[];
+}
+
+export interface RgnSpend {
+  spend: number;
+  cap: number | null;
+  threshold: number | null;
+}
+
+export type JobState =
+  | 'requested'
+  | 'submitted'
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'fetched'
+  | 'closed'
+  | 'failed'
+  | 'canceled'
+  | 'unknown'
+  | 'lost';
+
+/** `rgn_iterations_list` row (FR-RGN-40). The active job before it has candidates has
+ *  `n`, `dir` and `slug` null. */
+export interface RgnIteration {
+  job_id: string;
+  n: number | null;
+  dir: string | null;
+  slug: string | null;
+  state: JobState;
+  kept: number;
+  returned: number;
+  cost: CostValue | null;
+  accepted_in_stack: boolean;
+}
+
+export interface RgnBlend {
+  feather_px: number;
+  colour_match: boolean;
+}
+
+/** `rgn_candidate_preview` (R16). `url` is the transient key's URL: the UI never builds hosts
+ *  (EDT Appendix A). */
+export interface RgnPreview {
+  key: string;
+  url: string;
+  rect: RectPx;
+}
+
+/** A manifest candidate (schema §4.7) as `project_get` returns it. */
+export interface CandidateRecord {
+  id: string;
+  job_id: string;
+  index: number;
+  file: string;
+  status: 'new' | 'accepted' | 'dismissed' | 'discarded' | 'trashed' | 'invalid';
+  starred: boolean;
+  trash_id: string | null;
+  width?: number;
+  height?: number;
+  /** Aspect differs from the sent one by > 1 % (FR-RGN-24). */
+  aspect_warning?: boolean;
+}
+
 /** Core command name → [input, output]. Append new commands. */
 export interface Commands {
   app_info: [Record<string, never>, AppInfo];
@@ -274,6 +382,35 @@ export interface Commands {
   provider_get_capabilities: [{ model_id: string }, Capabilities];
   provider_balance: [Record<string, never>, Balance];
   provider_fake_set_case: [{ case: string }, Record<string, never>];
+  rgn_controls_evaluate: [
+    { model_id: string; controls: Record<string, unknown> },
+    { controls: RgnControlState[] },
+  ];
+  rgn_job_estimate: [{ draft: RgnDraft }, RgnEstimate];
+  rgn_job_submit: [
+    { draft: RgnDraft; estimate_id: string; confirmations: EstimateNeed[] },
+    { job_id: string },
+  ];
+  rgn_job_cancel: [{ job_id: string }, { result: 'canceled' | 'not_cancellable' }];
+  rgn_job_retry_draft: [{ job_id: string }, RgnDraft];
+  rgn_job_dismiss: [{ job_id: string }, { trashed: number }];
+  rgn_candidate_preview: [{ job_id: string; candidate_id: string; blend: RgnBlend }, RgnPreview];
+  rgn_candidate_accept: [
+    { job_id: string; candidate_id: string; blend: RgnBlend },
+    { layer_id: string; revision_id: string },
+  ];
+  rgn_candidate_star: [
+    { job_id: string; candidate_id: string; starred: boolean },
+    Record<string, never>,
+  ];
+  rgn_candidate_discard: [{ job_id: string; candidate_id: string }, Record<string, never>];
+  rgn_patch_retune: [
+    { layer_id: string; blend: RgnBlend },
+    { layer_id: string; revision_id: string },
+  ];
+  rgn_iterations_list: [Record<string, never>, RgnIteration[]];
+  rgn_spend_get: [Record<string, never>, RgnSpend];
+  rgn_spend_set: [{ cap: number; threshold: number }, RgnSpend];
 }
 
 export type CommandName = keyof Commands;
@@ -287,4 +424,15 @@ export interface Events {
   'edt:tiles-failed': { key: string; error: CoreErrorShape | string };
   'export:settings-changed': { source: number | null; target: number | null };
   'provider:status-changed': { connectivity: Connectivity };
+  'rgn:job-state': {
+    job_id: string;
+    state: JobState;
+    progress: number | null;
+    cost: CostValue | null;
+    error?: { code: string; hint?: string; message?: string } | null;
+    /** FR-PRV-19 `long_running` (from 180 s). */
+    long_running?: boolean;
+  };
+  'rgn:candidate-ready': { job_id: string; candidate_id: string; status: 'ready' | 'invalid' };
+  'rgn:spend': { spend: number; cap: number | null };
 }
