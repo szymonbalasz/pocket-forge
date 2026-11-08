@@ -8,6 +8,8 @@ export interface TestCore {
   calls: { cmd: string; input: Rec }[];
   /** Replaces the command handlers (and clears `calls`). */
   useHandlers(handlers: Record<string, Handler>): void;
+  /** The current handlers, to extend one test's set. */
+  handlersSnapshot(): Record<string, Handler>;
   /** Emits a core event to the UI's listeners. */
   emit(event: string, payload: unknown): void;
   /** Names of the commands called so far. */
@@ -29,6 +31,7 @@ export function installTestCore(): TestCore {
       handlers = h;
       core.calls.length = 0;
     },
+    handlersSnapshot: () => ({ ...handlers }),
     emit(event, payload) {
       for (const [id, l] of listeners)
         if (l.event === event) callbacks.get(l.handler)?.({ event, id, payload });

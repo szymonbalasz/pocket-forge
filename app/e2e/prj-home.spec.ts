@@ -210,3 +210,16 @@ test('R40 the provider chip is a status-bar segment next to the PRJ save state; 
   await expect(page.getByTestId('prv-status-mode')).toHaveCount(0);
   await expect(page.getByTestId('app-slot-rail').getByTestId('prv-header-chip')).toHaveCount(0);
 });
+
+test('FR-PRJ-03 #53 + New uses the native image dialog when it is available', async ({ page }) => {
+  await page.evaluate(() => {
+    const h = (window as unknown as { __pfMockHandlers: Record<string, () => unknown> })
+      .__pfMockHandlers;
+    h['plugin:dialog|open'] = () => ['D:/maps/Bridge.png', 'D:/maps/Ford.webp'];
+  });
+  await expect(cards(page)).toHaveCount(2);
+  await page.getByTestId('prj-home-new').click();
+  await expect(page.getByTestId('prj-import-summary-text')).toHaveText('2 created');
+  await expect(cards(page)).toHaveCount(4);
+  await expect(page.getByTestId('prj-home-new-paths')).toHaveCount(0);
+});
