@@ -1,0 +1,456 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_openai-gpt-image-2-5-sunburst",
+  "case": "dry-run",
+  "recorded_on": "2026-11-08",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_openai-gpt-image-2-5-sunburst"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "txt2img",
+              "img2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Scenario",
+              "modelProvider": "OpenAI",
+              "subProcessor": "Provider"
+            },
+            "createdAt": "2026-09-09T10:00:27.235Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_EPkDGDvf3EU51ti1mzk7KuLt",
+              "asset_6gt2CNaxHyQBay5GLLYy3DVL",
+              "asset_NiTwEfqLLtrCzkCT3iXA3TzR",
+              "asset_JoHc9k618H3cNx9n58fqyoQy",
+              "asset_xzRNNx8PFG4gQu8dtajCunHx",
+              "asset_Xns7wDSjPvvSPJMDq8BttPDC",
+              "asset_b1oEcxZ5W4aj2X1aQqe5STJu",
+              "asset_aRWzJqXTGAo5CM214NeTfTmc",
+              "asset_t79Gv4TLw2VXE2bS1CEoR6KF",
+              "asset_9yVK3RzvX85pm57TFeVVyjUD",
+              "asset_bu2W1DxZHLbv5Zocy9kWdZf8",
+              "asset_zUjSQa51Uw29GAdYqbgK4KrT",
+              "asset_Ws8LJVfjw9TzTErsYSjFnzzV",
+              "asset_qZhJRvRbrLacko5pM3BrW9W3",
+              "asset_rjsagWKe4YL2m4ptqUzT94c8",
+              "asset_1ye4qwKfx3nkkLyFMphsEgLu",
+              "asset_UYcx8DgcYLDR3fK7TAFyFStn",
+              "asset_wjSaSyfFtDwM8dotb7g9DM7P",
+              "asset_7bwzCZoiPUDZ2HPmn8cYdY8Z",
+              "asset_J6rYsdw5KY5fwZcEZDDdGtNf",
+              "asset_5JE4fBCaA6hN83YjsAwYZ8MT",
+              "asset_GThCmUykCJ8TNPJ3beuKDaTv",
+              "asset_RrHrauQkJ1AD9fdGzMnTB6yh",
+              "asset_ggd3oysknXAc3oDSi7JMoVae",
+              "asset_UXRhG2Vj21F2PsvCPtVGK4GF",
+              "asset_fqiXWxwwrBdbcSLBu3JRYvuC",
+              "asset_VhYBDHv1APWoTA9GpseR1HWh",
+              "asset_D9ypDDUAJeJLHpRyxRNfTN13",
+              "asset_MBjTDTaXdV6qTagTtdVngRpZ",
+              "asset_erfyfJBZaxrdVmuQdkbeZjn3",
+              "asset_QnEvANPbhrXpMjexXiAheMLS",
+              "asset_LQbtZE3U7vn6YmZXgM5kunPV",
+              "asset_8deabNLPXRJzFC8TbpV3sEg4",
+              "asset_Vj7tMoCiBA3rK2ZnDce7JzEv"
+            ],
+            "id": "model_openai-gpt-image-2-5-sunburst",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Describe the image you want to create, or how to edit your reference images. Plain, natural language works well.",
+                "label": "Prompt",
+                "maxLength": 32000,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "description": "Images to edit or build from (up to 16). Required if you provide a mask.",
+                "kind": "image",
+                "label": "Reference Images",
+                "maxLength": 16,
+                "name": "referenceImages",
+                "parent": true,
+                "required": {
+                  "ifDefined": {
+                    "mask": {
+                      "message": "A reference image is required when a mask is provided."
+                    }
+                  }
+                },
+                "type": "file_array"
+              },
+              {
+                "backgroundBehavior": "transparent",
+                "costImpact": false,
+                "description": "An optional PNG that marks which parts of the first reference image to change. It uses transparency: fully transparent areas are edited, fully opaque areas are kept. Export a PNG with real transparency (don't flatten it). If you've drawn a white-on-black mask, convert the white \"edit\" areas to transparent first.",
+                "kind": "image",
+                "label": "Mask",
+                "maskFrom": "referenceImages",
+                "name": "mask",
+                "parent": true,
+                "type": "file"
+              },
+              {
+                "costImpact": true,
+                "default": 1,
+                "description": "How many images to create from the same prompt (1-10).",
+                "group": "Settings",
+                "label": "Image Count",
+                "max": 10,
+                "min": 1,
+                "name": "numOutputs",
+                "step": 1,
+                "type": "number"
+              },
+              {
+                "costImpact": true,
+                "description": "The output width in pixels.",
+                "group": "Settings",
+                "label": "Width",
+                "max": 3840,
+                "min": 16,
+                "name": "width",
+                "step": 16,
+                "type": "number"
+              },
+              {
+                "costImpact": true,
+                "description": "The output height in pixels.",
+                "group": "Settings",
+                "label": "Height",
+                "max": 3840,
+                "min": 16,
+                "name": "height",
+                "step": 16,
+                "type": "number"
+              },
+              {
+                "allowedValues": [
+                  "auto",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "costImpact": true,
+                "default": "auto",
+                "description": "How much effort goes into the image. Higher levels look better but cost more; Auto lets the model choose.",
+                "group": "Settings",
+                "label": "Quality",
+                "name": "quality",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "auto",
+                  "opaque",
+                  "transparent"
+                ],
+                "costImpact": false,
+                "default": "auto",
+                "description": "Whether the background is solid (Opaque) or see-through (Transparent). Auto lets the model decide.",
+                "group": "Settings",
+                "label": "Background",
+                "name": "background",
+                "type": "string"
+              }
+            ],
+            "name": "GPT Image 2.5 Sunburst",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "OpenAI GPT Image 2.5 Sunburst: the most capable GPT Image model, built for precise generation and editing across complex scenes, dense text, and fine detail work.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Character Design",
+              "GPT-Image",
+              "Image to Image",
+              "OpenAI",
+              "Precision",
+              "Text Rendering",
+              "Text to Image",
+              "editing",
+              "featured",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "resolutionComponent": {
+                "heightInput": "height",
+                "label": "Dimensions",
+                "presets": [
+                  {
+                    "height": 3360,
+                    "label": "9:21 (1440x3360)",
+                    "width": 1440
+                  },
+                  {
+                    "height": 3840,
+                    "label": "9:16 (2160x3840)",
+                    "width": 2160
+                  },
+                  {
+                    "height": 1920,
+                    "label": "9:16 (1088x1920)",
+                    "width": 1088
+                  },
+                  {
+                    "height": 1536,
+                    "label": "2:3 (1024x1536)",
+                    "width": 1024
+                  },
+                  {
+                    "height": 2048,
+                    "label": "3:4 (1536x2048)",
+                    "width": 1536
+                  },
+                  {
+                    "height": 1024,
+                    "label": "1:1 (1024x1024)",
+                    "width": 1024
+                  },
+                  {
+                    "height": 2048,
+                    "label": "1:1 (2048x2048)",
+                    "width": 2048
+                  },
+                  {
+                    "height": 1536,
+                    "label": "4:3 (2048x1536)",
+                    "width": 2048
+                  },
+                  {
+                    "height": 1024,
+                    "label": "3:2 (1536x1024)",
+                    "width": 1536
+                  },
+                  {
+                    "height": 1152,
+                    "label": "16:9 (2048x1152)",
+                    "width": 2048
+                  },
+                  {
+                    "height": 2160,
+                    "label": "16:9 (3840x2160)",
+                    "width": 3840
+                  },
+                  {
+                    "height": 1440,
+                    "label": "21:9 (3360x1440)",
+                    "width": 3360
+                  },
+                  {
+                    "label": "Auto"
+                  }
+                ],
+                "widthInput": "width"
+              },
+              "selects": {
+                "background": {
+                  "auto": "Auto",
+                  "opaque": "Opaque",
+                  "transparent": "Transparent"
+                },
+                "quality": {
+                  "auto": "Auto",
+                  "high": "High",
+                  "low": "Low",
+                  "max": "Max",
+                  "medium": "Medium",
+                  "xhigh": "Extra High"
+                }
+              }
+            },
+            "updatedAt": "2026-09-18T10:39:39.547Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "room-512.png"
+          },
+          "name": "pocket-forge-source.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "authorId": "<user-3>",
+            "collectionIds": [],
+            "createdAt": "2026-11-08T19:14:00.570Z",
+            "editCapabilities": [
+              "REMOVE_BACKGROUND",
+              "REFINE",
+              "PIXELATE",
+              "PROMPT_EDITING",
+              "UPSCALE",
+              "UPSCALE_360",
+              "DETECTION",
+              "VECTORIZATION",
+              "SEGMENTATION",
+              "REFRAME",
+              "GENERATIVE_FILL"
+            ],
+            "id": "<asset-1>",
+            "kind": "image",
+            "metadata": {
+              "height": 512,
+              "kind": "image",
+              "name": "pocket-forge-source.png",
+              "size": 3031,
+              "type": "uploaded",
+              "width": 512
+            },
+            "mimeType": "image/png",
+            "ownerId": "<user-4>",
+            "privacy": "private",
+            "properties": {
+              "height": 512,
+              "size": 3031,
+              "width": 512
+            },
+            "source": "uploaded",
+            "status": "success",
+            "tags": [],
+            "updatedAt": "2026-11-08T19:14:00.570Z",
+            "url": "fake://asset/2"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "upload.png"
+          },
+          "name": "pocket-forge-mask.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "authorId": "<user-3>",
+            "collectionIds": [],
+            "createdAt": "2026-11-08T19:14:01.589Z",
+            "editCapabilities": [
+              "REMOVE_BACKGROUND",
+              "REFINE",
+              "PIXELATE",
+              "PROMPT_EDITING",
+              "UPSCALE",
+              "UPSCALE_360",
+              "DETECTION",
+              "VECTORIZATION",
+              "SEGMENTATION",
+              "REFRAME",
+              "GENERATIVE_FILL"
+            ],
+            "id": "<asset-2>",
+            "kind": "image",
+            "metadata": {
+              "height": 512,
+              "kind": "image",
+              "name": "pocket-forge-mask.png",
+              "size": 4571,
+              "type": "uploaded",
+              "width": 512
+            },
+            "mimeType": "image/png",
+            "ownerId": "<user-4>",
+            "privacy": "private",
+            "properties": {
+              "height": 512,
+              "size": 4571,
+              "width": 512
+            },
+            "source": "uploaded",
+            "status": "success",
+            "tags": [],
+            "updatedAt": "2026-11-08T19:14:01.589Z",
+            "url": "fake://asset/3"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/generate/custom/model_openai-gpt-image-2-5-sunburst",
+        "query": {
+          "dryRun": "true"
+        },
+        "body": {
+          "height": 512,
+          "mask": "<asset-2>",
+          "numOutputs": 1,
+          "prompt": "a mossy flagstone floor",
+          "referenceImages": [
+            "<asset-1>"
+          ],
+          "width": 512
+        }
+      },
+      "response": {
+        "status": 269,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "costDetails": {
+            "custom-generation": 12
+          },
+          "creativeUnitsCost": 12,
+          "creativeUnitsDiscount": 0
+        }
+      }
+    }
+  ]
+}

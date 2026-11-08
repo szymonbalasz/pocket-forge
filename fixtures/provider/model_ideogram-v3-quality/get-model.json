@@ -4,7 +4,7 @@
   "model": "model_ideogram-v3-quality",
   "case": "get-model",
   "recorded_on": "2026-11-08",
-  "source": "synthetic",
+  "source": "recorded",
   "exchanges": [
     {
       "request": {
@@ -18,117 +18,292 @@
         },
         "body": {
           "model": {
-            "id": "model_ideogram-v3-quality",
-            "name": "Ideogram V3 Quality",
-            "type": "custom",
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
             "capabilities": [
-              "img2img",
-              "inpaint"
+              "txt2img",
+              "img2img"
             ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Replicate",
+              "modelProvider": "Ideogram",
+              "subProcessor": "Replicate"
+            },
+            "createdAt": "2025-07-10T12:58:40.693Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_hyc2iYHHLvAeneXArr1KUoQT",
+              "asset_32Fz5KbfhWBxPTG5DxbPANUK",
+              "asset_Nfy7axVZKnieTjHgdbaCcXd3",
+              "asset_aNd7QVJhxB5m33Vz6cUwa8Rg",
+              "asset_p9rxEdAa24ox5YuJG8Awznpb",
+              "asset_18o57m1tAvjnSjTxf6Ra5bfH",
+              "asset_VMyNCBLXzpJ6oHqGLggBKbkE",
+              "asset_gcZeQBDwRwwK3j6y1EmXwaEy",
+              "asset_ZfChK9iVpo75MgymUFMkarmq",
+              "asset_ZNAFDZRLag9eZAmwnzQfemuy",
+              "asset_7HQ4o6XNqKEsXVXinMqJX5cz",
+              "asset_SDaxXdF6bfYp8CUvz4E1cPk4",
+              "asset_Wvq8K6ydiTBDAKDCijHvJMdq",
+              "asset_Lwpq1goWTHsk6B1Wu2wipRdK",
+              "asset_wm7jFQ1Z4HfiBNptYz8x3twT",
+              "asset_7TMJNhdf6Qy3T3G55rsRecqE",
+              "asset_H5mA5J1jytPhMnxFtU6cVqAP",
+              "asset_roH31ksHHT2wFhWGUbPQDnyw",
+              "asset_7pF1vd8Q323SJT8eR16WCKnQ",
+              "asset_kC9Uf1y6KyCkTpBe34eaBw2a",
+              "asset_1vsGvpy87bZTVuk5mF4Cht9j",
+              "asset_AhLHRQ1YAvBddn6mBcKYPquL",
+              "asset_L4MRJeoNXtv4PQSg9qdTweUx",
+              "asset_T7BUd5BT3nStcB6wGaydBoQ8",
+              "asset_V4WidjpqH7WEwfhgkzzTvPnM",
+              "asset_doRZwCcuEJGM4WhrDMEc8fuh",
+              "asset_vUfhiseP5WVWckV79x2gYBKL",
+              "asset_r7xWbQVcNEsdgER4uRGMNSFj",
+              "asset_1ER6icWJkc3TyVuQHvb6fpix",
+              "asset_t2D47sCqx8jzgWhQdFRNZQUS",
+              "asset_hnyvExHMBbduQA1ga9PYYxqL",
+              "asset_roKj8oeFrUtT1SZngGLJrTEp"
+            ],
+            "id": "model_ideogram-v3-quality",
             "inputs": [
               {
+                "costImpact": false,
+                "description": "Describe your image",
+                "label": "Prompt",
+                "maxLength": 4096,
                 "name": "prompt",
-                "type": "string",
-                "required": {
-                  "always": true
-                }
-              },
-              {
-                "name": "image",
-                "type": "file",
-                "kind": "image",
+                "prompt": true,
+                "promptSpark": true,
                 "required": {
                   "always": true
                 },
-                "maxSize": 52428800
+                "type": "string"
               },
               {
-                "name": "mask",
-                "type": "file",
+                "allowedValues": [
+                  "1:3",
+                  "1:2",
+                  "2:3",
+                  "3:4",
+                  "4:5",
+                  "9:16",
+                  "10:16",
+                  "1:1",
+                  "5:4",
+                  "4:3",
+                  "3:2",
+                  "16:10",
+                  "16:9",
+                  "2:1",
+                  "3:1"
+                ],
+                "costImpact": false,
+                "default": "4:3",
+                "description": "Aspect ratio. Ignored if a resolution or inpainting image is given.",
+                "label": "Aspect Ratio",
+                "name": "aspectRatio",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "None",
+                  "512x1536",
+                  "576x1408",
+                  "640x1344",
+                  "704x1344",
+                  "768x1344",
+                  "832x1216",
+                  "896x1152",
+                  "960x1024",
+                  "1024x1024",
+                  "1088x960",
+                  "1152x896",
+                  "1216x832",
+                  "1280x768",
+                  "1344x704",
+                  "1408x640",
+                  "1472x576",
+                  "1536x512"
+                ],
+                "costImpact": false,
+                "default": "None",
+                "description": "Resolution. Overrides aspect ratio. Ignored if an inpainting image is given.",
+                "label": "Resolution",
+                "name": "resolution",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "Auto",
+                  "On",
+                  "Off"
+                ],
+                "costImpact": false,
+                "default": "Auto",
+                "description": "Magic Prompt will interpret your prompt and optimize it to maximize variety and quality of the images generated. You can also use it to write prompts in different languages.",
+                "label": "Magic Prompt Option",
+                "name": "magicPromptOption",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "An image file to use for inpainting. You must also use a mask.",
                 "kind": "image",
+                "label": "Image for Inpainting",
+                "name": "image",
+                "parent": true,
+                "type": "file"
+              },
+              {
+                "costImpact": false,
+                "description": "A black and white image. Black pixels are inpainted, white pixels are preserved. The mask will be resized to match the image size.",
+                "kind": "image",
+                "label": "Mask",
                 "maskFrom": "image",
+                "name": "mask",
+                "parent": true,
                 "required": {
-                  "always": true
-                }
-              },
-              {
-                "name": "numOutputs",
-                "type": "number",
-                "min": 1,
-                "max": 4,
-                "step": 1,
-                "default": 1,
-                "costImpact": true
-              },
-              {
-                "name": "seed",
-                "type": "number",
-                "min": 0,
-                "max": 2147483647,
-                "step": 1
-              },
-              {
-                "name": "renderingSpeed",
-                "type": "string",
-                "allowedValues": [
-                  "TURBO",
-                  "DEFAULT",
-                  "QUALITY"
-                ],
-                "default": "DEFAULT",
-                "costImpact": true
-              },
-              {
-                "name": "magicPrompt",
-                "type": "string",
-                "allowedValues": [
-                  "AUTO",
-                  "ON",
-                  "OFF"
-                ],
-                "default": "AUTO"
-              },
-              {
-                "name": "styleType",
-                "type": "string",
-                "allowedValues": [
-                  "AUTO",
-                  "GENERAL",
-                  "REALISTIC",
-                  "DESIGN",
-                  "FICTION"
-                ],
-                "default": "AUTO"
-              },
-              {
-                "name": "colorPalette",
-                "type": "string",
-                "allowedValues": [
-                  "EMBER",
-                  "FRESH",
-                  "JUNGLE",
-                  "MAGIC",
-                  "MELON",
-                  "MOSAIC",
-                  "PASTEL",
-                  "ULTRAMARINE"
-                ],
-                "required": {
-                  "always": false,
-                  "conditionalValues": {
-                    "styleType": [
-                      "DESIGN"
-                    ]
+                  "ifDefined": {
+                    "image": {
+                      "message": "A mask must be provided if an inpainting image is set."
+                    }
                   }
-                }
+                },
+                "type": "file"
               },
               {
-                "name": "styleReferenceImages",
-                "type": "file_array",
+                "costImpact": false,
+                "description": "A list of images to use as style references.",
                 "kind": "image",
-                "max": 4
+                "label": "Style Reference Images",
+                "maxLength": 4,
+                "name": "styleReferenceImages",
+                "parent": true,
+                "type": "file_array"
+              },
+              {
+                "allowedValues": [
+                  "None",
+                  "Auto",
+                  "General",
+                  "Realistic",
+                  "Design"
+                ],
+                "costImpact": false,
+                "default": "None",
+                "description": "The styles help define the specific aesthetic of the image you want to generate.",
+                "label": "Style Type",
+                "name": "styleType",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "None",
+                  "80s Illustration",
+                  "90s Nostalgia",
+                  "Abstract Organic",
+                  "Analog Nostalgia",
+                  "Art Brut",
+                  "Art Deco",
+                  "Art Poster",
+                  "Aura",
+                  "Avant Garde",
+                  "Bauhaus",
+                  "Blueprint",
+                  "Blurry Motion",
+                  "Bright Art",
+                  "C4D Cartoon",
+                  "Children's Book",
+                  "Collage",
+                  "Coloring Book I",
+                  "Coloring Book II",
+                  "Cubism",
+                  "Dark Aura",
+                  "Doodle",
+                  "Double Exposure",
+                  "Dramatic Cinema",
+                  "Editorial",
+                  "Emotional Minimal",
+                  "Ethereal Party",
+                  "Expired Film",
+                  "Flat Art",
+                  "Flat Vector",
+                  "Forest Reverie",
+                  "Geo Minimalist",
+                  "Glass Prism",
+                  "Golden Hour",
+                  "Graffiti I",
+                  "Graffiti II",
+                  "Halftone Print",
+                  "High Contrast",
+                  "Hippie Era",
+                  "Iconic",
+                  "Japandi Fusion",
+                  "Jazzy",
+                  "Long Exposure",
+                  "Magazine Editorial",
+                  "Minimal Illustration",
+                  "Mixed Media",
+                  "Monochrome",
+                  "Nightlife",
+                  "Oil Painting",
+                  "Old Cartoons",
+                  "Paint Gesture",
+                  "Pop Art",
+                  "Retro Etching",
+                  "Riviera Pop",
+                  "Spotlight 80s",
+                  "Stylized Red",
+                  "Surreal Collage",
+                  "Travel Poster",
+                  "Vintage Geo",
+                  "Vintage Poster",
+                  "Watercolor",
+                  "Weird",
+                  "Woodblock Print"
+                ],
+                "costImpact": false,
+                "default": "None",
+                "description": "The style preset to use for the image generation.",
+                "label": "Style Preset",
+                "name": "stylePreset",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "Use a seed for reproducible results. Leave blank to use a random seed.",
+                "label": "Seed",
+                "max": 2147483647,
+                "min": 0,
+                "name": "seed",
+                "type": "number"
               }
-            ]
+            ],
+            "name": "Ideogram 3 (Quality)",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Ideogram 3 (Quality) by Ideogram generates images with precise text rendering and complex layouts. Supports inpainting, up to 4 style references, and 60+ style presets.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Ideogram",
+              "Image to Image",
+              "Text to Image",
+              "deprecated:model_ideogram-v4",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "updatedAt": "2026-06-28T10:15:26.216Z",
+            "userId": "<user-1>"
           }
         }
       }

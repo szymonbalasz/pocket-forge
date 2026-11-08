@@ -1,0 +1,438 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_ideogram-character",
+  "case": "dry-run",
+  "recorded_on": "2026-11-08",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_ideogram-character"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "img2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Replicate",
+              "modelProvider": "Ideogram",
+              "subProcessor": "Replicate"
+            },
+            "createdAt": "2025-08-08T08:37:28.314Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_erVcNyS4gH9HMBuPg6soyxgv",
+              "asset_93MsofvBg7dbzqRHnGxZ3aFX",
+              "asset_4us1S2vhz2i4MKGhhoZXaPMp",
+              "asset_oRbJd7woy6o2LSDqLCs3GUjA",
+              "asset_9hjX61UU2yxzBnToqhcPzUgZ",
+              "asset_TXyq7b4e1x4DK64MTRBxVq8T",
+              "asset_1sYy8GxAqjrjsSui7Gge3aiE",
+              "asset_EBiypAmkTN5skbRXjj2i7vrs",
+              "asset_tHFqqPhnUiAahBotUBdtbeHS",
+              "asset_bCzFwiJzFzTYr1KN4Dj9cdRe",
+              "asset_8EP7BZwHAKGDfXLNd4HKzNW8",
+              "asset_HgzgkGvuboobWMEQYfFN44Lf",
+              "asset_mS5NEeFzcLcgfK82N25Fy66f",
+              "asset_iP3erbbSa1sXedvbBTFRWJoj",
+              "asset_3AGAmoeQ15XGbbMcCmaZemSh",
+              "asset_ssY4XRt3gVpSkHD6p9YQ8F8n",
+              "asset_14Sw6vobxSLY2Sg8fQBmKtJM",
+              "asset_qc4cpXmTG2s1wMb1uyPzCZ6U",
+              "asset_ahacva9AMdTfMibgZ83AKFuV",
+              "asset_MKSD6CttLc8uJYkWaZLYQah4",
+              "asset_KX5RtGTMDNFPQZNeLiUAFzn2",
+              "asset_evDVtTZdrGNWNGZ7EYjwuXPo",
+              "asset_RPePLLiWo6P9UVuNDvpUom4w"
+            ],
+            "id": "model_ideogram-character",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Text prompt for image generation",
+                "label": "Prompt",
+                "maxLength": 2048,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "Default",
+                  "Turbo",
+                  "Quality"
+                ],
+                "costImpact": true,
+                "default": "Default",
+                "description": "Turbo for faster and cheaper generation, quality for higher quality and more expensive generation, default for balanced.",
+                "label": "Rendering Speed",
+                "name": "renderingSpeed",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "An image to use as a character reference.",
+                "kind": "image",
+                "label": "Character Reference Image",
+                "name": "characterReferenceImage",
+                "parent": true,
+                "required": {
+                  "always": true
+                },
+                "type": "file"
+              },
+              {
+                "allowedValues": [
+                  "Auto",
+                  "Fiction",
+                  "Realistic"
+                ],
+                "costImpact": false,
+                "default": "Auto",
+                "description": "The character style type. Auto, Fiction, or Realistic.",
+                "label": "Style",
+                "name": "styleType",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "1:3",
+                  "1:2",
+                  "2:3",
+                  "3:4",
+                  "4:5",
+                  "9:16",
+                  "10:16",
+                  "1:1",
+                  "3:2",
+                  "4:3",
+                  "5:4",
+                  "16:10",
+                  "16:9",
+                  "2:1",
+                  "3:1"
+                ],
+                "costImpact": false,
+                "default": "4:3",
+                "description": "Aspect ratio. Ignored if a resolution or inpainting image is given.",
+                "label": "Aspect Ratio",
+                "name": "aspectRatio",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "None",
+                  "1536x512",
+                  "1472x576",
+                  "1408x528",
+                  "1408x704",
+                  "1280x720",
+                  "1280x768",
+                  "1024x768",
+                  "1024x1024",
+                  "768x1024",
+                  "832x1472",
+                  "704x1408",
+                  "512x1536"
+                ],
+                "costImpact": false,
+                "default": "None",
+                "description": "Resolution. Overrides aspect ratio. Ignored if an inpainting image is given.",
+                "label": "Resolution",
+                "name": "resolution",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "An image file to use for inpainting. You must also use a mask.",
+                "kind": "image",
+                "label": "Image for Inpainting",
+                "name": "image",
+                "parent": true,
+                "type": "file"
+              },
+              {
+                "costImpact": false,
+                "description": "A black and white image. Black pixels are inpainted, white pixels are preserved. The mask will be resized to match the image size.",
+                "kind": "image",
+                "label": "Mask",
+                "maskFrom": "image",
+                "name": "mask",
+                "parent": true,
+                "required": {
+                  "ifDefined": {
+                    "image": {
+                      "message": "A mask must be provided if an inpainting image is set."
+                    }
+                  }
+                },
+                "type": "file"
+              },
+              {
+                "costImpact": false,
+                "description": "Use a seed for reproducible results. Leave blank to use a random seed.",
+                "label": "Seed",
+                "max": 2147483647,
+                "name": "seed",
+                "type": "number"
+              }
+            ],
+            "name": "Ideogram Character",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Ideogram Character by Ideogram generates new images of a character from a single reference, keeping identity consistent, with Realistic or Fiction styles and inpainting.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Face Swapping",
+              "Ideogram",
+              "Image Editing",
+              "Image to Image",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "updatedAt": "2026-06-28T11:19:52.550Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "room-512.png"
+          },
+          "name": "pocket-forge-source.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "authorId": "<user-3>",
+            "collectionIds": [],
+            "createdAt": "2026-11-08T19:14:00.570Z",
+            "editCapabilities": [
+              "REMOVE_BACKGROUND",
+              "REFINE",
+              "PIXELATE",
+              "PROMPT_EDITING",
+              "UPSCALE",
+              "UPSCALE_360",
+              "DETECTION",
+              "VECTORIZATION",
+              "SEGMENTATION",
+              "REFRAME",
+              "GENERATIVE_FILL"
+            ],
+            "id": "<asset-1>",
+            "kind": "image",
+            "metadata": {
+              "height": 512,
+              "kind": "image",
+              "name": "pocket-forge-source.png",
+              "size": 3031,
+              "type": "uploaded",
+              "width": 512
+            },
+            "mimeType": "image/png",
+            "ownerId": "<user-4>",
+            "privacy": "private",
+            "properties": {
+              "height": 512,
+              "size": 3031,
+              "width": 512
+            },
+            "source": "uploaded",
+            "status": "success",
+            "tags": [],
+            "updatedAt": "2026-11-08T19:14:00.570Z",
+            "url": "fake://asset/2"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "upload.png"
+          },
+          "name": "pocket-forge-mask.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "authorId": "<user-3>",
+            "collectionIds": [],
+            "createdAt": "2026-11-08T19:14:19.401Z",
+            "editCapabilities": [
+              "REMOVE_BACKGROUND",
+              "REFINE",
+              "PIXELATE",
+              "PROMPT_EDITING",
+              "UPSCALE",
+              "UPSCALE_360",
+              "DETECTION",
+              "VECTORIZATION",
+              "SEGMENTATION",
+              "REFRAME",
+              "GENERATIVE_FILL"
+            ],
+            "id": "<asset-2>",
+            "kind": "image",
+            "metadata": {
+              "height": 512,
+              "kind": "image",
+              "name": "pocket-forge-mask.png",
+              "size": 2242,
+              "type": "uploaded",
+              "width": 512
+            },
+            "mimeType": "image/png",
+            "ownerId": "<user-4>",
+            "privacy": "private",
+            "properties": {
+              "height": 512,
+              "size": 2242,
+              "width": 512
+            },
+            "source": "uploaded",
+            "status": "success",
+            "tags": [],
+            "updatedAt": "2026-11-08T19:14:19.401Z",
+            "url": "fake://asset/3"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "upload.png"
+          },
+          "name": "pocket-forge-reference.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "authorId": "<user-3>",
+            "collectionIds": [],
+            "createdAt": "2026-11-08T19:14:31.827Z",
+            "editCapabilities": [
+              "REMOVE_BACKGROUND",
+              "REFINE",
+              "PIXELATE",
+              "PROMPT_EDITING",
+              "UPSCALE",
+              "UPSCALE_360",
+              "DETECTION",
+              "VECTORIZATION",
+              "SEGMENTATION",
+              "REFRAME",
+              "GENERATIVE_FILL"
+            ],
+            "id": "<asset-3>",
+            "kind": "image",
+            "metadata": {
+              "height": 256,
+              "kind": "image",
+              "name": "pocket-forge-reference.png",
+              "size": 196962,
+              "type": "uploaded",
+              "width": 256
+            },
+            "mimeType": "image/png",
+            "ownerId": "<user-4>",
+            "privacy": "private",
+            "properties": {
+              "height": 256,
+              "size": 196962,
+              "width": 256
+            },
+            "source": "uploaded",
+            "status": "success",
+            "tags": [],
+            "updatedAt": "2026-11-08T19:14:31.827Z",
+            "url": "fake://asset/4"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/generate/custom/model_ideogram-character",
+        "query": {
+          "dryRun": "true"
+        },
+        "body": {
+          "characterReferenceImage": "<asset-3>",
+          "image": "<asset-1>",
+          "mask": "<asset-2>",
+          "prompt": "a mossy flagstone floor",
+          "seed": 1
+        }
+      },
+      "response": {
+        "status": 269,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "costDetails": {
+            "custom-generation": 25
+          },
+          "creativeUnitsCost": 25,
+          "creativeUnitsDiscount": 0
+        }
+      }
+    }
+  ]
+}

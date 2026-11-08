@@ -4,7 +4,7 @@
   "model": "model_ideogram-v4-5-precise-edit",
   "case": "get-model",
   "recorded_on": "2026-11-08",
-  "source": "synthetic",
+  "source": "recorded",
   "exchanges": [
     {
       "request": {
@@ -18,120 +18,227 @@
         },
         "body": {
           "model": {
-            "id": "model_ideogram-v4-5-precise-edit",
-            "name": "Ideogram 4.5 Precise Edit",
-            "type": "custom",
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
             "capabilities": [
-              "img2img",
-              "inpaint"
+              "img2img"
             ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Pending",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Scenario",
+              "modelProvider": "Ideogram",
+              "subProcessor": "Provider"
+            },
+            "createdAt": "2026-09-28T08:48:14.757Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_5zGrhgaT4A45JgF8VmFfFeng",
+              "asset_ASTwPUQSmDQDLb2eyD1KvMaX",
+              "asset_iwS84hATVZNjXfEswig8mow1",
+              "asset_VoUAdERFP2mY5rocBGa4PHpB",
+              "asset_rqkD3UhzGBUqntVwYHhg9Wr1",
+              "asset_Z3LEiwFY6AJaj5t3H1aPXoEe",
+              "asset_8QZ9br6RiRfCvH1YywGrerTH",
+              "asset_ut6Ha8LrnvbCUFJFHDbhdDiT",
+              "asset_hzbaRzAWhua5NU8KBDjTVER3",
+              "asset_uxiTovzqYXYhWPAKLXYDBXWq",
+              "asset_2smcAMBo2EkFswz6q1v8xcvH",
+              "asset_CthHVCu7qVB1ALwLL3oNEKcE",
+              "asset_RcWg8cKrYZH3sNoQSKeK8MCC",
+              "asset_VvvELHpP8NzfJmpkGdP5UySc",
+              "asset_wu5Jcpp7qY5j3C5zAwP79tkJ",
+              "asset_b6GvhXn3cUpAT38KkfG9q5CB",
+              "asset_zbnJPssCUfLv5FH9tEzHVJ3u",
+              "asset_Xx6QtdS9upyXWo2Qzv6mW8kG",
+              "asset_54LnuVPZqssAjfan5BW5eZai",
+              "asset_gkRRh3kv8nT6Kg2yWB7xTJUJ",
+              "asset_vCkZwvzesdEZULQj7feCBGmv",
+              "asset_hnzq4Z58cruabWKEi6rvdySw",
+              "asset_MnoHQR88rERpN8xNdVpdH9J7",
+              "asset_J6J3e4uhMouBB5CzPGTy8PHa",
+              "asset_P8T7UnDCQx3oDr9pbCsWcjHZ",
+              "asset_XkAHFc9CpC6exUrRM5nLNhjZ",
+              "asset_CJiyxDk6Gf5m3gKjD7rQmrq7",
+              "asset_oWDMTMSg3bDzNUxDPugnNFKg",
+              "asset_Mom9m3VCkGMuJJV9sbcbVHBX",
+              "asset_mBzNS71jdi8Ykdj6yKqSFe1T",
+              "asset_Hph4Et1PFqXckLydpDdsqzc6",
+              "asset_cef7aN3p3K4ZjQL6R7X6HFgS",
+              "asset_Wytx5K5rRMVB8xosBwCFWWfB",
+              "asset_ve7FuWgFjAGgbbtqji2GfZ27",
+              "asset_ffxGzxdpSC2HYEbWfg658d9M",
+              "asset_V6MBRMoMGMrNgD2zYJANpWhY",
+              "asset_W9ZCm9PkWjf21EXQwVT5LBLk",
+              "asset_1FJ8yTD8z6ANrDDvVvZWxMCM",
+              "asset_FWGXFJP7VgcehndJDWzvGU2K",
+              "asset_ST2VQchp9RH1VkKWkSLEUTAb",
+              "asset_ucdAWStkHcrdXbY7ySK67qUH",
+              "asset_gzN2WXvmifz3RDsqxJihaYEq",
+              "asset_NDhvyLeVFxBKhLcovEtXoi1L",
+              "asset_vXzi9wc96qd8Bprz1EFj5FLZ",
+              "asset_AnXHAUojHLaV1wnM8CXp7ogv",
+              "asset_SZAcTS1svqSVUD3gRqPfu6Vs",
+              "asset_tzVijBusv4mJnCaQq4Qw9Bcs",
+              "asset_fZ36tnwHHsjWrQGSxeDsf1qg",
+              "asset_NJvtbkG3d2XuFPxb3rZLZrm6",
+              "asset_WWqN3kMbdmnLu35KNYbC695Q",
+              "asset_G5AhNfhGozc7yJ5CVYunj2b9",
+              "asset_Tks3jy44LP9nUJigviaPUqAT",
+              "asset_XD9hdwKAc3jXidu2EEinhDfh",
+              "asset_HNBFM9VGhfGsxnkv74SMcWCY",
+              "asset_wdP7uVb7CbF8MFbjNmnaPvVK",
+              "asset_bUYNwvc76RnJYfkDLJH1tdog",
+              "asset_XRQbZ7w9DRz9UYDr1RBb87Wt",
+              "asset_fToPtYAWZ2az4BWTch2YNQW5",
+              "asset_dFfE5LxL2TU5faGbdEGhWuBQ",
+              "asset_pUVDS8ipWGCdAtAQSXzwhShi",
+              "asset_PBnnjrRwq8zmHe6LrVaJUHxS",
+              "asset_Ax1qQ4PEXLbdzAFGYiibVt3w"
+            ],
+            "id": "model_ideogram-v4-5-precise-edit",
             "inputs": [
               {
+                "costImpact": false,
+                "description": "Describe the edit to apply. Say what must stay unchanged for the strictest result.",
+                "label": "Prompt",
+                "maxLength": 10000,
                 "name": "prompt",
-                "type": "string",
-                "required": {
-                  "always": true
-                }
-              },
-              {
-                "name": "image",
-                "type": "file",
-                "kind": "image",
+                "prompt": true,
+                "promptSpark": true,
                 "required": {
                   "always": true
                 },
-                "maxSize": 52428800
+                "type": "string"
               },
               {
-                "name": "mask",
-                "type": "file",
+                "costImpact": false,
+                "description": "The image to edit, up to 67 megapixels. The output keeps its size, except a whole-image edit over 2048×2048 pixels of area, which comes back scaled down.",
                 "kind": "image",
-                "maskFrom": "image",
+                "label": "Image",
+                "name": "image",
+                "parent": true,
                 "required": {
                   "always": true
-                }
+                },
+                "type": "file"
               },
               {
-                "name": "numOutputs",
-                "type": "number",
-                "min": 1,
-                "max": 4,
-                "step": 1,
-                "default": 1,
-                "costImpact": true
-              },
-              {
-                "name": "seed",
-                "type": "number",
-                "min": 0,
-                "max": 2147483647,
-                "step": 1
-              },
-              {
-                "name": "renderingSpeed",
-                "type": "string",
-                "allowedValues": [
-                  "TURBO",
-                  "DEFAULT",
-                  "QUALITY"
-                ],
-                "default": "DEFAULT",
-                "costImpact": true
-              },
-              {
-                "name": "magicPrompt",
-                "type": "string",
-                "allowedValues": [
-                  "AUTO",
-                  "ON",
-                  "OFF"
-                ],
-                "default": "AUTO"
-              },
-              {
-                "name": "styleType",
-                "type": "string",
-                "allowedValues": [
-                  "AUTO",
-                  "GENERAL",
-                  "REALISTIC",
-                  "DESIGN",
-                  "FICTION"
-                ],
-                "default": "AUTO"
-              },
-              {
-                "name": "colorPalette",
-                "type": "string",
-                "allowedValues": [
-                  "EMBER",
-                  "FRESH",
-                  "JUNGLE",
-                  "MAGIC",
-                  "MELON",
-                  "MOSAIC",
-                  "PASTEL",
-                  "ULTRAMARINE"
-                ],
-                "required": {
-                  "always": false,
-                  "conditional": [
-                    {
-                      "input": "styleType",
-                      "values": [
-                        "DESIGN"
-                      ]
-                    }
-                  ]
-                }
-              },
-              {
-                "name": "referenceImages",
-                "type": "file_array",
+                "costImpact": false,
+                "description": "Optional mask over the image. White marks the region to edit, black the region to keep.",
                 "kind": "image",
-                "max": 4
+                "label": "Mask",
+                "maskFrom": "image",
+                "name": "mask",
+                "parent": true,
+                "type": "file"
+              },
+              {
+                "costImpact": false,
+                "description": "Optional images that guide the edit (up to 4, or 3 with a mask), such as a pose skeleton or a product to insert.",
+                "kind": "image",
+                "label": "Reference Images",
+                "maxLength": 4,
+                "name": "referenceImages",
+                "parent": true,
+                "type": "file_array"
+              },
+              {
+                "allowedValues": [
+                  "very_low",
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "costImpact": true,
+                "default": "medium",
+                "description": "The quality-versus-speed tradeoff. High picks the best of several candidates: slower and costs more.",
+                "group": "Settings",
+                "label": "Quality",
+                "name": "quality",
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "default": 1,
+                "description": "How many images to generate (1-8). Each additional image adds to the cost.",
+                "group": "Settings",
+                "label": "Image Count",
+                "max": 8,
+                "min": 1,
+                "name": "numOutputs",
+                "step": 1,
+                "type": "number"
+              },
+              {
+                "costImpact": false,
+                "description": "A number that locks in the randomness of the edit. Leave blank for a new result each time.",
+                "group": "Settings",
+                "label": "Seed",
+                "max": 2147483647,
+                "min": 0,
+                "name": "seed",
+                "type": "number"
+              },
+              {
+                "costImpact": false,
+                "default": false,
+                "description": "Screens outputs for copyrighted content. Flagged images are withheld. Adds latency.",
+                "group": "Settings",
+                "label": "Copyright Detection",
+                "name": "enableCopyrightDetection",
+                "type": "boolean"
+              },
+              {
+                "allowedValues": [
+                  "",
+                  "auto",
+                  "none"
+                ],
+                "costImpact": false,
+                "default": "",
+                "description": "Where the model edits. Leave empty to let Scenario choose: on images over 2048×2048 pixels of area, a window around the mask, or one located from the prompt. auto forces a fitted window; none edits the whole image, scaled down past 2048×2048 pixels of area.",
+                "group": "Settings",
+                "label": "Context Window",
+                "name": "contextWindow",
+                "type": "string"
               }
-            ]
+            ],
+            "name": "Ideogram 4.5 Precise Edit",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Edit an image in place and leave the rest untouched, at full resolution up to 67 MP: swap text, recolor, add or remove objects, with an optional mask and up to four reference images (three with a mask).",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Ideogram",
+              "editing",
+              "featured",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "selects": {
+                "contextWindow": {
+                  "auto": "Auto",
+                  "none": "None"
+                },
+                "quality": {
+                  "high": "High",
+                  "low": "Low",
+                  "medium": "Medium",
+                  "very_low": "Very Low"
+                }
+              }
+            },
+            "updatedAt": "2026-10-28T21:26:25.178Z",
+            "userId": "<user-1>"
           }
         }
       }
