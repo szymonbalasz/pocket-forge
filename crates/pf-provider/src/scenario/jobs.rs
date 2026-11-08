@@ -1,6 +1,7 @@
 //! Scenario job operations (PRV slice 4): uploads with the ref cache (FR-PRV-14), re-upload
 //! (FR-PRV-15), estimate (FR-PRV-16), submit (FR-PRV-17), status (FR-PRV-18), cancel
-//! (FR-PRV-20), fetch (FR-PRV-21) and balance (FR-PRV-22).
+//! (FR-PRV-20), fetch (FR-PRV-21) and balance (FR-PRV-22). References (#51) go through the
+//! same uploads and re-upload, into their slots' inputs (FR-PRV-33/34).
 //!
 //! Scenario shapes (research doc): `POST /assets {image: data-url, name, hide}` →
 //! `{asset: {id}}`; `POST /uploads {fileName, contentType, kind, fileSize, parts}` →
@@ -24,6 +25,7 @@ use super::api::{
 use super::{ScenarioProvider, lock};
 use crate::limits;
 use crate::mask::convert_mask;
+use crate::pixels::{ImageFormat, sniff};
 use crate::scenario::record::content_hash;
 use crate::transport::Method;
 use crate::{
@@ -98,6 +100,14 @@ struct Prepared {
     mask: Vec<u8>,
 }
 
+/// One uploaded reference: its slot, the caller's hash and the provider ref.
+#[derive(Clone)]
+struct ReferenceRef {
+    slot: String,
+    hash: String,
+    r: AssetRef,
+}
+
 /// Uploaded refs for one job (Appendix B `asset_refs`).
 #[derive(Clone)]
 struct Refs {
@@ -105,14 +115,32 @@ struct Refs {
     mask: AssetRef,
     hash_image: String,
     hash_mask: String,
+    /// In request order.
+    references: Vec<ReferenceRef>,
 }
 
 impl Refs {
     fn json(&self) -> Value {
-        json!({
+        let mut v = json!({
             "image": self.image, "mask": self.mask,
             "hash_image": self.hash_image, "hash_mask": self.hash_mask,
-        })
+        });
+        if !self.references.is_empty() {
+            v["references"] = self
+                .references
+                .iter()
+                .map(|x| json!({"slot": x.slot, "hash": x.hash, "ref": x.r}))
+                .collect();
+        }
+        v
+    }
+
+    /// A slot's refs in request order.
+    fn for_slot<'a>(&'a self, slot: &'a str) -> impl Iterator<Item = &'a AssetRef> + 'a {
+        self.references
+            .iter()
+            .filter(move |x| x.slot == slot)
+            .map(|x| &x.r)
     }
 }
 
@@ -134,11 +162,13 @@ impl ScenarioProvider {
         if !force && let Some(r) = lock(&self.refs).get(&hash).cloned() {
             return Ok((r, hash));
         }
-        let name = format!("pocket-forge-{}.png", purpose_name(purpose));
+        // Sources and masks are PNG; references may be JPEG or WebP (FR-PRV-33).
+        let format = sniff(bytes).unwrap_or(ImageFormat::Png);
+        let name = format!("pocket-forge-{}.{}", purpose_name(purpose), format.ext());
         let id = if bytes.len() < SINGLE_UPLOAD_LIMIT {
-            self.upload_single(creds, bytes, &name).await?
+            self.upload_single(creds, bytes, &name, format).await?
         } else {
-            self.upload_multipart(creds, bytes, &name).await?
+            self.upload_multipart(creds, bytes, &name, format).await?
         };
         let r = AssetRef(id);
         lock(&self.refs).insert(hash.clone(), r.clone());
@@ -150,10 +180,12 @@ impl ScenarioProvider {
         creds: &Credentials,
         bytes: &[u8],
         name: &str,
+        format: ImageFormat,
     ) -> ProviderResult<String> {
         use base64::Engine as _;
         let data = format!(
-            "data:image/png;base64,{}",
+            "data:{};base64,{}",
+            format.mime(),
             base64::engine::general_purpose::STANDARD.encode(bytes)
         );
         let body = json!({"image": data, "name": name, "hide": true});
@@ -178,10 +210,11 @@ impl ScenarioProvider {
         creds: &Credentials,
         bytes: &[u8],
         name: &str,
+        format: ImageFormat,
     ) -> ProviderResult<String> {
         let parts = bytes.len().div_ceil(PART_SIZE).max(1);
         let init = json!({
-            "fileName": name, "contentType": "image/png", "kind": "image",
+            "fileName": name, "contentType": format.mime(), "kind": "image",
             "fileSize": bytes.len(), "parts": parts,
         });
         let (_, out) = self
@@ -223,7 +256,7 @@ impl ScenarioProvider {
                     url,
                     &Body::Bytes {
                         bytes: chunk.to_vec(),
-                        content_type: "image/png".into(),
+                        content_type: format.mime().into(),
                     },
                     UPLOAD_PART_TIMEOUT,
                     Retry::Idempotent,
@@ -275,10 +308,12 @@ impl ScenarioProvider {
         })
     }
 
-    async fn upload_both(
+    /// Uploads the image, the mask and every reference (once per content hash, FR-PRV-34).
+    async fn upload_all(
         &self,
         creds: &Credentials,
         p: &Prepared,
+        request: &JobRequest,
         force: bool,
     ) -> ProviderResult<Refs> {
         let (image, hash_image) = self
@@ -287,11 +322,26 @@ impl ScenarioProvider {
         let (mask, hash_mask) = self
             .upload_bytes(creds, &p.mask, UploadPurpose::Mask, force)
             .await?;
+        let mut references = Vec::with_capacity(request.references.len());
+        let mut forced = std::collections::HashSet::new();
+        for x in &request.references {
+            // A forced re-upload still sends identical bytes only once.
+            let again = force && forced.insert(content_hash(&x.bytes));
+            let (r, _) = self
+                .upload_bytes(creds, &x.bytes, UploadPurpose::Reference, again)
+                .await?;
+            references.push(ReferenceRef {
+                slot: x.slot.clone(),
+                hash: x.hash.clone(),
+                r,
+            });
+        }
         Ok(Refs {
             image,
             mask,
             hash_image,
             hash_mask,
+            references,
         })
     }
 
@@ -308,6 +358,7 @@ impl ScenarioProvider {
             _ => return Err(invalid("operation")),
         };
         limits::check(&caps, request)?;
+        limits::check_references(&caps, request)?;
         let values = self.values_for(&caps, request);
         if let Some(e) = caps.evaluate(&values).errors.first() {
             return Err(invalid(&e.control));
@@ -351,7 +402,9 @@ impl ScenarioProvider {
         values
     }
 
-    /// The body, mapped through each control's role and input name (R28, FR-PRV-17).
+    /// The body, mapped through each control's role and input name (R28, FR-PRV-17). A
+    /// reference slot gets its refs in request order: an array for `file_array`, one ref for
+    /// `file`; a slot with none is omitted (FR-PRV-33).
     fn body(&self, p: &Prepared, request: &JobRequest, refs: Option<&Refs>) -> Value {
         let mut body = Map::new();
         let values = self.values_for(&p.caps, request);
@@ -359,7 +412,15 @@ impl ScenarioProvider {
             let v = match c.role {
                 ControlRole::Source => refs.map(|r| json!(r.image)),
                 ControlRole::Mask => refs.map(|r| json!(r.mask)),
-                ControlRole::Reference => None,
+                ControlRole::Reference => refs.and_then(|r| {
+                    let sent: Vec<&AssetRef> = r.for_slot(&c.name).collect();
+                    let array = p.caps.slots.iter().any(|s| s.name == c.name && s.array);
+                    match (sent.first(), array) {
+                        (None, _) => None,
+                        (Some(_), true) => Some(json!(sent)),
+                        (Some(one), false) => Some(json!(one)),
+                    }
+                }),
                 _ => values.get(&c.name).cloned(),
             };
             if let Some(v) = v.filter(|_| !NEVER_SEND.contains(&c.name.as_str())) {
@@ -417,12 +478,14 @@ impl ScenarioProvider {
             if refs.is_some() && is_missing_asset(&resp) {
                 if attempt == 0 {
                     tracing::info!("a provider asset is missing; re-uploading once");
-                    refs = Some(self.upload_both(creds, p, true).await?);
+                    refs = Some(self.upload_all(creds, p, request, true).await?);
                     continue;
                 }
                 let text = String::from_utf8_lossy(&resp.body).to_ascii_lowercase();
                 return Err(invalid(if text.contains("mask") {
                     "mask"
+                } else if text.contains("reference") {
+                    "reference"
                 } else {
                     "image"
                 }));
@@ -453,7 +516,7 @@ impl ScenarioProvider {
             .find(|r| r.model_id == request.model_id)
             .is_none_or(|r| r.dry_run_assets);
         let refs = if with_assets {
-            Some(self.upload_both(&creds, &p, false).await?)
+            Some(self.upload_all(&creds, &p, request, false).await?)
         } else {
             None
         };
@@ -479,7 +542,7 @@ impl ScenarioProvider {
     pub(crate) async fn do_submit(&self, request: &JobRequest) -> ProviderResult<ProviderRecord> {
         let p = self.prepare(request).await?;
         let creds = self.credentials()?;
-        let refs = self.upload_both(&creds, &p, false).await?;
+        let refs = self.upload_all(&creds, &p, request, false).await?;
         let (_, out, body, refs) = self
             .generate(&creds, request, &p, Some(refs), false)
             .await?;
