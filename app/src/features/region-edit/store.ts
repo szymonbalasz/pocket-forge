@@ -601,6 +601,12 @@ async function refit(): Promise<void> {
   schedule();
 }
 
+/** #56: what a discard says; the trash keeps it 30 days (Storage → Restore). */
+const TRASH_NOTICE = (n: number): string =>
+  n === 0
+    ? 'Nothing to discard.'
+    : `${n === 1 ? 'Discarded' : `${n} candidates discarded`}: in the trash for 30 days (Storage → Restore).`;
+
 // ── Picker (R19) ─────────────────────────────────────────────────────────────────────────────
 
 const pickerHandlers = {
@@ -609,6 +615,10 @@ const pickerHandlers = {
   onStar: (id: string, starred: boolean) => void rgn.star(id, starred),
   onDiscard: (id: string) => void rgn.discard(id),
 };
+
+/** #56: "Discard the rest" is offered once the iteration has an accepted candidate and others
+ *  that aren't starred. */
+const withDiscardRest = { ...pickerHandlers, onDiscardRest: () => void rgn.discardRest() };
 
 function syncPicker(): void {
   const s = state;
@@ -623,6 +633,7 @@ function syncPicker(): void {
     index: c.index,
     status: c.status,
     starred: c.starred,
+    accepted: c.accepted,
     thumbUrl: s.thumbs[c.id] ?? null,
     preview:
       c.id === s.selectedCandidateId && s.preview
@@ -631,7 +642,8 @@ function syncPicker(): void {
     warning: c.aspectWarning ? ASPECT_WARNING : null,
   }));
   const selected = list.some((c) => c.id === s.selectedCandidateId) ? s.selectedCandidateId : null;
-  editorBridge.setCandidates(candidates, pickerHandlers, selected);
+  const rest = list.some((c) => c.accepted) && list.some((c) => !c.accepted && !c.starred);
+  editorBridge.setCandidates(candidates, rest ? withDiscardRest : pickerHandlers, selected);
   const missingThumbs = list.filter(
     (c) => c.status === 'ready' && !s.thumbs[c.id] && !thumbsInFlight.has(c.id),
   );
@@ -1018,9 +1030,10 @@ export const rgn = {
       set({
         trackerNotice: {
           kind: 'info',
+          // #56: a dismiss keeps the candidates; only an explicit discard trashes.
           text: trashed
             ? `Dismissed; ${trashed} candidate${trashed === 1 ? '' : 's'} moved to the trash.`
-            : 'Dismissed.',
+            : 'Dismissed. Its candidates are kept; discard the ones you don’t want.',
         },
       });
     } catch (e) {
@@ -1112,6 +1125,26 @@ export const rgn = {
         set({ selectedCandidateId: null, preview: null });
         editorBridge.setCompare(null);
       }
+      set({ trackerNotice: { kind: 'info', text: TRASH_NOTICE(1) } });
+    } catch (e) {
+      const err = uiError(e);
+      set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
+    }
+    await Promise.all([refreshProject(), refreshIterations()]);
+  },
+
+  /** #56: "Discard the rest" of the selected iteration: one commit, restored from the trash. */
+  async discardRest(): Promise<void> {
+    const jobId = state.selectedJobId;
+    if (!jobId) return;
+    try {
+      const { trashed } = await api.region.discardRest(jobId);
+      const sel = state.candidates.find((c) => c.id === state.selectedCandidateId);
+      if (sel && sel.status !== 'accepted' && !sel.starred) {
+        set({ selectedCandidateId: null, preview: null });
+        editorBridge.setCompare(null);
+      }
+      set({ trackerNotice: { kind: 'info', text: TRASH_NOTICE(trashed) } });
     } catch (e) {
       const err = uiError(e);
       set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });

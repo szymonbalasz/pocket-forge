@@ -120,6 +120,29 @@ impl S {
         self.p = self.e.open(&self.dir);
     }
 
+    pub(crate) fn dismiss(&mut self, job: Ulid) {
+        resolve_job(
+            &self.e.ctx,
+            self.e.install(),
+            &mut self.p,
+            job,
+            ResolveReason::Dismiss,
+        )
+        .unwrap();
+    }
+
+    /// #56: "Discard the rest" (one trash item for the candidates).
+    pub(crate) fn discard_rest(&mut self, job: Ulid) -> usize {
+        discard_rest(&self.e.ctx, self.e.install(), &mut self.p, job).unwrap()
+    }
+
+    /// Dismiss, then discard every candidate: what a dismiss did before #56 (candidates and
+    /// inputs in the trash).
+    pub(crate) fn dismiss_and_discard(&mut self, job: Ulid) {
+        self.dismiss(job);
+        self.discard_rest(job);
+    }
+
     pub(crate) fn cand(&self, id: Ulid) -> Candidate {
         self.p
             .manifest
@@ -248,7 +271,7 @@ fn fr_rgn_24_undecodable_candidate_is_invalid() {
 }
 
 #[test]
-fn fr_prj_31_accept_is_one_commit_and_trashes_the_unstarred_rest() {
+fn fr_prj_31_owner_56_accept_is_one_commit_and_keeps_the_rest() {
     let mut s = setup();
     let (job, c) = s.fetched("moss", 3);
     set_star(&s.e.ctx, s.e.install(), &mut s.p, c[1].id, true).unwrap();
@@ -271,18 +294,11 @@ fn fr_prj_31_accept_is_one_commit_and_trashes_the_unstarred_rest() {
     assert_eq!(s.cand(c[0].id).status, CandidateStatus::Accepted);
     assert_eq!(s.cand(c[1].id).status, CandidateStatus::Dismissed);
     assert!(s.cand(c[1].id).trash_id.is_none(), "starred stays");
-    let trashed = s.cand(c[2].id);
-    assert!(trashed.trash_id.is_some());
-    assert!(
-        !s.dir.join(&trashed.file).exists(),
-        "a trashed result leaves results/"
-    );
-    let item = m
-        .trash
-        .iter()
-        .find(|t| Some(t.id) == trashed.trash_id)
-        .unwrap();
-    assert!(s.dir.join(item.trashed_path(&trashed.file)).is_file());
+    let rest = s.cand(c[2].id);
+    assert_eq!(rest.status, CandidateStatus::Dismissed);
+    assert!(rest.trash_id.is_none(), "#56: unstarred stays too");
+    assert!(s.dir.join(&rest.file).is_file(), "still in results/");
+    assert!(m.trash.is_empty());
     assert_eq!(s.p.jobs[&job.id].state, JobState::Closed);
     assert!(s.p.jobs[&job.id].resolved_at.is_some());
     assert!(
@@ -295,21 +311,145 @@ fn fr_prj_31_accept_is_one_commit_and_trashes_the_unstarred_rest() {
 }
 
 #[test]
-fn fr_prj_31_r9_dismiss_with_nothing_kept_trashes_candidates_and_inputs_and_the_empty_folder() {
+fn owner_56_dismiss_and_the_next_submit_keep_every_result() {
     let mut s = setup();
     let (job, c) = s.fetched("dust", 2);
-    let folder = s.dir.join("results/001 dust");
+    s.dismiss(job.id);
+    for c in &c {
+        let now = s.cand(c.id);
+        assert_eq!(
+            (now.status, now.trash_id),
+            (CandidateStatus::Dismissed, None)
+        );
+        assert!(s.dir.join(&c.file).is_file(), "kept in results/");
+    }
+    assert!(
+        s.dir.join(job.dir()).join("region.png").is_file(),
+        "inputs kept"
+    );
+    assert!(s.p.manifest.trash.is_empty());
+    // Unstarring a leftover no longer trashes it.
+    set_star(&s.e.ctx, s.e.install(), &mut s.p, c[0].id, true).unwrap();
+    set_star(&s.e.ctx, s.e.install(), &mut s.p, c[0].id, false).unwrap();
+    assert!(s.dir.join(&c[0].file).is_file());
+    assert!(s.p.manifest.trash.is_empty());
+    // The next submit resolves the same way.
+    let (second, c2) = s.fetched("moss", 1);
     resolve_job(
         &s.e.ctx,
         s.e.install(),
         &mut s.p,
-        job.id,
-        ResolveReason::Dismiss,
+        second.id,
+        ResolveReason::NextSubmit,
     )
     .unwrap();
+    assert!(s.dir.join(&c2[0].file).is_file());
+    assert!(s.p.manifest.trash.is_empty());
+}
+
+#[test]
+fn owner_56_job_inputs_are_trashed_only_when_every_candidate_is_discarded() {
+    let mut s = setup();
+    let (job, c) = s.fetched("dust", 2);
+    s.dismiss(job.id);
+    discard_candidate(&s.e.ctx, s.e.install(), &mut s.p, c[0].id).unwrap();
+    assert!(!s.dir.join(&c[0].file).exists(), "discard → trash");
+    assert!(
+        s.dir.join(job.dir()).join("region.png").is_file(),
+        "one left"
+    );
+    discard_candidate(&s.e.ctx, s.e.install(), &mut s.p, c[1].id).unwrap();
+    assert!(!s.dir.join(job.dir()).join("region.png").exists());
+    assert!(
+        s.p.manifest
+            .trash
+            .iter()
+            .any(|t| t.kind == TrashKind::JobInputs)
+    );
+    // An open (fetched) job keeps its inputs while all its candidates are discarded.
+    let (open, d) = s.fetched("moss", 1);
+    discard_candidate(&s.e.ctx, s.e.install(), &mut s.p, d[0].id).unwrap();
+    assert!(s.dir.join(open.dir()).join("region.png").is_file());
+    s.dismiss(open.id);
+    assert!(
+        !s.dir.join(open.dir()).join("region.png").exists(),
+        "on resolve"
+    );
+}
+
+#[test]
+fn owner_56_discard_rest_is_one_commit_and_skips_accepted_and_starred() {
+    let mut s = setup();
+    let (job, c) = s.fetched("moss", 4);
+    set_star(&s.e.ctx, s.e.install(), &mut s.p, c[1].id, true).unwrap();
+    s.accept(job.id, c[0].id).unwrap();
+    let revs = s.p.manifest.revisions.len();
+    let seq = s.p.manifest.trash.len();
+    assert_eq!(s.discard_rest(job.id), 2);
+    assert_eq!(s.p.manifest.trash.len(), seq + 1, "one trash item");
+    assert_eq!(s.p.manifest.revisions.len(), revs, "no revision");
+    assert_eq!(s.cand(c[0].id).status, CandidateStatus::Accepted);
+    assert!(s.cand(c[1].id).starred && s.cand(c[1].id).trash_id.is_none());
+    for i in [2, 3] {
+        let x = s.cand(c[i].id);
+        assert_eq!(x.status, CandidateStatus::Discarded);
+        assert!(x.trash_id.is_some() && !s.dir.join(&x.file).exists());
+    }
+    assert!(
+        s.dir.join(job.dir()).join("region.png").is_file(),
+        "accepted keeps inputs"
+    );
+    assert_eq!(s.discard_rest(job.id), 0, "nothing left: no-op");
+    // Undo = restore the trash item: the files come back as kept results.
+    let tid = s.cand(c[2].id).trash_id.unwrap();
+    crate::project::retention::trash_restore(&s.e.ctx, s.e.install(), &mut s.p, tid).unwrap();
+    for i in [2, 3] {
+        let x = s.cand(c[i].id);
+        assert_eq!((x.status, x.trash_id), (CandidateStatus::Dismissed, None));
+        assert!(s.dir.join(&x.file).is_file());
+    }
+}
+
+#[test]
+fn owner_56_projects_with_candidates_trashed_before_56_still_load_and_restore() {
+    let mut s = setup();
+    let (job, c) = s.fetched("dust", 2);
+    s.dismiss(job.id);
+    // What a dismiss wrote before #56: dismissed, `trash_id` set, file in the trash.
+    let file = c[0].file.clone();
+    let i = candidate_index(&s.p.manifest, c[0].id).unwrap();
+    commit(&s.e.ctx, s.e.install(), &mut s.p, |ctx, _, m, _| {
+        let tid = trash_files(
+            ctx,
+            m,
+            TrashKind::Candidates,
+            vec![file.clone()],
+            "dismissed",
+        );
+        m.candidates[i].trash_id = Some(tid);
+        Ok(())
+    })
+    .unwrap();
+    assert!(!s.dir.join(&file).exists());
+    s.reopen();
+    assert_eq!(s.cand(c[0].id).status, CandidateStatus::Dismissed);
+    // The old trashed one doesn't count as kept: discarding the other trashes the inputs.
+    discard_candidate(&s.e.ctx, s.e.install(), &mut s.p, c[1].id).unwrap();
+    assert!(!s.dir.join(job.dir()).join("region.png").exists());
+    // Star brings the old one back, as before.
+    set_star(&s.e.ctx, s.e.install(), &mut s.p, c[0].id, true).unwrap();
+    assert!(s.dir.join(&file).is_file());
+}
+
+#[test]
+fn fr_prj_31_r9_discarding_everything_trashes_candidates_and_inputs_and_the_empty_folder() {
+    let mut s = setup();
+    let (job, c) = s.fetched("dust", 2);
+    let folder = s.dir.join("results/001 dust");
+    s.dismiss_and_discard(job.id);
     assert!(
         c.iter()
-            .all(|c| s.cand(c.id).status == CandidateStatus::Dismissed)
+            .all(|c| s.cand(c.id).status == CandidateStatus::Discarded)
     );
     assert!(
         !folder.exists(),
@@ -363,6 +503,8 @@ fn fr_prj_43_r32_undo_accept_then_repick_restores_a_trashed_candidate() {
     let mut s = setup();
     let (job, c) = s.fetched("moss", 3);
     let lc = s.accept(job.id, c[0].id).unwrap();
+    // #56: only an explicit discard trashes one.
+    discard_candidate(&s.e.ctx, s.e.install(), &mut s.p, c[2].id).unwrap();
     let parent = crate::project::read_revision(&s.p, lc.revision_id)
         .unwrap()
         .parent
@@ -566,6 +708,8 @@ fn fr_prj_20_kill_after_accept_commit_closes_the_job_and_moves_trash_on_open() {
     let mut s = setup();
     let (job, c) = s.fetched("moss", 2);
     s.accept(job.id, c[0].id).unwrap();
+    assert!(s.dir.join(&c[1].file).is_file(), "#56: the rest stays");
+    discard_candidate(&s.e.ctx, s.e.install(), &mut s.p, c[1].id).unwrap();
     // Undo the follow-ups on disk: job.json back to fetched, the trashed file back in results.
     let path = s.dir.join(job.dir()).join("job.json");
     let mut j: JobFile = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
@@ -667,6 +811,12 @@ fn r4_resolve_image_covers_candidates_and_their_trashed_copies() {
         s.dir.join(&c[1].file)
     );
     s.accept(job.id, c[0].id).unwrap();
+    assert_eq!(
+        s.p.resolve_image(c[1].id).unwrap().path,
+        s.dir.join(&c[1].file),
+        "#56: kept in results/"
+    );
+    discard_candidate(&s.e.ctx, s.e.install(), &mut s.p, c[1].id).unwrap();
     let r = s.p.resolve_image(c[1].id).unwrap();
     assert!(r.path.is_file() && r.path.to_string_lossy().contains("trash"));
 }
