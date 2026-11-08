@@ -633,6 +633,9 @@ pub struct DraftInput {
     pub region: Option<Value>,
     #[serde(default)]
     pub mask_id: Option<Ulid>,
+    /// REF's draft references (#51); `null` = REF's defaults.
+    #[serde(default)]
+    pub references: Option<Value>,
 }
 
 /// `project_put_draft` (FR-PRJ-19): one commit with the draft and, if given, EXP's unsaved export
@@ -664,6 +667,7 @@ pub fn put_draft(
             seed: draft.seed,
             region: draft.region,
             mask_id: draft.mask_id,
+            references: draft.references,
             updated_at: ctx.now(),
             extra,
         });

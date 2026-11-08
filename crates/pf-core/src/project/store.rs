@@ -249,6 +249,7 @@ pub fn put_mask(
             seed: None,
             region: None,
             mask_id: None,
+            references: None,
             updated_at: ctx.now(),
             extra: Extra::new(),
         });
@@ -288,6 +289,12 @@ pub struct NewJob {
     pub estimate: Value,
     #[serde(default)]
     pub provider: Value,
+    /// `references[]` (#51, FR-RGN-43): written with `requested`, never changed.
+    #[serde(default)]
+    pub references: Vec<Value>,
+    /// Fields RGN adds to the job file (kept verbatim, written after the known ones).
+    #[serde(default)]
+    pub extra: Extra,
 }
 
 /// `record_job` (R2): `region.png` and `mask.png` as sent (after fit, before polarity
@@ -331,13 +338,14 @@ pub fn record_job(
         fit: new.fit,
         mask_id: new.mask_id,
         inputs: JobInputs::default(),
+        references: new.references,
         estimate: new.estimate,
         cost: Value::Null,
         provider: new.provider,
         iteration: None,
         candidate_ids: vec![],
         error: None,
-        extra: Extra::new(),
+        extra: new.extra,
     };
     let record = job.clone();
     commit(ctx, install_id, p, |_, _, m, plan| {
@@ -429,6 +437,8 @@ pub struct NewCandidate {
     pub provider_meta: Value,
     /// RGN's decode check failed (FR-RGN-24); a header that doesn't probe is invalid too.
     pub invalid: bool,
+    /// Fields RGN adds to the candidate record (e.g. `aspect_warning`, FR-RGN-24).
+    pub extra: Extra,
 }
 
 /// The next iteration folder for `prompt` (FR-RGN-39): `n` = 1 + the highest in the project,
@@ -530,7 +540,7 @@ pub fn add_candidates(
             },
             starred: false,
             trash_id: None,
-            extra: Extra::new(),
+            extra: c.extra,
         });
         files.push((file, c.bytes));
     }
