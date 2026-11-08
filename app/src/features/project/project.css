@@ -298,3 +298,17 @@
   display: flex;
   justify-content: flex-end;
 }
+
+/* #56: an iteration opens to its kept candidates, each with Discard. */
+.prj-result > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.prj-result > summary::-webkit-details-marker {
+  display: none;
+}
+
+.prj-result-cands {
+  padding-left: var(--pf-space-3);
+}

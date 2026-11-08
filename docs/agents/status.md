@@ -24,9 +24,14 @@
 | REF 6 (RGN integration) | — | merged | done | — |
 | Generate-loop walkthrough (RGN, EDT 5, PRV fake, EXP 3–5) | — | — | passed with defects D1–D7 | — |
 | RGN walk fixes D1–D7 + BL-34 | — | merged | done | — |
-| **Provider real calls (PRV 5)** | `prv-real` (kept for the session) | merged | ready for the owner | owner runs the first real session |
+| **Provider real calls (PRV 5)** | `prv-real` (kept for the session) | merged | owner's first real edit works (upload `entityId` fix merged) | drafting PRV gate amendments |
 | Reference packs walkthrough | — | — | passed with defects R1–R7 | — |
 | REF walk fixes R1–R7 | — | merged | done | BL-34 open |
+| Single-output cap, empty-mask hint, Mask whole region, blend instruction (#55) | `rgn-ux` | building | — | — |
+| Keep every result, easy discard (#56) | — | merged | done (R65–R67) | walkthrough with rgn-ux |
+| Backlog BL-30/31/32/35/36, BL-27 StrictMode | — | merged | done (R69, R70) | — |
+| Seam asymmetry (BL-33) | `fix-seam` | metric change (R68) | no asymmetry found | — |
+| Conflict view draws layer stacks (BL-22) | — | merged | done (R71) | walkthrough step 7 later |
 
 ## Pending owner decisions
 - OQ-IMG-12: file the image-webp bug upstream? (not urgent)

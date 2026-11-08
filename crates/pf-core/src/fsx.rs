@@ -14,6 +14,9 @@ use crate::error::{CoreError, CoreResult, is_locked};
 /// Marker every temp file name contains. Files with it are deleted on open (FR-PRJ-20).
 pub const TEMP_MARKER: &str = ".pf-tmp-";
 
+/// A `.*.pf-tmp-*` file younger than this may be a running export's (FR-EXP-17): sweeps keep it.
+pub const STALE_TEMP_FILE_AGE: Duration = Duration::from_secs(3600);
+
 /// How long a locked file is retried before `locked` (FR-PRJ-21).
 const LOCK_RETRY_FOR: Duration = Duration::from_secs(3);
 
@@ -245,6 +248,44 @@ pub fn remove_temp_files(dir: &Path) -> usize {
             removed += remove_temp_files(&path);
         } else if entry.file_name().to_string_lossy().contains(TEMP_MARKER)
             && fs::remove_file(&path).is_ok()
+        {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+/// FR-EXP-17's rule: a file named `.*.pf-tmp-*` whose modification time is at least `max_age`
+/// old (`now` is the sweep's start).
+pub fn is_stale_temp_file(
+    entry: &fs::DirEntry,
+    now: std::time::SystemTime,
+    max_age: Duration,
+) -> bool {
+    let name = entry.file_name().to_string_lossy().into_owned();
+    name.starts_with('.')
+        && name.contains(TEMP_MARKER)
+        && entry.file_type().is_ok_and(|t| t.is_file())
+        && entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .is_some_and(|age| age >= max_age)
+}
+
+/// Deletes [`is_stale_temp_file`] files in `dir` and its subfolders (BL-32: PRJ's open-time
+/// sweep of `exports/` keeps a fresh temp, as EXP's own sweep does). Returns how many.
+pub fn remove_stale_temp_files(dir: &Path, max_age: Duration) -> usize {
+    let now = std::time::SystemTime::now();
+    let mut removed = 0;
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    for entry in entries.flatten() {
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            removed += remove_stale_temp_files(&entry.path(), max_age);
+        } else if is_stale_temp_file(&entry, now, max_age) && fs::remove_file(entry.path()).is_ok()
         {
             removed += 1;
         }

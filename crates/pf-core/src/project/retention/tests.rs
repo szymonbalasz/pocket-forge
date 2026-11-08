@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use super::*;
 use crate::context::{FaultAction, Faults, ManualClock};
 use crate::project::store::tests::setup;
-use crate::project::store::{ResolveReason, resolve_job, set_star};
+use crate::project::store::{discard_candidate, set_star};
 use crate::test_support::*;
 
 const DAY_MS: i64 = 86_400_000;
@@ -18,6 +18,7 @@ fn fr_prj_32_purge_after_30_days_keeps_starred_and_accepted() {
     let (job, c) = s.fetched("moss", 3);
     set_star(&s.e.ctx, s.e.install(), &mut s.p, c[1].id, true).unwrap();
     s.accept(job.id, c[0].id).unwrap();
+    discard_candidate(&s.e.ctx, s.e.install(), &mut s.p, c[2].id).unwrap();
     let trashed = s.cand(c[2].id);
     let item = s.p.manifest.trash[0].clone();
     assert_eq!(Some(item.id), trashed.trash_id);
@@ -73,14 +74,7 @@ fn fr_prj_32_purge_date_math_and_next_purge() {
     assert_eq!(disk_usage(&s.p).next_purge, None);
     let (job, _) = s.fetched("dust", 2);
     set_now(&mut s.e.ctx, T0 + 5 * DAY_MS);
-    resolve_job(
-        &s.e.ctx,
-        s.e.install(),
-        &mut s.p,
-        job.id,
-        ResolveReason::Dismiss,
-    )
-    .unwrap();
+    s.dismiss_and_discard(job.id);
     let first =
         s.p.manifest
             .trash
@@ -120,14 +114,7 @@ fn fr_prj_32_purge_date_math_and_next_purge() {
 fn fr_prj_31_trash_list_and_restore_bring_files_back() {
     let mut s = setup();
     let (job, c) = s.fetched("dust", 2);
-    resolve_job(
-        &s.e.ctx,
-        s.e.install(),
-        &mut s.p,
-        job.id,
-        ResolveReason::Dismiss,
-    )
-    .unwrap();
+    s.dismiss_and_discard(job.id);
     let rows = trash_list(&s.p);
     assert_eq!(rows.len(), 2);
     let cands = rows
@@ -170,14 +157,7 @@ fn fr_prj_31_restore_only_candidates_job_inputs_and_conflict_copies() {
     // R51 (BL-24): other kinds are listed but not restorable; the next sweep would undo it.
     let mut s = setup();
     let (job, _) = s.fetched("ash", 1);
-    resolve_job(
-        &s.e.ctx,
-        s.e.install(),
-        &mut s.p,
-        job.id,
-        ResolveReason::Dismiss,
-    )
-    .unwrap();
+    s.dismiss_and_discard(job.id);
     let orphan = std::path::Path::new(PFORGE_DIR).join("stray.bin");
     std::fs::write(s.dir.join(&orphan), b"stray").unwrap();
     s.reopen();
@@ -221,14 +201,7 @@ fn fr_prj_31_restore_only_candidates_job_inputs_and_conflict_copies() {
 fn fr_prj_20_restore_that_fails_to_commit_leaves_the_item_in_the_trash() {
     let mut s = setup();
     let (job, c) = s.fetched("dust", 1);
-    resolve_job(
-        &s.e.ctx,
-        s.e.install(),
-        &mut s.p,
-        job.id,
-        ResolveReason::Dismiss,
-    )
-    .unwrap();
+    s.dismiss_and_discard(job.id);
     let item = trash_list(&s.p)
         .into_iter()
         .find(|r| r.kind == TrashKind::Candidates)
@@ -250,14 +223,7 @@ fn fr_prj_20_restore_that_fails_to_commit_leaves_the_item_in_the_trash() {
 fn fr_prj_41_trash_restore_is_refused_read_only() {
     let mut s = setup();
     let (job, _) = s.fetched("dust", 1);
-    resolve_job(
-        &s.e.ctx,
-        s.e.install(),
-        &mut s.p,
-        job.id,
-        ResolveReason::Dismiss,
-    )
-    .unwrap();
+    s.dismiss_and_discard(job.id);
     let id = s.p.manifest.trash[0].id;
     s.p.read_only = Some(crate::project::ReadOnlyReason::OriginalChanged);
     let err = trash_restore(&s.e.ctx, s.e.install(), &mut s.p, id).unwrap_err();
@@ -277,6 +243,7 @@ fn fr_prj_33_disk_usage_by_category_never_hydrates() {
     let mut s = setup();
     let (job, c) = s.fetched("moss", 2);
     s.accept(job.id, c[0].id).unwrap();
+    discard_candidate(&s.e.ctx, s.e.install(), &mut s.p, c[1].id).unwrap();
     std::fs::write(s.dir.join("references/mood.png"), vec![0u8; 1000]).unwrap();
     std::fs::create_dir_all(s.dir.join("parts/doors")).unwrap();
     std::fs::write(s.dir.join("parts/doors/door.png"), vec![0u8; 500]).unwrap();

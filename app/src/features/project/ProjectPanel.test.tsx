@@ -200,6 +200,52 @@ test('FR-PRJ-31 Restore is offered only for restorable trash items (R51)', async
   expect(within(row('T2')).queryByTestId('prj-panel-storage-restore')).toBeNull();
 });
 
+test('BL-30 a multi-file trash item names its first file plus the count, and lists all in the tooltip', async () => {
+  await openCrypt({
+    trash: [
+      {
+        id: 'T1',
+        path: 'results/001 kitchen/02.png',
+        files: ['results/001 kitchen/02.png', 'results/001 kitchen/03.png'],
+        kind: 'candidates',
+        bytes: 2048,
+        trashed_at: '2026-11-01T00:00:00Z',
+        restorable: true,
+      },
+    ],
+  });
+  const item = await screen.findByTestId('prj-panel-storage-item');
+  expect(item.querySelector('.prj-file-name')?.textContent).toBe('02.png +1 more');
+  expect(item.getAttribute('title')).toBe('results/001 kitchen/02.png\nresults/001 kitchen/03.png');
+});
+
+test('BL-30 a moved folder shows the reason in Storage, not 0 B figures', async () => {
+  await openCrypt();
+  await screen.findByTestId('prj-panel-storage-usage');
+  const moved = () => {
+    throw {
+      code: 'not_found',
+      message: 'The project folder was moved or renamed outside Pocket Forge. Reopen it from home.',
+      detail: { reason: 'folder_moved' },
+    };
+  };
+  expect(files('working').length).toBeGreaterThan(0);
+  core.useHandlers({
+    ...core.handlersSnapshot(),
+    project_disk_usage: moved,
+    project_trash_list: moved,
+    project_folder_list: moved,
+  });
+  act(() => core.emit('project:committed', { seq: 9 }));
+  await waitFor(() => expect(screen.queryByTestId('prj-panel-storage-usage')).toBeNull());
+  expect(files('working')).toEqual([]);
+  expect(
+    screen.getAllByText(
+      'The project folder was moved or renamed outside Pocket Forge. Reopen it from home.',
+    ).length,
+  ).toBeGreaterThanOrEqual(2);
+});
+
 test('FR-PRJ-31 a failed restore says why as a sentence, not raw core text (walk 2 N2)', async () => {
   await openCrypt({
     trash: [
@@ -398,4 +444,58 @@ test('FR-PRJ-47 #53 Add… copies the files picked in the native dialog', async 
   fireEvent.click(screen.getByTestId('prj-panel-parts-add'));
   await waitFor(() => expect(files('parts')).toEqual(['statue.png']));
   expect(screen.queryByTestId('prj-panel-parts-add-paths')).toBeNull();
+});
+
+test('owner #56 Results: each iteration lists its kept candidates with Discard, no confirmation', async () => {
+  await openCrypt();
+  const base = core.handlersSnapshot();
+  const cand = (id: string, index: number, status: string) => ({
+    id,
+    job_id: 'J1',
+    index,
+    file: `results/001 kitchen/0${index + 1}.png`,
+    status,
+    starred: false,
+    trash_id: null as string | null,
+  });
+  const cands = [cand('C1', 0, 'accepted'), cand('C2', 1, 'dismissed'), cand('C3', 2, 'dismissed')];
+  core.useHandlers({
+    ...base,
+    rgn_iterations_list: () => [
+      {
+        job_id: 'J1',
+        n: 1,
+        dir: 'results/001 kitchen',
+        slug: 'kitchen',
+        state: 'closed',
+        kept: cands.filter((c) => !c.trash_id).length,
+        returned: 3,
+        cost: null,
+        accepted_in_stack: true,
+        references: 0,
+        reference_files: [],
+      },
+    ],
+    project_get: async (i) => ({ ...((await base.project_get!(i)) as object), candidates: cands }),
+    rgn_candidate_discard: (i) => {
+      const c = cands.find((x) => x.id === i.candidate_id)!;
+      c.status = 'discarded';
+      c.trash_id = 'T9';
+      return {};
+    },
+  });
+  act(() => core.emit('project:committed', { seq: 9 }));
+  const rows = () =>
+    screen.queryAllByTestId('prj-results-candidate').map((r) => r.dataset.recordId);
+  await waitFor(() => expect(rows()).toEqual(['C1', 'C2', 'C3']));
+  const buttons = screen.getAllByTestId('prj-results-discard') as HTMLButtonElement[];
+  expect(buttons[0]!.disabled).toBe(true);
+  fireEvent.click(buttons[1]!);
+  await waitFor(() => expect(rows()).toEqual(['C1', 'C3']));
+  expect(core.calls.find((c) => c.cmd === 'rgn_candidate_discard')?.input).toEqual({
+    job_id: 'J1',
+    candidate_id: 'C2',
+  });
+  expect(screen.getByTestId('prj-results-notice').textContent).toMatch(/trash for 30 days/);
+  expect(screen.getByTestId('prj-panel-results-item').textContent).toContain('2 / 3');
 });

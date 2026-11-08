@@ -431,6 +431,8 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
           onAccept: rec('accept'),
           onStar: rec('star'),
           onDiscard: rec('discard'),
+          // #56: like RGN, "Discard the rest" only once one is accepted.
+          ...(cands?.some((c) => c.accepted) ? { onDiscardRest: rec('discard-rest') } : {}),
         });
       },
     }),

@@ -7,6 +7,7 @@ import { Popover } from 'radix-ui';
 import {
   api,
   pickPaths,
+  type CandidateRecord,
   type DiskUsage,
   type FolderFile,
   type RgnIteration,
@@ -91,7 +92,7 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
       {USER_FOLDERS.map((f) => (
         <Folder key={f.id} id={f.id} label={f.label} revision={revision} canAdd={!readOnly} />
       ))}
-      <Results revision={revision} />
+      <Results revision={revision} readOnly={readOnly} />
       <History project={project} revision={revision} />
       <Storage revision={revision} readOnly={readOnly} />
     </div>
@@ -262,7 +263,11 @@ function Folder({
         setFiles(f);
         setError(null);
       },
-      (e: unknown) => setError(errorOf(e).message),
+      (e: unknown) => {
+        // BL-30: no stale (or empty) list under the error, e.g. once the folder was moved.
+        setFiles(null);
+        setError(errorOf(e).message);
+      },
     );
   }, [id]);
   useEffect(load, [load, revision]);
@@ -418,39 +423,112 @@ function AddFiles({
 
 // ------------------------------------------------------------------ results
 
-/** Iterations (`results/NNN <slug>/`), from RGN's list; RGN's tracker selects them. */
-function Results({ revision }: { revision: number }) {
+/** Iterations (`results/NNN <slug>/`), from RGN's list; RGN's tracker selects them. Each one
+ *  opens to its kept candidates, with Discard (#56: no confirmation, the trash keeps it 30 days). */
+function Results({ revision, readOnly }: { revision: number; readOnly: boolean }) {
   const [items, setItems] = useState<RgnIteration[]>([]);
-  useEffect(() => {
+  const [cands, setCands] = useState<CandidateRecord[]>([]);
+  const [notice, setNotice] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
+  const load = useCallback(() => {
     // The active job before it has candidates has no number or folder yet: not a result.
     api.region.iterations().then(
       (rows) => setItems(rows.filter((r) => r.n !== null)),
       () => setItems([]),
     );
-  }, [revision]);
+    api.project.get().then(
+      (p) =>
+        setCands(
+          (p as (ProjectSnapshot & { candidates?: CandidateRecord[] }) | null)?.candidates ?? [],
+        ),
+      () => setCands([]),
+    );
+  }, []);
+  useEffect(load, [load, revision]);
+  const discard = (c: CandidateRecord) =>
+    api.region.discard(c.job_id, c.id).then(
+      () => {
+        setNotice({
+          kind: 'info',
+          text: 'Discarded: in the trash for 30 days (Storage → Restore).',
+        });
+        load();
+      },
+      (e: unknown) => setNotice({ kind: 'error', text: sentence(errorOf(e).message) }),
+    );
   return (
     <Section id="results" label="Results" count={items.length}>
+      {notice && (
+        <p
+          className={`${notice.kind === 'error' ? 'error' : 'muted'} small`}
+          data-testid="prj-results-notice"
+          role="status"
+        >
+          {notice.text}
+        </p>
+      )}
       {items.length === 0 ? (
         <p className="muted small">No iterations yet</p>
       ) : (
         <ul className="prj-files">
-          {items.map((it) => (
-            <li
-              key={it.job_id}
-              className="prj-file"
-              data-testid="prj-panel-results-item"
-              data-record-id={it.job_id}
-              title={it.dir ?? undefined}
-            >
-              <span className="prj-file-name">
-                {String(it.n).padStart(3, '0')} {it.slug ?? ''}
-              </span>
-              <span className="prj-file-size tabular">
-                {it.kept} / {it.returned}
-                {it.accepted_in_stack ? ' ✓' : ''}
-              </span>
-            </li>
-          ))}
+          {items.map((it) => {
+            const kept = cands
+              .filter(
+                (c) => c.job_id === it.job_id && c.trash_id === null && c.status !== 'trashed',
+              )
+              .sort((a, b) => a.index - b.index);
+            return (
+              <li
+                key={it.job_id}
+                data-testid="prj-panel-results-item"
+                data-record-id={it.job_id}
+                title={it.dir ?? undefined}
+              >
+                <details className="prj-result">
+                  <summary className="prj-file">
+                    <span className="prj-file-name">
+                      {String(it.n).padStart(3, '0')} {it.slug ?? ''}
+                    </span>
+                    <span className="prj-file-size tabular">
+                      {it.kept} / {it.returned}
+                      {it.accepted_in_stack ? ' ✓' : ''}
+                    </span>
+                  </summary>
+                  <ul className="prj-files prj-result-cands">
+                    {kept.map((c) => (
+                      <li
+                        key={c.id}
+                        className="prj-file"
+                        data-testid="prj-results-candidate"
+                        data-record-id={c.id}
+                        data-status={c.status}
+                        title={c.file}
+                      >
+                        <span className="prj-file-name">
+                          {c.file.split('/').pop()}
+                          {c.status === 'accepted' ? ' ✓' : ''}
+                          {c.starred ? ' ★' : ''}
+                        </span>
+                        <button
+                          type="button"
+                          className="link"
+                          data-testid="prj-results-discard"
+                          disabled={readOnly || c.status === 'accepted'}
+                          title={
+                            c.status === 'accepted'
+                              ? 'The accepted candidate can’t be discarded'
+                              : 'Discard: to the trash for 30 days'
+                          }
+                          onClick={() => void discard(c)}
+                        >
+                          Discard
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              </li>
+            );
+          })}
         </ul>
       )}
     </Section>
@@ -542,6 +620,8 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
   const load = useCallback(() => {
     api.project.diskUsage().then(setUsage, (e: unknown) => {
       const err = errorOf(e);
+      // BL-30: no stale (or 0 B) figures under the error, e.g. once the folder was moved.
+      setUsage(null);
       // `ipc`: the core doesn't register the command yet (PRJ slice 5): say so quietly.
       setError(err.code === 'ipc' ? null : err.message);
       setUnavailable(err.code === 'ipc');
@@ -590,9 +670,9 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
               className="prj-file"
               data-testid="prj-panel-storage-item"
               data-record-id={t.id}
-              title={t.path}
+              title={trashFiles(t).join('\n')}
             >
-              <span className="prj-file-name">{t.path.split('/').pop()}</span>
+              <span className="prj-file-name">{trashLabel(t)}</span>
               <span className="prj-file-size tabular">{bytesLabel(t.bytes)}</span>
               {t.restorable && (
                 <button
@@ -615,6 +695,18 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
       )}
     </Section>
   );
+}
+
+/** Every project path in a trash item (`files`, else the first `path`). */
+function trashFiles(t: TrashItem): string[] {
+  return t.files && t.files.length > 0 ? t.files : [t.path];
+}
+
+/** BL-30: the first file's name, plus how many more the item holds. */
+function trashLabel(t: TrashItem): string {
+  const files = trashFiles(t);
+  const name = files[0]!.split('/').pop();
+  return files.length > 1 ? `${name} +${files.length - 1} more` : (name ?? '');
 }
 
 /** A core message as a sentence for the panel (walk 2 N2: no raw lower-case text). */

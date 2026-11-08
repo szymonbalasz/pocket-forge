@@ -726,11 +726,13 @@ impl Command for ProjectFolderList {
     type Input = FolderInput;
     type Output = Vec<FolderFile>;
 
-    /// FR-PRJ-48: on open, focus and Refresh; metadata only.
+    /// FR-PRJ-48: on open, focus and Refresh; metadata only. BL-30: `folder_moved` once the
+    /// folder is gone, not an empty list.
     fn run(core: &Core, input: FolderInput) -> CoreResult<Vec<FolderFile>> {
         let files = {
-            let state = core.state();
-            let p = state.project.as_ref().ok_or_else(no_project)?;
+            let mut state = core.state();
+            let p = state.project.as_mut().ok_or_else(no_project)?;
+            project::require_folder(p)?;
             project::folder_list(p, &input.folder)?
         };
         Ok(with_thumb_urls(core, files))
@@ -914,7 +916,7 @@ impl Command for EdtMaskRead {
 
 pub use crate::region_edit::candidates::{
     RgnCandidateAccept, RgnCandidateDiscard, RgnCandidatePreview, RgnCandidateStar,
-    RgnIterationsList, RgnPatchRetune,
+    RgnIterationsList, RgnJobDiscardRest, RgnPatchRetune,
 };
 /// Region-edit commands live in their own module (region-edit spec §9).
 pub use crate::region_edit::commands::{
@@ -1027,6 +1029,7 @@ registry![
     ExportCancel,
     EdtMaskSubmit,
     EdtMaskRead,
+    RgnJobDiscardRest,
 ];
 
 #[cfg(test)]

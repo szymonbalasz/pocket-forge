@@ -659,6 +659,8 @@ export interface Commands {
   ref_resolve: [{ model_id: string; references: DraftReferences | null }, RefResolved];
   project_conflict_get: [Record<string, never>, ConflictView];
   project_resolve_conflict: [{ keep: ConflictKeep }, RevisionEntry];
+  /** #56: "Discard the rest": every candidate of the job but the accepted and starred ones. */
+  rgn_job_discard_rest: [{ job_id: string }, { trashed: number }];
 }
 
 export type CommandName = keyof Commands;
@@ -743,6 +745,8 @@ export interface PackCard {
   name: string;
   /** Absolute pack folder. */
   path: string;
+  /** The pack folder relative to its library root (`References/<name>`), for the tooltip (BL-35). */
+  rel_path?: string;
   image_count: number;
   /** The first line of the notes ("" when none). */
   notes_first_line: string;

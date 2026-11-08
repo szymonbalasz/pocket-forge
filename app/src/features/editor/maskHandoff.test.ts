@@ -213,6 +213,60 @@ describe('mask hand-off', () => {
   });
 });
 
+describe('BL-31 Keep other reload', () => {
+  test('bl_31 a hold cancels the pending retry until the kept mask is loaded', async () => {
+    const r = rig();
+    r.ctl.changeRegion(region);
+    stroke(r.ctl, 12, 30);
+    r.fail.next = new ApiError({ code: 'conflict', message: 'sync conflict' });
+    await vi.advanceTimersByTimeAsync(MASK_SUBMIT_DEBOUNCE_MS);
+    r.sync.retry(); // the Keep other commit
+    r.sync.hold(); // Keep other: reload the kept mask
+    r.sync.retry(); // a later commit while the reload is still reading
+    await vi.advanceTimersByTimeAsync(MASK_SUBMIT_DEBOUNCE_MS * 3);
+    expect(r.sent).toHaveLength(0);
+    expect(r.sync.pending).toBe(false);
+    const kept = emptyMask(region.inner);
+    kept.data.fill(7);
+    r.sync.markLoaded(kept, 'M-other');
+    r.ctl.load(region, kept);
+    await vi.advanceTimersByTimeAsync(MASK_SUBMIT_DEBOUNCE_MS * 2);
+    expect(r.sent).toHaveLength(0);
+    expect(r.sync.current).toEqual({ kind: 'saved' });
+    expect(await r.sync.flush()).toEqual({ mask_id: 'M-other', rect: region.inner });
+  });
+
+  test('bl_31 a submit in flight when the hold starts is forgotten; a flush waits for the load', async () => {
+    const r = rig();
+    r.ctl.changeRegion(region);
+    r.ctl.fillAll(255);
+    void r.sync.flush(); // in flight
+    r.sync.hold();
+    await vi.advanceTimersByTimeAsync(0);
+    const flushed = r.sync.flush();
+    const kept = emptyMask(region.inner);
+    kept.data.fill(7);
+    r.sync.markLoaded(kept, 'M-other');
+    r.ctl.load(region, kept);
+    expect(await flushed).toEqual({ mask_id: 'M-other', rect: region.inner });
+    await vi.advanceTimersByTimeAsync(MASK_SUBMIT_DEBOUNCE_MS * 2);
+    expect(r.sent).toHaveLength(1); // only the one already in flight
+    expect(r.sync.current).toEqual({ kind: 'saved' });
+  });
+
+  test('bl_31 resume ends a hold without a loaded mask and submits a changed one again', async () => {
+    const r = rig();
+    r.ctl.changeRegion(region);
+    r.sync.hold();
+    stroke(r.ctl, 12, 30);
+    await vi.advanceTimersByTimeAsync(MASK_SUBMIT_DEBOUNCE_MS * 2);
+    expect(r.sent).toHaveLength(0);
+    r.sync.resume();
+    await vi.advanceTimersByTimeAsync(MASK_SUBMIT_DEBOUNCE_MS);
+    expect(r.sent).toHaveLength(1);
+  });
+});
+
 describe('IPC body', () => {
   test('FR-EDT-18 the mask bytes go out as base64 and come back byte-identical', async () => {
     const all = Uint8Array.from({ length: 70_001 }, (_, i) => (i * 31) % 256);
