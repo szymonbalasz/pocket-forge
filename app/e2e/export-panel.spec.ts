@@ -23,6 +23,14 @@ test('FR-EXP-06 FR-EXP-07 FR-EXP-08 FR-EXP-26 grid + target → plan line, and E
   // Ctrl+E focuses the section (EXP §7).
   await expect(page.getByTestId('exp-panel-grid-mode-px')).toBeFocused();
   await expect(plan(page)).toHaveText('4200×5600 · Full resolution · exports/Crypt.png');
+  // The checked format's label lines up with the others (walkthrough D5).
+  const labelY = (f: string) =>
+    page
+      .getByTestId(`exp-panel-format-${f}`)
+      .locator('xpath=..')
+      .boundingBox()
+      .then((b) => b!.y);
+  expect(Math.abs((await labelY('png')) - (await labelY('jpeg')))).toBeLessThan(1);
   // After mouse use, Ctrl+E still shows the focus ring (ui-guidelines; walkthrough D4).
   await page.getByTestId('edt-view-fit').click();
   await page.keyboard.press('Control+e');
@@ -215,4 +223,25 @@ test('FR-EXP-25 saved settings restore into the panel at open', async ({ page })
   await expect(page.getByTestId('exp-panel-target-ppsq')).toHaveValue('70');
   await expect(page.getByTestId('exp-panel-format-webp')).toHaveAttribute('data-state', 'checked');
   await expect(plan(page)).toHaveText('4200×5600 → 2100×2800 · 0.5× · exports/Crypt_70px.webp');
+});
+
+test('OQ-EXP-09 closing during an export asks inline, in warning colour, answers on one row', async ({
+  page,
+}) => {
+  await openExport(page, { steps: 60, stepMs: 150 });
+  await expandExport(page);
+  await start(page).click();
+  await expect(page.getByTestId('exp-panel-progress')).toBeVisible();
+  await page.getByTestId('prj-panel-close').click();
+  const ask = page.getByTestId('exp-panel-close-ask');
+  await expect(ask).toBeVisible();
+  await expect(ask).toHaveClass(/banner-warning/);
+  const [confirm, keep] = await Promise.all([
+    page.getByTestId('exp-panel-close-confirm').boundingBox(),
+    page.getByTestId('exp-panel-close-keep').boundingBox(),
+  ]);
+  expect(Math.abs(confirm!.y - keep!.y)).toBeLessThan(1);
+  await page.getByTestId('exp-panel-close-keep').click();
+  await expect(ask).toBeHidden();
+  await expect(page.getByTestId('exp-panel-progress')).toBeVisible();
 });

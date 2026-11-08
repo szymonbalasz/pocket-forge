@@ -350,7 +350,7 @@ export function ExportPanel() {
 
           {run && s.closeAsk && (
             <div
-              className="banner small exp-close-ask"
+              className="banner banner-warning small exp-close-ask"
               role="alert"
               data-testid="exp-panel-close-ask"
             >
