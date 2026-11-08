@@ -331,7 +331,12 @@ pub fn resolve_conflict(
     keep: Keep,
 ) -> CoreResult<RevisionEntry> {
     p.require_writable()?;
-    let s = sides(p)?;
+    let mut s = sides(p)?;
+    // Walk 2 N1: a draft refused during the conflict is this machine's newest state. It goes with
+    // this version: current if kept, else in the `conflict` revision. Never dropped silently.
+    if let (Some(pending), Some(this)) = (p.pending_draft.clone(), s.this.as_mut()) {
+        super::apply_draft(ctx, this, pending.draft, pending.export);
+    }
     let (kept, lost) = match keep {
         Keep::This => (s.this, s.other),
         Keep::Other => (s.other, s.this),
@@ -420,6 +425,7 @@ pub fn resolve_conflict(
         return Err(e);
     }
     p.warnings.retain(|w| w.code != "conflict");
+    p.pending_draft = None;
     p.request_thumbnail(ctx);
     let entry = p
         .manifest

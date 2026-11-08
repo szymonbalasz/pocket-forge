@@ -121,7 +121,9 @@ impl Command for ProjectResolveConflict {
             let mut state = core.state();
             let install_id = state.settings.install_id;
             let p = state.project.as_mut().ok_or_else(no_project)?;
-            conflict::resolve_conflict(&core.ctx, install_id, p, input.keep)?
+            let rev = conflict::resolve_conflict(&core.ctx, install_id, p, input.keep)?;
+            crate::export::on_conflict_resolved(&core.ctx, &mut state, input.keep);
+            rev
         };
         // R48: replay what the conflict held back at once (the runner emits its events).
         crate::region_edit::runner::tick(core, false);
@@ -266,6 +268,46 @@ mod tests {
         core.dispatch("project_close", json!({"force": true}))
             .unwrap();
         assert!(core.state().project.is_none());
+    }
+
+    /// Walk 2 N1: during a conflict a refused draft makes Close ask (reason `conflict`), and
+    /// Keep other drops this session's export settings for the kept version's.
+    #[test]
+    fn fr_prj_36_fr_prj_21_close_asks_during_a_conflict_and_keep_other_reloads_export_settings() {
+        let (_d, core) = core_with_project();
+        let dir = core.state().project.as_ref().unwrap().dir.clone();
+        let settings = json!({"grid": {"mode": "cells", "cols": 4, "rows": 3}, "target_px_per_square": null, "format": "jpeg"});
+        core.dispatch("export_set_settings", json!({ "settings": settings }))
+            .unwrap();
+        std::fs::copy(dir.join("project.json"), dir.join("project (2).json")).unwrap();
+        let e = core
+            .dispatch(
+                "project_put_draft",
+                json!({"draft": {"final_prompt": "typed during"}}),
+            )
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::Conflict);
+        let e = core.dispatch("project_close", json!({})).unwrap_err();
+        assert_eq!(
+            (e.code, &e.detail["reason"]),
+            (ErrorCode::Unsaved, &json!("conflict"))
+        );
+        assert!(core.state().project.is_some(), "still open");
+
+        core.dispatch("project_resolve_conflict", json!({"keep": "other"}))
+            .unwrap();
+        let s = core.dispatch("export_get_settings", json!({})).unwrap();
+        assert!(
+            s.get("format").is_none(),
+            "the kept version has no settings: {s}"
+        );
+        let snap = core.dispatch("project_get", json!({})).unwrap();
+        assert!(snap["draft"].is_null() || snap["draft"]["final_prompt"] != "typed during");
+        core.dispatch("project_close", json!({})).unwrap();
+        core.dispatch("project_open", json!({ "path": dir }))
+            .unwrap();
+        let s = core.dispatch("export_get_settings", json!({})).unwrap();
+        assert!(s.get("format").is_none(), "nothing wrote them back: {s}");
     }
 
     #[test]

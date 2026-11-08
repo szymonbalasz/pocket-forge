@@ -43,6 +43,12 @@ let listening = false;
 export type CloseGuard = (proceed: () => void) => boolean;
 const closeGuards = new Set<CloseGuard>();
 
+/** Called with the snapshot after a sync conflict is resolved (FR-PRJ-36): features that keep
+ *  draft state (RGN, REF, EXP) reload it from the kept version, so a later save can't write
+ *  the version not kept back over it (walk 2 N1). */
+export type ResolvedListener = (project: ProjectSnapshot) => void;
+const resolvedListeners = new Set<ResolvedListener>();
+
 function guardsAllow(proceed: () => void): boolean {
   for (const g of closeGuards) if (!g(proceed)) return false;
   return true;
@@ -68,6 +74,13 @@ function saveCode(e: unknown): string {
 
 function savedAt(p: ProjectSnapshot): string {
   return p.committed_at ?? p.revisions.at(-1)?.created_at ?? '';
+}
+
+/** The save segment for a freshly read snapshot: Conflict while one is open (§7), else Saved. */
+function settled(p: ProjectSnapshot): SaveStatus {
+  return p.warnings.some((w) => w.code === 'conflict')
+    ? { kind: 'conflict' }
+    : { kind: 'saved', at: savedAt(p) };
 }
 
 /** The banner text for `project:spool-dropped`, from codes only (no paths). */
@@ -237,12 +250,22 @@ export const projectStore = {
     bump();
   },
 
-  /** After `project_resolve_conflict` (FR-PRJ-36): re-reads the project, saved again. */
+  /** Registers a `ResolvedListener`; returns its removal. */
+  onResolved(listener: ResolvedListener): () => void {
+    resolvedListeners.add(listener);
+    return () => resolvedListeners.delete(listener);
+  },
+
+  /** After `project_resolve_conflict` (FR-PRJ-36): re-reads the project and has the features
+   *  reload their draft state from the kept version. */
   async resolved(): Promise<void> {
     if (!state.project) return;
     try {
       const project = await api.project.get();
-      if (project) set({ project, save: { kind: 'saved', at: savedAt(project) } });
+      if (project) {
+        set({ project, save: settled(project) });
+        for (const l of resolvedListeners) l(project);
+      }
     } catch (e) {
       set({ error: errorOf(e) });
     }

@@ -245,6 +245,38 @@ pub(crate) fn spawn_debounce(ctx: Arc<Context>, state: Arc<Mutex<State>>) {
     }
 }
 
+/// PRJ's resolve hook for EXP (walk 2 N1): Keep other drops this session's settings, so the kept
+/// version's record is in effect (and is what the next draft save carries); Keep this commits
+/// any the conflict held back.
+pub(crate) fn on_conflict_resolved(
+    ctx: &Context,
+    state: &mut State,
+    keep: crate::project::conflict::Keep,
+) {
+    if keep == crate::project::conflict::Keep::This {
+        if let Err(e) = flush_pending(ctx, state, true) {
+            tracing::warn!(error = %e, "export settings not saved after the resolve");
+        }
+        return;
+    }
+    let State { project, exp, .. } = state;
+    let Some(p) = project.as_ref() else {
+        return;
+    };
+    exp.bind(p);
+    exp.session = None;
+    exp.pending_since = None;
+    let (w, h) = size(p);
+    let values = current_settings(exp, p).px_per_square(w, h);
+    if exp.last_emitted != Some(values) {
+        exp.last_emitted = Some(values);
+        ctx.emit(
+            "export:settings-changed",
+            json!({ "source": values.0, "target": values.1 }),
+        );
+    }
+}
+
 /// PRJ's `unsaved` check for EXP (FR-PRJ-21): commits pending settings now; true if a `locked`
 /// file kept them from saving, so closing asks first. Any other failure is logged and dropped,
 /// as PRJ drops a pending draft that fails for another reason.

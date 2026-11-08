@@ -133,6 +133,14 @@ export const block = {
     if (state.modelId) void resolve();
   },
 
+  /** A restore or a resolved conflict replaced the draft (walk 2 N1): its selection, not saved
+   *  again (the core wrote it). */
+  reload(refs: DraftReferences | null): void {
+    token++;
+    set({ refs, error: null, notices: [] });
+    if (state.modelId) void resolve();
+  },
+
   /** After a submit the Retry flags are history: they are cleared, and restored items that
    *  were missing leave the selection. */
   settle(): void {
@@ -258,6 +266,8 @@ export function referencesBlocker(): string | null {
 
 /** RGN's Retry (FR-RGN-44): replaces the selection with the job's. */
 export const restoreReferences = (refs: DraftReferences | null): void => block.restore(refs);
+/** RGN after a restore or a resolved conflict: the draft's selection, without a save. */
+export const reloadReferences = (refs: DraftReferences | null): void => block.reload(refs);
 /** RGN after a successful submit: clears the Retry flags. */
 export const settleReferences = (): void => block.settle();
 

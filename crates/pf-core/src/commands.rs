@@ -453,6 +453,11 @@ impl Command for ProjectClose {
                     project::FOLDER_MOVED,
                     "Your latest changes aren't saved: the project folder was moved or renamed. Close anyway?",
                 )
+            } else if p.conflict.is_some() {
+                (
+                    "conflict",
+                    "Your latest changes aren't saved: this project was also changed on another machine. Close anyway?",
+                )
             } else {
                 (
                     "locked",

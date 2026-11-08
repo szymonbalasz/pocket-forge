@@ -70,6 +70,10 @@ fn fr_prj_34_fr_prj_36_copy_shows_both_and_keep_this_makes_a_conflict_revision()
         draft(&mut s, "blocked").unwrap_err().code,
         ErrorCode::Conflict
     );
+    assert!(
+        crate::project::has_unsaved(&s.p),
+        "the refused draft is kept"
+    );
 
     let v = conflict_get(&s.p, s.e.install()).unwrap();
     assert_eq!(v.source, "copy");
@@ -89,7 +93,11 @@ fn fr_prj_34_fr_prj_36_copy_shows_both_and_keep_this_makes_a_conflict_revision()
         "theirs",
         "the other version is a revision"
     );
-    assert_eq!(prompt(&s.p.manifest), "mine");
+    assert_eq!(
+        prompt(&s.p.manifest),
+        "blocked",
+        "this machine's newest draft, typed during the conflict"
+    );
     assert_ne!(
         s.p.manifest.head_revision, rev.id,
         "the kept version stays the head"
@@ -188,7 +196,69 @@ fn fr_prj_35_seq_mismatch_refuses_the_write_and_fires_conflict() {
     resolve_conflict(&s.e.ctx, s.e.install(), &mut s.p, Keep::This).unwrap();
     let disk = read_value(&s.dir.join("project.json"));
     assert_eq!(disk["commit"]["seq"], 41);
-    assert_eq!(disk["draft"]["final_prompt"], "mine");
+    assert_eq!(
+        disk["draft"]["final_prompt"], "next",
+        "the refused save is this machine's version"
+    );
+}
+
+/// Walk 2 N1, repro B: a prompt typed while the conflict is open is refused, kept in memory
+/// (closing asks), waits through the 10 s retry and is saved by Keep this.
+#[test]
+fn fr_prj_36_fr_prj_21_a_draft_refused_during_a_conflict_is_saved_by_keep_this() {
+    let mut s = setup();
+    draft(&mut s, "mine").unwrap();
+    make_copy(&s, "theirs");
+    s.reopen();
+    assert!(s.p.conflict.is_some());
+    assert_eq!(
+        draft(&mut s, "typed during").unwrap_err().code,
+        ErrorCode::Conflict
+    );
+    assert!(crate::project::has_unsaved(&s.p), "closing must ask");
+    assert!(
+        retry_pending(&s.e.ctx, s.e.install(), &mut s.p),
+        "still pending"
+    );
+    assert!(
+        crate::project::has_unsaved(&s.p),
+        "the retry doesn't drop it"
+    );
+    assert_eq!(
+        prompt(&read_json(&s.dir.join("project.json")).unwrap()),
+        "mine"
+    );
+
+    resolve_conflict(&s.e.ctx, s.e.install(), &mut s.p, Keep::This).unwrap();
+    assert!(!crate::project::has_unsaved(&s.p));
+    assert_eq!(prompt(&s.p.manifest), "typed during");
+    s.reopen();
+    assert_eq!(prompt(&s.p.manifest), "typed during", "on disk");
+}
+
+/// Walk 2 N1, repro A: Keep other after a refused save keeps the other prompt current and puts
+/// this machine's refused one in the `conflict` revision; nothing is left pending to overwrite it.
+#[test]
+fn fr_prj_36_keep_other_puts_a_refused_draft_in_the_conflict_revision() {
+    let mut s = setup();
+    draft(&mut s, "mine").unwrap();
+    let mut v = read_value(&s.dir.join("project.json"));
+    v["commit"]["seq"] = Value::from(40);
+    v["commit"]["install_id"] = Value::from(other_pc());
+    v["draft"]["final_prompt"] = Value::from("theirs");
+    write_value(&s.dir.join("project.json"), &v);
+    assert_eq!(
+        draft(&mut s, "mine, edited").unwrap_err().code,
+        ErrorCode::Conflict
+    );
+
+    let rev = resolve_conflict(&s.e.ctx, s.e.install(), &mut s.p, Keep::Other).unwrap();
+    assert!(!crate::project::has_unsaved(&s.p));
+    assert!(!retry_pending(&s.e.ctx, s.e.install(), &mut s.p));
+    let file: RevisionFile = read_json(&s.dir.join(revision_file(rev.id))).unwrap();
+    assert_eq!(file.draft.unwrap().final_prompt, "mine, edited");
+    s.reopen();
+    assert_eq!(prompt(&s.p.manifest), "theirs", "the kept version stays");
 }
 
 fn cand(shade: u8) -> NewCandidate {

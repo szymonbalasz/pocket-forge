@@ -39,6 +39,7 @@ import {
   referencesCostKey,
   referencesDraft,
   referencesForSend,
+  reloadReferences,
   restoreReferences,
   settleReferences,
 } from '../references';
@@ -367,9 +368,13 @@ async function refreshProject(): Promise<void> {
   }
 }
 
-/** Shows a restored revision's draft (walk D4). No draft save: the restore already wrote it. EDT
- *  keeps its region and mask. */
+/** Shows a restored revision's draft (walk D4), or the kept version's after a conflict is
+ *  resolved (walk 2 N1). No draft save: the core already wrote it, and a save still waiting
+ *  would write the replaced draft back. EDT keeps its region and mask. */
 function applyRestoredDraft(d: ProjectSnapshot['draft']): void {
+  if (draftTimer) clearTimeout(draftTimer);
+  draftTimer = null;
+  reloadReferences(d?.references ?? null);
   set({
     prompt: d?.final_prompt ?? '',
     seedMode: d?.seed !== null && d?.seed !== undefined ? 'pinned' : 'random',
@@ -598,6 +603,13 @@ function subscribe(): void {
       void refreshIterations();
     }),
     onEventSafe('provider:status-changed', () => void refreshProvider()),
+    Promise.resolve(
+      projectStore.onResolved((p) => {
+        if (p.project_id !== state.projectId) return;
+        set({ headRevision: p.head_revision });
+        applyRestoredDraft(p.draft);
+      }),
+    ),
   ];
   unsubscribe = () =>
     subs.forEach(
