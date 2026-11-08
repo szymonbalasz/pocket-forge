@@ -3,13 +3,13 @@ use crate::context::{FaultAction, Faults};
 use crate::project::{open, restore_revision};
 use crate::test_support::*;
 
-struct S {
-    e: Env,
-    dir: std::path::PathBuf,
-    p: OpenProject,
+pub(crate) struct S {
+    pub e: Env,
+    pub dir: std::path::PathBuf,
+    pub p: OpenProject,
 }
 
-fn setup() -> S {
+pub(crate) fn setup() -> S {
     let e = env();
     let dir = e.project("Crypt");
     let p = e.open(&dir);
@@ -17,7 +17,7 @@ fn setup() -> S {
 }
 
 impl S {
-    fn mask(&mut self) -> Mask {
+    pub(crate) fn mask(&mut self) -> Mask {
         let rect = Rect {
             x: 4,
             y: 4,
@@ -34,7 +34,7 @@ impl S {
         .unwrap()
     }
 
-    fn job(&mut self, prompt: &str) -> JobFile {
+    pub(crate) fn job(&mut self, prompt: &str) -> JobFile {
         let mask = self.mask();
         let new = NewJob {
             operation: "edit_masked".into(),
@@ -56,7 +56,7 @@ impl S {
         .unwrap()
     }
 
-    fn to(&mut self, job: Ulid, state: JobState) {
+    pub(crate) fn to(&mut self, job: Ulid, state: JobState) {
         update_job(
             &self.e.ctx,
             &mut self.p,
@@ -71,7 +71,7 @@ impl S {
     }
 
     /// A job through to `fetched` with `n` candidates.
-    fn fetched(&mut self, prompt: &str, n: usize) -> (JobFile, Vec<Candidate>) {
+    pub(crate) fn fetched(&mut self, prompt: &str, n: usize) -> (JobFile, Vec<Candidate>) {
         let job = self.job(prompt);
         for s in [JobState::Submitted, JobState::Running, JobState::Succeeded] {
             self.to(job.id, s);
@@ -89,7 +89,7 @@ impl S {
         (job, out)
     }
 
-    fn patch() -> NewPatch {
+    pub(crate) fn patch() -> NewPatch {
         NewPatch {
             png: rgba_png(8, 6, [0, 255, 0, 255]),
             rect: Some(Rect {
@@ -103,7 +103,7 @@ impl S {
         }
     }
 
-    fn accept(&mut self, job: Ulid, cand: Ulid) -> CoreResult<LayerCommit> {
+    pub(crate) fn accept(&mut self, job: Ulid, cand: Ulid) -> CoreResult<LayerCommit> {
         accept_candidate(
             &self.e.ctx,
             self.e.install(),
@@ -115,11 +115,11 @@ impl S {
         )
     }
 
-    fn reopen(&mut self) {
+    pub(crate) fn reopen(&mut self) {
         self.p = self.e.open(&self.dir);
     }
 
-    fn cand(&self, id: Ulid) -> Candidate {
+    pub(crate) fn cand(&self, id: Ulid) -> Candidate {
         self.p
             .manifest
             .candidates

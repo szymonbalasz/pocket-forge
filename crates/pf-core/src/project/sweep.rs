@@ -171,6 +171,10 @@ pub(super) fn on_open(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> C
                 Ok(())
             })?;
         }
+        // FR-PRJ-32: items older than 30 days are deleted. Not fatal: retried at the next open.
+        if let Err(e) = super::retention::purge_expired(ctx, install_id, p) {
+            tracing::warn!(error = %e, "trash purge failed; retried at the next open");
+        }
     }
     if !lost.is_empty() {
         p.warnings.push(Warning {

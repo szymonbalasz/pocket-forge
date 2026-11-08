@@ -160,6 +160,20 @@ test('FR-PRJ-33 FR-PRJ-31 FR-PRJ-32 Storage shows disk use, trash count, next pu
   });
 });
 
+test('FR-PRJ-21 closing with a save still pending asks first; Close anyway closes', async () => {
+  await openCrypt({ pendingSave: true });
+  fireEvent.click(screen.getByTestId('prj-panel-close'));
+  const banner = await screen.findByTestId('prj-error');
+  expect(banner.dataset.code).toBe('unsaved');
+  expect(projectStore.get().project).not.toBeNull();
+  fireEvent.click(screen.getByTestId('prj-panel-close-anyway'));
+  await waitFor(() => expect(projectStore.get().project).toBeNull());
+  expect(core.calls.filter((c) => c.cmd === 'project_close').map((c) => c.input)).toEqual([
+    {},
+    { force: true },
+  ]);
+});
+
 test('FR-PRJ-41 FR-PRJ-15 a read-only project shows why and disables Add, Save and Restore', async () => {
   await openCrypt({ read_only: 'original_changed' });
   const w = await screen.findByTestId('prj-panel-warning');

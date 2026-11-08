@@ -68,6 +68,17 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
       {error && (
         <div className="banner banner-error" data-testid="prj-error" data-code={error.code}>
           {error.message}{' '}
+          {error.code === 'unsaved' && (
+            // FR-PRJ-21: closing with a save still pending asks first.
+            <button
+              type="button"
+              className="link"
+              data-testid="prj-panel-close-anyway"
+              onClick={() => void projectStore.close(true)}
+            >
+              Close anyway
+            </button>
+          )}{' '}
           <button type="button" className="link" onClick={() => projectStore.clearError()}>
             Dismiss
           </button>

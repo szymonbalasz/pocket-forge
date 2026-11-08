@@ -87,11 +87,16 @@ export interface FolderFile {
 
 export interface TrashItem {
   id: string;
-  /** Project-relative path the item came from. */
+  /** Project-relative path the item came from (the first of `files`). */
   path: string;
   kind: string;
   bytes: number;
   trashed_at: string;
+  /** Every project path in the item (core, PRJ slice 5). */
+  files?: string[];
+  /** `trashed_at` + 30 days (FR-PRJ-32). */
+  purge_at?: string;
+  reason?: string;
 }
 
 export type DiskCategory =
@@ -111,6 +116,8 @@ export interface DiskUsage {
   trash_count: number;
   /** When the oldest trash item is purged (30 days, FR-PRJ-32), or null with an empty trash. */
   next_purge: string | null;
+  /** Sum of `bytes` (core). */
+  total?: number;
 }
 
 export interface Layer {
@@ -488,7 +495,8 @@ export interface Commands {
   library_get_config: [Record<string, never>, LibraryConfig];
   library_set_roots: [{ roots: string[] }, LibraryConfig];
   project_open: [{ path: string }, ProjectSnapshot];
-  project_close: [Record<string, never>, Record<string, never>];
+  /** `force`: close although a save is still pending (FR-PRJ-21, `unsaved` otherwise). */
+  project_close: [{ force?: boolean }, Record<string, never>];
   project_get: [Record<string, never>, ProjectSnapshot | null];
   project_put_draft: [{ draft: DraftInput }, { seq: number }];
   project_save_revision: [{ label?: string }, RevisionEntry];

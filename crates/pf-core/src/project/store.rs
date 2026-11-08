@@ -908,4 +908,4 @@ pub fn next_purge_at(p: &OpenProject) -> Option<Timestamp> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

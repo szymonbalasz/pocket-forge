@@ -97,7 +97,7 @@ export const api = {
   },
   project: {
     open: (path: string) => call('project_open', { path }),
-    close: () => call('project_close', {}),
+    close: (force = false) => call('project_close', force ? { force: true } : {}),
     get: () => call('project_get', {}),
     putDraft: (draft: Commands['project_put_draft'][0]['draft']) =>
       call('project_put_draft', { draft }),

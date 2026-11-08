@@ -68,6 +68,9 @@ tauri_commands! {
     project_prefetch_original => c::ProjectPrefetchOriginal,
     project_folder_list => c::ProjectFolderList,
     project_folder_add => c::ProjectFolderAdd,
+    project_trash_list => c::ProjectTrashList,
+    project_trash_restore => c::ProjectTrashRestore,
+    project_disk_usage => c::ProjectDiskUsage,
 }
 
 #[cfg(test)]

@@ -33,6 +33,8 @@ export interface PrjMockProject {
   noThumb?: boolean;
   /** `project.json` unreadable: the card has no `last_edited` and the `unreadable` badge (R45). */
   unreadable?: boolean;
+  /** A save still pending after `locked`: `project_close` answers `unsaved` (FR-PRJ-21). */
+  pendingSave?: boolean;
 }
 
 export interface PrjMockSeed {
@@ -155,6 +157,7 @@ export function prjMock(
         ...(p.folders ?? {}),
       },
       trash: p.trash ?? [],
+      pendingSave: !!p.pendingSave,
       revisions: [
         { id: nextRev(), seq: 0, created_at: p.last_edited, reason: 'create' },
       ] as RevisionEntry[],
@@ -330,7 +333,10 @@ export function prjMock(
       const p = open();
       return p ? snapshot(p) : null;
     },
-    project_close: () => {
+    project_close: (input) => {
+      const p = open();
+      if (p?.pendingSave && !input.force)
+        return fail('unsaved', 'A save is still pending (the file is locked); close anyway?');
       state.openPath = null;
       return {};
     },

@@ -77,6 +77,14 @@ pub fn run() {
             tracing::info!(?ctx, "starting");
             let core = Core::new(ctx).map_err(|e| e.to_string())?;
             app.manage(core);
+            // FR-PRJ-21/40: retry saves that failed with `locked` and replay the spool.
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    std::thread::sleep(pf_core::project::SAVE_RETRY_EVERY);
+                    pf_core::project::commands::retry_pending_saves(&handle.state::<Core>());
+                }
+            });
             Ok(())
         })
         .run(tauri::generate_context!())

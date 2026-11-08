@@ -406,14 +406,35 @@ impl Command for ProjectOpen {
 
 pub struct ProjectClose;
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectCloseInput {
+    /// Close even with a save still pending (FR-PRJ-21: the UI asked first).
+    #[serde(default)]
+    pub force: bool,
+}
+
+impl Validate for ProjectCloseInput {}
+
 impl Command for ProjectClose {
     const NAME: &'static str = "project_close";
-    type Input = NoInput;
+    type Input = ProjectCloseInput;
     type Output = Ok_;
 
-    /// Releases the decoded original (R11) and the served images.
-    fn run(core: &Core, _: NoInput) -> CoreResult<Ok_> {
+    /// Releases the decoded original (R11) and the served images. A save still pending after
+    /// `locked` → `unsaved`, unless `force` (FR-PRJ-21).
+    fn run(core: &Core, input: ProjectCloseInput) -> CoreResult<Ok_> {
         let mut state = core.state();
+        let install_id = state.settings.install_id;
+        if !input.force
+            && let Some(p) = state.project.as_mut()
+            && (project::retry_pending(&core.ctx, install_id, p) || project::has_unsaved(p))
+        {
+            return Err(CoreError::new(
+                ErrorCode::Unsaved,
+                "a save is still pending (the file is locked); close anyway?",
+            ));
+        }
         if let Some(p) = state.project.take() {
             p.decoded.release();
         }
@@ -780,6 +801,9 @@ pub use crate::region_edit::commands::{
     RgnControlsEvaluate, RgnJobEstimate, RgnRegionFit, RgnSpendGet, RgnSpendSet,
 };
 
+/// PRJ retention and conflict commands (asset-project §9, slices 5 and 6).
+pub use crate::project::commands::{ProjectDiskUsage, ProjectTrashList, ProjectTrashRestore};
+
 // ---------------------------------------------------------------- registry (append-only)
 
 /// A registry row: command name → JSON adapter.
@@ -831,6 +855,9 @@ registry![
     ProjectPrefetchOriginal,
     ProjectFolderList,
     ProjectFolderAdd,
+    ProjectTrashList,
+    ProjectTrashRestore,
+    ProjectDiskUsage,
 ];
 
 #[cfg(test)]

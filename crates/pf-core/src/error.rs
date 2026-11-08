@@ -219,7 +219,9 @@ impl From<pf_provider::ProviderError> for CoreError {
 pub fn is_locked(e: &std::io::Error) -> bool {
     // ERROR_SHARING_VIOLATION (32), ERROR_LOCK_VIOLATION (33), ERROR_ACCESS_DENIED (5) on rename
     // over a file another process has open.
-    cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33))
+    // `ResourceBusy` (EBUSY elsewhere) is treated the same, and is what the `Locked` fault returns.
+    (cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33)))
+        || e.kind() == std::io::ErrorKind::ResourceBusy
 }
 
 #[cfg(test)]

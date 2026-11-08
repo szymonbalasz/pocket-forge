@@ -24,6 +24,8 @@ use crate::settings::Settings;
 use crate::thumb::{self, ThumbJob, Thumbnails};
 use crate::time::Timestamp;
 
+pub mod commands;
+pub mod retention;
 pub mod store;
 mod sweep;
 
@@ -94,6 +96,26 @@ pub struct OpenProject {
     pub decoded: DecodedOriginal,
     /// Where thumbnails are queued (`None` in unit tests that don't need them).
     pub thumbs: Option<Thumbnails>,
+    /// A draft save that failed with `locked`, retried every 10 s (FR-PRJ-21).
+    pub pending_draft: Option<PendingDraft>,
+}
+
+/// A draft save kept in memory after `locked` (FR-PRJ-21).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingDraft {
+    pub draft: DraftInput,
+    pub export: Option<serde_json::Map<String, Value>>,
+}
+
+/// How often a save that failed with `locked` is retried (FR-PRJ-21).
+pub const SAVE_RETRY_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// `project:save-failed{reason, retrying}` (FR-PRJ-21).
+pub(crate) fn emit_save_failed(ctx: &Context, reason: ErrorCode, retrying: bool) {
+    ctx.emit(
+        "project:save-failed",
+        serde_json::json!({ "reason": reason.as_str(), "retrying": retrying }),
+    );
 }
 
 /// What `project_open` returns.
@@ -303,6 +325,7 @@ pub fn open(
         jobs: BTreeMap::new(),
         refs: RevisionRefs::default(),
         thumbs,
+        pending_draft: None,
     };
     check_original(ctx, &mut p)?;
     if let Some(kind) = library::kind_of_folder(&p.dir)
@@ -637,7 +660,64 @@ pub struct DraftInput {
 
 /// `project_put_draft` (FR-PRJ-19): one commit with the draft and, if given, EXP's unsaved export
 /// settings (R30: `grid`, `target_px_per_square`, `format`, merged into the `export` record).
+/// A `locked` failure keeps the draft in memory, fires `project:save-failed{locked, retrying}`
+/// and is retried every 10 s by [`retry_pending`] (FR-PRJ-21); a later save replaces it.
 pub fn put_draft(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    draft: DraftInput,
+    export_settings: Option<serde_json::Map<String, Value>>,
+) -> CoreResult<u64> {
+    let keep = PendingDraft {
+        draft: draft.clone(),
+        export: export_settings.clone(),
+    };
+    let result = put_draft_once(ctx, install_id, p, draft, export_settings);
+    match &result {
+        Ok(_) => p.pending_draft = None,
+        Err(e) if e.code == ErrorCode::Locked => {
+            p.pending_draft = Some(keep);
+            emit_save_failed(ctx, ErrorCode::Locked, true);
+        }
+        Err(_) => {}
+    }
+    result
+}
+
+/// Retries what a `locked` failure left behind (FR-PRJ-21): the pending draft, then the spool
+/// (FR-PRJ-40). Called every [`SAVE_RETRY_EVERY`]. Returns true while something is still
+/// pending. A draft that now fails for another reason (`conflict`, `read_only`) is dropped:
+/// the UI saves its draft again on the next change.
+pub fn retry_pending(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> bool {
+    if let Some(pending) = p.pending_draft.take() {
+        match put_draft_once(
+            ctx,
+            install_id,
+            p,
+            pending.draft.clone(),
+            pending.export.clone(),
+        ) {
+            Ok(_) => {}
+            Err(e) if e.code == ErrorCode::Locked => {
+                p.pending_draft = Some(pending);
+                emit_save_failed(ctx, ErrorCode::Locked, true);
+                return true;
+            }
+            Err(e) => {
+                tracing::warn!(code = %e.code, "pending draft dropped: {}", e.message);
+            }
+        }
+    }
+    false
+}
+
+/// True if closing would lose state that only lives in memory (FR-PRJ-21: closing asks first).
+pub fn has_unsaved(p: &OpenProject) -> bool {
+    p.pending_draft.is_some()
+}
+
+fn put_draft_once(
     ctx: &Context,
     install_id: Ulid,
     p: &mut OpenProject,

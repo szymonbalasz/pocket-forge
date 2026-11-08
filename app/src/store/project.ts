@@ -110,10 +110,10 @@ export const projectStore = {
     }
   },
 
-  /** Back to the home grid. */
-  async close(): Promise<void> {
+  /** Back to the home grid. `force` closes although a save is still pending (FR-PRJ-21). */
+  async close(force = false): Promise<void> {
     try {
-      await api.project.close();
+      await api.project.close(force);
     } catch (e) {
       // `unsaved` (FR-PRJ-21): stay open and say why.
       const err = errorOf(e);
