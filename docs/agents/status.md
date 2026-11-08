@@ -11,7 +11,6 @@
 | Region-edit jobs (RGN 3–5) | — | merged | done | walkthrough needs fake job persistence (R48) |
 | Export commands (EXP 3, 5) | — | merged | done | — |
 | Export walkthrough (steps 1–2, 6–12) | `walk-exp` | `test/exp-walk` | in progress | steps 3–5 need EDT 5 |
-| Backlog: BL-27 (part)/28/29 | `backlog4` | `fix/backlog-4` | in progress | — |
 | Editor mask hand-off (EDT 5 + BL-10/14/16) | — | merged | done | — |
 | Asset-project retention + conflicts (PRJ 5–6) | — | merged | done | walkthrough steps 7–8 pending |
 | Reference packs core (REF 1, 4) | — | merged | done | — |
