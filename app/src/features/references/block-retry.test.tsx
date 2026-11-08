@@ -167,3 +167,25 @@ test('FR-RGN-42 FR-REF-24 only ticks in cost-affecting slots change the cost key
   await idle();
   expect(referencesCostKey()).toBe('styleImages=project:mood-b.png');
 });
+
+test('FR-REF-26 Appendix A step 9: a deleted pack’s items are missing; restored, they resolve again', async () => {
+  const m = setup();
+  await waitFor(() => expect(items().length).toBe(3));
+  const draft = (await m.handlers.__ref_retry!({
+    rows: [row('References/Weapons/swatch-a.png', 'swatch-a.png')],
+    label: '001',
+    has_slots: true,
+  })) as DraftReferences;
+  act(() => block.restore(draft));
+  await idle();
+  const a = `pack:${WEAPONS}:swatch-a.png`;
+  await waitFor(() => expect(item(a)?.dataset.on).toBe('true'));
+  // Deleted in the packs home: the core emits `ref:packs-changed`; the block resolves again.
+  const { item_id } = (await m.handlers.ref_pack_delete!({ pack_id: WEAPONS })) as {
+    item_id: string;
+  };
+  await waitFor(() => expect(badges(a)).toEqual([['missing', 'missing']]));
+  expect(item(a).dataset.on).toBe('false');
+  await m.handlers.ref_trash_restore!({ id: item_id });
+  await waitFor(() => expect(badges(a)).toEqual([]));
+});

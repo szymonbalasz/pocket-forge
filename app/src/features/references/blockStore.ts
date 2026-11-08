@@ -5,6 +5,8 @@ import { useSyncExternalStore } from 'react';
 
 import {
   api,
+  hasCore,
+  onEvent,
   type DraftReferences,
   type PackCard,
   type RefResolved,
@@ -61,6 +63,11 @@ function watchClose(): void {
   projectStore.subscribe(() => {
     if (!projectStore.get().project && state.projectId) block.reset();
   });
+  // A pack created, renamed, deleted or restored, or files changed in Explorer while the app was
+  // in the background: resolve again so the items and badges are current (FR-REF-26 restore,
+  // reference-packs Appendix A step 9). Resolve reads no image bytes (§12).
+  if (hasCore()) onEvent('ref:packs-changed', () => void resolve()).catch(() => undefined);
+  if (typeof window !== 'undefined') window.addEventListener('focus', () => void resolve());
 }
 
 async function resolve(): Promise<void> {
