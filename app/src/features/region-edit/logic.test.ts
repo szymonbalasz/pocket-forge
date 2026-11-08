@@ -207,6 +207,9 @@ describe('labels', () => {
   test('FR-RGN-12 cost in provider units, or unknown', () => {
     expect(costLabel({ amount: 1234.5, unit: 'CU' })).toBe('1,234.5 CU');
     expect(costLabel({ amount: 'unknown', unit: 'CU' })).toBe('unknown');
+    // Walk D6: a zero session spend is "0", never "-0".
+    expect(costLabel({ amount: -0, unit: 'CU' })).toBe('0 CU');
+    expect(costLabel({ amount: -0.001, unit: 'CU' })).toBe('0 CU');
   });
 
   test('FR-RGN-20 the normalised error and hint; insufficient_balance has its own message', () => {

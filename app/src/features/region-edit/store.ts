@@ -26,6 +26,7 @@ import {
   type RgnPreview,
   type Spend,
 } from '../../api';
+import { projectStore } from '../../store/project';
 import {
   editorBridge,
   pushUndo,
@@ -202,6 +203,8 @@ let unsubscribe: (() => void) | null = null;
 const thumbsInFlight = new Set<string>();
 /** EDT's region inner as last seen, so a retried region is kept until EDT's changes. */
 let editorInner: RectPx | null = null;
+/** EDT's restored region was taken for this attach (`editorRegion`); later changes are edits. */
+let regionTaken = false;
 
 const sameRect = (a: RectPx | null, b: RectPx | null) =>
   a === b || (!!a && !!b && a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h);
@@ -311,7 +314,8 @@ function saveDraftSoon(): void {
         region: s.inner ? { inner: s.inner, margin: s.margin } : null,
         ...referencesDraft(), // REF's selection (FR-REF-20)
       })
-      .catch(() => undefined); // PRJ surfaces save problems; the next change retries.
+      // Shown in the save segment (walk D3); the next change saves again.
+      .catch((e) => projectStore.draftSaveFailed(e));
   }, DRAFT_SAVE_MS);
 }
 
@@ -342,6 +346,10 @@ async function refreshProject(): Promise<void> {
     const p = await api.project.get();
     if (!p || p.project_id !== state.projectId) return;
     const extra = p as ProjectSnapshot & { candidates?: CandidateRecord[] };
+    // A restore (History, or undo of an accept) brings back that revision's draft (FR-PRJ-23).
+    const restored =
+      p.head_revision !== state.headRevision &&
+      p.revisions.find((r) => r.id === p.head_revision)?.reason === 'restore';
     set({
       candidates: extra.candidates ?? [],
       layers: p.layers,
@@ -352,10 +360,24 @@ async function refreshProject(): Promise<void> {
           ? state.maskId
           : (p.draft?.mask_id ?? state.maskId),
     });
+    if (restored) applyRestoredDraft(p.draft);
     syncPicker();
   } catch {
     // Keep the last snapshot; the next commit event retries.
   }
+}
+
+/** Shows a restored revision's draft (walk D4). No draft save: the restore already wrote it. EDT
+ *  keeps its region and mask. */
+function applyRestoredDraft(d: ProjectSnapshot['draft']): void {
+  set({
+    prompt: d?.final_prompt ?? '',
+    seedMode: d?.seed !== null && d?.seed !== undefined ? 'pinned' : 'random',
+    seed: d?.seed ?? null,
+  });
+  const model = d?.model_id ?? state.modelId;
+  if (model) void selectModel(model, d?.controls ?? null);
+  else schedule();
 }
 
 async function refreshIterations(): Promise<void> {
@@ -623,10 +645,12 @@ export const rgn = {
     }
     rgn.detach();
     const d = project.draft;
-    const region = d?.region as { margin?: number } | null | undefined;
+    const region = d?.region as { inner?: RectPx; margin?: number } | null | undefined;
     set({
       projectId: project.project_id,
       readOnly: project.read_only,
+      // Opening never writes the draft (walk D2): the saved region stands until EDT restores it.
+      inner: region?.inner ?? null,
       prompt: d?.final_prompt ?? '',
       seedMode: d?.seed !== null && d?.seed !== undefined ? 'pinned' : 'random',
       seed: d?.seed ?? null,
@@ -661,11 +685,23 @@ export const rgn = {
     if (previewTimer) clearTimeout(previewTimer);
     draftTimer = previewTimer = null;
     editorInner = null;
+    regionTaken = false;
     thumbsInFlight.clear();
     for (const k of Object.keys(tokens)) nextToken(k);
     if (state.projectId) editorBridge.setCandidates(null);
     state = initial;
     for (const l of listeners) l();
+  },
+
+  /** EDT's region for the attached project, once EDT has restored it (FR-EDT-19). The first value
+   *  is the reopened region: taken without a draft save or a prompt reset (walk D2); every later
+   *  one is an edit (`setRegion`). */
+  editorRegion(inner: RectPx | null): void {
+    if (regionTaken) return rgn.setRegion(inner);
+    regionTaken = true;
+    editorInner = inner;
+    set({ inner });
+    void refit();
   },
 
   /** EDT's validated region changed (R18). Null = the region was removed. */

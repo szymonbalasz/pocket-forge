@@ -138,7 +138,9 @@ function HomeView() {
       </header>
       {lib.cards && lib.cards.length === 0 && !unavailable && (
         <div className="prj-home-empty" data-testid="prj-home-empty">
-          <p>Drop an image to start a {section.noun}</p>
+          <p>
+            Drop an image to start {/^[aeiou]/.test(section.noun) ? 'an' : 'a'} {section.noun}
+          </p>
           <p className="muted small">
             Drop image files or a folder here, paste an image, or use + New. Your files are copied;
             the originals stay where they are.
