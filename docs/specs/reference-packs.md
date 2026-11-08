@@ -2,7 +2,7 @@
 feature: reference-packs
 prefix: REF
 owner: spec-reference-packs
-status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [asset-project, provider, region-edit, editor-canvas]
 ---
 
@@ -153,6 +153,8 @@ Built around RGN slice 3 (submit, job records), which is in progress.
 | OQ-REF-03 | Where deleted packs and images go | **A. A References trash in the library root, 30 days (#18)**: like the project trash, no new dependency / B. The OS recycle bin: familiar, but needs a new crate (`trash`) and is per machine | No | 1 |
 | OQ-REF-04 | Long-side cap for sent references | **A. 2048 px (and ≤ the model max)**: small uploads, enough for style / B. The model's `input_px.max`: more detail, larger uploads / C. Always as-is up to the model's limits | No | 4 |
 | OQ-REF-05 | `pack.json` sync conflict | **A. The later `updated_at` wins; the other is trashed and restorable**: notes and roles are small / B. Show both and let the user pick, as #39 does for projects: more UI for little data | No | 1 |
+
+**Resolved:** OQ-REF-01 ✅ A, the folder name · OQ-REF-02 ✅ A, path + hash only · OQ-REF-03 ✅ A, a References trash in the library root · OQ-REF-04 ✅ A, 2048 px · OQ-REF-05 ✅ A, the later `updated_at` wins (#54)
 
 ## Appendix A: walkthrough
 Dev build, fake provider, `PF_DATA_DIR=.pf-dev/data`, `PF_LIBRARY_DIR=.pf-dev/library`.
