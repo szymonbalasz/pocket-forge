@@ -385,7 +385,14 @@ fn check_original(ctx: &Context, p: &mut OpenProject) -> CoreResult<()> {
     pf_imaging::probe_file_complete(&path).map_err(probe_error)?;
     let meta = std::fs::metadata(&path).unwrap_or(meta);
     let o = &p.manifest.original;
-    if meta.len() != o.size || mtime_of(&meta) != o.mtime || racily_clean(&p.dir, o.mtime) {
+    // R45: hashed on every open until the project's first commit after creation (seq 1), and
+    // after that whenever the racily-clean window says size + mtime can't be trusted.
+    let never_committed = p.manifest.commit.seq <= CREATION_SEQ;
+    if meta.len() != o.size
+        || mtime_of(&meta) != o.mtime
+        || never_committed
+        || racily_clean(&p.dir, o.mtime)
+    {
         let hash = fsx::hash_file(&path).map_err(|e| CoreError::io("hashing the original", &e))?;
         if hash != o.content_hash {
             p.read_only.get_or_insert(ReadOnlyReason::OriginalChanged);
@@ -397,6 +404,9 @@ fn check_original(ctx: &Context, p: &mut OpenProject) -> CoreResult<()> {
     }
     Ok(())
 }
+
+/// The `commit.seq` creation writes (FR-PRJ-09).
+const CREATION_SEQ: u64 = 1;
 
 /// Size + mtime can't see a rewrite within one mtime tick of the recorded one. When the recorded
 /// mtime is within [`RACY_WINDOW_MS`] of `project.json`'s own mtime, the stored hash decides
