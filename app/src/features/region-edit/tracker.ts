@@ -22,6 +22,13 @@ export const stripJobId = (rows: RgnIteration[]): string | null => {
   return first && first.state !== 'closed' ? first.job_id : null;
 };
 
+/** R62: Retry is offered on the newest job once it is final (`closed` included, e.g. accepted);
+ *  older iterations get none (R61). */
+export const retryJobId = (rows: RgnIteration[]): string | null => {
+  const first = orderRows(rows)[0];
+  return first && canRetry(first.state) ? first.job_id : null;
+};
+
 /** Keeps the current selection while it exists; else the newest row. */
 export function defaultSelection(rows: RgnIteration[], current: string | null): string | null {
   if (current && rows.some((r) => r.job_id === current)) return current;

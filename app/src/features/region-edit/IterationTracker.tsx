@@ -15,6 +15,7 @@ import {
   isActive,
   orderRows,
   refsTooltip,
+  retryJobId,
   stripJobId,
 } from './tracker';
 import type { RgnIteration } from '../../api';
@@ -145,6 +146,7 @@ export function IterationTracker() {
   if (!s.projectId || s.iterations.length === 0) return null;
   const rows = orderRows(s.iterations);
   const strip = stripJobId(rows);
+  const retryable = retryJobId(rows);
   const select = (id: string) => rgn.selectIteration(id);
   return (
     <div className="rgn-tracker" data-testid="rgn-tracker">
@@ -206,6 +208,19 @@ export function IterationTracker() {
                     </span>
                   )}
                   <span>{costLabel(r.cost)}</span>
+                  {r.job_id === retryable && (
+                    <button
+                      type="button"
+                      className="small"
+                      data-testid="rgn-job-retry"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void rgn.retry(r.job_id);
+                      }}
+                    >
+                      Retry
+                    </button>
+                  )}
                 </div>
               )}
             </div>

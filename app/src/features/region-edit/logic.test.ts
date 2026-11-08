@@ -29,6 +29,7 @@ import {
   iterationCandidates,
   orderRows,
   refsTooltip,
+  retryJobId,
   stripJobId,
   trashOnSubmit,
 } from './tracker';
@@ -372,6 +373,14 @@ describe('iteration tracker logic', () => {
     expect(defaultSelection(rows, 'gone')).toBe('J3');
     expect(stripJobId(rows)).toBe('J3');
     expect(stripJobId([row('J1', 1, 'closed', true)])).toBeNull();
+  });
+
+  test('FR-RGN-21 R62 Retry on the newest job in any final state, closed included; never an older one', () => {
+    expect(retryJobId([row('J1', 1, 'closed', true), row('J2', 2, 'closed')])).toBe('J2');
+    for (const st of ['failed', 'canceled', 'lost', 'fetched'] as const)
+      expect(retryJobId([row('J1', 1, 'closed'), row('J2', 2, st)])).toBe('J2');
+    expect(retryJobId([row('J1', 1, 'closed'), row('J3', null, 'running')])).toBeNull();
+    expect(retryJobId([])).toBeNull();
   });
 
   test('FR-RGN-40 the picker gets the iteration’s non-trashed candidates in provider order', () => {
