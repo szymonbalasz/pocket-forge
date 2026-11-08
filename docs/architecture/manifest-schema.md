@@ -213,7 +213,7 @@ Owner of the meaning: [reference-packs](../specs/reference-packs.md) (REF). In `
 No `name`: the folder name is the pack name (OQ-REF-01).
 
 ### 4.13 References trash item
-`<library-root>/References/.pforge/trash/<item-id>/item.json` = `{schema_version, id, kind: pack|images, pack_id, from, files[], trashed_at}` (`from` = `References/<pack>` for a pack, the file names for images), plus the moved files under the same folder. `item.json` is written first; the move is rolled forward at startup. Purged when `trashed_at` + 30 days < now (FR-REF-12).
+`<library-root>/References/.pforge/trash/<item-id>/item.json` = `{schema_version, id, kind: pack|images, pack_id, from, files[], trashed_at, restored_at?}` (`from` = `References/<pack>` for a pack, the file names for images), plus the moved files under the same folder. `item.json` is written first; the move is rolled forward at startup. `restored_at` is set before a restore moves files back, so a restore interrupted by a crash is finished at startup (R50). Purged when `trashed_at` + 30 days < now (FR-REF-12).
 
 ## 5. `settings.json` (R8)
 | Section | Fields | Owner of the meaning |

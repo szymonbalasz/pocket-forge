@@ -249,6 +249,7 @@ pub fn put_mask(
             seed: None,
             region: None,
             mask_id: None,
+            references: None,
             updated_at: ctx.now(),
             extra: Extra::new(),
         });
@@ -288,6 +289,12 @@ pub struct NewJob {
     pub estimate: Value,
     #[serde(default)]
     pub provider: Value,
+    /// `references[]` (#51, FR-RGN-43): written with `requested`, never changed.
+    #[serde(default)]
+    pub references: Vec<Value>,
+    /// Fields RGN adds to the job file (kept verbatim, written after the known ones).
+    #[serde(default)]
+    pub extra: Extra,
 }
 
 /// `record_job` (R2): `region.png` and `mask.png` as sent (after fit, before polarity
@@ -331,13 +338,14 @@ pub fn record_job(
         fit: new.fit,
         mask_id: new.mask_id,
         inputs: JobInputs::default(),
+        references: new.references,
         estimate: new.estimate,
         cost: Value::Null,
         provider: new.provider,
         iteration: None,
         candidate_ids: vec![],
         error: None,
-        extra: Extra::new(),
+        extra: new.extra,
     };
     let record = job.clone();
     commit(ctx, install_id, p, |_, _, m, plan| {
@@ -378,13 +386,15 @@ pub struct JobUpdate {
 /// `update_job` (R2, schema §3): one transition or data update, written to `job.json` only (the
 /// commit point for job state). `fetched` and `closed` are set by `add_candidates`, accept and
 /// `resolve_job`.
+///
+/// Refused with `read_only` or `conflict` while the project can't be written; RGN's runner then
+/// spools it (FR-PRJ-40).
 pub fn update_job(
     ctx: &Context,
     p: &mut OpenProject,
     job_id: Ulid,
     update: JobUpdate,
 ) -> CoreResult<JobFile> {
-    p.require_writable()?;
     let mut next = job(p, job_id)?.clone();
     if let Some(state) = update.state {
         if matches!(state, JobState::Fetched | JobState::Closed) && state != next.state {
@@ -413,12 +423,28 @@ pub fn update_job(
     if let Some(error) = update.error {
         next.error = (!error.is_null()).then_some(error);
     }
-    write_job(ctx, p, &next)?;
-    if let Some(row) = p.manifest.jobs.iter_mut().find(|r| r.id == job_id) {
-        row.state = next.state;
+    if let Some(e) = blocked(p) {
+        return Err(e);
     }
-    p.jobs.insert(job_id, next.clone());
+    write_job(ctx, p, &next)?;
+    set_job(p, next.clone());
     Ok(next)
+}
+
+fn set_job(p: &mut OpenProject, job: JobFile) {
+    if let Some(row) = p.manifest.jobs.iter_mut().find(|r| r.id == job.id) {
+        row.state = job.state;
+        row.iteration = job.iteration.as_ref().map(|i| i.n);
+    }
+    p.jobs.insert(job.id, job);
+}
+
+/// Why the project can't be written right now, if it can't (read-only or in conflict).
+fn blocked(p: &OpenProject) -> Option<CoreError> {
+    if let Err(e) = p.require_writable() {
+        return Some(e);
+    }
+    p.conflict.is_some().then(super::conflict::conflict_error)
 }
 
 /// One returned candidate, untouched (R10).
@@ -429,6 +455,8 @@ pub struct NewCandidate {
     pub provider_meta: Value,
     /// RGN's decode check failed (FR-RGN-24); a header that doesn't probe is invalid too.
     pub invalid: bool,
+    /// Fields RGN adds to the candidate record (e.g. `aspect_warning`, FR-RGN-24).
+    pub extra: Extra,
 }
 
 /// The next iteration folder for `prompt` (FR-RGN-39): `n` = 1 + the highest in the project,
@@ -455,6 +483,9 @@ fn next_iteration(p: &OpenProject, prompt: &str) -> Iteration {
 /// `add_candidates` (FR-PRJ-30, schema §3): `job.json` with `iteration` set → the candidate files
 /// in `results/NNN <slug>/NN.<ext>` → the manifest → `job.json` `fetched`. A re-fetch after a
 /// crash reuses the job's folder and replaces only files no candidate record references.
+///
+/// Refused with `read_only` or `conflict` while the project can't be written; RGN's runner then
+/// spools it (FR-PRJ-40).
 pub fn add_candidates(
     ctx: &Context,
     install_id: Ulid,
@@ -462,7 +493,9 @@ pub fn add_candidates(
     job_id: Ulid,
     candidates: Vec<NewCandidate>,
 ) -> CoreResult<Vec<Candidate>> {
-    p.require_writable()?;
+    if let Some(e) = blocked(p) {
+        return Err(e);
+    }
     let mut job = job(p, job_id)?.clone();
     if job.state != JobState::Succeeded {
         return Err(CoreError::invalid(
@@ -530,7 +563,7 @@ pub fn add_candidates(
             },
             starred: false,
             trash_id: None,
-            extra: Extra::new(),
+            extra: c.extra,
         });
         files.push((file, c.bytes));
     }
@@ -908,4 +941,4 @@ pub fn next_purge_at(p: &OpenProject) -> Option<Timestamp> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

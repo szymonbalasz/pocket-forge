@@ -165,6 +165,8 @@ pub struct SeenRequest {
     /// Relative to the API base, or the absolute URL.
     pub path: String,
     pub authorized: bool,
+    /// The body, if it was JSON.
+    pub body: Option<Value>,
 }
 
 /// Plays a recording back in order. A request that doesn't match the next exchange, or one
@@ -277,6 +279,10 @@ impl Transport for ReplayTransport {
                 method: req.method,
                 path,
                 authorized: req.authorization.is_some(),
+                body: req
+                    .body
+                    .as_deref()
+                    .and_then(|b| serde_json::from_slice(b).ok()),
             });
         let resp = &ex.response;
         if resp.status == 0 {

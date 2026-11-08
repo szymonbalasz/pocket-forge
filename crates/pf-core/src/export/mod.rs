@@ -20,7 +20,7 @@ use ulid::Ulid;
 
 use crate::context::Context;
 use crate::core::State;
-use crate::error::CoreResult;
+use crate::error::{CoreResult, ErrorCode};
 use crate::project::{OpenProject, store};
 
 pub mod commands;
@@ -242,6 +242,21 @@ pub(crate) fn spawn_debounce(ctx: Arc<Context>, state: Arc<Mutex<State>>) {
         .spawn(run)
     {
         tracing::warn!(error = %e, "can't start the export settings save");
+    }
+}
+
+/// PRJ's `unsaved` check for EXP (FR-PRJ-21): commits pending settings now; true if a `locked`
+/// file kept them from saving, so closing asks first. Any other failure is logged and dropped,
+/// as PRJ drops a pending draft that fails for another reason.
+pub(crate) fn unsaved_on_close(ctx: &Context, state: &mut State) -> bool {
+    match flush_pending(ctx, state, true) {
+        Ok(_) => false,
+        Err(e) if e.code == ErrorCode::Locked => true,
+        Err(e) => {
+            tracing::warn!(error = %e, "export settings not saved on close");
+            state.exp.pending_since = None;
+            false
+        }
     }
 }
 

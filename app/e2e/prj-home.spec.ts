@@ -45,6 +45,8 @@ test('FR-PRJ-49 section switching: the rail picks the section; Items is empty; t
 }) => {
   await expect(cards(page)).toHaveCount(2);
   await expect(page.getByTestId('prj-rail-maps')).toHaveAttribute('aria-current', 'page');
+  // ui-guidelines (BL-15): nothing to generate or export on Home, so the right panel collapses.
+  await expect(page.getByTestId('app-slot-right')).toBeHidden();
   await expect(page.getByTestId('prj-home-card-name')).toHaveText(['grid-map', 'Crypt']);
 
   await page.getByTestId('prj-rail-tokens').click();
@@ -52,15 +54,17 @@ test('FR-PRJ-49 section switching: the rail picks the section; Items is empty; t
   await expect(page.getByTestId('prj-home-card-name')).toHaveText(['Goblin']);
 
   await page.getByTestId('prj-rail-items').click();
-  await expect(page.getByTestId('prj-home-empty')).toContainText('Drop an image to start a item');
+  await expect(page.getByTestId('prj-home-empty')).toContainText('Drop an image to start an item');
   await expect(cards(page)).toHaveCount(0);
 
   await page.getByTestId('prj-rail-maps').click();
   await openFirstCard(page);
   await expect(page.getByTestId('edt-canvas-stage')).toHaveAttribute('data-image-loaded', 'true');
   await expect(page.getByTestId('prj-home-dropzone')).toHaveCount(0);
+  await expect(page.getByTestId('app-slot-right')).toBeVisible();
   await page.getByTestId('prj-rail-tokens').click();
   await expect(page.getByTestId('prj-home-card-name')).toHaveText(['Goblin']);
+  await expect(page.getByTestId('app-slot-right')).toBeHidden();
   await expect(page.getByTestId('edt-canvas-stage')).toHaveCount(0);
   const names = (await calls(page)).map((c) => c.cmd);
   expect(names).toContain('project_close');
@@ -202,13 +206,13 @@ test('R40 the provider chip is a status-bar segment next to the PRJ save state; 
 }) => {
   await openFirstCard(page);
   await expect(
-    page.locator('[data-segment="provider:chip"]').getByTestId('prv-header-chip'),
+    page.locator('[data-segment="provider:chip"]').getByTestId('prv-status-chip'),
   ).toBeVisible();
   await expect(
     page.locator('[data-segment="project:save"]').getByTestId('prj-status-save'),
   ).toBeVisible();
   await expect(page.getByTestId('prv-status-mode')).toHaveCount(0);
-  await expect(page.getByTestId('app-slot-rail').getByTestId('prv-header-chip')).toHaveCount(0);
+  await expect(page.getByTestId('app-slot-rail').getByTestId('prv-status-chip')).toHaveCount(0);
 });
 
 test('FR-PRJ-03 #53 + New uses the native image dialog when it is available', async ({ page }) => {

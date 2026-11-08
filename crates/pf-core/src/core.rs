@@ -65,6 +65,9 @@ pub struct Core {
     pub(crate) create_cancel: AtomicBool,
     /// One creation at a time, so two batches never race for a name.
     pub(crate) create_lock: Mutex<()>,
+    /// REF's session memory: header probes and prepared references (FR-REF-23). Has its own
+    /// locks; never needs the state lock.
+    pub refs: crate::references::RefSession,
 }
 
 impl Core {
@@ -74,6 +77,7 @@ impl Core {
         let (settings, settings_warnings) = settings::load_or_init(&ctx)?;
         crate::library::prepare_override(&ctx)?;
         crate::library::sweep_startup(&ctx, &settings);
+        crate::references::sweep_startup(&ctx, &settings);
         ctx.provider.set_account(settings.provider.account());
         Ok(Core {
             thumbs: Thumbnails::new(&ctx),
@@ -88,6 +92,7 @@ impl Core {
             served: Arc::default(),
             create_cancel: AtomicBool::new(false),
             create_lock: Mutex::new(()),
+            refs: Default::default(),
         })
     }
 

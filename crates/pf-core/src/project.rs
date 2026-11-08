@@ -24,6 +24,10 @@ use crate::settings::Settings;
 use crate::thumb::{self, ThumbJob, Thumbnails};
 use crate::time::Timestamp;
 
+pub mod commands;
+pub mod conflict;
+pub mod retention;
+pub mod spool;
 pub mod store;
 mod sweep;
 
@@ -94,6 +98,62 @@ pub struct OpenProject {
     pub decoded: DecodedOriginal,
     /// Where thumbnails are queued (`None` in unit tests that don't need them).
     pub thumbs: Option<Thumbnails>,
+    /// A draft save that failed with `locked`, retried every 10 s (FR-PRJ-21).
+    pub pending_draft: Option<PendingDraft>,
+    /// Set while a sync conflict is open: every commit is refused with `conflict` until
+    /// `project_resolve_conflict` (FR-PRJ-34 … 36).
+    pub conflict: Option<conflict::ConflictSource>,
+}
+
+/// A draft save kept in memory after `locked` (FR-PRJ-21).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingDraft {
+    pub draft: DraftInput,
+    pub export: Option<serde_json::Map<String, Value>>,
+}
+
+/// How often a save that failed with `locked` is retried (FR-PRJ-21).
+pub const SAVE_RETRY_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// `project:save-failed{reason, retrying}` (FR-PRJ-21).
+pub(crate) fn emit_save_failed(ctx: &Context, reason: &str, retrying: bool) {
+    ctx.emit(
+        "project:save-failed",
+        serde_json::json!({ "reason": reason, "retrying": retrying }),
+    );
+}
+
+/// `detail.reason` of the error for a project folder moved or renamed while open (§11).
+pub const FOLDER_MOVED: &str = "folder_moved";
+
+/// §11: the folder was moved or renamed in Explorer while open. `not_found` with
+/// `detail.reason = folder_moved`; the message never carries a path.
+pub(crate) fn folder_moved() -> CoreError {
+    CoreError::new(
+        ErrorCode::NotFound,
+        "The project folder was moved or renamed outside Pocket Forge. Reopen it from home.",
+    )
+    .with_detail(serde_json::json!({ "reason": FOLDER_MOVED }))
+}
+
+/// True for [`folder_moved`] errors.
+pub fn is_folder_moved(e: &CoreError) -> bool {
+    e.code == ErrorCode::NotFound && e.detail["reason"] == FOLDER_MOVED
+}
+
+/// §11: refuses with [`folder_moved`] once the folder is gone, and notes it in the warnings
+/// (the panel's "reopen from home" banner). State stays in memory.
+pub(crate) fn require_folder(p: &mut OpenProject) -> CoreResult<()> {
+    if p.dir.is_dir() {
+        return Ok(());
+    }
+    if !p.warnings.iter().any(|w| w.code == FOLDER_MOVED) {
+        p.warnings.push(Warning::new(
+            FOLDER_MOVED,
+            "The project folder was moved or renamed outside Pocket Forge. Reopen it from home.",
+        ));
+    }
+    Err(folder_moved())
 }
 
 /// What `project_open` returns.
@@ -303,6 +363,8 @@ pub fn open(
         jobs: BTreeMap::new(),
         refs: RevisionRefs::default(),
         thumbs,
+        pending_draft: None,
+        conflict: None,
     };
     check_original(ctx, &mut p)?;
     if let Some(kind) = library::kind_of_folder(&p.dir)
@@ -315,11 +377,9 @@ pub fn open(
             format!("The project is in the {} folder now.", kind.section_dir()),
         ));
     }
-    if library::has_conflict_copy(&p.dir) {
-        p.warnings.push(Warning::new(
-            "conflict",
-            "This project was also changed on another machine.",
-        ));
+    if let Some(copy) = conflict::manifest_copies(&p.dir).into_iter().next() {
+        // FR-PRJ-34: shown on open; writes wait for the user's pick.
+        conflict::mark(ctx, &mut p, conflict::ConflictSource::Copy(copy));
     }
     sweep::load_history(&mut p)?;
     if recovered && p.read_only.is_none() {
@@ -356,7 +416,14 @@ fn check_original(ctx: &Context, p: &mut OpenProject) -> CoreResult<()> {
     pf_imaging::probe_file_complete(&path).map_err(probe_error)?;
     let meta = std::fs::metadata(&path).unwrap_or(meta);
     let o = &p.manifest.original;
-    if meta.len() != o.size || mtime_of(&meta) != o.mtime || racily_clean(&p.dir, o.mtime) {
+    // R45: hashed on every open until the project's first commit after creation (seq 1), and
+    // after that whenever the racily-clean window says size + mtime can't be trusted.
+    let never_committed = p.manifest.commit.seq <= CREATION_SEQ;
+    if meta.len() != o.size
+        || mtime_of(&meta) != o.mtime
+        || never_committed
+        || racily_clean(&p.dir, o.mtime)
+    {
         let hash = fsx::hash_file(&path).map_err(|e| CoreError::io("hashing the original", &e))?;
         if hash != o.content_hash {
             p.read_only.get_or_insert(ReadOnlyReason::OriginalChanged);
@@ -368,6 +435,9 @@ fn check_original(ctx: &Context, p: &mut OpenProject) -> CoreResult<()> {
     }
     Ok(())
 }
+
+/// The `commit.seq` creation writes (FR-PRJ-09).
+const CREATION_SEQ: u64 = 1;
 
 /// Size + mtime can't see a rewrite within one mtime tick of the recorded one. When the recorded
 /// mtime is within [`RACY_WINDOW_MS`] of `project.json`'s own mtime, the stored hash decides
@@ -416,21 +486,46 @@ pub fn commit(
     p: &mut OpenProject,
     change: impl FnOnce(&Context, &OpenProject, &mut Manifest, &mut CommitPlan) -> CoreResult<()>,
 ) -> CoreResult<u64> {
+    commit_with(ctx, install_id, p, false, change)
+}
+
+/// [`commit`]; `resolving` = the conflict resolve's own commit, which skips the conflict checks
+/// (FR-PRJ-34, 35) because it is what ends the conflict.
+pub(crate) fn commit_with(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    resolving: bool,
+    change: impl FnOnce(&Context, &OpenProject, &mut Manifest, &mut CommitPlan) -> CoreResult<()>,
+) -> CoreResult<u64> {
     p.require_writable()?;
+    require_folder(p)?;
+    if !resolving {
+        conflict::check_before_commit(ctx, p)?;
+    }
+    // FR-PRJ-34, OQ-PRJ-10 A: job.json copies settle (the later state wins); they and thumbnail
+    // copies go to the trash with this commit.
+    conflict::settle_job_copies(ctx, p);
+    let copies = conflict::side_copies(p);
     let mut next = p.manifest.clone();
     let mut plan = CommitPlan::default();
     change(ctx, p, &mut next, &mut plan)?;
+    if !copies.is_empty() {
+        store::trash_files(
+            ctx,
+            &mut next,
+            TrashKind::ConflictCopy,
+            copies,
+            "sync conflict copy",
+        );
+    }
     if let Some(kind) = library::kind_of_folder(&p.dir) {
         next.kind = kind;
     }
     store::trash_superseded_masks(ctx, p, &mut next, &plan);
-    check_commit_unchanged(p)?;
     if !p.dir.is_dir() {
-        // Renamed or moved in Explorer while open (§11): state stays in memory.
-        return Err(CoreError::new(
-            ErrorCode::NotFound,
-            "the project folder was moved or renamed; reopen it from home",
-        ));
+        // Renamed or moved in Explorer during the change (§11): state stays in memory.
+        return Err(folder_moved());
     }
 
     for (rel, bytes) in &plan.files {
@@ -488,6 +583,17 @@ pub(crate) fn write_job(ctx: &Context, p: &OpenProject, job: &JobFile) -> CoreRe
     fsx::write_json_atomic(ctx, &path, job)
 }
 
+/// The on-disk `commit{seq, install_id}` of `project.json`, if it can be read.
+pub(crate) fn disk_commit(p: &OpenProject) -> Option<(u64, Ulid)> {
+    let disk: Value = serde_json::from_slice(&std::fs::read(p.manifest_path()).ok()?).ok()?;
+    let seq = disk["commit"]["seq"].as_u64()?;
+    let install = disk["commit"]["install_id"]
+        .as_str()?
+        .parse::<Ulid>()
+        .ok()?;
+    Some((seq, install))
+}
+
 /// FR-PRJ-35: the on-disk commit must still be the one last loaded or written.
 fn check_commit_unchanged(p: &OpenProject) -> CoreResult<()> {
     let conflict = || {
@@ -499,10 +605,7 @@ fn check_commit_unchanged(p: &OpenProject) -> CoreResult<()> {
     let bytes = match std::fs::read(p.manifest_path()) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound && !p.dir.is_dir() => {
-            return Err(CoreError::new(
-                ErrorCode::NotFound,
-                "the project folder was moved or renamed; reopen it from home",
-            ));
+            return Err(folder_moved());
         }
         Err(_) => return Err(conflict()),
     };
@@ -562,6 +665,9 @@ pub fn save_revision(
     label: Option<String>,
 ) -> CoreResult<RevisionEntry> {
     p.require_writable()?;
+    // Before reading the head revision file, so the error is `folder_moved`, not OS text
+    // with an absolute path (walkthrough D3).
+    require_folder(p)?;
     let head = read_revision(p, p.manifest.head_revision)?;
     if head.layers == p.manifest.layers && head.draft == p.manifest.draft {
         return Err(CoreError::new(
@@ -586,6 +692,9 @@ pub fn restore_revision(
     rev_id: Ulid,
 ) -> CoreResult<RevisionEntry> {
     p.require_writable()?;
+    // Before reading the head revision file, so the error is `folder_moved`, not OS text
+    // with an absolute path (walkthrough D3).
+    require_folder(p)?;
     let rev = read_revision(p, rev_id)?;
     for layer in rev.layers.iter().filter(|l| l.kind == LayerKind::Patch) {
         let file = layer.file.as_deref().unwrap_or_default();
@@ -633,11 +742,91 @@ pub struct DraftInput {
     pub region: Option<Value>,
     #[serde(default)]
     pub mask_id: Option<Ulid>,
+    /// REF's draft references (#51); `null` = REF's defaults.
+    #[serde(default)]
+    pub references: Option<Value>,
 }
 
 /// `project_put_draft` (FR-PRJ-19): one commit with the draft and, if given, EXP's unsaved export
 /// settings (R30: `grid`, `target_px_per_square`, `format`, merged into the `export` record).
+/// A `locked` failure keeps the draft in memory, fires `project:save-failed{locked, retrying}`
+/// and is retried every 10 s by [`retry_pending`] (FR-PRJ-21); a later save replaces it.
 pub fn put_draft(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    draft: DraftInput,
+    export_settings: Option<serde_json::Map<String, Value>>,
+) -> CoreResult<u64> {
+    let keep = PendingDraft {
+        draft: draft.clone(),
+        export: export_settings.clone(),
+    };
+    let result = put_draft_once(ctx, install_id, p, draft, export_settings);
+    match &result {
+        Ok(_) => p.pending_draft = None,
+        Err(e) if keeps_draft(e) => {
+            p.pending_draft = Some(keep);
+            emit_save_failed(ctx, save_failed_reason(e), true);
+        }
+        // Shown by the read-only and conflict states already.
+        Err(e) if matches!(e.code, ErrorCode::ReadOnly | ErrorCode::Conflict) => {}
+        // Anything else is surfaced too: the UI's debounced draft save doesn't show its errors
+        // (walkthrough D3).
+        Err(e) => emit_save_failed(ctx, save_failed_reason(e), false),
+    }
+    result
+}
+
+/// Retries what a `locked` failure left behind (FR-PRJ-21): the pending draft. (RGN's runner
+/// replays the spool on every tick, R48.) Called every [`SAVE_RETRY_EVERY`]. Returns true while something is still
+/// pending. A draft that now fails for another reason (`conflict`, `read_only`) is dropped:
+/// the UI saves its draft again on the next change.
+pub fn retry_pending(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> bool {
+    if let Some(pending) = p.pending_draft.take() {
+        match put_draft_once(
+            ctx,
+            install_id,
+            p,
+            pending.draft.clone(),
+            pending.export.clone(),
+        ) {
+            // A moved folder that came back: the banner goes too.
+            Ok(_) => p.warnings.retain(|w| w.code != FOLDER_MOVED),
+            Err(e) if keeps_draft(&e) => {
+                p.pending_draft = Some(pending);
+                emit_save_failed(ctx, save_failed_reason(&e), true);
+                return true;
+            }
+            Err(e) => {
+                tracing::warn!(code = %e.code, "pending draft dropped: {}", e.message);
+            }
+        }
+    }
+    false
+}
+
+/// Failures after which the draft stays in memory and is retried: a lock (FR-PRJ-21) or a
+/// folder moved while open (§11; it commits if the folder comes back).
+fn keeps_draft(e: &CoreError) -> bool {
+    e.code == ErrorCode::Locked || is_folder_moved(e)
+}
+
+/// `project:save-failed` `reason`: the error code, or `folder_moved`.
+fn save_failed_reason(e: &CoreError) -> &'static str {
+    if is_folder_moved(e) {
+        FOLDER_MOVED
+    } else {
+        e.code.as_str()
+    }
+}
+
+/// True if closing would lose state that only lives in memory (FR-PRJ-21: closing asks first).
+pub fn has_unsaved(p: &OpenProject) -> bool {
+    p.pending_draft.is_some()
+}
+
+fn put_draft_once(
     ctx: &Context,
     install_id: Ulid,
     p: &mut OpenProject,
@@ -664,6 +853,7 @@ pub fn put_draft(
             seed: draft.seed,
             region: draft.region,
             mask_id: draft.mask_id,
+            references: draft.references,
             updated_at: ctx.now(),
             extra,
         });

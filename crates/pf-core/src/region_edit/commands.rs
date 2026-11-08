@@ -110,7 +110,7 @@ impl Command for RgnRegionFit {
     type Output = RegionFit;
 
     fn run(core: &Core, input: RegionFitInput) -> CoreResult<RegionFit> {
-        let src = pixel_source(&core.state())?;
+        let src = pixel_source(&core.ctx, &core.state())?;
         check_project(&*src, Some(input.project_id))?;
         let px = match &input.model_id {
             Some(m) => Some(capabilities(core, m)?.input_px),
@@ -189,6 +189,10 @@ pub struct JobDraft {
     /// Pinned seed, or `null` = random (FR-RGN-10).
     #[serde(default)]
     pub seed: Option<u64>,
+    /// REF's draft references (#51, FR-RGN-41, schema §4.5); `null` = REF's defaults. Carried
+    /// as given; REF slice 6 resolves them inside `prepare_job`.
+    #[serde(default)]
+    pub references: Option<Value>,
 }
 
 impl Validate for JobDraft {
@@ -241,7 +245,7 @@ pub fn prepare_job(
     draft: &JobDraft,
     for_submit: bool,
 ) -> CoreResult<PreparedJob> {
-    let src = pixel_source(&core.state())?;
+    let src = pixel_source(&core.ctx, &core.state())?;
     check_project(&*src, project_id)?;
     if src.read_only() {
         return Err(CoreError::new(

@@ -8,16 +8,18 @@
 | Skeleton; provider 2–4; editor-canvas 1–4, 6; export 1–2, 4; region-edit 1–2, 6 | — | merged | done | provider slice 5 needs the owner |
 | Asset-project core + UI (slices 1–4) | — | merged | done | walkthrough pending |
 | Native file dialog (#53) | — | merged | done | — |
-| Backlog: BL-04/06/07/09/11 | `backlog` | `fix/backlog-1` | BL-07 in-app smoke (R46) | — |
-| Region-edit jobs (RGN 3–5) | `rgn-jobs` | `build/region-edit-jobs` | in progress | — |
+| Region-edit jobs (RGN 3–5) | — | merged | done | walkthrough needs fake job persistence (R48) |
 | Export commands (EXP 3, 5) | `exp-cmd` | `build/export-commands` | in progress | — |
 | Editor mask hand-off (EDT 5 + BL-10/14/16) | `edt-mask` | `build/editor-mask-handoff` | in progress | — |
-| Asset-project retention + conflicts (PRJ 5–6) | `prj-ret` | `build/asset-project-retention` | in progress | — |
-| Reference packs core (REF 1, 4) | `ref-core` | `build/reference-packs-core` | in progress | REF 4 needs REF 2 |
-| Provider references (REF 2) | `prv-ref` | `build/provider-references` | in progress | — |
-| Packs UI + References block (REF 3, 5) | `ref-ui` | `build/reference-packs-ui` | in progress | — |
-| Next: asset-project walkthrough | — | — | waiting | a free slot |
-| Later: REF 6 (RGN integration) | — | — | waiting | REF 4, 5 and RGN 3 merged |
+| Asset-project retention + conflicts (PRJ 5–6) | — | merged | done | walkthrough steps 7–8 pending |
+| Reference packs core (REF 1, 4) | — | merged | done | — |
+| Provider references (REF 2) | — | merged | done | — |
+| Packs UI + References block (REF 3, 5) | — | merged | done | — |
+| Asset-project walkthrough (steps 1–6, 9) | — | — | passed with defects (spinner race, draft rewrite, rename-while-open) | — |
+| Walkthrough fixes (spinner, draft) | — | merged | done | — |
+| Asset-project re-walk (spinner on real app, steps 7–8) | `walk-prj2` | `test/prj-walk-2` | in progress | — |
+| Backlog: BL-21/23/24/25 | `backlog3` | `fix/backlog-3` | in progress | — |
+| REF 6 (RGN integration) | `ref-rgn` | `build/reference-packs-rgn` | in progress | — |
 
 ## Pending owner decisions
 - OQ-IMG-12: file the image-webp bug upstream? (not urgent)

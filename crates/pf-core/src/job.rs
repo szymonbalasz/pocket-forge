@@ -143,6 +143,10 @@ pub struct JobFile {
     pub mask_id: Option<Ulid>,
     #[serde(default)]
     pub inputs: JobInputs,
+    /// The reference files sent, in request order (#51, FR-REF-25, FR-RGN-43); `[]` when none.
+    /// Written with `requested`, never changed. REF owns the entry shape.
+    #[serde(default)]
+    pub references: Vec<Value>,
     #[serde(default)]
     pub estimate: Value,
     #[serde(default)]

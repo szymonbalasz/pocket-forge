@@ -73,7 +73,7 @@ test('FR-PRJ-49 section switching: the rail picks the section the home grid show
   fireEvent.click(screen.getByTestId('prj-rail-items'));
   await waitFor(() => expect(screen.getByTestId('prj-home-empty')).toBeTruthy());
   expect(screen.getByTestId('prj-home-empty').textContent).toContain(
-    'Drop an image to start a item',
+    'Drop an image to start an item',
   );
   expect(cards()).toHaveLength(0);
 });

@@ -37,8 +37,9 @@ let state: ProjectState = initial;
 const listeners = new Set<() => void>();
 let listening = false;
 
-/** A feature's say before the open project closes (EXP's "Cancel the export and close?").
- *  Returns true to allow it now; false to hold the close and call `proceed` later. */
+/** A feature's say before the open project closes, ahead of PRJ's own `unsaved` check (EXP's
+ *  "Cancel the export and close?"). Returns true to allow it now; false to hold the close and
+ *  call `proceed` later. */
 export type CloseGuard = (proceed: () => void) => boolean;
 const closeGuards = new Set<CloseGuard>();
 
@@ -56,6 +57,13 @@ export function errorOf(e: unknown): { code: string; message: string } {
   return e instanceof ApiError
     ? { code: e.code, message: e.message }
     : { code: 'ui', message: String(e) };
+}
+
+/** The save-state code of a failed save: `folder_moved` (§11, `not_found` with that
+ *  `detail.reason`), else the error code. */
+function saveCode(e: unknown): string {
+  const reason = e instanceof ApiError ? (e.detail as { reason?: unknown } | null)?.reason : null;
+  return reason === 'folder_moved' ? 'folder_moved' : errorOf(e).code;
 }
 
 function savedAt(p: ProjectSnapshot): string {
@@ -88,9 +96,44 @@ function listen(): void {
   );
   on(
     onEvent('project:conflict', () => {
+      // FR-PRJ-35: found mid-session; the snapshot's warnings now carry `conflict` too.
       if (state.project) set({ save: { kind: 'conflict' } });
+      void projectStore.reload().then(() => {
+        if (state.project) set({ save: { kind: 'conflict' } });
+      });
     }),
   );
+}
+
+/** `open` once the guards allowed it. */
+async function openNow(path: string): Promise<boolean> {
+  set({ busy: true, error: null, opening: path });
+  try {
+    if (state.project) await api.project.close().catch(() => undefined);
+    const project = await api.project.open(path);
+    set({ project, save: { kind: 'saved', at: savedAt(project) }, busy: false, opening: null });
+    bump();
+    return true;
+  } catch (e) {
+    set({ project: null, error: errorOf(e), busy: false });
+    return false;
+  }
+}
+
+/** `close` once the guards allowed it. */
+async function closeNow(force: boolean): Promise<void> {
+  try {
+    await api.project.close(force);
+  } catch (e) {
+    // `unsaved` (FR-PRJ-21): stay open and say why.
+    const err = errorOf(e);
+    if (err.code === 'unsaved') {
+      set({ error: err });
+      return;
+    }
+  }
+  set({ project: null, save: initial.save, error: null });
+  bump();
 }
 
 export const projectStore = {
@@ -112,41 +155,16 @@ export const projectStore = {
   },
 
   /** Opens a project folder (FR-PRJ-14). Closing the open one asks the close guards first. */
-  async open(path: string, opts: { force?: boolean } = {}): Promise<boolean> {
-    if (
-      state.project &&
-      !opts.force &&
-      !guardsAllow(() => void projectStore.open(path, { force: true }))
-    )
-      return false;
-    set({ busy: true, error: null, opening: path });
-    try {
-      if (state.project) await api.project.close().catch(() => undefined);
-      const project = await api.project.open(path);
-      set({ project, save: { kind: 'saved', at: savedAt(project) }, busy: false, opening: null });
-      bump();
-      return true;
-    } catch (e) {
-      set({ project: null, error: errorOf(e), busy: false });
-      return false;
-    }
+  async open(path: string): Promise<boolean> {
+    if (state.project && !guardsAllow(() => void openNow(path))) return false;
+    return openNow(path);
   },
 
-  /** Back to the home grid. The close guards are asked first unless `force`. */
-  async close(opts: { force?: boolean } = {}): Promise<void> {
-    if (!opts.force && !guardsAllow(() => void projectStore.close({ force: true }))) return;
-    try {
-      await api.project.close();
-    } catch (e) {
-      // `unsaved` (FR-PRJ-21): stay open and say why.
-      const err = errorOf(e);
-      if (err.code === 'unsaved') {
-        set({ error: err });
-        return;
-      }
-    }
-    set({ project: null, save: initial.save, error: null });
-    bump();
+  /** Back to the home grid. The close guards are asked first; `force` closes although a save is
+   *  still pending (FR-PRJ-21). */
+  async close(force = false): Promise<void> {
+    if (!guardsAllow(() => void closeNow(force))) return;
+    await closeNow(force);
   },
 
   /** Re-reads the open project (after a restore, relink, …). */
@@ -178,7 +196,7 @@ export const projectStore = {
             ? { kind: 'unchanged', at }
             : err.code === 'conflict'
               ? { kind: 'conflict' }
-              : { kind: 'failed', ...err, retrying: false },
+              : { kind: 'failed', ...err, code: saveCode(e), retrying: false },
       });
     }
     bump();
@@ -193,9 +211,35 @@ export const projectStore = {
       const project = await api.project.get();
       set({ project: project ?? state.project, save: { kind: 'saved', at: rev.created_at } });
     } catch (e) {
-      set({ error: errorOf(e), save: { kind: 'saved', at: savedAt(state.project) } });
+      const code = saveCode(e);
+      set({
+        error: errorOf(e),
+        save:
+          code === 'folder_moved'
+            ? { kind: 'failed', code, message: '', retrying: false }
+            : { kind: 'saved', at: savedAt(state.project) },
+      });
     }
     bump();
+  },
+
+  /** After `project_resolve_conflict` (FR-PRJ-36): re-reads the project, saved again. */
+  async resolved(): Promise<void> {
+    if (!state.project) return;
+    try {
+      const project = await api.project.get();
+      if (project) set({ project, save: { kind: 'saved', at: savedAt(project) } });
+    } catch (e) {
+      set({ error: errorOf(e) });
+    }
+    bump();
+  },
+
+  /** A draft write failed (RGN's `project_put_draft`): the save segment must not say Saved. The
+   *  next commit sets it back (FR-PRJ-21; PRJ's own retry is separate). */
+  draftSaveFailed(e: unknown): void {
+    if (!state.project) return;
+    set({ save: { kind: 'failed', ...errorOf(e), code: saveCode(e), retrying: false } });
   },
 
   setError(error: { code: string; message: string } | null): void {

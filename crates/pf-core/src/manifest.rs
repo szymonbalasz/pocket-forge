@@ -207,6 +207,9 @@ pub struct Draft {
     /// `{inner, margin}`; RGN owns the meaning.
     pub region: Option<Value>,
     pub mask_id: Option<Ulid>,
+    /// REF's `{packs, items}` (#51, FR-RGN-41); `null` = REF's defaults (FR-REF-17).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub references: Option<Value>,
     pub updated_at: Timestamp,
     #[serde(flatten)]
     pub extra: Extra,

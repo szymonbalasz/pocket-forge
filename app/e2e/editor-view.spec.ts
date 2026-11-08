@@ -110,6 +110,29 @@ test('FR-EDT-07 FR-EDT-08 the one-tile level shows first; level 0 appears after 
   expect(stageAttrs).toEqual({ x: v.tx, y: v.ty, sx: v.scale, sy: v.scale });
 });
 
+test('FR-EDT-07 a pyramid built and reported before tiles_open returns still loads (D1)', async ({
+  page,
+}) => {
+  // openMap waits for data-image-loaded; before the fix the events were missed and it stayed false.
+  await openMap(page, { buildOnOpen: 'ready' });
+  await expect(page.getByTestId('edt-loading')).toBeHidden();
+  const t = await hook<{ backdropShown: boolean; level: number | null }>(page, 'tiles');
+  expect(t.backdropShown).toBe(true);
+  expect(t.level).not.toBeNull();
+});
+
+test('FR-EDT-07 a build that fails before tiles_open returns shows the error, not the spinner (D1)', async ({
+  page,
+}) => {
+  await openMap(page, { buildOnOpen: 'failed' });
+  await expect(page.getByTestId('edt-build-error')).toContainText('image body is unreadable');
+  await expect(page.getByTestId('edt-loading')).toBeHidden();
+  // Rebuild reopens; this time the pyramid is complete.
+  await page.getByTestId('edt-build-error').getByRole('button', { name: 'Rebuild' }).click();
+  await expect(page.getByTestId('edt-build-error')).toBeHidden();
+  await expect(page.getByTestId('edt-canvas-stage')).toHaveAttribute('data-image-loaded', 'true');
+});
+
 test('FR-EDT-12 a failing tile shows the badge; Rebuild reopens the pyramid', async ({ page }) => {
   await openMap(page);
   // Registered after the mock's catch-all route, so it wins.

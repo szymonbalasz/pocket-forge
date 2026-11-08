@@ -70,4 +70,61 @@ pub(crate) fn decode_grey8(bytes: &[u8]) -> Option<Grey8> {
     })
 }
 
+/// An image file format a reference may be sent in (FR-PRV-33).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ImageFormat {
+    Png,
+    Jpeg,
+    Webp,
+}
+
+impl ImageFormat {
+    pub fn mime(self) -> &'static str {
+        match self {
+            ImageFormat::Png => "image/png",
+            ImageFormat::Jpeg => "image/jpeg",
+            ImageFormat::Webp => "image/webp",
+        }
+    }
+
+    pub fn ext(self) -> &'static str {
+        match self {
+            ImageFormat::Png => "png",
+            ImageFormat::Jpeg => "jpg",
+            ImageFormat::Webp => "webp",
+        }
+    }
+}
+
+/// The format from the file's magic bytes; `None` for anything else.
+pub(crate) fn sniff(bytes: &[u8]) -> Option<ImageFormat> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some(ImageFormat::Png)
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some(ImageFormat::Jpeg)
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some(ImageFormat::Webp)
+    } else {
+        None
+    }
+}
+
 pub(crate) use crate::fixtures::encode_png;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fr_prv_33_sniffs_png_jpeg_and_webp_only() {
+        assert_eq!(
+            sniff(&encode_png(1, 1, png::ColorType::Grayscale, &[0])),
+            Some(ImageFormat::Png)
+        );
+        assert_eq!(sniff(b"\xFF\xD8\xFF\xE0rest"), Some(ImageFormat::Jpeg));
+        assert_eq!(sniff(b"RIFF\x10\0\0\0WEBPVP8 "), Some(ImageFormat::Webp));
+        for bad in [&b""[..], b"GIF89a", b"RIFF\x10\0\0\0WAVE", b"\x89PN"] {
+            assert_eq!(sniff(bad), None, "{bad:?}");
+        }
+    }
+}

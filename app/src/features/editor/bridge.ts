@@ -45,3 +45,9 @@ export async function thumbnailUrl(projectId: string, imageId: string): Promise<
 export function useEditorRegion(): RegionState | null {
   return useEditor((s) => s.region);
 }
+
+/** The project whose saved region EDT has restored (null before): until it is the open project,
+ *  `useEditorRegion` is not that project's region and must not be saved into its draft. */
+export function useEditorRegionRestored(): string | null {
+  return useEditor((s) => s.regionFor);
+}

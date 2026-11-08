@@ -1,13 +1,14 @@
 //! The model overlay (#15, OQ-PRV-18: a static Rust table): what Scenario's capabilities don't
 //! say. Each row gives a model its mask convention and soft rule, the input name per role
 //! where Scenario doesn't mark it (R28), the accepted sent-image size, whether a dry run needs
-//! the uploaded assets, and where it was checked. Masked edit is offered only for a model with
+//! the uploaded assets, the role and fallback count of each reference slot (FR-PRV-31), and
+//! where it was checked. Masked edit is offered only for a model with
 //! a row **and** a mask input in its capabilities (FR-PRV-11).
 //!
 //! Model ids, `dry_run_assets` and the `soft` picks are confirmed by free `GET /models/{id}`
 //! and dry-run recordings (PRV slice 5, owner); until then they follow the research doc.
 
-use crate::{ControlRole, InputPx, MaskConvention, SoftRule};
+use crate::{ControlRole, InputPx, MaskConvention, ReferenceRole, SoftRule};
 
 /// One overlay row (spec Appendix C).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -23,6 +24,10 @@ pub struct OverlayRow {
     /// Does a dry run need the uploaded image assets (R15)? `true` until a recorded free dry
     /// run shows otherwise: estimate then uploads, and FR-PRV-14 dedupes for submit.
     pub dry_run_assets: bool,
+    /// Reference input name → role (#51). An input not listed has no role.
+    pub slot_roles: &'static [(&'static str, ReferenceRole)],
+    /// Reference input name → max count, for a `file_array` input that lists no `max`.
+    pub slot_max: &'static [(&'static str, u32)],
     pub doc_url: &'static str,
     pub checked: &'static str,
 }
@@ -44,6 +49,12 @@ const IDEOGRAM_ROLES: &[(&str, ControlRole)] = &[
     ("seed", ControlRole::Seed),
 ];
 
+/// Ideogram's reference inputs (spec Appendix C).
+const IDEOGRAM_SLOTS: &[(&str, ReferenceRole)] = &[
+    ("styleReferenceImages", ReferenceRole::Style),
+    ("characterReferenceImages", ReferenceRole::Identity),
+];
+
 const OPENAI_DOC: &str = "https://docs.scenario.com/get-started/generation/third-party-model-generation/third-party-model-generation-openai";
 const IDEOGRAM_DOC: &str = "https://docs.scenario.com/get-started/generation/third-party-model-generation/third-party-model-generation-ideogram";
 const CHECKED: &str = "2026-11-06";
@@ -62,6 +73,9 @@ const fn gpt(model_id: &'static str) -> OverlayRow {
         },
         max_bytes: 50 * MB,
         dry_run_assets: true,
+        // None recorded (Appendix C).
+        slot_roles: &[],
+        slot_max: &[],
         doc_url: OPENAI_DOC,
         checked: CHECKED,
     }
@@ -81,6 +95,8 @@ const fn ideogram(model_id: &'static str, convention: MaskConvention, max: u32) 
         },
         max_bytes: 50 * MB,
         dry_run_assets: true,
+        slot_roles: IDEOGRAM_SLOTS,
+        slot_max: &[],
         doc_url: IDEOGRAM_DOC,
         checked: CHECKED,
     }
@@ -108,6 +124,12 @@ const FAKE_ROLES: &[(&str, ControlRole)] = &[
     ("num_samples", ControlRole::CandidateCount),
 ];
 
+/// The fake models' reference inputs (FR-PRV-35).
+const FAKE_SLOTS: &[(&str, ReferenceRole)] = &[
+    ("style_refs", ReferenceRole::Style),
+    ("identity_ref", ReferenceRole::Identity),
+];
+
 const fn fake(model_id: &'static str, convention: MaskConvention, soft: SoftRule) -> OverlayRow {
     OverlayRow {
         model_id,
@@ -121,6 +143,8 @@ const fn fake(model_id: &'static str, convention: MaskConvention, soft: SoftRule
         },
         max_bytes: 50 * MB,
         dry_run_assets: false,
+        slot_roles: FAKE_SLOTS,
+        slot_max: &[],
         doc_url: "docs/specs/provider.md#appendix-d-fake-cases",
         checked: CHECKED,
     }
@@ -157,5 +181,21 @@ impl OverlayRow {
             .iter()
             .find(|(n, _)| *n == input)
             .map(|(_, r)| *r)
+    }
+
+    /// The role of a reference input (FR-PRV-31).
+    pub fn slot_role(&self, input: &str) -> Option<ReferenceRole> {
+        self.slot_roles
+            .iter()
+            .find(|(n, _)| *n == input)
+            .map(|(_, r)| *r)
+    }
+
+    /// The fallback max count of a reference input with no `max` (FR-PRV-31).
+    pub fn slot_max(&self, input: &str) -> Option<u32> {
+        self.slot_max
+            .iter()
+            .find(|(n, _)| *n == input)
+            .map(|(_, m)| *m)
     }
 }

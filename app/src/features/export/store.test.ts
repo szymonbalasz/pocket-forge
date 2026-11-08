@@ -15,6 +15,7 @@ const h = vi.hoisted(() => {
       cancel: vi.fn(),
       prefetchOriginal: vi.fn(),
     },
+    prj: { close: vi.fn() },
   };
 });
 
@@ -22,7 +23,7 @@ vi.mock('../../api', async (importOriginal) => {
   const real = await importOriginal<typeof import('../../api')>();
   return {
     ...real,
-    api: { export: h.exp },
+    api: { export: h.exp, project: h.prj },
     onEvent: async (name: string, fn: (p: unknown) => void) => {
       h.handlers.set(name, fn);
       return () => h.handlers.delete(name);
@@ -213,23 +214,25 @@ describe('export store', () => {
   test('OQ-EXP-09 closing during an export asks first; confirm cancels, then closes', async () => {
     await bound();
     await exportStore.start();
-    const close = vi.spyOn(projectStore, 'close');
+    h.prj.close.mockReset();
     await projectStore.close();
     expect(exportStore.get().closeAsk).toBe(true);
     exportStore.keepExporting();
     expect(exportStore.get().closeAsk).toBe(false);
     expect(h.exp.cancel).not.toHaveBeenCalled();
-    await projectStore.close();
+    expect(h.prj.close).not.toHaveBeenCalled();
+    // PRJ's "Close anyway" (force past `unsaved`) is guarded too, and keeps its force.
+    await projectStore.close(true);
     await exportStore.confirmClose();
     expect(h.exp.cancel).toHaveBeenCalledWith('e1');
-    expect(close).toHaveBeenLastCalledWith({ force: true });
+    expect(h.prj.close).toHaveBeenCalledTimes(1);
+    expect(h.prj.close).toHaveBeenLastCalledWith(true);
     h.emit('export:canceled', { export_id: 'e1' });
     // Nothing running: the guard lets a close straight through.
-    close.mockClear();
     await projectStore.close();
     expect(exportStore.get().closeAsk).toBe(false);
-    expect(close).toHaveBeenCalledTimes(1);
-    close.mockRestore();
+    expect(h.prj.close).toHaveBeenCalledTimes(2);
+    expect(h.prj.close).toHaveBeenLastCalledWith(false);
   });
 
   test('FR-EXP-18 a failed export shows its message and Retry starts again', async () => {

@@ -1,0 +1,459 @@
+/* Packs home, pack view and the References block (reference-packs §7). theme.css tokens only. */
+
+.ref-home {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-3);
+  padding: var(--pf-space-4);
+  background: var(--pf-bg-1);
+  outline: 2px dashed transparent;
+  outline-offset: -8px;
+}
+
+.ref-home[data-over='true'] {
+  outline-color: var(--pf-accent);
+  background: var(--pf-bg-2);
+}
+
+.ref-home .banner {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.ref-header {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.ref-header h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.ref-header button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-1);
+}
+
+.ref-title-button {
+  background: none;
+  border: 1px solid transparent;
+  font-size: 16px;
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+.ref-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--pf-text-dim);
+  border: 2px dashed var(--pf-border);
+  border-radius: 6px;
+  padding: var(--pf-space-4);
+}
+
+.ref-empty p:first-child {
+  font-size: 15px;
+  color: var(--pf-text);
+}
+
+.ref-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--pf-space-3);
+}
+
+.ref-grid-images {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+
+.ref-card {
+  position: relative;
+  background: var(--pf-bg-2);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ref-card:hover,
+.ref-card:focus-within {
+  border-color: var(--pf-text-dim);
+}
+
+.ref-card-body {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 0 0 var(--pf-space-2);
+  background: none;
+  border: none;
+  border-radius: 0;
+  text-align: left;
+}
+
+.ref-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  background: var(--pf-bg-0);
+  margin-bottom: var(--pf-space-1);
+}
+
+.ref-thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--pf-text-dim);
+}
+
+.ref-card-name,
+.ref-card-line {
+  padding: 0 var(--pf-space-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ref-card-line,
+.ref-meta {
+  font-size: var(--pf-font-size-meta);
+  color: var(--pf-text-dim);
+}
+
+.ref-image-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-1);
+  padding: 0 var(--pf-space-2) var(--pf-space-2);
+}
+
+.ref-image-foot select {
+  flex: 1;
+  min-width: 0;
+}
+
+.ref-badges {
+  position: absolute;
+  top: var(--pf-space-1);
+  left: var(--pf-space-1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-space-1);
+  pointer-events: none;
+}
+
+.ref-badge {
+  font-size: var(--pf-font-size-meta);
+  padding: 1px 6px;
+  border-radius: var(--pf-radius);
+  background: var(--pf-overlay);
+  color: var(--pf-text);
+}
+
+.ref-badge-conflict,
+.ref-badge-corrupt,
+.ref-badge-missing {
+  color: var(--pf-danger);
+}
+
+.ref-badge-not_ready,
+.ref-badge-not_available_offline,
+.ref-badge-cloud,
+.ref-badge-cloud_only,
+.ref-badge-changed_since,
+.ref-badge-duplicate {
+  color: var(--pf-warn);
+}
+
+.ref-home select,
+.ref-block select {
+  background: var(--pf-bg-3);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  color: var(--pf-text);
+  padding: 2px 4px;
+}
+
+.ref-notes {
+  min-height: 56px;
+}
+
+.ref-trash {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ref-trash li {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.ref-toast {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+  min-width: 280px;
+  max-width: 520px;
+  padding: var(--pf-space-2) var(--pf-space-3);
+  background: var(--pf-bg-3);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  box-shadow: 0 4px 16px var(--pf-overlay);
+}
+
+.ref-toast ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 160px;
+  overflow: auto;
+  font-size: var(--pf-font-size-meta);
+}
+
+.ref-toast li {
+  display: flex;
+  gap: var(--pf-space-2);
+}
+
+.ref-toast li span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ref-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--pf-overlay);
+  z-index: 40;
+}
+
+.ref-dialog,
+.ref-popover,
+.ref-menu {
+  background: var(--pf-bg-2);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  box-shadow: 0 4px 16px var(--pf-overlay);
+  z-index: 50;
+}
+
+.ref-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, calc(100vw - 2 * var(--pf-space-4)));
+  padding: var(--pf-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+}
+
+.ref-dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+}
+
+.ref-dialog h2 {
+  margin: 0;
+  font-size: 14px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--pf-text);
+}
+
+.ref-menu {
+  min-width: 140px;
+  padding: var(--pf-space-1);
+}
+
+.ref-menu-item {
+  padding: 4px var(--pf-space-2);
+  border-radius: var(--pf-radius);
+  cursor: default;
+  outline: none;
+}
+
+.ref-menu-item[data-highlighted] {
+  background: var(--pf-accent-soft);
+}
+
+.ref-popover {
+  width: 240px;
+  max-height: 320px;
+  overflow: auto;
+  padding: var(--pf-space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ref-popover label {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  padding: 2px 4px;
+}
+
+.ref-popover label[data-disabled='true'] {
+  color: var(--pf-text-dim);
+}
+
+/* ------------------------------------------------------------------ References block */
+
+.ref-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+}
+
+.ref-block[aria-disabled='true'] {
+  opacity: 0.6;
+}
+
+.ref-block-head {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.ref-block-head strong {
+  font-weight: 600;
+}
+
+.ref-block-group {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-1);
+  margin-top: var(--pf-space-1);
+  font-size: var(--pf-font-size-meta);
+  color: var(--pf-text-dim);
+}
+
+.ref-block-group button {
+  padding: 0 4px;
+  background: none;
+  border: none;
+}
+
+.ref-block-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ref-block-item {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-1);
+  min-height: 32px;
+}
+
+.ref-block-item label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-1);
+}
+
+.ref-block-item img,
+.ref-block-thumb-empty {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: 2px;
+  background: var(--pf-bg-0);
+}
+
+.ref-block-file {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ref-block-item[data-blocked='true'] .ref-block-file {
+  color: var(--pf-text-dim);
+}
+
+.ref-block-under {
+  color: var(--pf-danger);
+}
+
+.ref-skeleton {
+  height: 28px;
+  border-radius: 2px;
+  background: var(--pf-bg-3);
+}
+
+.ref-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pf-space-1);
+  min-width: 0;
+  padding: 1px 6px;
+  font-size: var(--pf-font-size-meta);
+}
+
+.ref-select-content {
+  z-index: 60;
+  min-width: var(--radix-select-trigger-width);
+  background: var(--pf-bg-3);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  padding: var(--pf-space-1) 0;
+}
+
+.ref-select-item {
+  padding: var(--pf-space-1) var(--pf-space-3);
+  cursor: default;
+  outline: none;
+}
+
+.ref-select-item[data-highlighted] {
+  background: var(--pf-accent-soft);
+}
+
+.ref-select-item[data-disabled] {
+  color: var(--pf-text-dim);
+}

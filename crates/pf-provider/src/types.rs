@@ -150,12 +150,24 @@ pub enum ReferenceRole {
     Identity,
 }
 
-/// An extra image input of a model (none are sent in tier S).
+/// A reference image input of a model (FR-PRV-31), derived from a control with
+/// `role: reference` (R31).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Slot {
+    /// The control (input) name; `ReferenceImage::slot` names it.
     pub name: String,
+    /// From the overlay row's `slot_roles`; `None` when the model doesn't say.
     pub role: Option<ReferenceRole>,
-    pub required: bool,
+    /// 1 if the input is required, else 0. Meeting it is the caller's job (FR-PRV-32).
+    pub min: u32,
+    /// `file` → 1; `file_array` → the input's `max`, else the overlay's `slot_max`, else 1.
+    pub max: u32,
+    /// From `costImpact`: references in this slot change the estimate (FR-REF-24).
+    pub cost_affecting: bool,
+    /// The input takes a list (`file_array`); otherwise one file. The body sends an array or
+    /// one ref accordingly (FR-PRV-33).
+    #[serde(default)]
+    pub array: bool,
 }
 
 /// `list_models` plus whether it came from the local cache while offline (FR-PRV-25).
@@ -195,11 +207,18 @@ pub enum UploadPurpose {
 #[serde(transparent)]
 pub struct AssetRef(pub String);
 
-/// A reference image sent with a job.
+/// A reference image sent with a job (FR-PRV-33), prepared by REF (FR-REF-21/22).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ReferenceImage {
-    pub role: ReferenceRole,
-    pub png: Vec<u8>,
+    /// The [`Slot::name`] it goes to.
+    pub slot: String,
+    /// The role the user picked, recorded only; the slot decides the input.
+    pub role: Option<ReferenceRole>,
+    /// The bytes as sent: PNG, JPEG or WebP.
+    pub bytes: Vec<u8>,
+    /// SHA-256 of `bytes`: `sha256:<hex>` (pf-core's form) or bare hex. A mismatch is
+    /// `invalid_request(reference)`.
+    pub hash: String,
 }
 
 /// A generic job request (ADR 0001).
@@ -212,6 +231,7 @@ pub struct JobRequest {
     pub model_id: String,
     pub final_prompt: String,
     pub controls: BTreeMap<String, Value>,
+    /// In request order; each slot's refs go to its input in this order (FR-PRV-33).
     pub references: Vec<ReferenceImage>,
     pub region_png: Vec<u8>,
     pub mask_png: Vec<u8>,

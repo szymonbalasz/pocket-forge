@@ -470,6 +470,30 @@ fn fr_exp_25_close_commits_pending_settings() {
 }
 
 #[test]
+fn fr_exp_25_fr_prj_21_settings_a_lock_keeps_from_saving_make_close_ask() {
+    let mut t = setup();
+    t.core
+        .dispatch(
+            "export_set_settings",
+            json!({"settings": settings(Some(16.0), Some(8), "jpeg")}),
+        )
+        .unwrap();
+    Arc::get_mut(&mut t.core.ctx).unwrap().faults =
+        Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap();
+    // One close check (PRJ's), EXP's pending settings included.
+    let err = t.core.dispatch("project_close", json!({})).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Unsaved);
+    assert_eq!(err.detail["reason"], "locked");
+    assert!(t.core.state().project.is_some(), "still open");
+    // "Close anyway".
+    t.core
+        .dispatch("project_close", json!({"force": true}))
+        .unwrap();
+    assert!(t.core.state().project.is_none());
+    assert_eq!(t.manifest_export(), Value::Null, "lost, as the user chose");
+}
+
+#[test]
 fn fr_exp_26_settings_changed_fires_when_source_or_target_change() {
     let t = setup();
     let got = t.core.dispatch("export_get_settings", json!({})).unwrap();
@@ -1253,6 +1277,7 @@ fn r3_accept_then_restore_parent_then_export_equals_the_original() {
                 seed: Some(1),
                 provider_meta: json!({}),
                 invalid: false,
+                extra: Default::default(),
             }],
         )
         .unwrap();

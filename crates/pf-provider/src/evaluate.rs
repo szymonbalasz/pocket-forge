@@ -3,7 +3,8 @@
 //! flags, plus per-control errors. RGN calls it at its command boundary.
 //!
 //! `values` maps control names to values (the prompt, count and seed under their control
-//! names too). Source and mask images are bound by role (R28) and never checked here.
+//! names too). Source and mask images are bound by role (R28) and never checked here, and
+//! neither are reference slots (their counts are checked on send, FR-PRV-33).
 
 use std::collections::BTreeMap;
 
@@ -200,7 +201,12 @@ impl Capabilities {
             .filter_map(|(c, v)| v.then_some(c))
             .collect();
         for c in &visible {
-            if matches!(c.role, ControlRole::Source | ControlRole::Mask) {
+            // Images are bound by role (R28); reference counts are checked against `slots[]`
+            // when the request is sent (FR-PRV-33), not here.
+            if matches!(
+                c.role,
+                ControlRole::Source | ControlRole::Mask | ControlRole::Reference
+            ) {
                 continue;
             }
             match values.get(&c.name) {
