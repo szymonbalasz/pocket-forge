@@ -153,7 +153,11 @@ pub static SCENARIO_ROWS: [OverlayRow; 9] = [
             8192,
         )
     },
-    ideogram("model_ideogram-v3-balanced", MaskConvention::BlackEdit, 4096),
+    ideogram(
+        "model_ideogram-v3-balanced",
+        MaskConvention::BlackEdit,
+        4096,
+    ),
     ideogram("model_ideogram-v3-quality", MaskConvention::BlackEdit, 4096),
     ideogram("model_ideogram-v3-turbo", MaskConvention::BlackEdit, 4096),
     ideogram("model_ideogram-character", MaskConvention::BlackEdit, 4096),

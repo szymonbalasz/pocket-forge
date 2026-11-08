@@ -22,9 +22,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use serde_json::Value;
 
 pub use self::api::DEFAULT_BASE_URL;
-pub use self::overlay::scenario_model_ids;
 use self::api::{Api, Retry, seg};
 use self::cache::{CacheFile, ModelCache};
+pub use self::overlay::scenario_model_ids;
 use self::overlay::{OverlayRow, SCENARIO_ROWS, row_in};
 use crate::credentials::CredentialStore;
 use crate::replay::Recording;

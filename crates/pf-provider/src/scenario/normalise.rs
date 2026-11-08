@@ -514,18 +514,26 @@ mod tests {
         let base = json!([{"name": "image", "type": "file"}, {"name": "mask", "type": "file", "maskFrom": "image"}]);
         let mut inputs = base.as_array().unwrap().clone();
         inputs.push(json!({"name": "lora", "type": "model_ref"}));
-        let c = normalise("m", &json!({"inputs": inputs}), row("model_ideogram-v3-balanced"))
-            .unwrap()
-            .capabilities;
+        let c = normalise(
+            "m",
+            &json!({"inputs": inputs}),
+            row("model_ideogram-v3-balanced"),
+        )
+        .unwrap()
+        .capabilities;
         assert!(c.controls.iter().all(|x| x.name != "lora"));
         assert_eq!(c.operations, [Operation::EditMasked]);
         assert!(c.warnings.iter().any(|w| w.contains("model_ref")));
 
         inputs
             .push(json!({"name": "palette", "type": "colour_list", "required": {"always": true}}));
-        let c = normalise("m", &json!({"inputs": inputs}), row("model_ideogram-v3-balanced"))
-            .unwrap()
-            .capabilities;
+        let c = normalise(
+            "m",
+            &json!({"inputs": inputs}),
+            row("model_ideogram-v3-balanced"),
+        )
+        .unwrap()
+        .capabilities;
         assert!(
             c.operations.is_empty(),
             "a required unknown input → not offered"
@@ -732,21 +740,35 @@ mod tests {
                 }
             }
             for role in [ControlRole::Source, ControlRole::Mask] {
-                assert!(c.controls.iter().any(|x| x.role == role), "{}", row.model_id);
+                assert!(
+                    c.controls.iter().any(|x| x.role == role),
+                    "{}",
+                    row.model_id
+                );
             }
             // Inputs the adapter fills are never controls.
-            assert!(c.controls.iter().all(|x| !row.fills(&x.name)), "{}", row.model_id);
+            assert!(
+                c.controls.iter().all(|x| !row.fills(&x.name)),
+                "{}",
+                row.model_id
+            );
             assert!(c.warnings.is_empty(), "{}: {:?}", row.model_id, c.warnings);
         }
     }
 
     #[test]
     fn normalising_is_fast() {
-        let rec = crate::scenario::fixture_recording("model_ideogram-v3-balanced", "get-model").unwrap();
+        let rec =
+            crate::scenario::fixture_recording("model_ideogram-v3-balanced", "get-model").unwrap();
         let body = &rec.exchanges[0].response.body;
         let t = std::time::Instant::now();
         for _ in 0..100 {
-            normalise("model_ideogram-v3-balanced", body, row("model_ideogram-v3-balanced")).unwrap();
+            normalise(
+                "model_ideogram-v3-balanced",
+                body,
+                row("model_ideogram-v3-balanced"),
+            )
+            .unwrap();
         }
         assert!(t.elapsed().as_millis() < 1000, "< 10 ms each (spec §12)");
     }

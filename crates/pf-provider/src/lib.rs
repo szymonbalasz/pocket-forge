@@ -19,6 +19,7 @@ mod limits;
 pub mod mask;
 mod pixels;
 mod poll;
+pub mod real_call;
 pub mod replay;
 pub mod scenario;
 mod secret;

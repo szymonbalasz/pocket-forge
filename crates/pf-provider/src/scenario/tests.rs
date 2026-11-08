@@ -257,8 +257,18 @@ fn dry_run_body(model: &str) -> serde_json::Map<String, Value> {
     let r = rig_with(
         vec![
             get_model(model),
-            ex(Method::Post, "/assets", 200, json!({"asset": {"id": "a_img"}})),
-            ex(Method::Post, "/assets", 200, json!({"asset": {"id": "a_mask"}})),
+            ex(
+                Method::Post,
+                "/assets",
+                200,
+                json!({"asset": {"id": "a_img"}}),
+            ),
+            ex(
+                Method::Post,
+                "/assets",
+                200,
+                json!({"asset": {"id": "a_mask"}}),
+            ),
             ex(
                 Method::Post,
                 &format!("/generate/custom/{model}?dryRun=true"),
@@ -295,11 +305,17 @@ fn fr_prv_17_gpt_source_is_the_first_reference_image_at_the_sent_size() {
     )
     .unwrap();
     assert!(caps.capabilities.controls.iter().all(|c| c.name != "width"));
-    assert_eq!(caps.capabilities.input_px.max, 3840, "a list's max is a count");
+    assert_eq!(
+        caps.capabilities.input_px.max, 3840,
+        "a list's max is a count"
+    );
     let body = dry_run_body(GPT);
     assert_eq!(body["referenceImages"], json!(["a_img"]));
     assert_eq!(body["mask"], json!("a_mask"));
-    assert_eq!((&body["width"], &body["height"]), (&json!(256), &json!(256)));
+    assert_eq!(
+        (&body["width"], &body["height"]),
+        (&json!(256), &json!(256))
+    );
     assert!(!body.contains_key("image"));
 }
 
