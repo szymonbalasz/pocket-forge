@@ -116,7 +116,7 @@ pub fn prepare_reference(
     reader.limits(limits());
     let img = reader.decode().map_err(|e| match e {
         image::ImageError::IoError(io) => ProbeError::Io(io),
-        other => ProbeError::Corrupt(other.to_string()),
+        other => ProbeError::data(other),
     })?;
     let mut side = max_side.max(1);
     loop {
@@ -134,7 +134,7 @@ pub fn prepare_reference(
         let mut out = Cursor::new(Vec::new());
         small
             .write_to(&mut out, image::ImageFormat::Png)
-            .map_err(|e| ProbeError::Corrupt(e.to_string()))?;
+            .map_err(ProbeError::encode)?;
         let out = out.into_inner();
         if out.len() as u64 <= max_bytes || side <= 64 {
             return Ok(SentImage {

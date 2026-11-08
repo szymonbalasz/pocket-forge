@@ -20,14 +20,22 @@ import type {
 
 export type * from './types';
 
-/** A failed core command, with its normalised code (`read_only`, `not_found`, …). */
+/** Sentence case for text shown as an error: core messages (and text built from codes) start
+ *  lower case, Rust-style (BL-27). Only a plain leading word is changed, so a message that
+ *  starts with a file name or identifier (`pack.json …`, `model_id …`) keeps it as written. */
+export function sentence(text: string): string {
+  return /^[a-z][a-z']*(?=[\s,:;!?)]|$)/.test(text) ? text[0]!.toUpperCase() + text.slice(1) : text;
+}
+
+/** A failed core command, with its normalised code (`read_only`, `not_found`, …). Its
+ *  `message` is in sentence case, ready to show. */
 export class ApiError extends Error {
   readonly code: string;
   readonly field: string | undefined;
   readonly detail: unknown;
 
   constructor(shape: CoreErrorShape) {
-    super(shape.message);
+    super(sentence(shape.message));
     this.name = 'ApiError';
     this.code = shape.code;
     this.field = shape.field;

@@ -73,10 +73,29 @@ pub enum ProbeError {
     Animated,
     #[error("image is {width}x{height} px; the maximum is {MAX_SIDE} px per side")]
     TooLarge { width: u32, height: u32 },
-    #[error("image header is unreadable: {0}")]
+    /// The whole message: built by [`ProbeError::header`], [`ProbeError::data`] or
+    /// [`ProbeError::encode`], so it says which part failed (BL-27).
+    #[error("{0}")]
     Corrupt(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+impl ProbeError {
+    /// The header (format, size) can't be read.
+    pub fn header(e: impl std::fmt::Display) -> Self {
+        Self::Corrupt(format!("image header is unreadable: {e}"))
+    }
+
+    /// The header is fine but the pixel data can't be decoded (e.g. a broken PNG body).
+    pub fn data(e: impl std::fmt::Display) -> Self {
+        Self::Corrupt(format!("image data is unreadable: {e}"))
+    }
+
+    /// A decoded image could not be encoded again (thumbnail, sent copy).
+    pub fn encode(e: impl std::fmt::Display) -> Self {
+        Self::Corrupt(format!("image could not be re-encoded: {e}"))
+    }
 }
 
 /// Detects the format from magic bytes. Extensions are never trusted.
@@ -120,9 +139,7 @@ pub fn probe_file(path: &Path) -> Result<ImageInfo, ProbeError> {
     check_animated(format, &head)?;
     let reader =
         image::ImageReader::with_format(BufReader::new(File::open(path)?), format.to_image());
-    let (width, height) = reader
-        .into_dimensions()
-        .map_err(|e| ProbeError::Corrupt(e.to_string()))?;
+    let (width, height) = reader.into_dimensions().map_err(ProbeError::header)?;
     finish(format, width, height)
 }
 
@@ -183,15 +200,13 @@ pub fn probe_bytes(bytes: &[u8]) -> Result<ImageInfo, ProbeError> {
     let format = sniff(bytes).ok_or(ProbeError::Unsupported)?;
     check_animated(format, bytes)?;
     let reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), format.to_image());
-    let (width, height) = reader
-        .into_dimensions()
-        .map_err(|e| ProbeError::Corrupt(e.to_string()))?;
+    let (width, height) = reader.into_dimensions().map_err(ProbeError::header)?;
     finish(format, width, height)
 }
 
 fn finish(format: ImageFormat, width: u32, height: u32) -> Result<ImageInfo, ProbeError> {
     if width == 0 || height == 0 {
-        return Err(ProbeError::Corrupt("zero-sized image".into()));
+        return Err(ProbeError::header("zero-sized image"));
     }
     if width > MAX_SIDE || height > MAX_SIDE {
         return Err(ProbeError::TooLarge { width, height });

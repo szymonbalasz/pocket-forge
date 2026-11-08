@@ -73,7 +73,8 @@ function HomeView() {
     return () => document.removeEventListener('paste', onPaste);
   }, []);
 
-  if (lib.config && lib.choosingRoot) return <RootSetup first={!lib.config.configured} />;
+  if (lib.config && lib.choosingRoot)
+    return <RootSetup first={!lib.config.configured} current={lib.config.roots[0]?.path ?? ''} />;
 
   const unavailable =
     lib.listError?.code === 'library_unavailable' ||
@@ -308,8 +309,9 @@ function CreationToast() {
 }
 
 /** First run: "Choose your library folder" (FR-PRJ-01); also "Choose again". */
-function RootSetup({ first }: { first: boolean }) {
-  const [path, setPath] = useState('');
+function RootSetup({ first, current }: { first: boolean; current: string }) {
+  // "Choose again" starts from the current root, so a moved folder is one edit away (BL-27).
+  const [path, setPath] = useState(current);
   const [error, setError] = useState<string | null>(null);
   return (
     <div className="prj-home prj-setup" data-testid="prj-setup">
