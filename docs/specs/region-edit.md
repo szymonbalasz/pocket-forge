@@ -2,7 +2,7 @@
 feature: region-edit
 prefix: RGN
 owner: rev-region-edit
-status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [asset-project, editor-canvas, provider, export, reference-packs]
 ---
 
