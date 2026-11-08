@@ -107,17 +107,18 @@
 `id`, `file` (`.pforge/masks/<id>.png`), `rect` (the region, inner), `created_at`.
 
 ### 4.5 Draft
-`final_prompt`, `model_id`, `controls{}` (keyed by capability control `name`, #37), `seed` (int \| null), `region` (`{inner, margin}` \| null), `mask_id` (latest mask, R7) \| null, `references` (#51, REF: `{packs: [{pack_id, name}], items: [{key, on, role \| null, retry_of?, changed?}]}` \| null; null = REF's defaults, FR-REF-17; an item's `role` is set only when the user chose one, null = the model's default, R53; `retry_of` = the iteration `NNN` a Retry restored the item from, `changed: true` when its bytes differ from what that job sent, FR-REF-26), `updated_at`.
+`final_prompt`, `model_id`, `controls{}` (keyed by capability control `name`, #37), `seed` (int \| null), `region` (`{inner, margin}` \| null), `mask_id` (latest mask, R7) \| null, `references` (#51, REF: `{packs: [{pack_id, name}], items: [{key, on, role \| null, retry_of?, changed?}]}` \| null; null = REF's defaults, FR-REF-17; an item's `role` is set only when the user chose one, null = the model's default, R53; `retry_of` = the iteration `NNN` a Retry restored the item from, `changed: true` when its bytes differ from what that job sent, FR-REF-26), `blend_instruction` (bool, optional; absent = on; whether submit appends the blend instruction, #55), `updated_at`.
 
 ### 4.6 Job (`.pforge/jobs/<id>/job.json`)
 | Field | Type | Notes |
 |---|---|---|
 | `schema_version`, `id`, `created_at`, `updated_at` | | |
 | `state`, `state_times{}` | enum, `{<state>: time}` | written on **every** transition (R2) |
-| `resolved_at` | time \| null | set when the job is resolved: accept, dismiss or the next submit ([region-edit](../specs/region-edit.md) FR-RGN-28) |
+| `resolved_at` | time \| null | set when the job is resolved: accept, dismiss or the next submit ([region-edit](../specs/region-edit.md) FR-RGN-28); resolving trashes no candidate; inputs go to the trash only once every candidate is discarded, or on resolve when the job has none (#56, R66) |
 | `operation`, `model_id` | string | `edit_masked` |
 | `capability_snapshot` | object | KQ-17 |
-| `final_prompt`, `controls{}`, `candidate_count` | | as submitted |
+| `final_prompt`, `controls{}`, `candidate_count` | | as submitted; `final_prompt` is the prompt as sent, blend instruction included (#55) |
+| `typed_prompt`, `blend_instruction` | string, bool; optional | #55, R73: the prompt as typed and whether the instruction was appended. `typed_prompt` drives Retry, the iteration slug and the accept label. Absent on jobs from before #55 (typed = `final_prompt`) |
 | `seed` | `{requested, returned}` | int \| null each |
 | `region` | `{inner, outer, margin}` | |
 | `fit` | `{sent_w, sent_h, scale}` | |
@@ -173,11 +174,11 @@ Terminal = `failed | canceled | lost | closed`. A re-pick (RGN FR-RGN-36) accept
 | `seed` | int \| null | |
 | `provider_meta` | object | opaque (PRV) |
 | `status` | `new\|accepted\|dismissed\|discarded\|trashed\|invalid` | R10 |
-| `starred` | bool | separate from status; starred is never trashed |
+| `starred` | bool | separate from status, a favourite marker; skipped by Discard the rest, and an explicit Discard clears it (#56, R65) |
 | `trash_id` | ULID \| null | set while the file is in the trash; after a purge it still names the purged item |
 | `purged_at` | timestamp, optional | set when the 30-day purge deleted the file (FR-PRJ-32, BL-23); the record stays |
 
-- `new` = ready to compare · `accepted` · `dismissed` = left over when its job was resolved · `discarded` = the user discarded it · `trashed` = moved by a sweep (orphan, conflict) · `invalid` = won't decode. UI statuses (`pending|ready|invalid`) are EDT/RGN's only.
+- `new` = ready to compare · `accepted` · `dismissed` = left over when its job was resolved; the file stays in `results/` (`trash_id` null, #56), and a restored discarded candidate returns as `dismissed` (R66) · `discarded` = the user discarded it · `trashed` = moved by a sweep (orphan, conflict) · `invalid` = won't decode. UI statuses (`pending|ready|invalid`) are EDT/RGN's only.
 - A rebuild (FR-PRJ-24, conflict) adds candidates listed in a job's `candidate_ids[]` but missing here, as `new` (or `invalid` if the file won't decode).
 
 ### 4.8 Trash item (manifest `trash[]`)
@@ -223,6 +224,7 @@ No `name`: the folder name is the pack name (OQ-REF-01).
 | `library` | `roots[]` (absolute, per machine; the first receives new projects). `import_dest` is retired (#44): an old value is kept as an unknown field and ignored | PRJ |
 | `spend` | `cap`, `threshold` (provider units; null = not set, asked on first submit) | RGN |
 | `provider` | `team_id?`, `project_id?` (never credentials; those are in the OS store) | PRV |
+| `region_edit` | `blend_instruction?` (string ≤ 2000 chars; absent = the built-in default text, #55) | RGN |
 
 Corrupt or unreadable → defaults + a warning; the bad file is kept as `settings.corrupt-<UTC>.json`. Unknown sections are kept.
 
