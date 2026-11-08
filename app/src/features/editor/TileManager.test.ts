@@ -99,4 +99,32 @@ describe('TileManager', () => {
     expect(attempts[bad]).toBe(4);
     tm.destroy();
   });
+
+  test('FR-EDT-12 refreshes during the retry wait do not restart the retries (3 requests in all)', async () => {
+    vi.useFakeTimers();
+    const attempts: Record<string, number> = {};
+    let stats: TileStats | null = null;
+    const bad = 'pf/t/k/0/0_0.webp';
+    const tm = new TileManager(
+      fakeLayer(),
+      desc([true, true]),
+      (s) => (stats = s),
+      async (u) => {
+        attempts[u] = (attempts[u] ?? 0) + 1;
+        if (u === bad) throw new Error('HTTP 404');
+        return bitmap();
+      },
+    );
+    const view = { scale: 1, tx: 0, ty: 0 };
+    tm.update(view, { w: 400, h: 400 }, 1);
+    // Pans, tile arrivals and level builds all refresh; do it often while the retries wait.
+    for (let t = 0; t < 3000; t += 50) {
+      tm.update({ ...view, tx: -(t % 7) }, { w: 400, h: 400 }, 1);
+      tm.markBuilt(0);
+      await vi.advanceTimersByTimeAsync(50);
+    }
+    expect(attempts[bad]).toBe(3);
+    expect(stats!.failed).toBe(1);
+    tm.destroy();
+  });
 });

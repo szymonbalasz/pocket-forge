@@ -111,12 +111,14 @@ export async function pickPaths(opts: PickOptions): Promise<string[]> {
   }
 }
 
-/** Tells the app the UI has rendered (ends the process in `tauri:smoke` runs). */
-export async function appReady(ok: boolean, detail: string): Promise<void> {
+/** Tells the app the UI has rendered (ends the process in `tauri:smoke` runs). In a debug smoke
+ *  run with a tile step the app answers with the image to open next (R46); otherwise null. */
+export async function appReady(ok: boolean, detail: string): Promise<string | null> {
   try {
-    await invoke('app_ready', { ok, detail });
+    return (await invoke<string | null>('app_ready', { ok, detail })) ?? null;
   } catch {
     // Not fatal: only the smoke run depends on it.
+    return null;
   }
 }
 

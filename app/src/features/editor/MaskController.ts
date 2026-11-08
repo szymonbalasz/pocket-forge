@@ -1,7 +1,9 @@
 // The live mask (FR-EDT-14..16, 19..22): a region-sized 8-bit buffer, mirrored into a CPU-backed
 // canvas (`willReadFrequently`, so it survives GPU resets) shown as a 50 % tint, plus per-stroke
-// undo entries holding the before/after alpha of the stroke's bounding box.
+// undo entries holding the before/after alpha of the stroke's bounding box. A stroke saves each
+// mask row the first time a dab touches it, not the whole mask at pointer-down (BL-09).
 import {
+  dabBox,
   dabsAlong,
   dabSpacing,
   emptyMask,
@@ -33,7 +35,8 @@ interface Stroke {
   last: Pt;
   carry: number;
   box: Box | null;
-  before: Uint8Array;
+  /** Rows as they were before the stroke first touched them (full mask width). */
+  before: (Uint8Array | undefined)[];
 }
 
 export interface MaskControllerDeps {
@@ -112,7 +115,7 @@ export class MaskController {
       last: p,
       carry: 0,
       box: null,
-      before: this.mask.data.slice(),
+      before: [],
     };
     this.dab(p);
     return true;
@@ -135,8 +138,14 @@ export class MaskController {
     if (!s || !m || !s.box) return;
     const box = s.box;
     const w = m.rect.w;
-    const before = extract(s.before, w, box);
     const after = extract(m.data, w, box);
+    // Rows the stroke never touched are unchanged, so the current bytes are their "before".
+    const before = after.slice();
+    const bw = box.x1 - box.x0;
+    for (let y = box.y0; y < box.y1; y++) {
+      const row = s.before[y];
+      if (row) before.set(row.subarray(box.x0, box.x1), (y - box.y0) * bw);
+    }
     this.boxEntry(s.mode === 'paint' ? 'brush stroke' : 'eraser stroke', m, box, before, after);
   }
 
@@ -174,7 +183,13 @@ export class MaskController {
   private dab(p: Pt): void {
     const s = this.stroke!;
     const m = this.mask!;
-    const b = stamp(m, p.x - m.rect.x, p.y - m.rect.y, s.r, s.hardness, s.mode);
+    const cx = p.x - m.rect.x;
+    const cy = p.y - m.rect.y;
+    const touched = dabBox(m, cx, cy, s.r);
+    if (!touched) return;
+    const w = m.rect.w;
+    for (let y = touched.y0; y < touched.y1; y++) s.before[y] ??= m.data.slice(y * w, (y + 1) * w);
+    const b = stamp(m, cx, cy, s.r, s.hardness, s.mode);
     if (!b) return;
     s.box = unionBox(s.box, b);
     this.deps.view.update(m, b);
