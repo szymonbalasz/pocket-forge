@@ -10,6 +10,11 @@ export const providerFeature: Feature = {
   status: [{ id: 'chip', priority: 90, Component: ProviderChip }],
 };
 
+/** Reloads the chip's status and balance (RGN, after the provider answers again, walk D5). */
+export function refreshProviderStatus(): Promise<void> {
+  return providerStore.refresh();
+}
+
 /** Opens the provider settings (the rail's Settings entry). */
 export function openProviderSettings(): void {
   providerStore.openSettings();

@@ -27,6 +27,7 @@ import {
   type Spend,
 } from '../../api';
 import { projectStore } from '../../store/project';
+import { refreshProviderStatus } from '../provider';
 import {
   editorBridge,
   flushMask,
@@ -127,6 +128,9 @@ export interface RgnState {
 
 export const DEFAULT_MARGIN = 128;
 export const DEFAULT_BLEND: RgnBlend = { feather_px: 48, colour_match: true };
+/** Walk D5: while the provider is offline, or the model list or capabilities failed, the panel
+ *  asks again this often (PRV's offline poll delay, FR-PRV-19), so it recovers on reconnect. */
+export const PROVIDER_PROBE_MS = 10_000;
 /** FR-PRJ-19: the draft is saved ≥ 2 s after the last change. */
 export const DRAFT_SAVE_MS = 2000;
 const PREVIEW_DEBOUNCE_MS = 150;
@@ -203,6 +207,7 @@ const isCurrent = (k: string, t: number) => tokens[k] === t;
 const debouncer = new EstimateDebouncer((sig) => void runEstimate(sig));
 let draftTimer: ReturnType<typeof setTimeout> | null = null;
 let previewTimer: ReturnType<typeof setTimeout> | null = null;
+let probeTimer: ReturnType<typeof setTimeout> | null = null;
 let unsubscribe: (() => void) | null = null;
 /** Candidate ids whose thumbnail (FR-EDT-32) is being fetched. */
 const thumbsInFlight = new Set<string>();
@@ -342,7 +347,37 @@ async function refreshProvider(): Promise<void> {
     // Unknown provider status: leave submit to the estimate's errors.
   }
   schedule();
+  probeSoon();
 }
+
+/** The panel can't work with the provider's current answers (walk D5). */
+const needsProbe = (s: RgnState): boolean =>
+  !!s.projectId &&
+  s.provider?.configured !== false &&
+  (isOffline(s) || !!s.modelsError || !!s.capsError || (!s.modelsLoading && !s.models.length));
+
+function probeSoon(): void {
+  if (probeTimer || !needsProbe(state)) return;
+  probeTimer = setTimeout(() => {
+    probeTimer = null;
+    void probe();
+  }, PROVIDER_PROBE_MS);
+}
+
+/** Asks the provider again: models (then capabilities), and the status. A call that succeeds
+ *  after offline makes the core emit `provider:status-changed`; the chip's balance is refreshed
+ *  as well, since a cleared balance error changes no connectivity. */
+async function probe(): Promise<void> {
+  if (!needsProbe(state)) return;
+  const pid = state.projectId;
+  await reloadModels();
+  if (state.projectId !== pid) return;
+  await refreshProvider();
+  if (!needsProbe(state)) void refreshProviderStatus();
+}
+
+const reloadModels = () =>
+  loadModels(Object.fromEntries(state.touched.map((n) => [n, state.values[n]])));
 
 async function loadSpend(): Promise<void> {
   try {
@@ -500,6 +535,7 @@ async function loadModels(remembered: Values | null): Promise<void> {
   } catch (e) {
     set({ modelsLoading: false, modelsError: uiError(e) });
   }
+  probeSoon();
 }
 
 async function evaluate(): Promise<void> {
@@ -672,7 +708,12 @@ function subscribe(): void {
       void refreshProject();
       void refreshIterations();
     }),
-    onEventSafe('provider:status-changed', () => void refreshProvider()),
+    onEventSafe('provider:status-changed', () =>
+      // Back online: the stale or missing list and a failed capability load reload at once.
+      refreshProvider().then(() => {
+        if (state.provider?.connectivity !== 'offline' && needsProbe(state)) void reloadModels();
+      }),
+    ),
     Promise.resolve(
       // Keep other (walk 2 N1): the kept draft. Keep this: the panel is this version already
       // (the core saved the refused draft; a save still waiting now succeeds).
@@ -706,6 +747,7 @@ async function selectModel(id: string, remembered: Values | null): Promise<void>
     if (!isCurrent('caps', t)) return;
     set({ caps: null, capsLoading: false, capsError: uiError(e) });
     schedule();
+    probeSoon();
   }
 }
 
@@ -767,7 +809,8 @@ export const rgn = {
     debouncer.reset();
     if (draftTimer) clearTimeout(draftTimer);
     if (previewTimer) clearTimeout(previewTimer);
-    draftTimer = previewTimer = null;
+    if (probeTimer) clearTimeout(probeTimer);
+    draftTimer = previewTimer = probeTimer = null;
     editorInner = null;
     regionTaken = false;
     thumbsInFlight.clear();
