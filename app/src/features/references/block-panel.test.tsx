@@ -146,11 +146,12 @@ test('FR-REF-20 a tick is written with the draft through RGN’s debounced draft
     { timeout: 3000 },
   );
   const draft = fake.callsOf('project_put_draft').at(-1)!.draft as Record<string, unknown>;
+  // R53: only roles the user chose are saved; the defaults (style here) are re-derived per model.
   expect(draft.references).toEqual({
     packs: [],
     items: [
-      { key: 'project:a.png', on: false, role: 'style' },
-      { key: 'project:b.png', on: true, role: 'style' },
+      { key: 'project:a.png', on: false, role: null },
+      { key: 'project:b.png', on: true, role: null },
     ],
   });
   // The rest of the draft is still RGN's.

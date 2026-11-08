@@ -554,16 +554,18 @@ pub fn reconcile(
         .collect();
     let ready = slots_out.iter().all(|s| s.on >= s.min);
     let mut items: Vec<ItemOut> = rows.into_iter().map(|r| r.out).collect();
+    // R53: the draft keeps only roles the user chose (or Retry restored); `null` = the default,
+    // re-derived per model (FR-REF-17), so a model change can apply a pack's role.
     let mut draft_items: Vec<DraftItem> = items
         .iter()
-        .map(|i| DraftItem {
-            key: i.key.clone(),
-            on: i.on,
-            role: i.role,
-            extra: prev_items
-                .get(&i.key)
-                .map(|p| p.extra.clone())
-                .unwrap_or_default(),
+        .map(|i| {
+            let prev = prev_items.get(&i.key);
+            DraftItem {
+                key: i.key.clone(),
+                on: i.on,
+                role: prev.and_then(|p| p.role),
+                extra: prev.map(|p| p.extra.clone()).unwrap_or_default(),
+            }
         })
         .collect();
     draft_items.extend(kept_draft_items);

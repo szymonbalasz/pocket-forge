@@ -469,3 +469,47 @@ fn fr_rgn_45_the_tracker_lists_the_references_sent() {
         ])
     );
 }
+
+#[test]
+fn fr_ref_17_r53_default_roles_follow_the_model_chosen_roles_stay() {
+    // Appendix A steps 5–6: a pack image marked identity, picked under fake-white-edit (one
+    // style slot), defaults to identity once fake-black-edit (style + identity) is picked.
+    let (lab, _) = lab_with(&[]);
+    let pack = make_pack(&lab, "Blades", &[("face.png", 30), ("s1.png", 40)]);
+    lab.core
+        .dispatch(
+            "ref_pack_update",
+            json!({"pack_id": pack, "roles": {"face.png": "identity"}}),
+        )
+        .unwrap();
+    let picked = json!({"packs": [{"pack_id": pack, "name": "Blades"}], "items": []});
+    let white = resolve(&lab, "fake-white-edit", &picked);
+    let face = format!("pack:{pack}:face.png");
+    assert_eq!(
+        item(&white, &face)["role"],
+        "style",
+        "white has only a style slot"
+    );
+    // The draft saves no default role.
+    let saved = white["references"].clone();
+    assert!(
+        saved["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["role"].is_null())
+    );
+    let black = resolve(&lab, "fake-black-edit", &saved);
+    assert_eq!(item(&black, &face)["role"], "identity");
+    assert_eq!(item(&black, &face)["slot"], "identity_ref");
+    // A role the user chose is kept across the model change.
+    let mut chosen = saved.clone();
+    for i in chosen["items"].as_array_mut().unwrap() {
+        if i["key"] == json!(face) {
+            i["role"] = json!("style");
+        }
+    }
+    let white = resolve(&lab, "fake-white-edit", &chosen);
+    let black = resolve(&lab, "fake-black-edit", &white["references"]);
+    assert_eq!(item(&black, &face)["role"], "style");
+}

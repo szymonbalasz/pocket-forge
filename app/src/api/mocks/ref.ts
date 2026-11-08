@@ -461,13 +461,14 @@ export function refMock(
           found ? { pack_id: found.pack_id, name: found.name } : want,
         ),
         items: [
-          // Retry's flags are kept, as pf-core keeps an item's other fields.
+          // Retry's flags are kept, as pf-core keeps an item's other fields. Only a role the
+          // user chose is saved; null = the default, re-derived per model (R53).
           ...items.map((i) => {
             const p = prevItems.get(i.key);
             return {
               key: i.key,
               on: i.on,
-              role: i.role,
+              role: p?.role ?? null,
               ...(p?.retry_of !== undefined ? { retry_of: p.retry_of } : {}),
               ...(p?.changed ? { changed: true } : {}),
             };
