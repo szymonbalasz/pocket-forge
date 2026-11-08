@@ -19,6 +19,18 @@ use super::*;
 /// `cost_affecting`, `array`.
 pub use pf_provider::Slot;
 
+/// A slot as the block names it (walk R7): its role ("Style"), else "References". Messages
+/// shown to the user use this, never the provider's input name (`style_refs`).
+pub fn slot_label(slot: &Slot) -> String {
+    match slot.role {
+        Some(ReferenceRole::Style) => "Style",
+        Some(ReferenceRole::Structure) => "Structure",
+        Some(ReferenceRole::Identity) => "Identity",
+        None => "References",
+    }
+    .to_owned()
+}
+
 /// The slot an item with `role` goes to: the slot with that role, else the first.
 fn slot_index(slots: &[Slot], role: Option<ReferenceRole>) -> usize {
     role.and_then(|r| slots.iter().position(|s| s.role == Some(r)))
@@ -446,7 +458,9 @@ pub fn reconcile(
                     code: "limit_lowered",
                     message: format!(
                         "{} was unticked: {} takes at most {}",
-                        r.out.file, slots[r.slot].name, slots[r.slot].max
+                        r.out.file,
+                        slot_label(&slots[r.slot]),
+                        slots[r.slot].max
                     ),
                     key: Some(r.out.key.clone()),
                 });

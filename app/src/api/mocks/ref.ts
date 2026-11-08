@@ -123,6 +123,9 @@ export function refMock(
   const fail = (code: string, message: string, field?: string) =>
     Promise.reject(field ? { code, message, field } : { code, message });
   const lc = (s: string) => s.toLowerCase();
+  /** pf-core `resolve::slot_label`: the role, else "References" (walk R7). */
+  const label = (s: { role?: RefRole | null }) =>
+    s.role ? s.role[0]!.toUpperCase() + s.role.slice(1) : 'References';
   const byName = (a: string, b: string) => (lc(a) < lc(b) ? -1 : lc(a) > lc(b) ? 1 : 0);
   const base = (p: string) =>
     p
@@ -387,7 +390,7 @@ export function refMock(
         } else
           notices.push({
             code: 'limit_lowered',
-            message: `${r.item.file} was unticked: ${slots[r.slot]!.name} takes at most ${slots[r.slot]!.max}`,
+            message: `${r.item.file} was unticked: ${label(slots[r.slot]!)} takes at most ${slots[r.slot]!.max}`,
             key: r.item.key,
           });
       }
@@ -648,7 +651,7 @@ export function refMock(
         if (s.on < s.min)
           return Promise.reject({
             code: 'references_required',
-            message: `${s.name} needs at least ${s.min} reference(s)`,
+            message: `${label(s)} needs at least ${s.min} reference(s)`,
             detail: { slot: s.name, min: s.min },
           });
       const seen = new Set<string>();

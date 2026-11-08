@@ -127,8 +127,10 @@ export function headerCount(slots: readonly RefSlot[]): string {
   return slots.map((s) => `${slotName(s)} ${s.on}/${s.max}`).join(' · ');
 }
 
-export function slotName(slot: RefSlot): string {
-  return slot.role ? roleLabel(slot.role) : slot.name;
+/** A slot as the block names it: its role, else "References" (never the provider's input
+ *  name; pf-core `slot_label`). */
+export function slotName(slot: Pick<RefSlot, 'role'>): string {
+  return slot.role ? roleLabel(slot.role) : 'References';
 }
 
 /** Items that can be ticked at all (corrupt or missing ones can't, §11). */

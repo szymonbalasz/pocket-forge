@@ -230,7 +230,11 @@ fn unavailable(key: &str, reason: UnavailableReason) -> CoreError {
 fn required(slot: &Slot) -> CoreError {
     CoreError::new(
         ErrorCode::ReferencesRequired,
-        format!("{} needs at least {} reference(s)", slot.name, slot.min),
+        format!(
+            "{} needs at least {} reference(s)",
+            resolve::slot_label(slot),
+            slot.min
+        ),
     )
     .with_detail(serde_json::json!({ "slot": slot.name, "min": slot.min }))
 }
@@ -238,7 +242,11 @@ fn required(slot: &Slot) -> CoreError {
 fn too_many(slot: &Slot) -> CoreError {
     CoreError::new(
         ErrorCode::TooManyReferences,
-        format!("{} takes at most {} reference(s)", slot.name, slot.max),
+        format!(
+            "{} takes at most {} reference(s)",
+            resolve::slot_label(slot),
+            slot.max
+        ),
     )
     .with_detail(serde_json::json!({ "slot": slot.name, "max": slot.max }))
 }
