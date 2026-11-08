@@ -189,7 +189,8 @@ impl AnyProvider {
     }
 
     /// The provider for a mode with the real wiring: Scenario reads credentials from `store`
-    /// and caches models under `cache_dir` (`<data-dir>/cache/provider/`). No network call
+    /// and caches models under `cache_dir` (`<data-dir>/cache/provider/`); the fake copies its
+    /// jobs to `<cache_dir>/fake-jobs/` so they survive a restart (R48). No network call
     /// happens until an operation runs.
     pub fn for_mode(
         mode: ProviderMode,
@@ -197,7 +198,12 @@ impl AnyProvider {
         cache_dir: Option<std::path::PathBuf>,
     ) -> Self {
         match mode {
-            ProviderMode::Fake => Self::fake(),
+            ProviderMode::Fake => match cache_dir {
+                Some(dir) => {
+                    AnyProvider::Fake(fake::FakeProvider::with_jobs_dir(dir.join("fake-jobs")))
+                }
+                None => Self::fake(),
+            },
             ProviderMode::Scenario => AnyProvider::Scenario(ScenarioProvider::new(
                 ScenarioConfig::real(store, cache_dir),
             )),
@@ -354,6 +360,19 @@ mod tests {
             ProviderMode::Scenario
         );
         assert!(ProviderMode::from_env_value(Some("real")).is_err());
+    }
+
+    #[test]
+    fn fr_prv_03_r48_the_app_fake_copies_jobs_under_the_cache_dir() {
+        let store = std::sync::Arc::new(MemoryStore::default());
+        let dir = std::path::PathBuf::from("data/cache/provider");
+        let p = AnyProvider::for_mode(ProviderMode::Fake, store.clone(), Some(dir.clone()));
+        assert_eq!(
+            p.as_fake().unwrap().jobs_dir(),
+            Some(dir.join("fake-jobs").as_path())
+        );
+        let p = AnyProvider::for_mode(ProviderMode::Fake, store, None);
+        assert_eq!(p.as_fake().unwrap().jobs_dir(), None);
     }
 
     #[test]

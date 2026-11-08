@@ -11,10 +11,14 @@
 //!   request's references with [`FakeProvider::last_reference_hashes`].
 //!
 //! Like a provider's server, it keeps jobs and uploads in memory; job progress lives in the
-//! opaque record (`fake.polls`), so RGN's persisted record drives the state machine.
+//! opaque record (`fake.polls`), so RGN's persisted record drives the state machine. With a
+//! jobs dir (the app's `<data-dir>/cache/provider/fake-jobs/`), every submitted job also gets a
+//! copy on disk, so status, cancel and fetch work after an app restart (R48): the job is
+//! rebuilt from its record plus that copy.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde_json::{Value, json};
@@ -69,6 +73,11 @@ pub enum FakeCase {
     AspectMismatch(u32),
     /// Each candidate = the sent image + levels (clamped), with seed noise in the mask.
     Offset(i32),
+    /// Submit fails with `provider_failure` before the job is accepted: no job, no spend
+    /// (FR-RGN-23 → `failed`). Other calls are normal.
+    SubmitFailure,
+    /// Submit times out (`timeout`); the fake keeps no job (FR-RGN-23 → `lost`).
+    SubmitTimeout,
 }
 
 fn param<T: std::str::FromStr>(name: &str, prefix: &str, default: T) -> Option<T> {
@@ -100,6 +109,8 @@ impl FakeCase {
             "estimate_unknown" => FakeCase::EstimateUnknown,
             "not_cancellable" => FakeCase::NotCancellable,
             "bad_candidate" => FakeCase::BadCandidate,
+            "submit_failure" => FakeCase::SubmitFailure,
+            "submit_timeout" => FakeCase::SubmitTimeout,
             _ if n.starts_with("slow") => FakeCase::Slow(param(n, "slow", 5)?),
             _ if n.starts_with("aspect_mismatch") => {
                 FakeCase::AspectMismatch(param(n, "aspect_mismatch", 10)?.min(400))
@@ -125,6 +136,8 @@ impl FakeCase {
             FakeCase::EstimateUnknown => "estimate_unknown".into(),
             FakeCase::NotCancellable => "not_cancellable".into(),
             FakeCase::BadCandidate => "bad_candidate".into(),
+            FakeCase::SubmitFailure => "submit_failure".into(),
+            FakeCase::SubmitTimeout => "submit_timeout".into(),
             FakeCase::AspectMismatch(p) => format!("aspect_mismatch({p})"),
             FakeCase::Offset(l) => format!("offset({l})"),
         }
@@ -175,6 +188,24 @@ pub struct FakeProvider {
     state: Mutex<FakeState>,
     /// Last known connectivity (FR-PRV-07).
     pub connectivity: ConnectivityCell,
+    /// Where submitted jobs are copied so they survive a restart (R48); none in unit tests.
+    jobs_dir: Option<PathBuf>,
+}
+
+/// `job.json` of a job copy (R48). The rest comes from the job record.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct JobCopy {
+    v: u32,
+    /// Content hashes of the references, in request order.
+    reference_hashes: Vec<String>,
+}
+
+/// A handle is a safe single path segment (it names the copy's folder).
+fn safe_handle(handle: &str) -> bool {
+    !handle.is_empty()
+        && handle
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 fn invalid(field: &str) -> ProviderError {
@@ -199,6 +230,92 @@ fn handle_of(job: &ProviderRecord) -> ProviderResult<String> {
 }
 
 impl FakeProvider {
+    /// A fake that copies every submitted job under `dir` (R48), normally
+    /// `<data-dir>/cache/provider/fake-jobs/`. The folder is a rebuildable cache.
+    pub fn with_jobs_dir(dir: PathBuf) -> Self {
+        FakeProvider {
+            jobs_dir: Some(dir),
+            ..Self::default()
+        }
+    }
+
+    pub fn jobs_dir(&self) -> Option<&Path> {
+        self.jobs_dir.as_deref()
+    }
+
+    /// Writes the job's copy: `<handle>/` with `region.png`, `mask.png` and `job.json`,
+    /// built in a temp folder and renamed into place. Failures only warn (it's a cache).
+    fn save_job(&self, handle: &str, job: &FakeJob) {
+        let Some(dir) = &self.jobs_dir else { return };
+        let tmp = dir.join(format!(".{handle}.pf-tmp"));
+        let write = || -> std::io::Result<()> {
+            let _ = std::fs::remove_dir_all(&tmp);
+            std::fs::create_dir_all(&tmp)?;
+            std::fs::write(tmp.join("region.png"), &job.region_png)?;
+            std::fs::write(tmp.join("mask.png"), &job.mask_png)?;
+            let copy = JobCopy {
+                v: 1,
+                reference_hashes: job.reference_hashes.clone(),
+            };
+            std::fs::write(
+                tmp.join("job.json"),
+                serde_json::to_vec(&copy).map_err(std::io::Error::other)?,
+            )?;
+            std::fs::rename(&tmp, dir.join(handle))
+        };
+        if let Err(e) = write() {
+            tracing::warn!(error = %e, "could not copy the fake job; it won't survive a restart");
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
+    }
+
+    /// The job behind a handle: from memory, else rebuilt from its record plus its copy
+    /// (R48). Seed, count and case come from the record; images and references from the copy.
+    fn job_for(&self, handle: &str, record: &ProviderRecord) -> Option<FakeJob> {
+        if let Some(j) = self.lock().jobs.get(handle) {
+            return Some(j.clone());
+        }
+        let dir = self.jobs_dir.as_ref()?.join(handle);
+        if !safe_handle(handle) {
+            return None;
+        }
+        let copy: JobCopy =
+            serde_json::from_slice(&std::fs::read(dir.join("job.json")).ok()?).ok()?;
+        let request = &record.0["request"];
+        let job = FakeJob {
+            region_png: std::fs::read(dir.join("region.png")).ok()?,
+            mask_png: std::fs::read(dir.join("mask.png")).ok()?,
+            candidate_count: request["num_samples"].as_u64()? as u32,
+            seed: request["seed"].as_u64()?,
+            reference_hashes: copy.reference_hashes,
+            case: record.0["fake"]["case"]
+                .as_str()
+                .and_then(FakeCase::parse)
+                .unwrap_or_default(),
+        };
+        let mut s = self.lock();
+        if dir.join("canceled").exists() {
+            s.canceled.insert(handle.to_owned());
+        }
+        s.jobs.insert(handle.to_owned(), job.clone());
+        Some(job)
+    }
+
+    /// A handle no job in memory or on disk has yet: the counter restarts with the app.
+    fn new_handle(&self, s: &mut FakeState, hash_image: &str) -> String {
+        loop {
+            s.next_job += 1;
+            let handle = format!("fake-job-{}-{}", s.next_job, &hash_image[..8]);
+            let on_disk = self
+                .jobs_dir
+                .as_ref()
+                .is_some_and(|d| d.join(&handle).exists());
+            if !s.jobs.contains_key(&handle) && !on_disk {
+                return handle;
+            }
+        }
+    }
+
     pub fn with_case(case: FakeCase) -> Self {
         let p = Self::default();
         p.set_case(case);
@@ -375,6 +492,16 @@ impl FakeProvider {
         let (caps, _, _) = Self::validate(request)?;
         self.note_references(request);
         let case = self.case();
+        // FR-RGN-23: refused before the provider accepted it, or no answer at all.
+        match case {
+            FakeCase::SubmitFailure => {
+                return Err(ProviderError::ProviderFailure {
+                    hint: "the fake provider refused the submit (case submit_failure)".into(),
+                });
+            }
+            FakeCase::SubmitTimeout => return Err(ProviderError::Timeout),
+            _ => {}
+        }
         let (mut image, mut hash_image) = self.upload_once(&request.region_png, false);
         let (mut mask, mut hash_mask) = self.upload_once(&request.mask_png, false);
         let mut references = self.upload_references(request, false);
@@ -400,25 +527,23 @@ impl FakeProvider {
             let d = h.finalize();
             u64::from_le_bytes([d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]])
         });
+        let job = FakeJob {
+            region_png: request.region_png.clone(),
+            mask_png: request.mask_png.clone(),
+            candidate_count: request.candidate_count,
+            seed,
+            reference_hashes: request
+                .references
+                .iter()
+                .map(|r| sha256_hex(&r.bytes))
+                .collect(),
+            case,
+        };
         let mut s = self.lock();
-        s.next_job += 1;
-        let handle = format!("fake-job-{}-{}", s.next_job, &hash_image[..8]);
-        s.jobs.insert(
-            handle.clone(),
-            FakeJob {
-                region_png: request.region_png.clone(),
-                mask_png: request.mask_png.clone(),
-                candidate_count: request.candidate_count,
-                seed,
-                reference_hashes: request
-                    .references
-                    .iter()
-                    .map(|r| sha256_hex(&r.bytes))
-                    .collect(),
-                case,
-            },
-        );
+        let handle = self.new_handle(&mut s, &hash_image);
+        s.jobs.insert(handle.clone(), job.clone());
         drop(s);
+        self.save_job(&handle, &job);
         let ref_units = Self::ref_units(&caps, request);
         let mut rec = self.record(request, Some(&handle), case, ref_units);
         rec.0["request"]["seed"] = json!(seed);
@@ -449,9 +574,10 @@ impl FakeProvider {
         let polls = job.0["fake"]["polls"].as_u64().unwrap_or(0);
         let count = job.0["request"]["num_samples"].as_u64().unwrap_or(1) as u32;
         let ref_units = job.0["fake"]["ref_units"].as_u64().unwrap_or(0) as u32;
+        let known = self.job_for(&handle, job);
         let (canceled, case) = {
             let s = self.lock();
-            let case = s.jobs.get(&handle).map_or(s.case, |j| j.case);
+            let case = known.map_or(s.case, |j| j.case);
             (s.canceled.contains(&handle), case)
         };
         let running_polls = match case {
@@ -496,11 +622,11 @@ impl FakeProvider {
     fn do_fetch(&self, job: &ProviderRecord) -> ProviderResult<Candidates> {
         self.gate()?;
         let handle = handle_of(job)?;
-        let fake_job = self.lock().jobs.get(&handle).cloned().ok_or_else(|| {
-            ProviderError::ProviderFailure {
-                hint: "the fake provider forgot this job (it keeps jobs in memory only)".into(),
-            }
-        })?;
+        let fake_job =
+            self.job_for(&handle, job)
+                .ok_or_else(|| ProviderError::ProviderFailure {
+                    hint: "the fake provider has no copy of this job".into(),
+                })?;
         let region = decode_rgb8(&fake_job.region_png).ok_or_else(|| invalid("image"))?;
         let mask = decode_grey8(&fake_job.mask_png).ok_or_else(|| invalid("mask"))?;
         let images = (0..fake_job.candidate_count)
@@ -624,13 +750,23 @@ impl Provider for FakeProvider {
         job: &ProviderRecord,
     ) -> impl Future<Output = ProviderResult<CancelAck>> + Send {
         let out = self.gate().and_then(|()| handle_of(job)).map(|handle| {
+            self.job_for(&handle, job);
             let mut s = self.lock();
             if s.case == FakeCase::NotCancellable {
-                CancelAck::NotCancellable
-            } else {
-                s.canceled.insert(handle);
-                CancelAck::Canceled
+                return CancelAck::NotCancellable;
             }
+            s.canceled.insert(handle.clone());
+            drop(s);
+            // The cancel survives a restart too (R48).
+            if let Some(dir) = self.jobs_dir.as_ref().filter(|_| safe_handle(&handle)) {
+                let copy = dir.join(&handle);
+                if copy.is_dir()
+                    && let Err(e) = std::fs::write(copy.join("canceled"), b"")
+                {
+                    tracing::warn!(error = %e, "could not mark the fake job canceled");
+                }
+            }
+            CancelAck::Canceled
         });
         self.done(out)
     }
@@ -1037,6 +1173,95 @@ mod tests {
         );
     }
 
+    /// FR-RGN-23: a refused submit (→ `failed`) and a submit timeout (→ `lost`). Only
+    /// submit fails; no job is kept, so nothing is spent.
+    #[test]
+    fn fr_prv_04_fr_rgn_23_submit_failure_and_submit_timeout() {
+        for (name, code) in [
+            ("submit_failure", "provider_failure"),
+            ("submit_timeout", "timeout"),
+        ] {
+            let p = case(name);
+            let req = request(Some(1));
+            run(p.list_models(&ModelFilter::default())).unwrap();
+            run(p.estimate(&req)).unwrap();
+            assert_eq!(run(p.submit(&req)).unwrap_err().code(), code, "{name}");
+            run(p.balance()).unwrap();
+            p.set_case(FakeCase::Success);
+            let rec = run(p.submit(&req)).unwrap();
+            assert!(
+                rec.0["job_handle"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("fake-job-1-"),
+                "{name}: the failed submit made no job"
+            );
+        }
+    }
+
+    /// R48: a job submitted before an app restart is rebuilt from its record plus the copy
+    /// under the jobs dir, and gives the same states and candidates as without a restart.
+    #[test]
+    fn fr_prv_03_r48_fake_jobs_survive_an_app_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let jobs = dir.path().join("fake-jobs");
+        let req = black(vec![
+            reference("style_refs", ref_png(1)),
+            reference("identity_ref", ref_png(2)),
+        ]);
+        let uninterrupted = {
+            let p = case("slow(2)");
+            let (s, rec) = states(&p, &req, 4);
+            assert_eq!(s, [Queued, Running, Running, Succeeded]);
+            run(p.fetch_candidates(&rec)).unwrap()
+        };
+
+        let before = FakeProvider::with_jobs_dir(jobs.clone());
+        before.set_case(FakeCase::parse("slow(2)").unwrap());
+        let (s, rec) = states(&before, &req, 2);
+        assert_eq!(s, [Queued, Running]);
+        let handle = rec.0["job_handle"].as_str().unwrap().to_owned();
+        for f in ["region.png", "mask.png", "job.json"] {
+            assert!(jobs.join(&handle).join(f).is_file(), "{f}");
+        }
+        drop(before);
+
+        // A new app: the case is back to `success`, but the job keeps its own.
+        let after = FakeProvider::with_jobs_dir(jobs.clone());
+        let mut rec = rec;
+        let mut s = vec![];
+        for _ in 0..2 {
+            let st = run(after.status(&rec)).unwrap();
+            s.push(st.state);
+            rec = st.provider;
+        }
+        assert_eq!(s, [Running, Succeeded]);
+        assert_eq!(
+            run(after.fetch_candidates(&rec)).unwrap().images,
+            uninterrupted.images
+        );
+        // The restarted counter never reuses a handle that has a copy.
+        let again = run(after.submit(&req)).unwrap();
+        assert_ne!(again.0["job_handle"], json!(handle));
+        // Without a copy the job can't be fetched: a provider failure, never a panic.
+        let elsewhere = FakeProvider::default();
+        assert_eq!(
+            run(elsewhere.fetch_candidates(&rec)).unwrap_err().code(),
+            "provider_failure"
+        );
+    }
+
+    #[test]
+    fn fr_prv_03_r48_a_cancel_survives_an_app_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let before = FakeProvider::with_jobs_dir(dir.path().to_path_buf());
+        let rec = run(before.submit(&request(Some(1)))).unwrap();
+        assert_eq!(run(before.cancel(&rec)).unwrap(), CancelAck::Canceled);
+        drop(before);
+        let after = FakeProvider::with_jobs_dir(dir.path().to_path_buf());
+        assert_eq!(run(after.status(&rec)).unwrap().state, Canceled);
+    }
+
     #[test]
     fn fr_prv_03_unmasked_pixels_unchanged_masked_pixels_patterned() {
         let req = request(Some(1));
@@ -1074,6 +1299,8 @@ mod tests {
             "bad_candidate",
             "aspect_mismatch(25)",
             "offset(-40)",
+            "submit_failure",
+            "submit_timeout",
         ] {
             let c = FakeCase::parse(n).unwrap_or_else(|| panic!("{n}"));
             assert_eq!(FakeCase::parse(&c.name()), Some(c));
