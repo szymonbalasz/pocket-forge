@@ -116,11 +116,17 @@ export const api = {
   },
   export: { getSettings: () => call('export_get_settings', {}) },
   region: {
-    fit: (projectId: string, inner: Commands['rgn_region_fit'][0]['inner'], margin?: number) =>
+    fit: (
+      projectId: string,
+      inner: Commands['rgn_region_fit'][0]['inner'],
+      margin?: number,
+      modelId?: string,
+    ) =>
       call('rgn_region_fit', {
         project_id: projectId,
         inner,
         ...(margin === undefined ? {} : { margin }),
+        ...(modelId === undefined ? {} : { model_id: modelId }),
       }),
   },
   mask: {

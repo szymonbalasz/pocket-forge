@@ -55,6 +55,7 @@ tauri_commands! {
     provider_get_capabilities => c::ProviderGetCapabilities,
     provider_balance => c::ProviderBalance,
     provider_fake_set_case => c::ProviderFakeSetCase,
+    rgn_region_fit => c::RgnRegionFit,
 }
 
 #[cfg(test)]
