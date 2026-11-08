@@ -7,6 +7,7 @@ import { Collapsible, Select, Slider, Switch } from 'radix-ui';
 import { useProjectState } from '../../store/project';
 import { useEditorRegion } from '../editor';
 import { openProviderSettings } from '../provider';
+import { ReferencesBlock } from '../references';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ControlField } from './ControlField';
 import { controlKind, isValueControl, stateOf } from './controls';
@@ -415,6 +416,7 @@ function BlendSection({ s }: { s: RgnState }) {
 export function GeneratePanel() {
   useRgnSession();
   const s = useRgn((x) => x);
+  const { project } = useProjectState();
   const [open, setOpen] = useState(true);
   if (!s.projectId) return null;
   return (
@@ -433,6 +435,14 @@ export function GeneratePanel() {
           )}
           <RegionSection s={s} />
           <ModelSection s={s} />
+          <ReferencesBlock
+            projectId={s.projectId}
+            draftReferences={project?.draft?.references}
+            modelId={s.caps ? s.modelId : null}
+            hasSlots={(s.caps?.slots.length ?? 0) > 0}
+            readOnly={!!s.readOnly}
+            onChange={rgn.referencesChanged}
+          />
           <PromptSection s={s} />
           <CostSection s={s} />
           <SubmitSection s={s} />
