@@ -258,6 +258,77 @@ mod tests {
         assert!(p.crop.x >= 40 && p.crop.x + p.crop.width <= 120 && w == 160);
     }
 
+    /// BL-33: the feather treats both mask edges alike. An off-centre mask (40 px of context on
+    /// the left, 24 on the right, so the outer rect sits closer to one edge) has a ramp on its
+    /// right edge that mirrors its left edge exactly. On a mirrored fixture with `offset(12)`-like
+    /// input the column-mean edge steps of the two sides are equal and ≤ 0.5 levels/px. The second
+    /// edge's 0.512 in the walkthrough was the fake's seed noise: over 60 seeds both edges average
+    /// 0.52 (see BL-33).
+    #[test]
+    fn fr_rgn_32_feather_and_bake_are_symmetric_on_both_mask_edges() {
+        let (w, h) = (200u32, 40u32);
+        let (m0, m1) = (40u32, 176u32);
+        let mask: Vec<u8> = (0..w * h)
+            .map(|i| if (m0..m1).contains(&(i % w)) { 255 } else { 0 })
+            .collect();
+        let alpha = feather(&mask, w, h, 48);
+        for y in 0..h as usize {
+            let row = &alpha[y * w as usize..(y + 1) * w as usize];
+            for d in 0..(m1 - m0) as usize {
+                assert_eq!(
+                    row[m0 as usize + d],
+                    row[m1 as usize - 1 - d],
+                    "row {y}: {d} px inside the left and right edges"
+                );
+            }
+        }
+        // A fixture mirrored about the mask's centre (x ↔ m0 + m1 − 1 − x): texture outside and
+        // in, candidate = base + 12 plus zero-mean seeded noise in the mask (−3..=3; it dithers
+        // the u8 rounding without adding a content step). Colour match removes the +12.
+        let key = |x: u32| x.min(m0 + m1 - 1 - x);
+        let hash = |x: u32, y: u32| {
+            (key(x).wrapping_mul(73_856_093) ^ y.wrapping_mul(19_349_663))
+                .wrapping_mul(2_654_435_761)
+        };
+        let h = 1600u32;
+        let mask: Vec<u8> = (0..w * h)
+            .map(|i| if (m0..m1).contains(&(i % w)) { 255 } else { 0 })
+            .collect();
+        let base = RgbImage::from_fn(w, h, |x, y| {
+            let n = (hash(x, y) >> 24) as u8 % 48;
+            image::Rgb([70 + n, 90 + n / 2, 110 + n / 3])
+        });
+        let cand = RgbImage::from_fn(w, h, |x, y| {
+            let n = if (m0..m1).contains(&x) {
+                ((hash(x, y) >> 8) % 7) as i16 - 3
+            } else {
+                0
+            };
+            image::Rgb(
+                base.get_pixel(x, y)
+                    .0
+                    .map(|v| (i16::from(v) + 12 + n) as u8),
+            )
+        });
+        let p = bake_patch(&base, &cand, &mask, 48, true);
+        let out = over(&base, &p);
+        let mean = |x: u32| {
+            (0..h)
+                .map(|y| f64::from(out.get_pixel(x, y).0[0]) - f64::from(base.get_pixel(x, y).0[0]))
+                .sum::<f64>()
+                / f64::from(h)
+        };
+        // Steps over ±16 px of each edge, the right edge read outward-in so it mirrors the left.
+        let left: Vec<f64> = (m0 - 16..m0 + 16).map(|x| mean(x + 1) - mean(x)).collect();
+        let right: Vec<f64> = (m1 - 16..m1 + 16)
+            .rev()
+            .map(|x| mean(x - 1) - mean(x))
+            .collect();
+        assert_eq!(left, right, "both edges step alike");
+        let max = left.iter().fold(0.0f64, |a, s| a.max(s.abs()));
+        assert!(max <= 0.5, "edge step {max} levels/px on both edges");
+    }
+
     #[test]
     fn fr_rgn_26_bake_patch_skips_colour_match_without_context_and_keeps_a_sliver() {
         let base = RgbImage::from_pixel(20, 20, image::Rgb([10, 20, 30]));
