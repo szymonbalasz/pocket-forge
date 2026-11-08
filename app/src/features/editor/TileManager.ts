@@ -200,7 +200,7 @@ export class TileManager {
         this.show(url, lv.level, t);
       } else if (fetch) {
         wanted.add(url);
-        this.request(url, 0);
+        this.request(url);
       }
     }
     for (const url of this.sink.urls()) if (!wanted.has(url)) this.sink.hide(url);
@@ -216,9 +216,15 @@ export class TileManager {
     if (bitmap) this.sink.show(url, level, t, bitmap);
   }
 
-  private request(url: string, attempt: number): void {
+  /** A fetch from a refresh. A tile stays in `inflight` through its retry wait, so refreshes
+   * meanwhile don't restart it: one fetch plus two retries in all (FR-EDT-12, BL-11). */
+  private request(url: string): void {
     if (this.inflight.has(url) || this.failed.has(url)) return;
     this.inflight.add(url);
+    this.attempt(url, 0);
+  }
+
+  private attempt(url: string, attempt: number): void {
     const gen = this.generation;
     const stale = () => this.destroyed || gen !== this.generation;
     this.fetcher(url).then(
@@ -230,16 +236,16 @@ export class TileManager {
       },
       () => {
         if (stale()) return;
-        this.inflight.delete(url);
         const delay = RETRY_DELAYS_MS[attempt];
         if (delay === undefined) {
+          this.inflight.delete(url);
           this.failed.add(url);
           this.onChange(this.stats());
           return;
         }
         const timer = setTimeout(() => {
           this.timers.delete(timer);
-          this.request(url, attempt + 1);
+          if (!stale()) this.attempt(url, attempt + 1);
         }, delay);
         this.timers.add(timer);
       },
