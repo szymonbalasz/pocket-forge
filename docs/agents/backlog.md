@@ -32,3 +32,4 @@ Small items for idle slots (see [process.md](../process.md)). The planned work a
 | BL-26 | A restored draft's region isn't pushed back into EDT (EDT owns the region); needs the BL-14 bridge setter | XS | `features/region-edit`, `features/editor` bridge | EDT mask hand-off | open |
 | BL-27 | Walkthrough polish: the "¤" cost marker (design call), Choose again's empty field, no feedback on an unchanged Save, lower-case error text, corrupt-body error wording, double `tiles_open` in dev StrictMode | S | `features/*` | — | open |
 | BL-28 | Flaky by design: `draftSave.test.tsx` waits two 2 s debounces inside a 5 s timeout; use fake timers | XS | `features/region-edit` tests | — | open |
+| BL-29 | Flaky: `project::tests::fr_prj_21_edge_folder_moved_while_open_keeps_the_draft_and_says_so_without_paths` failed 1 of 3 local Windows runs (tests.rs:382), passes alone | XS | `pf-core` project tests | — | open |
