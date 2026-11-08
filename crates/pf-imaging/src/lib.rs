@@ -1,13 +1,14 @@
 //! Image operations for Pocket Forge (ADR 0004).
 //!
 //! The skeleton holds format sniffing and header probing, which import uses to validate files
-//! (FR-PRJ-06). Tile pyramid, region extract, blend, flatten and encode land in their own modules.
+//! (FR-PRJ-06). `blend` bakes region-edit patches (feather + colour match). Tile pyramid, region extract, flatten and encode land in their own modules.
 //! This crate knows nothing about asset projects: it works on bytes, paths and pixel buffers.
 //!
 //! Export (export spec): `compose` is the only compositor; `encode`, `webp`, `resize` and
 //! `sizing` are the export encoders, rescale and size maths. `webp` is the only module allowed
 //! `unsafe` (libwebp FFI).
 
+mod blend;
 mod compose;
 mod encode;
 mod probe;
@@ -21,6 +22,9 @@ mod test_support;
 pub mod thumbnail;
 mod webp;
 
+pub use blend::{
+    BakedPatch, ColourFit, GAIN_RANGE, MIN_CONTEXT_SHARE, bake_patch, feather, fit_colour,
+};
 pub use compose::{
     COMPOSE_VERSION, ComposeError, Layer, LayerStack, PixelRect, Placement, STRIP_H, Strip,
     StripFlattener, compose_rect, flatten_full, flatten_strips,
