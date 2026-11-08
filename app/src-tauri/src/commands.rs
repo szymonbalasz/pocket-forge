@@ -78,6 +78,7 @@ tauri_commands! {
     ref_pack_delete => c::RefPackDelete,
     ref_trash_list => c::RefTrashList,
     ref_trash_restore => c::RefTrashRestore,
+    ref_resolve => c::RefResolve,
 }
 
 #[cfg(test)]

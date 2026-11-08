@@ -85,6 +85,12 @@ pub enum ErrorCode {
     Canceled,
     /// A re-pick that's no longer possible (R32, FR-RGN-36).
     RepickUnavailable,
+    /// A ticked reference can't be read; `detail{key, reason}` (FR-REF-21).
+    ReferenceUnavailable,
+    /// A reference slot under its minimum; `detail{slot, min}` (FR-REF-18).
+    ReferencesRequired,
+    /// A reference slot over its maximum; `detail{slot, max}` (FR-REF-18).
+    TooManyReferences,
 }
 
 impl ErrorCode {
@@ -136,6 +142,9 @@ impl ErrorCode {
             ErrorCode::HashMismatch => "hash_mismatch",
             ErrorCode::Canceled => "canceled",
             ErrorCode::RepickUnavailable => "repick_unavailable",
+            ErrorCode::ReferenceUnavailable => "reference_unavailable",
+            ErrorCode::ReferencesRequired => "references_required",
+            ErrorCode::TooManyReferences => "too_many_references",
         }
     }
 }

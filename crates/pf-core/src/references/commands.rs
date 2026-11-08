@@ -11,6 +11,7 @@ use serde_json::json;
 use ulid::Ulid;
 
 use super::packs::{self, AddResult, CreateOutput, PackCard, PackView};
+use super::resolve::{self, DraftReferences, Resolved};
 use super::trash::{self, TrashEntry};
 use super::{MAX_NOTES_CHARS, require_pack};
 use crate::commands::NoInput;
@@ -392,5 +393,91 @@ impl Command for RefTrashRestore {
         let path = trash::restore(&core.ctx, &settings(core), input.id)?;
         changed(core);
         Ok(RestoreOutput { path })
+    }
+}
+
+// ---------------------------------------------------------------- ref_resolve
+
+pub struct RefResolve;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RefResolveInput {
+    pub model_id: String,
+    /// The draft's `references`; `null` = REF's defaults (FR-REF-17).
+    #[serde(default)]
+    pub references: Option<DraftReferences>,
+}
+
+const MAX_KEY_CHARS: usize = 600;
+
+impl Validate for RefResolveInput {
+    fn validate(&self) -> CoreResult<()> {
+        if self.model_id.trim().is_empty() || self.model_id.len() > 200 {
+            return Err(CoreError::invalid("model_id", "not a model id"));
+        }
+        if let Some(r) = &self.references {
+            if r.packs.len() > 1000 {
+                return Err(CoreError::invalid("references.packs", "too many packs"));
+            }
+            if r.items.len() > MAX_PATHS {
+                return Err(CoreError::invalid("references.items", "too many items"));
+            }
+            for (i, it) in r.items.iter().enumerate() {
+                if it.key.is_empty() || it.key.chars().count() > MAX_KEY_CHARS {
+                    return Err(CoreError::invalid(
+                        format!("references.items[{i}].key"),
+                        "not an item key",
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Command for RefResolve {
+    const NAME: &'static str = "ref_resolve";
+    type Input = RefResolveInput;
+    type Output = Resolved;
+
+    /// FR-REF-15 … 19, 27. Runs without the state lock (the capabilities may come from PRV).
+    fn run(core: &Core, input: RefResolveInput) -> CoreResult<Resolved> {
+        let (dir, read_only, settings) = {
+            let st = core.state();
+            let p = st.project.as_ref().ok_or_else(|| {
+                CoreError::new(
+                    crate::error::ErrorCode::NoProject,
+                    "no asset project is open",
+                )
+            })?;
+            (p.dir.clone(), p.read_only.is_some(), st.settings.clone())
+        };
+        let caps = crate::region_edit::commands::capabilities(core, &input.model_id)?;
+        let slots = resolve::slot_limits(&caps);
+        let mut out = resolve::resolve(
+            &core.ctx,
+            &settings,
+            &core.refs.probes,
+            &dir,
+            &slots,
+            input.references.as_ref(),
+        );
+        resolve::mark_duplicates(&mut out.items, |p| core.refs.prepared.content_hash_of(p));
+        for item in &mut out.items {
+            if let Some(url) = item
+                .path
+                .as_deref()
+                .and_then(|p| tiles::register_library_image(core, p))
+            {
+                item.thumb_key = url
+                    .rsplit_once("/i/")
+                    .and_then(|(_, k)| k.split_once('.'))
+                    .map(|(k, _)| k.to_owned());
+                item.thumb_url = Some(url);
+            }
+        }
+        out.read_only = read_only;
+        Ok(out)
     }
 }

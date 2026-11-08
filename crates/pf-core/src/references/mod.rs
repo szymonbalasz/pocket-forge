@@ -24,11 +24,18 @@ use crate::time::Timestamp;
 
 pub mod commands;
 pub mod packs;
+pub mod prepare;
+pub mod resolve;
 pub mod thumb;
 pub mod trash;
 
 #[cfg(test)]
+mod send_tests;
+#[cfg(test)]
 mod tests;
+
+pub use prepare::{Prepared, RefSession, SentReference, prepare_for_send};
+pub use resolve::DraftReferences;
 
 /// The folder in every root that holds the packs (FR-PRJ-51). Not a section.
 pub const REFERENCES_DIR: &str = "References";

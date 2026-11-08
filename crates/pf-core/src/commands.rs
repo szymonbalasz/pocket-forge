@@ -785,7 +785,7 @@ pub use crate::region_edit::commands::{
 /// Reference-pack commands live in their own module (reference-packs spec §9).
 pub use crate::references::commands::{
     RefListPacks, RefPackAddImages, RefPackCreate, RefPackDelete, RefPackGet, RefPackRemoveImages,
-    RefPackRename, RefPackUpdate, RefTrashList, RefTrashRestore,
+    RefPackRename, RefPackUpdate, RefResolve, RefTrashList, RefTrashRestore,
 };
 
 // ---------------------------------------------------------------- registry (append-only)
@@ -849,6 +849,7 @@ registry![
     RefPackDelete,
     RefTrashList,
     RefTrashRestore,
+    RefResolve,
 ];
 
 #[cfg(test)]
