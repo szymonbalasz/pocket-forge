@@ -9,6 +9,8 @@ import {
   formHasSource,
   formOf,
   invalidSettingsError,
+  overallFraction,
+  phaseWeights,
   planLine,
   replaceNote,
   settingsOf,
@@ -195,5 +197,25 @@ describe('export panel view', () => {
     expect(errorText('busy')).toMatch(/already running/);
     expect(errorText('layer_unreadable')).toMatch(/nothing was exported/);
     expect(errorText('weird', 'core says no')).toBe('core says no');
+  });
+
+  test('FR-EXP-19 weighted phases give one 0–100 fraction that never restarts', () => {
+    for (const rescale of [false, true])
+      for (const format of ['png', 'jpeg', 'webp'] as const) {
+        const w = phaseWeights(rescale, format);
+        expect(w.reduce((a, [, x]) => a + x, 0)).toBeCloseTo(1);
+        let prev = 0;
+        for (const [phase] of w)
+          for (const f of [0, 0.5, 1]) {
+            const o = overallFraction(w, phase, f);
+            expect(o).toBeGreaterThanOrEqual(prev);
+            prev = o;
+          }
+        expect(prev).toBeCloseTo(1);
+      }
+    const w = phaseWeights(true, 'png');
+    // Compose done, resize just started: not back to 0.
+    expect(overallFraction(w, 'resize', 0)).toBeCloseTo(0.35);
+    expect(overallFraction(w, 'encode', 0.5)).toBeCloseTo(0.775);
   });
 });

@@ -17,17 +17,24 @@ import {
   errorText,
   formOf,
   invalidSettingsError,
+  overallFraction,
+  phaseWeights,
   settingsOf,
   type ExportForm,
   type FieldError,
   type OriginalState,
+  type PhaseWeights,
 } from './view';
 
 export interface ExportRun {
   /** Null until `export_start` returns; events for this project's one export still apply. */
   exportId: string | null;
   phase: ExportPhase;
+  /** The current phase's own fraction, as the event sent it. */
   fraction: number;
+  /** The whole export's fraction (weighted phases, never goes back): the bar and the status. */
+  overall: number;
+  weights: PhaseWeights;
   canceling: boolean;
 }
 
@@ -145,8 +152,10 @@ export const exportStore = {
         if (state.projectId) set({ original: { kind: 'ready' } });
       });
       await onEvent('export:progress', (p) => {
-        if (isOurs(p.export_id) && state.run)
-          set({ run: { ...state.run, phase: p.phase, fraction: p.fraction } });
+        const run = state.run;
+        if (!isOurs(p.export_id) || !run) return;
+        const overall = Math.max(run.overall, overallFraction(run.weights, p.phase, p.fraction));
+        set({ run: { ...run, phase: p.phase, fraction: p.fraction, overall } });
       });
       await onEvent('export:done', (p) => {
         if (!isOurs(p.export_id)) return;
@@ -254,7 +263,14 @@ export const exportStore = {
     const { settings, plan, run } = state;
     if (!settings || !plan || run) return;
     set({
-      run: { exportId: null, phase: 'compose', fraction: 0, canceling: false },
+      run: {
+        exportId: null,
+        phase: 'compose',
+        fraction: 0,
+        overall: 0,
+        weights: phaseWeights(plan.scale !== 1, settings.format),
+        canceling: false,
+      },
       done: null,
       error: null,
     });

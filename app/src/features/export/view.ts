@@ -2,6 +2,7 @@
 // note, Start's state and error wording. No commands here; the store calls the core.
 import type {
   ExportFormat,
+  ExportPhase,
   ExportPlan,
   ExportSettings,
   ExportSettingsInput,
@@ -247,3 +248,53 @@ export const PHASE_TEXT: Record<string, string> = {
   encode: 'Encoding',
   write: 'Writing',
 };
+
+/** Each phase's share of the whole export, in run order. PNG and JPEG at full resolution encode
+ *  while they flatten, so `compose` covers the encode there. Rough shares from the walkthrough
+ *  timings; they only have to keep the bar moving forward. */
+export type PhaseWeights = [ExportPhase, number][];
+
+export function phaseWeights(rescale: boolean, format: ExportFormat): PhaseWeights {
+  if (!rescale)
+    return format === 'webp'
+      ? [
+          ['compose', 0.2],
+          ['encode', 0.75],
+          ['write', 0.05],
+        ]
+      : [
+          ['compose', 0.95],
+          ['write', 0.05],
+        ];
+  return format === 'webp'
+    ? [
+        ['compose', 0.2],
+        ['resize', 0.2],
+        ['encode', 0.55],
+        ['write', 0.05],
+      ]
+    : [
+        ['compose', 0.35],
+        ['resize', 0.25],
+        ['encode', 0.35],
+        ['write', 0.05],
+      ];
+}
+
+/** One 0–1 fraction for the whole export from a phase's own fraction (EXP §7: the bar never
+ *  restarts per phase). A phase missing from the weights counts as the start of the next one. */
+export function overallFraction(
+  weights: PhaseWeights,
+  phase: ExportPhase,
+  fraction: number,
+): number {
+  const order: ExportPhase[] = ['compose', 'resize', 'encode', 'write'];
+  const at = order.indexOf(phase);
+  let done = 0;
+  for (const [p, w] of weights) {
+    const i = order.indexOf(p);
+    if (i < at) done += w;
+    else if (i === at) done += w * Math.min(1, Math.max(0, fraction));
+  }
+  return Math.min(1, done);
+}

@@ -204,7 +204,7 @@ export function ExportPanel() {
             <span>Export</span>
             {run && (
               <span className="small muted tabular exp-header-progress">
-                {Math.round(run.fraction * 100)} %
+                {Math.round(run.overall * 100)} %
               </span>
             )}
           </button>
@@ -377,16 +377,16 @@ export function ExportPanel() {
                 role="progressbar"
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-valuenow={Math.round(run.fraction * 100)}
+                aria-valuenow={Math.round(run.overall * 100)}
                 data-testid="exp-panel-progress"
                 data-phase={run.phase}
               >
-                <div className="exp-progress-fill" style={{ width: `${run.fraction * 100}%` }} />
+                <div className="exp-progress-fill" style={{ width: `${run.overall * 100}%` }} />
               </div>
               <span className="small muted tabular" data-testid="exp-panel-phase">
                 {run.canceling
                   ? 'Canceling…'
-                  : `${PHASE_TEXT[run.phase] ?? run.phase} ${Math.round(run.fraction * 100)} %`}
+                  : `${PHASE_TEXT[run.phase] ?? run.phase} · ${Math.round(run.overall * 100)} %`}
               </span>
               <button
                 type="button"
@@ -450,7 +450,7 @@ export function ExportStatus() {
   if (!run) return null;
   return (
     <span className="small tabular" data-testid="exp-status-progress">
-      Exporting {Math.round(run.fraction * 100)} %
+      Exporting {Math.round(run.overall * 100)} %
     </span>
   );
 }
