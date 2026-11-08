@@ -20,7 +20,7 @@
 | Asset-project walkthrough (steps 1–6, 9) | — | — | passed with defects (spinner race, draft rewrite, rename-while-open) | — |
 | Walkthrough fixes (spinner, draft) | — | merged | done | — |
 | Asset-project re-walk | — | — | spinner fixed (44 opens); N1–N4 found | — |
-| Re-walk fixes N1–N4 | `fix-prj2` | `fix/walk-prj-2` | in progress | — |
+| Re-walk fixes N1–N4 | — | merged | done | — |
 | REF 6 (RGN integration) | — | merged | done | — |
 | Generate-loop walkthrough (RGN, EDT 5, PRV fake, EXP 3–5) | `walk-rgn` | `test/rgn-walk` | in progress | — |
 | Reference packs walkthrough | `walk-ref` | `test/ref-walk` | in progress | — |
