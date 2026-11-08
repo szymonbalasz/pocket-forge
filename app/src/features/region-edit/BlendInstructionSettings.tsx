@@ -38,8 +38,8 @@ export function BlendInstructionSettings() {
   return (
     <div className="rgn-settings">
       <p className="prv-meta">
-        Added to the prompt of a region edit while “Blend with surroundings” is on. Maps also add
-        “Top-down battlemap view.”
+        Blend instruction: added to the prompt of a region edit while “Blend with surroundings” is
+        on. Maps also add “Top-down battlemap view.”
       </p>
       <textarea
         className="rgn-prompt"

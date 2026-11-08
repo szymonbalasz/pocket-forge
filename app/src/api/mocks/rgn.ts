@@ -49,6 +49,9 @@ export function installRgnMock(seed: RgnMockSeed): void {
     progress: number | null;
     /** The job's `references[]` (FR-RGN-43), from the REF mock's prepare hook. */
     refs: Rec[];
+    /** The other-role controls sent and the count with its control name, as the capability
+     *  snapshot at submit had them (pf-core's job `controls` / `candidate_count`). */
+    sent: { controls: Rec; count: { name: string; n: number } | null };
   }
   interface Cand {
     id: string;
@@ -309,6 +312,13 @@ export function installRgnMock(seed: RgnMockSeed): void {
     const ctl = c.controls.find((x) => x.role === 'candidate_count');
     return Number(ctl ? (controls[ctl.name] ?? ctl.default ?? 1) : 1);
   };
+  const sentOf = (c: Capabilities, controls: Rec): Job['sent'] => {
+    const out: Rec = {};
+    for (const [k, v] of Object.entries(controls))
+      if (c.controls.find((x) => x.name === k)?.role === 'other') out[k] = v;
+    const ctl = c.controls.find((x) => x.role === 'candidate_count');
+    return { controls: out, count: ctl ? { name: ctl.name, n: countOf(c, controls) } : null };
+  };
   const costOf = (c: Capabilities, controls: Rec): number | 'unknown' => {
     if (seed.costPerSample === 'unknown') return 'unknown';
     return countOf(c, controls) * (seed.costPerSample ?? 1) * (controls.hd === true ? 2 : 1);
@@ -490,6 +500,7 @@ export function installRgnMock(seed: RgnMockSeed): void {
           delete row.cost_affecting;
           return row;
         }),
+        sent: sentOf(ok.c, draft.controls ?? {}),
       };
       s.jobs.push(j);
       s.spend += amount;
@@ -519,7 +530,16 @@ export function installRgnMock(seed: RgnMockSeed): void {
             has_slots: !!caps(j.draft.model_id)?.slots?.length,
           })
         : null;
-      return { ...JSON.parse(JSON.stringify(j.draft)), seed: j.draft.seed ?? null, references };
+      // As pf-core: the job's sent `other` controls plus its count under the count control's
+      // name (walk owner-UX M1: the count is sent apart from `controls`).
+      const controls: Rec = { ...j.sent.controls };
+      if (j.sent.count) controls[j.sent.count.name] = j.sent.count.n;
+      return {
+        ...JSON.parse(JSON.stringify(j.draft)),
+        controls,
+        seed: j.draft.seed ?? null,
+        references,
+      };
     },
     rgn_job_dismiss: (input: Rec) => {
       const j = s.jobs.find((x) => x.id === input.job_id);

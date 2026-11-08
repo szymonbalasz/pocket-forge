@@ -19,6 +19,10 @@ describe('Blend instruction settings (#55)', () => {
   test('owner-55 settings text: shows the default, saves an edit, resets to default', async () => {
     fake = mockCore();
     expect(settingsSections().map((s) => s.id)).toContain('rgn-blend-instruction');
+    // Walk owner-UX L4: the section is headed by its feature, beside "Scenario provider".
+    expect(settingsSections().find((s) => s.id === 'rgn-blend-instruction')?.title).toBe(
+      'Region edit',
+    );
     render(<BlendInstructionSettings />);
     const text = screen.getByTestId('rgn-settings-blend-text') as HTMLTextAreaElement;
     await waitFor(() => expect(text.value).toMatch(/^Keep everything near the edges/));

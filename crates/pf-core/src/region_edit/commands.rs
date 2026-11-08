@@ -268,6 +268,11 @@ pub fn prepare_job(
     draft: &JobDraft,
     for_submit: bool,
 ) -> CoreResult<PreparedJob> {
+    // §11 / walk owner-UX L2: a moved folder is `folder_moved`, never the OS text of the
+    // first file read (the mask) failing.
+    if let Some(p) = core.state().project.as_mut() {
+        crate::project::require_folder(p)?;
+    }
     let src = pixel_source(&core.ctx, &core.state())?;
     check_project(&*src, project_id)?;
     if src.read_only() {

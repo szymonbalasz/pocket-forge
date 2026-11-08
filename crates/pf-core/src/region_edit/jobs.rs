@@ -3,6 +3,8 @@
 //! project unchanged (FR-RGN-31), except that a submit the provider refused or timed out keeps
 //! its `failed` / `lost` job record (FR-RGN-17/23).
 
+use std::collections::BTreeMap;
+
 use pf_provider::{CancelAck, CostAmount, Provider, ProviderError, ProviderRecord};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Value, json};
@@ -416,7 +418,7 @@ impl Command for RgnJobRetryDraft {
             mask_id,
             model_id: job.model_id.clone(),
             final_prompt: job.typed_prompt().to_owned(),
-            controls: job.controls.clone(),
+            controls: retry_controls(&job),
             seed: if pinned {
                 job.seed.requested.map(|s| s as u64)
             } else {
@@ -428,6 +430,24 @@ impl Command for RgnJobRetryDraft {
                 == Some(true),
         })
     }
+}
+
+/// FR-RGN-21 / FR-RGN-11: the job's sent controls plus its candidate count under the count
+/// control's name (from the job's capability snapshot). The count is sent as
+/// `candidate_count`, not in `controls`, so without this a Retry fell back to the model default.
+/// A count the current capabilities reject resets in the panel with the FR-RGN-11 notice.
+fn retry_controls(job: &JobFile) -> BTreeMap<String, Value> {
+    let mut controls = job.controls.clone();
+    let count = job.capability_snapshot["controls"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|c| c["role"] == "candidate_count")
+        .and_then(|c| c["name"].as_str());
+    if let Some(name) = count {
+        controls.insert(name.to_owned(), Value::from(job.candidate_count));
+    }
+    controls
 }
 
 /// FR-RGN-44 / FR-REF-26: the job's references as a draft selection (runs without the state

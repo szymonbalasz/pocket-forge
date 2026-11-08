@@ -22,6 +22,14 @@ export interface ProjectState {
   opening: string | null;
   /** Bumped after every commit this UI knows of, so panels reload their lists. */
   revision: number;
+  /** Walk owner-UX L3: the one discard / restore notice, shown next to where the user acted
+   *  (Results, the tracker or Storage); a newer one replaces it wherever it was. */
+  trashNotice: TrashNotice | null;
+}
+
+export interface TrashNotice {
+  at: 'results' | 'tracker' | 'storage';
+  text: string;
 }
 
 const initial: ProjectState = {
@@ -31,6 +39,7 @@ const initial: ProjectState = {
   busy: false,
   opening: null,
   revision: 0,
+  trashNotice: null,
 };
 
 let state: ProjectState = initial;
@@ -73,11 +82,31 @@ export function errorOf(e: unknown): { code: string; message: string } {
     : { code: 'ui', message: String(e) };
 }
 
+/** §11: the project folder was moved or renamed while open (`not_found` with
+ *  `detail.reason = folder_moved`). */
+export function isFolderMovedError(e: unknown): boolean {
+  return (
+    e instanceof ApiError && (e.detail as { reason?: unknown } | null)?.reason === 'folder_moved'
+  );
+}
+
+/** §11: the folder-moved state features act on (the save segment failed with it, or the
+ *  project's warnings carry it). It clears with the next commit. */
+export function folderMoved(s: ProjectState): boolean {
+  return (
+    (s.save.kind === 'failed' && s.save.code === 'folder_moved') ||
+    !!s.project?.warnings.some((w) => w.code === 'folder_moved')
+  );
+}
+
+/** What a panel shows instead of its figures while the folder is moved (never OS text). */
+export const FOLDER_MOVED_TEXT =
+  'The project folder was moved or renamed outside Pocket Forge. Reopen it from home.';
+
 /** The save-state code of a failed save: `folder_moved` (§11, `not_found` with that
  *  `detail.reason`), else the error code. */
 function saveCode(e: unknown): string {
-  const reason = e instanceof ApiError ? (e.detail as { reason?: unknown } | null)?.reason : null;
-  return reason === 'folder_moved' ? 'folder_moved' : errorOf(e).code;
+  return isFolderMovedError(e) ? 'folder_moved' : errorOf(e).code;
 }
 
 function savedAt(p: ProjectSnapshot): string {
@@ -108,8 +137,14 @@ function listen(): void {
   const on = (p: Promise<unknown>) => p.catch(() => undefined);
   on(
     onEvent('project:committed', () => {
-      if (!state.project) return;
-      set({ save: { kind: 'saved', at: new Date().toISOString() } });
+      const p = state.project;
+      if (!p) return;
+      // A commit means the folder is back: the core drops its folder_moved warning too.
+      const warnings = p.warnings.filter((w) => w.code !== 'folder_moved');
+      set({
+        save: { kind: 'saved', at: new Date().toISOString() },
+        ...(warnings.length !== p.warnings.length ? { project: { ...p, warnings } } : {}),
+      });
       bump();
     }),
   );
@@ -147,7 +182,7 @@ async function openNow(path: string): Promise<boolean> {
     if (state.project) await api.project.close().catch(() => undefined);
     const project = await api.project.open(path);
     // A conflict found at open shows as Conflict, not Saved (walk 2 N3).
-    set({ project, save: settled(project), busy: false, opening: null });
+    set({ project, save: settled(project), busy: false, opening: null, trashNotice: null });
     bump();
     return true;
   } catch (e) {
@@ -168,7 +203,7 @@ async function closeNow(force: boolean): Promise<void> {
       return;
     }
   }
-  set({ project: null, save: initial.save, error: null });
+  set({ project: null, save: initial.save, error: null, trashNotice: null });
   bump();
 }
 
@@ -291,6 +326,18 @@ export const projectStore = {
   draftSaveFailed(e: unknown): void {
     if (!state.project) return;
     set({ save: { kind: 'failed', ...errorOf(e), code: saveCode(e), retrying: false } });
+  },
+
+  /** A feature's call failed with `folder_moved` (§11): the save segment and banner say so,
+   *  and every feature sees `folderMoved` (Storage clears, Generate is blocked). */
+  noteFolderMoved(): void {
+    if (!state.project || folderMoved(state)) return;
+    set({ save: { kind: 'failed', code: 'folder_moved', message: '', retrying: false } });
+  },
+
+  /** Shows the discard / restore notice where the user acted (replacing any other). */
+  setTrashNotice(notice: TrashNotice | null): void {
+    set({ trashNotice: notice });
   },
 
   /** Drops an open-time warning that no longer applies (RGN: `resumable` once no job is left

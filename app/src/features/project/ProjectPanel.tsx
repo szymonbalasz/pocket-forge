@@ -17,7 +17,14 @@ import {
   type TrashItem,
 } from '../../api';
 import { IconPlus } from '../../shell/icons';
-import { errorOf, projectStore, useProjectState } from '../../store/project';
+import {
+  errorOf,
+  folderMoved,
+  FOLDER_MOVED_TEXT,
+  isFolderMovedError,
+  projectStore,
+  useProjectState,
+} from '../../store/project';
 import { ConflictView } from './ConflictView';
 import { bytesLabel, CATEGORY_LABEL, dateLabel, revisionLabel, timeLabel } from './format';
 import './project.css';
@@ -429,6 +436,7 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
   const [items, setItems] = useState<RgnIteration[]>([]);
   const [cands, setCands] = useState<CandidateRecord[]>([]);
   const [notice, setNotice] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
+  const trash = useProjectState().trashNotice;
   const load = useCallback(() => {
     // The active job before it has candidates has no number or folder yet: not a result.
     api.region.iterations().then(
@@ -447,8 +455,10 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
   const discard = (c: CandidateRecord) =>
     api.region.discard(c.job_id, c.id).then(
       () => {
-        setNotice({
-          kind: 'info',
+        // Walk owner-UX L3: one notice, shown here (the tracker's and Storage's go).
+        setNotice(null);
+        projectStore.setTrashNotice({
+          at: 'results',
           text: 'Discarded: in the trash for 30 days (Storage → Restore).',
         });
         load();
@@ -457,7 +467,7 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
     );
   return (
     <Section id="results" label="Results" count={items.length}>
-      {notice && (
+      {notice ? (
         <p
           className={`${notice.kind === 'error' ? 'error' : 'muted'} small`}
           data-testid="prj-results-notice"
@@ -465,6 +475,12 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
         >
           {notice.text}
         </p>
+      ) : (
+        trash?.at === 'results' && (
+          <p className="muted small" data-testid="prj-results-notice" role="status">
+            {trash.text}
+          </p>
+        )
       )}
       {items.length === 0 ? (
         <p className="muted small">No iterations yet</p>
@@ -617,23 +633,51 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
   const [trash, setTrash] = useState<TrashItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState(false);
-  const load = useCallback(() => {
-    api.project.diskUsage().then(setUsage, (e: unknown) => {
-      const err = errorOf(e);
-      // BL-30: no stale (or 0 B) figures under the error, e.g. once the folder was moved.
-      setUsage(null);
-      // `ipc`: the core doesn't register the command yet (PRJ slice 5): say so quietly.
-      setError(err.code === 'ipc' ? null : err.message);
-      setUnavailable(err.code === 'ipc');
-    });
-    api.project.trashList().then(setTrash, () => setTrash([]));
+  const projectState = useProjectState();
+  const moved = folderMoved(projectState);
+  const notice = projectState.trashNotice?.at === 'storage' ? projectState.trashNotice : null;
+  /** Walk owner-UX L1: any call failing with `folder_moved` clears the figures and the trash
+   *  list (not only a revision change), and every feature hears of it. */
+  const movedFailure = useCallback((e: unknown): boolean => {
+    if (!isFolderMovedError(e)) return false;
+    setUsage(null);
+    setTrash([]);
+    setError(FOLDER_MOVED_TEXT);
+    projectStore.noteFolderMoved();
+    return true;
   }, []);
-  useEffect(load, [load, revision]);
+  const load = useCallback(() => {
+    api.project.diskUsage().then(
+      (u) => {
+        setUsage(u);
+        setError(null);
+      },
+      (e: unknown) => {
+        if (movedFailure(e)) return;
+        const err = errorOf(e);
+        // BL-30: no stale (or 0 B) figures under the error.
+        setUsage(null);
+        // `ipc`: the core doesn't register the command yet (PRJ slice 5): say so quietly.
+        setError(err.code === 'ipc' ? null : err.message);
+        setUnavailable(err.code === 'ipc');
+      },
+    );
+    api.project.trashList().then(setTrash, (e: unknown) => {
+      if (!movedFailure(e)) setTrash([]);
+    });
+  }, [movedFailure]);
+  // The folder moved (or came back): reload, so the figures never outlive it.
+  useEffect(load, [load, revision, moved]);
 
   const total = usage ? Object.values(usage.bytes).reduce((s, b) => s + b, 0) : 0;
   return (
     <Section id="storage" label="Storage">
       {error && <p className="error small">{error}</p>}
+      {notice && (
+        <p className="muted small" data-testid="prj-panel-storage-notice" role="status">
+          {notice.text}
+        </p>
+      )}
       {unavailable && (
         <p className="muted small" data-testid="prj-panel-storage-unavailable">
           Disk use and trash aren’t available yet.
@@ -681,9 +725,19 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
                   data-testid="prj-panel-storage-restore"
                   disabled={readOnly}
                   onClick={() =>
-                    api.project
-                      .trashRestore(t.id)
-                      .then(load, (e: unknown) => setError(sentence(errorOf(e).message)))
+                    api.project.trashRestore(t.id).then(
+                      () => {
+                        // Walk owner-UX L3: replaces the stale "Discarded…" notice.
+                        projectStore.setTrashNotice({
+                          at: 'storage',
+                          text: `Restored ${trashLabel(t)}.`,
+                        });
+                        load();
+                      },
+                      (e: unknown) => {
+                        if (!movedFailure(e)) setError(sentence(errorOf(e).message));
+                      },
+                    )
                   }
                 >
                   Restore
@@ -702,10 +756,20 @@ function trashFiles(t: TrashItem): string[] {
   return t.files && t.files.length > 0 ? t.files : [t.path];
 }
 
-/** BL-30: the first file's name, plus how many more the item holds. */
+/** BL-30: the first file's name, plus how many more the item holds. Walk owner-UX L3: a
+ *  result file names its iteration ("002 · 03.png"); a superseded mask says so, not its id. */
 function trashLabel(t: TrashItem): string {
   const files = trashFiles(t);
-  const name = files[0]!.split('/').pop();
+  const first = files[0]!;
+  const iteration = /^results\/(\d{3})[^/]*\/([^/]+)$/.exec(first);
+  const name =
+    t.kind === 'mask'
+      ? t.reason === 'superseded'
+        ? 'Mask (superseded)'
+        : 'Mask'
+      : iteration
+        ? `${iteration[1]} · ${iteration[2]}`
+        : first.split('/').pop();
   return files.length > 1 ? `${name} +${files.length - 1} more` : (name ?? '');
 }
 

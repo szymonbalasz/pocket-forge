@@ -134,12 +134,15 @@ function Pane({
       {syncing && (
         <p className="muted small" data-testid={`prj-conflict-${side.side}-syncing`}>
           Still syncing
-          {side.missing_files.length > 0 ? ` (${side.missing_files.length} files missing)` : ''}
+          {side.missing_files.length > 0
+            ? ` (${side.missing_files.length} ${side.missing_files.length === 1 ? 'file' : 'files'} missing)`
+            : ''}
         </p>
       )}
       <button
         type="button"
-        className="primary"
+        // Walk owner-UX L4: one primary action; Keep this is the default (PRJ §7 labels).
+        className={side.side === 'this' ? 'primary' : undefined}
         data-testid={`prj-conflict-keep-${side.side}`}
         disabled={!side.can_keep || busy}
         onClick={() => onKeep(side.side)}

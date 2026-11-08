@@ -10,8 +10,8 @@ import { editorFeature } from '../editor';
 import { GeneratePanel } from './GeneratePanel';
 import { IterationTracker } from './IterationTracker';
 import { JobStatus } from './JobStatus';
-import { rgn } from './store';
-import { mockControls, mockCore, polyfillRadix, SIMPLE } from './testUtils';
+import { FOLDER_MOVED_BLOCKER, rgn } from './store';
+import { ALL_TYPES, mockControls, mockCore, polyfillRadix, SIMPLE } from './testUtils';
 
 const Picker = editorFeature.slots.bottom!;
 const REGION = { x: 400, y: 400, w: 512, h: 512 };
@@ -480,6 +480,26 @@ describe('confirm dialog (FR-RGN-14..16, §7)', { timeout: 20_000 }, () => {
     expect(mockControls().state().spend).toBe(2);
   });
 
+  test('walk owner-UX L2: a moved folder blocks Generate with a readable reason, no OS text', async () => {
+    const dlg = await ready({ spend: { cap: 100, threshold: 10 } });
+    const h = handlers();
+    h.rgn_job_submit = () =>
+      Promise.reject({
+        code: 'not_found',
+        message:
+          'The project folder was moved or renamed outside Pocket Forge. Reopen it from home.',
+        detail: { reason: 'folder_moved' },
+      });
+    fireEvent.click(within(dlg).getByTestId('rgn-confirm-ok'));
+    await waitFor(() => expect(screen.queryByTestId('rgn-confirm')).toBeNull());
+    const submit = screen.getByTestId('rgn-panel-submit') as HTMLButtonElement;
+    await waitFor(() => expect(submit.disabled).toBe(true));
+    expect(screen.getByTestId('rgn-panel-submit-reason').textContent).toBe(FOLDER_MOVED_BLOCKER);
+    expect(screen.getByTestId('rgn-panel-submit-error').textContent).not.toMatch(/os error/);
+    // No estimates while it's moved.
+    expect(rgn.get().estimate.status).toBe('idle');
+  });
+
   test('BL-36 a dearer fresh estimate shows the confirm again; nothing is spent', async () => {
     const dlg = await ready({ spend: { cap: 100, threshold: 10 } });
     mockControls().failNext('rgn_job_submit', 'estimate_stale', 'The estimate is out of date.');
@@ -587,6 +607,46 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     await waitFor(() => expect(fake.callsOf('rgn_job_estimate').length).toBe(before + 1), {
       timeout: 2000,
     });
+  });
+
+  test('FR-RGN-21 retry restores the count the user set; FR-RGN-11 the draft keeps it', async () => {
+    await setup();
+    act(() => rgn.setValue('num_samples', 4));
+    await typePrompt('four please');
+    await estimated();
+    fireEvent.click(screen.getByTestId('rgn-panel-submit'));
+    fireEvent.click(await screen.findByTestId('rgn-confirm-ok'));
+    await waitFor(() => expect(screen.getAllByTestId('rgn-tracker-item')).toHaveLength(1));
+    act(() => mockControls().fail());
+    await waitFor(() => expect(screen.getByTestId('rgn-job-retry')).toBeTruthy());
+    act(() => rgn.setValue('num_samples', 1));
+    fireEvent.click(screen.getByTestId('rgn-job-retry'));
+    await waitFor(() => expect(rgn.get().values.num_samples).toBe(4));
+    expect(rgn.get().touched).toContain('num_samples');
+    // The draft written after the retry keeps it (FR-RGN-11).
+    await waitFor(
+      () => {
+        const saved = fake.callsOf('project_put_draft').at(-1) as {
+          draft: { controls: Record<string, unknown> };
+        };
+        expect(saved.draft.controls.num_samples).toBe(4);
+      },
+      { timeout: 4000 },
+    );
+  });
+
+  test('FR-RGN-11 a restored count a single-output model rejects is dropped with a notice', async () => {
+    const all = structuredClone(ALL_TYPES);
+    await submitted({ capabilities: { 'fake-all-types': all, 'fake-simple': SIMPLE } });
+    act(() => mockControls().fail());
+    await waitFor(() => expect(screen.getByTestId('rgn-job-retry')).toBeTruthy());
+    all.controls = all.controls.filter((c) => c.role !== 'candidate_count');
+    fireEvent.click(screen.getByTestId('rgn-job-retry'));
+    await waitFor(() =>
+      expect(rgn.get().notices.some((n) => n.startsWith('num_samples:'))).toBe(true),
+    );
+    expect(rgn.get().values.num_samples).toBeUndefined();
+    expect(screen.getByTestId('rgn-panel-count-single')).toBeTruthy();
   });
 
   test('FR-RGN-40 tracker: iterations newest first with kept/returned, cost, ✓; the picker shows the selected one', async () => {
@@ -770,6 +830,15 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(4);
     expect((screen.getAllByTestId('edt-picker-discard')[0] as HTMLButtonElement).disabled).toBe(
       true,
+    );
+    // Walk owner-UX L4: Radix tips, not native titles.
+    const discard0 = screen.getAllByTestId('edt-picker-discard')[0]!;
+    expect(discard0.getAttribute('title')).toBeNull();
+    expect(discard0.closest('[data-tooltip]')?.getAttribute('data-tooltip')).toBe(
+      'The accepted candidate can’t be discarded',
+    );
+    expect(screen.getByTestId('edt-picker-discard-rest').className).toContain(
+      'edt-picker-discard-rest',
     );
     fireEvent.click(screen.getByTestId('edt-picker-discard-rest'));
     await waitFor(() => expect(fake.callsOf('rgn_job_discard_rest')).toHaveLength(1));

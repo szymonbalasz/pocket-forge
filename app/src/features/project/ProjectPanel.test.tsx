@@ -215,8 +215,63 @@ test('BL-30 a multi-file trash item names its first file plus the count, and lis
     ],
   });
   const item = await screen.findByTestId('prj-panel-storage-item');
-  expect(item.querySelector('.prj-file-name')?.textContent).toBe('02.png +1 more');
+  expect(item.querySelector('.prj-file-name')?.textContent).toBe('001 · 02.png +1 more');
   expect(item.getAttribute('title')).toBe('results/001 kitchen/02.png\nresults/001 kitchen/03.png');
+});
+
+test('walk owner-UX L3: trash rows name the iteration; a superseded mask is labelled, not its id', async () => {
+  await openCrypt({
+    trash: [
+      {
+        id: 'T1',
+        path: 'results/002 kitchen/03.png',
+        kind: 'candidates',
+        bytes: 1024,
+        trashed_at: '2026-11-01T00:00:00Z',
+        restorable: true,
+      },
+      {
+        id: 'T2',
+        path: 'masks/01M6YGFXABCDEFGHJKMNPQRSTV.png',
+        kind: 'mask',
+        reason: 'superseded',
+        bytes: 1024,
+        trashed_at: '2026-11-02T00:00:00Z',
+        restorable: false,
+      },
+    ],
+  });
+  const items = await screen.findAllByTestId('prj-panel-storage-item');
+  const names = items.map((i) => i.querySelector('.prj-file-name')?.textContent);
+  expect(names).toEqual(['002 · 03.png', 'Mask (superseded)']);
+});
+
+test('walk owner-UX L3: Restore replaces the discard notice with a short confirmation', async () => {
+  await openCrypt({
+    trash: [
+      {
+        id: 'T1',
+        path: 'results/001 kitchen/02.png',
+        kind: 'candidates',
+        bytes: 1024,
+        trashed_at: '2026-11-01T00:00:00Z',
+        restorable: true,
+      },
+    ],
+  });
+  act(() =>
+    projectStore.setTrashNotice({
+      at: 'results',
+      text: 'Discarded: in the trash for 30 days (Storage → Restore).',
+    }),
+  );
+  expect(screen.getByTestId('prj-results-notice').textContent).toMatch(/Discarded/);
+  fireEvent.click(await screen.findByTestId('prj-panel-storage-restore'));
+  expect((await screen.findByTestId('prj-panel-storage-notice')).textContent).toBe(
+    'Restored 001 · 02.png.',
+  );
+  expect(screen.queryByTestId('prj-results-notice')).toBeNull();
+  expect(screen.queryByText(/Discarded/)).toBeNull();
 });
 
 test('BL-30 a moved folder shows the reason in Storage, not 0 B figures', async () => {
@@ -244,6 +299,51 @@ test('BL-30 a moved folder shows the reason in Storage, not 0 B figures', async 
       'The project folder was moved or renamed outside Pocket Forge. Reopen it from home.',
     ).length,
   ).toBeGreaterThanOrEqual(2);
+});
+
+test('BL-30 walk owner-UX L1: a Restore failing with folder_moved clears the figures at once', async () => {
+  await openCrypt({
+    trash: [
+      {
+        id: 'T1',
+        path: 'results/001 kitchen/02.png',
+        kind: 'candidates',
+        bytes: 1024,
+        trashed_at: '2026-11-01T00:00:00Z',
+        restorable: true,
+      },
+    ],
+  });
+  await screen.findByTestId('prj-panel-storage-usage');
+  const moved = () => {
+    throw {
+      code: 'not_found',
+      message: 'The project folder was moved or renamed outside Pocket Forge. Reopen it from home.',
+      detail: { reason: 'folder_moved' },
+    };
+  };
+  core.useHandlers({
+    ...core.handlersSnapshot(),
+    project_disk_usage: moved,
+    project_trash_list: moved,
+    project_trash_restore: moved,
+  });
+  // No commit, no revision change: only the failed call.
+  fireEvent.click(await screen.findByTestId('prj-panel-storage-restore'));
+  await waitFor(() => expect(screen.queryByTestId('prj-panel-storage-usage')).toBeNull());
+  expect(screen.queryByTestId('prj-panel-storage-item')).toBeNull();
+  // The banner (and every feature) knows the folder moved.
+  const banner = screen
+    .getAllByTestId('prj-panel-warning')
+    .find((b) => b.dataset.code === 'folder_moved');
+  expect(banner).toBeTruthy();
+  // The folder came back: the next commit clears the signal (and RGN's Generate block).
+  act(() => core.emit('project:committed', { seq: 9 }));
+  await waitFor(() =>
+    expect(
+      screen.queryAllByTestId('prj-panel-warning').some((b) => b.dataset.code === 'folder_moved'),
+    ).toBe(false),
+  );
 });
 
 test('FR-PRJ-31 a failed restore says why as a sentence, not raw core text (walk 2 N2)', async () => {
@@ -341,6 +441,36 @@ test('FR-PRJ-35 FR-PRJ-36 a conflict found mid-session shows the banner and the 
     keep: 'other',
   });
   expect(screen.getByTestId('prj-status-save').dataset.state).toBe('saved');
+});
+
+test('walk owner-UX L4 the conflict view has one primary Keep and says "1 file missing"', async () => {
+  await openCrypt();
+  const side = (which: 'this' | 'other', missing: string[]) => ({
+    side: which,
+    file: which === 'this' ? null : 'project.json',
+    readable: true,
+    committed_at: '2026-11-07T10:00:00.000Z',
+    seq: which === 'this' ? 3 : 9,
+    machine: which,
+    layers: [],
+    newest_revision: null,
+    missing_files: missing,
+    can_keep: missing.length === 0,
+  });
+  const p = mock.projects.get(CRYPT)!;
+  p.conflict = {
+    source: 'seq',
+    this: side('this', []),
+    other: side('other', ['patches/01P.png']),
+  };
+  act(() => core.emit('project:conflict', {}));
+  fireEvent.click(await screen.findByTestId('prj-panel-conflict-open'));
+  const keepThis = await screen.findByTestId('prj-conflict-keep-this');
+  expect(keepThis.classList.contains('primary')).toBe(true);
+  expect(screen.getByTestId('prj-conflict-keep-other').classList.contains('primary')).toBe(false);
+  expect(screen.getByTestId('prj-conflict-other-syncing').textContent).toBe(
+    'Still syncing (1 file missing)',
+  );
 });
 
 test('FR-PRJ-34 a conflict copy found at open shows Conflict in the status bar, not Saved (walk 2 N3)', async () => {

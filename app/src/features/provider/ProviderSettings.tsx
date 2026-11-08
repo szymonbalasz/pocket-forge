@@ -191,9 +191,13 @@ export function ProviderSettings() {
           aria-describedby={undefined}
         >
           <header className="prv-settings-head">
-            <Dialog.Title className="prv-title">Scenario provider</Dialog.Title>
+            <Dialog.Title className="prv-title">Settings</Dialog.Title>
           </header>
-          <SettingsForm />
+          {/* Walk owner-UX L4: one heading per section. */}
+          <section className="prv-section" data-section="provider">
+            <h3 className="prv-title">Scenario provider</h3>
+            <SettingsForm />
+          </section>
           {settingsSections().map(({ id, title, Component }) => (
             <section key={id} className="prv-section" data-section={id}>
               <h3 className="prv-title">{title}</h3>

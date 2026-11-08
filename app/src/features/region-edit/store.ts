@@ -27,7 +27,7 @@ import {
   type RgnPreview,
   type Spend,
 } from '../../api';
-import { projectStore } from '../../store/project';
+import { folderMoved, isFolderMovedError, projectStore } from '../../store/project';
 import { refreshProviderStatus } from '../provider';
 import {
   editorBridge,
@@ -132,6 +132,8 @@ export interface RgnState {
   blend: RgnBlend;
   trackerNotice: { kind: 'info' | 'error'; text: string } | null;
   thumbs: Record<string, string>;
+  /** §11: the project folder was moved or renamed (PRJ's signal): no estimates or submit. */
+  folderMoved: boolean;
 }
 
 export const DEFAULT_MARGIN = 128;
@@ -190,6 +192,7 @@ const initial: RgnState = {
   blend: DEFAULT_BLEND,
   trackerNotice: null,
   thumbs: {},
+  folderMoved: false,
 };
 
 let state: RgnState = initial;
@@ -281,10 +284,15 @@ ${text}`;
   return s.prompt ? s.prompt + suffix : text;
 }
 
+/** Walk owner-UX L2: why Generate is disabled while the project folder is moved (§11). */
+export const FOLDER_MOVED_BLOCKER =
+  'The project folder was moved or renamed. Reopen it from home to generate.';
+
 /** Why submit is disabled (null = enabled). FR-RGN-09/17/33/38, §7 states. */
 export function submitBlocker(s: RgnState): string | null {
   if (!s.projectId) return 'Open an asset project.';
   if (s.readOnly) return 'The project is read-only.';
+  if (s.folderMoved) return FOLDER_MOVED_BLOCKER;
   if (s.provider && !s.provider.configured) return 'Set up the provider first.';
   if (isOffline(s)) return 'Offline: estimates and submit need the provider.';
   if (activeJobId(s)) return 'A job is running.';
@@ -320,8 +328,8 @@ export function currentDraft(s: RgnState): JobDraft | null {
 }
 
 function signatureOf(s: RgnState): string | null {
-  if (!s.projectId || s.readOnly || isOffline(s) || !s.fit || !s.caps || !s.modelId || !s.maskId)
-    return null;
+  if (!s.projectId || s.readOnly || s.folderMoved || isOffline(s)) return null;
+  if (!s.fit || !s.caps || !s.modelId || !s.maskId) return null;
   // An empty mask can't be estimated (`mask_invalid`); the hint says what to do.
   if (s.maskPainted === false) return null;
   // Required controls (not the prompt) must be filled before an estimate makes sense.
@@ -359,6 +367,7 @@ async function runEstimate(sig: string): Promise<void> {
     });
   } catch (e) {
     if (!isCurrent('estimate', t)) return;
+    if (isFolderMovedError(e)) projectStore.noteFolderMoved(); // blocks Generate (L2)
     const error = uiError(e);
     set({ estimate: { status: 'error', result: null, error, signature: sig } });
     if (error.code === 'reference_unavailable') refreshReferences(); // FR-REF-21
@@ -809,7 +818,17 @@ function subscribe(): void {
       }),
     ),
   ];
-  unsubscribe = () =>
+  // §11 (walk owner-UX L2): PRJ's folder-moved signal blocks estimates and Generate.
+  const syncMoved = () => {
+    const moved = folderMoved(projectStore.get());
+    if (moved === state.folderMoved) return;
+    set({ folderMoved: moved });
+    schedule();
+  };
+  syncMoved();
+  const offProject = projectStore.subscribe(syncMoved);
+  unsubscribe = () => {
+    offProject();
     subs.forEach(
       (p) =>
         void p
@@ -817,6 +836,7 @@ function subscribe(): void {
           // The core went away first (app close, test teardown).
           .catch(() => undefined),
     );
+  };
 }
 
 async function selectModel(id: string, remembered: Values | null): Promise<void> {
@@ -1072,6 +1092,7 @@ export const rgn = {
         return;
       }
       set({ submitting: false, confirmOpen: false, submitError: err });
+      if (isFolderMovedError(e)) projectStore.noteFolderMoved(); // blocks Generate (L2)
       if (err.code === 'estimate_stale') debouncer.force();
       // FR-REF-21: a ticked reference is gone; the block shows which, and the next edit or
       // resolve re-estimates.
@@ -1226,7 +1247,9 @@ export const rgn = {
         set({ selectedCandidateId: null, preview: null });
         editorBridge.setCompare(null);
       }
-      set({ trackerNotice: { kind: 'info', text: TRASH_NOTICE(1) } });
+      // Walk owner-UX L3: one notice, shown here (Results' and Storage's go).
+      set({ trackerNotice: null });
+      projectStore.setTrashNotice({ at: 'tracker', text: TRASH_NOTICE(1) });
     } catch (e) {
       const err = uiError(e);
       set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
@@ -1245,7 +1268,8 @@ export const rgn = {
         set({ selectedCandidateId: null, preview: null });
         editorBridge.setCompare(null);
       }
-      set({ trackerNotice: { kind: 'info', text: TRASH_NOTICE(trashed) } });
+      set({ trackerNotice: null });
+      projectStore.setTrashNotice({ at: 'tracker', text: TRASH_NOTICE(trashed) });
     } catch (e) {
       const err = uiError(e);
       set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });

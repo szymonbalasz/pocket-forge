@@ -328,6 +328,15 @@
   height: 22px;
 }
 
+/* Walk owner-UX L4: "Discard the rest" stays on one line. */
+.edt-picker-discard-rest {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .edt-picker-invalid .edt-picker-thumb {
   color: var(--pf-danger);
 }

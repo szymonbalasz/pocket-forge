@@ -16,6 +16,6 @@ export const regionEditFeature: Feature = {
 // #55: the blend instruction text, in the settings dialog.
 registerSettingsSection({
   id: 'rgn-blend-instruction',
-  title: 'Blend instruction',
+  title: 'Region edit',
   Component: BlendInstructionSettings,
 });

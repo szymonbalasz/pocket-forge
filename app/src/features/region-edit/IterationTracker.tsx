@@ -6,6 +6,7 @@ import { useEffect, useState, type KeyboardEvent } from 'react';
 import { Tooltip } from 'radix-ui';
 
 import { IconCheck } from '../../shell/icons';
+import { projectStore, useProjectState } from '../../store/project';
 import { costLabel, elapsedLabel, iterationNumber, jobErrorText, STATE_LABEL } from './format';
 import { rgn, useRgn, type LiveJob } from './store';
 import {
@@ -144,6 +145,7 @@ function RefsChip({ row }: { row: RgnIteration }) {
 
 export function IterationTracker() {
   const s = useRgn((x) => x);
+  const trash = useProjectState().trashNotice;
   if (!s.projectId || s.iterations.length === 0) return null;
   const rows = orderRows(s.iterations);
   const strip = stripJobId(rows);
@@ -228,6 +230,22 @@ export function IterationTracker() {
           );
         })}
       </div>
+      {trash?.at === 'tracker' && !s.trackerNotice && (
+        <div
+          className="small rgn-tracker-notice muted"
+          data-testid="rgn-tracker-notice"
+          role="status"
+        >
+          {trash.text}
+          <button
+            type="button"
+            className="link small"
+            onClick={() => projectStore.setTrashNotice(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
       {s.trackerNotice && (
         <div
           className={`small rgn-tracker-notice ${s.trackerNotice.kind === 'error' ? 'error' : 'muted'}`}
