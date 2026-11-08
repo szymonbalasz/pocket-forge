@@ -362,17 +362,58 @@ describe('confirm dialog (FR-RGN-14..16, §7)', { timeout: 20_000 }, () => {
     expect(fake.callsOf('rgn_job_submit')).toHaveLength(0);
   });
 
-  test('FR-RGN-13 estimate_stale closes the dialog and re-estimates', async () => {
+  const handlers = () =>
+    (window as unknown as { __pfMockHandlers: Record<string, (i: unknown) => unknown> })
+      .__pfMockHandlers;
+
+  test('FR-RGN-13 BL-36 an estimate expired while the dialog was open: re-estimates and submits within what was confirmed', async () => {
     const dlg = await ready({ spend: { cap: 100, threshold: 10 } });
     mockControls().failNext('rgn_job_submit', 'estimate_stale', 'The estimate is out of date.');
     const before = fake.callsOf('rgn_job_estimate').length;
     fireEvent.click(within(dlg).getByTestId('rgn-confirm-ok'));
+    await waitFor(() => expect(fake.callsOf('rgn_job_submit')).toHaveLength(2));
+    expect(fake.callsOf('rgn_job_estimate').length).toBe(before + 1);
+    // The id hashes the inputs, so the fresh estimate (re-stored, not expired) has the same one.
+    const second = fake.callsOf('rgn_job_submit')[1] as { estimate_id: string };
+    expect(second.estimate_id).toBe(rgn.get().estimate.result!.estimate_id);
+    await waitFor(() => expect(screen.queryByTestId('rgn-confirm')).toBeNull());
+    expect(screen.queryByTestId('rgn-panel-submit-error')).toBeNull();
+    expect(mockControls().state().spend).toBe(2);
+  });
+
+  test('BL-36 a dearer fresh estimate shows the confirm again; nothing is spent', async () => {
+    const dlg = await ready({ spend: { cap: 100, threshold: 10 } });
+    mockControls().failNext('rgn_job_submit', 'estimate_stale', 'The estimate is out of date.');
+    const h = handlers();
+    const estimate = h.rgn_job_estimate!;
+    h.rgn_job_estimate = async (i) => {
+      const r = (await estimate(i)) as { cost: { amount: number } };
+      return { ...r, estimate_id: 'E-dearer', cost: { ...r.cost, amount: r.cost.amount + 1 } };
+    };
+    fireEvent.click(within(dlg).getByTestId('rgn-confirm-ok'));
+    const again = await screen.findByText(/estimate changed while this dialog was open/);
+    expect(again).not.toBeNull();
+    expect(
+      within(screen.getByTestId('rgn-confirm')).getByTestId('rgn-confirm-estimate').textContent,
+    ).toBe('3 CU');
+    expect(fake.callsOf('rgn_job_submit')).toHaveLength(1);
+    expect(mockControls().state().spend).toBe(0);
+    h.rgn_job_estimate = estimate;
+  });
+
+  test('FR-RGN-13 stale twice: the dialog closes and the panel estimates again', async () => {
+    const dlg = await ready({ spend: { cap: 100, threshold: 10 } });
+    const h = handlers();
+    const submit = h.rgn_job_submit!;
+    h.rgn_job_submit = () => {
+      throw { code: 'estimate_stale', message: 'The estimate is out of date.' };
+    };
+    fireEvent.click(within(dlg).getByTestId('rgn-confirm-ok'));
     await waitFor(() =>
       expect(screen.getByTestId('rgn-panel-submit-error').textContent).toMatch(/estimating again/),
     );
-    await waitFor(() => expect(fake.callsOf('rgn_job_estimate').length).toBe(before + 1), {
-      timeout: 2000,
-    });
+    expect(screen.queryByTestId('rgn-confirm')).toBeNull();
+    h.rgn_job_submit = submit;
   });
 });
 
