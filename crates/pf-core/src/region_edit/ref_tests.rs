@@ -35,7 +35,10 @@ fn swatch(shade: u8) -> Vec<u8> {
 fn lab_with(files: &[(&str, u8)]) -> (Lab, Arc<FakeFsAttributes>) {
     let mut lab = Lab::new();
     let fs = Arc::new(FakeFsAttributes::default());
-    lab.core.ctx.fs = Box::new(SharedFs(fs.clone()));
+    // The context is shared (`Arc`) with background threads; none run in these tests.
+    std::sync::Arc::get_mut(&mut lab.core.ctx)
+        .expect("the context is not shared")
+        .fs = Box::new(SharedFs(fs.clone()));
     for (f, shade) in files {
         std::fs::write(lab.project_dir.join("references").join(f), swatch(*shade)).unwrap();
     }

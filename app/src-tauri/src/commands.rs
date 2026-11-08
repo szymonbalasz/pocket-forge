@@ -94,6 +94,11 @@ tauri_commands! {
     project_disk_usage => c::ProjectDiskUsage,
     project_conflict_get => c::ProjectConflictGet,
     project_resolve_conflict => c::ProjectResolveConflict,
+    export_get_settings => c::ExportGetSettings,
+    export_set_settings => c::ExportSetSettings,
+    export_plan => c::ExportPlan,
+    export_start => c::ExportStart,
+    export_cancel => c::ExportCancel,
     edt_mask_submit => c::EdtMaskSubmit,
     edt_mask_read => c::EdtMaskRead,
 }

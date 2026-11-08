@@ -41,6 +41,19 @@ impl DecodedOriginal {
         self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// A handle whose decode never finishes (EXP's `original_unavailable` test, FR-EXP-28).
+    #[cfg(test)]
+    pub(crate) fn decoding_for_tests(project_id: Ulid) -> Self {
+        let d = DecodedOriginal::new(project_id, PathBuf::new());
+        *d.lock() = State::Decoding;
+        d
+    }
+
+    /// The project this original belongs to.
+    pub fn project_id(&self) -> Ulid {
+        self.project_id
+    }
+
     /// True once the pixels are in memory.
     pub fn is_ready(&self) -> bool {
         matches!(*self.lock(), State::Ready(_))

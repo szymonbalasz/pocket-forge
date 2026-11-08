@@ -11,6 +11,7 @@ import {
   type ExportPlan,
   type ExportSettingsInput,
 } from '../../api';
+import { projectStore } from '../../store/project';
 import {
   emptyForm,
   errorText,
@@ -45,6 +46,8 @@ export interface ExportState {
   error: { code: string; message: string } | null;
   /** Bumped by Ctrl+E so the panel moves focus into the section. */
   focusTick: number;
+  /** The project is closing while an export runs: "Cancel the export and close?" (EXP §7). */
+  closeAsk: boolean;
 }
 
 const initial: ExportState = {
@@ -60,6 +63,7 @@ const initial: ExportState = {
   done: null,
   error: null,
   focusTick: 0,
+  closeAsk: false,
 };
 
 let state: ExportState = initial;
@@ -67,6 +71,18 @@ const listeners = new Set<() => void>();
 let syncSeq = 0;
 let prefetched: string | null = null;
 let listening: Promise<void> | null = null;
+let proceedClose: (() => void) | null = null;
+let cancelClose: (() => void) | null = null;
+let guarding = false;
+
+/** PRJ close guard: hold the close while an export runs and ask first (OQ-EXP-09). */
+function closeGuard(proceed: () => void, cancel: () => void): boolean {
+  if (!state.run) return true;
+  proceedClose = proceed;
+  cancelClose = cancel;
+  set({ closeAsk: true, expanded: true });
+  return false;
+}
 
 function set(patch: Partial<ExportState>): void {
   state = { ...state, ...patch };
@@ -113,11 +129,17 @@ export const exportStore = {
   reset(): void {
     syncSeq = 0;
     prefetched = null;
+    proceedClose = null;
+    cancelClose = null;
     set(initial);
   },
 
-  /** Subscribes to the export events once (EXP §9). */
+  /** Subscribes to the export events once (EXP §9) and guards project close. */
   listen(): Promise<void> {
+    if (!guarding) {
+      guarding = true;
+      projectStore.addCloseGuard(closeGuard);
+    }
     listening ??= (async () => {
       await onEvent('project:original-ready', () => {
         if (state.projectId) set({ original: { kind: 'ready' } });
@@ -274,6 +296,26 @@ export const exportStore = {
 
   dismissDone(): void {
     set({ done: null });
+  },
+
+  /** "Cancel the export and close": cancels, then lets the held close go on (the core's
+   *  close hook cancels too, so this never waits for `export:canceled`). */
+  async confirmClose(): Promise<void> {
+    const proceed = proceedClose;
+    proceedClose = null;
+    cancelClose = null;
+    set({ closeAsk: false });
+    await exportStore.cancel();
+    proceed?.();
+  },
+
+  /** "Keep exporting": the close is dropped. */
+  keepExporting(): void {
+    const cancel = cancelClose;
+    proceedClose = null;
+    cancelClose = null;
+    set({ closeAsk: false });
+    cancel?.();
   },
 };
 

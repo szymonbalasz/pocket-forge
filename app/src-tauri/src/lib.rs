@@ -2,6 +2,8 @@
 //! window and event forwarding. No domain logic: everything is a `pf-core` command.
 
 mod commands;
+#[cfg(debug_assertions)]
+mod smoke_export;
 
 use pf_core::context::EventSink;
 use pf_core::{Context, Core};
@@ -45,7 +47,9 @@ mod smoke {
 /// `PF_SMOKE=1` it ends the process (exit 0 if `ok`), which is how `tauri:smoke` knows the
 /// window loaded. With `PF_SMOKE_TILE_IMAGE` set as well, the first `ok` report instead returns
 /// that image: the UI opens it through the core, fetches tile 0/0_0 through the `pf-tiles`
-/// scheme and reports again (R46). Otherwise it only logs and returns null.
+/// scheme and reports again (R46). With `PF_SMOKE_EXPORT_IMAGE` set too, the final `ok` report
+/// first runs the export step (`smoke_export`) on a worker thread, then exits. Otherwise it only
+/// logs and returns null.
 #[tauri::command]
 fn app_ready(app: AppHandle, ok: bool, detail: String) -> Option<String> {
     tracing::info!(ok, %detail, "UI ready");
@@ -54,6 +58,21 @@ fn app_ready(app: AppHandle, ok: bool, detail: String) -> Option<String> {
         if let Some(image) = smoke::tile_image(ok) {
             println!("PF_SMOKE shell ok {detail}");
             return Some(image);
+        }
+        if ok && let Some(image) = smoke_export::image() {
+            std::thread::spawn(move || {
+                let result = smoke_export::run(&app.state::<Core>(), &image);
+                match &result {
+                    Ok(d) => println!("PF_SMOKE export ok {d}"),
+                    Err(e) => println!("PF_SMOKE export failed {e}"),
+                }
+                println!(
+                    "PF_SMOKE {} {detail}",
+                    if result.is_ok() { "ok" } else { "failed" }
+                );
+                app.exit(if result.is_ok() { 0 } else { 1 });
+            });
+            return None;
         }
         println!("PF_SMOKE {} {detail}", if ok { "ok" } else { "failed" });
         app.exit(if ok { 0 } else { 1 });
