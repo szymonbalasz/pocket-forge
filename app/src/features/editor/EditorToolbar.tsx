@@ -15,6 +15,7 @@ import {
   IconUndo,
 } from '../../shell/icons';
 import { actions } from './actions';
+import { noMouseFocus } from './shortcuts';
 import { useEditor, type Tool } from './store';
 import { Tip } from './Tip';
 
@@ -30,7 +31,13 @@ export function EditorToolbar() {
   if (!image) return null;
   const canPaint = region !== null;
   return (
-    <div className="edt-toolbar" role="toolbar" aria-orientation="vertical" aria-label="Tools">
+    <div
+      className="edt-toolbar"
+      role="toolbar"
+      onMouseDown={noMouseFocus}
+      aria-orientation="vertical"
+      aria-label="Tools"
+    >
       {TOOLS.map(({ tool: t, label, key, Icon }) => (
         <Tip key={t} text={`${label} (${key})`}>
           <button

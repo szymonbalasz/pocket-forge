@@ -31,6 +31,20 @@ export function isControlKey(e: KeyboardEvent): boolean {
   return (e.key === 'Enter' || e.key === ' ') && isControlTarget(e.target);
 }
 
+/** R41: a mouse press on a button in this container doesn't give the button focus (and drops
+ *  focus from wherever it was), so Space-to-pan and tool keys work right after the click. The
+ *  click still fires. Keyboard focus (Tab) is unchanged and gets Enter/Space first (#48). */
+export function noMouseFocus(e: {
+  button: number;
+  target: EventTarget;
+  preventDefault(): void;
+}): void {
+  if (e.button !== 0 || !(e.target instanceof Element) || !e.target.closest('button')) return;
+  e.preventDefault();
+  const active = document.activeElement;
+  if (active instanceof HTMLElement && active !== document.body) active.blur();
+}
+
 /** A normalised key chord: `Ctrl+Shift+Z`, `B`, `Shift+[`, `Space`, … (Meta counts as Ctrl). */
 export function chord(e: KeyboardEvent): string {
   const parts: string[] = [];

@@ -4,7 +4,7 @@
 import { useEffect } from 'react';
 
 import { IconCheck, IconCompare, IconStar, IconTrash } from '../../shell/icons';
-import { dispatchShortcut, type ShortcutMap } from './shortcuts';
+import { dispatchShortcut, noMouseFocus, type ShortcutMap } from './shortcuts';
 import { editorStore, useEditor, type PickerCandidate } from './store';
 import { Tip } from './Tip';
 
@@ -59,7 +59,13 @@ export function EditorPicker() {
   if (!picker || picker.candidates.length === 0) return null;
   const { candidates, selectedId, handlers } = picker;
   return (
-    <div className="edt-picker" role="listbox" aria-label="Candidates" data-testid="edt-picker">
+    <div
+      className="edt-picker"
+      role="listbox"
+      onMouseDown={noMouseFocus}
+      aria-label="Candidates"
+      data-testid="edt-picker"
+    >
       {candidates.map((c: PickerCandidate, i) => (
         <div
           key={c.id}
