@@ -42,6 +42,9 @@ function launch(extraEnv) {
     PF_DATA_DIR: join(tmp, 'data'),
     PF_LIBRARY_DIR: library,
     PF_PROVIDER: 'fake',
+    // Its own WebView2 profile: a second launch must not attach to the first one's browser
+    // process (still shutting down, without the debug port), nor touch the real profile.
+    WEBVIEW2_USER_DATA_FOLDER: join(tmp, 'webview2'),
     ...extraEnv,
   };
   console.log(`▶ launching ${exe}`);
@@ -52,8 +55,34 @@ function launch(extraEnv) {
     process.stdout.write(d);
   });
   const exited = new Promise((resolve) => child.on('exit', (code) => resolve(code)));
-  const cleanup = () => rmSync(tmp, { recursive: true, force: true });
+  // WebView2 may hold its profile for a few seconds after the app exits.
+  const cleanup = () => {
+    for (let i = 0; ; i++) {
+      try {
+        rmSync(tmp, { recursive: true, force: true });
+        return;
+      } catch (e) {
+        if (i >= 50) return console.warn(`  could not remove ${tmp}: ${e.message}`);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+      }
+    }
+  };
   return { child, exited, output: () => out, library, cleanup };
+}
+
+/** Command lines of the running WebView2 browser processes (diagnostics for a missing port). */
+function webviewArgs() {
+  const r = spawnSync(
+    'powershell',
+    [
+      '-NoProfile',
+      '-Command',
+      "Get-CimInstance Win32_Process -Filter \"name='msedgewebview2.exe'\" | ? { $_.CommandLine -notlike '*--type=*' } | % { $_.CommandLine }",
+    ],
+    { encoding: 'utf8' },
+  );
+  return `WebView2 browser processes:
+${r.stdout?.trim() || '(none)'}`;
 }
 
 const fail = (msg) => {
@@ -110,7 +139,8 @@ if (process.platform !== 'win32') {
       try {
         browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
       } catch (e) {
-        if (i >= 120) throw e;
+        if (i >= 120) throw new Error(`${e.message}
+${webviewArgs()}`);
         await new Promise((r) => setTimeout(r, 500));
       }
     }

@@ -102,7 +102,7 @@ export function konvaMaskView(
           x: m.rect.x,
           y: m.rect.y,
           opacity: 0.5,
-          name: 'mask',
+          name: 'mask-tint',
           listening: false,
         });
         tiles = maskTiles(m.rect.w, m.rect.h).map((box) => {
@@ -116,7 +116,8 @@ export function konvaMaskView(
               y: box.y0,
               width: canvas.width,
               height: canvas.height,
-              name: 'mask-tile',
+              // Each tile is an Image named "mask" (the e2e contract for the tint).
+              name: 'mask mask-tile',
               listening: false,
               perfectDrawEnabled: false,
             }),
