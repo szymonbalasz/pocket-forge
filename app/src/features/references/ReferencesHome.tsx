@@ -125,6 +125,7 @@ function PacksHome() {
           {s.listError.message}
         </div>
       )}
+      <ListNotices />
       {s.cards && s.cards.length === 0 && (
         <div className="ref-empty" data-testid="ref-home-empty">
           <p>Create a pack, or drop a folder of reference images</p>
@@ -137,7 +138,7 @@ function PacksHome() {
       {s.cards && s.cards.length > 0 && (
         <ul className="ref-grid" data-testid="ref-home-grid">
           {s.cards.map((c) => (
-            <PackCardView key={c.pack_id} card={c} />
+            <PackCardView key={c.id} card={c} />
           ))}
         </ul>
       )}
@@ -157,17 +158,28 @@ function PackCardView({ card }: { card: PackCard }) {
   const [thumbFailed, setThumbFailed] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // No `pack.json` yet (FR-REF-04): listed, but it can't be opened, renamed or deleted until a
+  // later listing adopts it.
+  const id = card.pack_id;
   return (
     <>
       <ContextMenu.Root>
-        <ContextMenu.Trigger asChild>
-          <li className="ref-card" data-testid="ref-home-card" data-record-id={card.pack_id}>
+        <ContextMenu.Trigger asChild disabled={!id}>
+          <li
+            className="ref-card"
+            data-testid="ref-home-card"
+            data-record-id={card.id}
+            title={
+              id ? card.path : `${card.path} (not ready: Pocket Forge couldn’t write pack.json)`
+            }
+          >
             <button
               type="button"
               className="ref-card-body"
-              onClick={() => void refs.open(card.pack_id)}
+              disabled={!id}
+              onClick={() => id && void refs.open(id)}
               onKeyDown={(e) => {
-                if (e.key === 'F2') {
+                if (e.key === 'F2' && id) {
                   e.preventDefault();
                   setRenaming(true);
                 }
@@ -193,9 +205,9 @@ function PackCardView({ card }: { card: PackCard }) {
               <span className="ref-card-line tabular" data-testid="ref-home-card-count">
                 {imagesLabel(card.image_count)}
               </span>
-              {card.notes_line && (
+              {card.notes_first_line && (
                 <span className="ref-card-line" data-testid="ref-home-card-notes">
-                  {card.notes_line}
+                  {card.notes_first_line}
                 </span>
               )}
             </button>
@@ -234,21 +246,55 @@ function PackCardView({ card }: { card: PackCard }) {
           </ContextMenu.Content>
         </ContextMenu.Portal>
       </ContextMenu.Root>
-      <NameDialog
-        open={renaming}
-        title="Rename pack"
-        action="Rename"
-        initial={card.name}
-        onOpenChange={setRenaming}
-        submit={(name) => refs.rename(card.pack_id, name)}
-      />
-      <DeleteDialog
-        open={deleting}
-        name={card.name}
-        onOpenChange={setDeleting}
-        confirm={() => refs.deletePack(card.pack_id)}
-      />
+      {id && (
+        <>
+          <NameDialog
+            open={renaming}
+            title="Rename pack"
+            action="Rename"
+            initial={card.name}
+            onOpenChange={setRenaming}
+            submit={(name) => refs.rename(id, name)}
+          />
+          <DeleteDialog
+            open={deleting}
+            name={card.name}
+            onOpenChange={setDeleting}
+            confirm={() => refs.deletePack(id)}
+          />
+        </>
+      )}
     </>
+  );
+}
+
+/** What the last listing did (adopted a folder, gave a copied pack a new id, resolved a
+ *  `pack.json` conflict, FR-REF-04, 05, 28), from the cards' `notices[]`. */
+function ListNotices() {
+  const { cards, noticesSeen } = useRefs();
+  const notices = (cards ?? []).flatMap((c) =>
+    c.notices.map((n) => ({ ...n, id: `${c.id}:${n.code}:${n.message}` })),
+  );
+  const shown = notices.filter((n) => !noticesSeen.includes(n.id));
+  if (!shown.length) return null;
+  return (
+    <div className="banner banner-warning" role="status" data-testid="ref-home-notices">
+      <ul className="ref-trash">
+        {shown.map((n) => (
+          <li key={n.id} data-testid="ref-home-notice" data-code={n.code}>
+            {n.message}
+          </li>
+        ))}
+      </ul>
+      <span className="pf-spacer" />
+      <button
+        type="button"
+        className="link"
+        onClick={() => refs.dismissNotices(shown.map((n) => n.id))}
+      >
+        Dismiss
+      </button>
+    </div>
   );
 }
 
@@ -264,11 +310,11 @@ function TrashList() {
           <li key={t.id} data-testid="ref-trash-item" data-record-id={t.id} data-kind={t.kind}>
             <span>
               {t.kind === 'pack'
-                ? folderName(t.from)
-                : `${imagesLabel(t.files.length)} from ${folderName(t.from)}`}
+                ? t.pack_name
+                : `${imagesLabel(t.files.length)} from ${t.pack_name}`}
             </span>
-            <span className="ref-meta tabular" title={t.trashed_at}>
-              {t.trashed_at.slice(0, 10)}
+            <span className="ref-meta tabular" title={`Deleted ${t.trashed_at}`}>
+              until {t.purge_at.slice(0, 10)}
             </span>
             <button
               type="button"

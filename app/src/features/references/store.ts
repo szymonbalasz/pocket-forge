@@ -13,7 +13,7 @@ import {
   type RefTrashItem,
 } from '../../api';
 import { errorOf } from '../../store/project';
-import { folderName, isImagePath, nextFreeName } from './format';
+import { folderName, isImagePath } from './format';
 
 export interface UiError {
   code: string;
@@ -36,6 +36,8 @@ export interface RefsState {
   summary: { pack: string; items: PackAddItem[] } | null;
   /** The last failed action (rename, delete, …), shown as a banner. */
   error: UiError | null;
+  /** Card notices the user dismissed (by `<card id>:<code>:<message>`). */
+  noticesSeen: string[];
 }
 
 const initial: RefsState = {
@@ -48,6 +50,7 @@ const initial: RefsState = {
   adding: null,
   summary: null,
   error: null,
+  noticesSeen: [],
 };
 
 let state: RefsState = initial;
@@ -172,28 +175,16 @@ export const refs = {
       return;
     }
     for (const folder of folders) {
-      const base = folderName(folder);
-      const names = new Set((state.cards ?? []).map((c) => c.name.toLowerCase()));
-      let name = nextFreeName(base, names);
       set({ adding: { done: 0, total: 0 } });
-      for (let tries = 0; tries < 20; tries++) {
-        try {
-          const r = await api.references.create(name, [folder]);
-          set({ summary: { pack: r.pack.name, items: r.items }, error: null });
-          break;
-        } catch (e) {
-          const err = errorOf(e);
-          if (err.code !== 'name_taken') {
-            set({ error: err });
-            break;
-          }
-          names.add(name.toLowerCase());
-          name = nextFreeName(base, names);
-        }
+      try {
+        const r = await api.references.create(folderName(folder), [folder], true);
+        set({ summary: { pack: r.pack.name, items: r.items }, error: null });
+      } catch (e) {
+        set({ error: errorOf(e) });
       }
       set({ adding: null });
-      await refs.refreshList();
     }
+    await refs.refreshList();
   },
 
   /** Rename (FR-REF-10). Returns the field error to show, or null. */
@@ -231,8 +222,9 @@ export const refs = {
     set({ adding: { done: 0, total: paths.length }, summary: null });
     const r = await attempt(() => api.references.addImages(id, paths));
     set({ adding: null });
-    if (r) set({ summary: { pack: state.pack?.name ?? '', items: r.items } });
-    await refs.refreshPack();
+    if (r && state.openId === id)
+      set({ pack: r.pack, summary: { pack: r.pack.name, items: r.items } });
+    else await refs.refreshPack();
     void refs.refreshList();
   },
 
@@ -256,6 +248,10 @@ export const refs = {
   /** Restore from Recently deleted (FR-REF-12). */
   async restore(itemId: string): Promise<void> {
     if (await attempt(() => api.references.trashRestore(itemId))) await refs.refresh();
+  },
+
+  dismissNotices(ids: string[]): void {
+    set({ noticesSeen: [...state.noticesSeen, ...ids] });
   },
 
   dismissSummary(): void {

@@ -19,15 +19,6 @@ export function folderName(path: string): string {
   );
 }
 
-/** `name`, or `name (2)`, `name (3)`, … — the first one not in `taken` (lower case). */
-export function nextFreeName(name: string, taken: Set<string>): string {
-  if (!taken.has(name.toLowerCase())) return name;
-  for (let n = 2; ; n++) {
-    const next = `${name} (${n})`;
-    if (!taken.has(next.toLowerCase())) return next;
-  }
-}
-
 /** The absolute paths in pasted text (Explorer's "Copy as path", `file://` URIs), or []. */
 export function parsePastedPaths(text: string): string[] {
   const paths = text
@@ -96,12 +87,17 @@ export function roleLabel(role: RefRole | null | undefined): string {
 
 // ── References block (FR-REF-15..19) ─────────────────────────────────────────────────────────
 
-/** The slot an item counts against: the slot with its role, else the first (FR-REF-17). */
+/** The slot an item counts against: the core's `slot`, else the slot with its role, else the
+ *  first (FR-REF-17). */
 export function slotOf(
   slots: readonly RefSlot[],
-  item: Pick<RefItem, 'role'>,
+  item: Pick<RefItem, 'role'> & { slot?: string },
 ): RefSlot | undefined {
-  return slots.find((s) => s.role === (item.role ?? null)) ?? slots[0];
+  return (
+    slots.find((s) => s.name === item.slot) ??
+    slots.find((s) => s.role !== null && s.role === (item.role ?? null)) ??
+    slots[0]
+  );
 }
 
 /** FR-REF-19: `none` one slot without a role · `label` one slot with a role · `select` several. */
@@ -122,7 +118,7 @@ export function slotName(slot: RefSlot): string {
 
 /** Items that can be ticked at all (corrupt or missing ones can't, §11). */
 export function tickable(item: RefItem): boolean {
-  return item.state === 'ok' || item.state === 'cloud_only';
+  return item.checkable;
 }
 
 /** FR-REF-18: ticking is refused at the slot's max ("limit N reached"); null = allowed. */

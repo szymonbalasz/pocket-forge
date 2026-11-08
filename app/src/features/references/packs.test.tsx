@@ -160,8 +160,9 @@ test('FR-REF-07 dropping a folder on the packs home creates one pack named after
   await drop(['D:/art/Weapons']);
   await waitFor(() => expect(cardNames()).toContain('Weapons (2)'));
   expect(core.calls.filter((c) => c.cmd === 'ref_pack_create').at(-1)?.input).toEqual({
-    name: 'Weapons (2)',
+    name: 'Weapons',
     paths: ['D:/art/Weapons'],
+    suffix_if_taken: true,
   });
 });
 
@@ -380,4 +381,57 @@ test('FR-REF-29 a failed command leaves the pack as it was and shows the error',
   );
   expect((await screen.findByTestId('ref-error')).dataset.code).toBe('locked');
   expect(images()).toHaveLength(3);
+});
+
+test('FR-REF-04 a folder without pack.json is listed as not ready and cannot be opened', async () => {
+  setup({
+    packs: [
+      ...sampleRefSeed().packs,
+      { name: 'Loose', images: [{ file: 'x.png' }], notReady: true },
+    ],
+  });
+  await waitFor(() => expect(cards()).toHaveLength(3));
+  const loose = card('Loose');
+  expect(loose.dataset.recordId).toBe('C:/pf-mock/library/References/Loose');
+  expect(within(loose).getByTestId('ref-home-card-badge').dataset.badge).toBe('not_ready');
+  const open = within(loose).getByRole('button') as HTMLButtonElement;
+  expect(open.disabled).toBe(true);
+  fireEvent.click(open);
+  expect(core.names()).not.toContain('ref_pack_get');
+});
+
+test('FR-REF-05 FR-REF-28 what a listing did is shown from the cards’ notices and can be dismissed', async () => {
+  setup({
+    packs: [
+      {
+        ...sampleRefSeed().packs[0]!,
+        notices: [
+          {
+            code: 'conflict_resolved',
+            message: 'Weapons had a sync conflict; the newer version was kept',
+          },
+        ],
+      },
+    ],
+  });
+  const notice = await screen.findByTestId('ref-home-notice');
+  expect(notice.dataset.code).toBe('conflict_resolved');
+  fireEvent.click(within(screen.getByTestId('ref-home-notices')).getByRole('button'));
+  expect(screen.queryByTestId('ref-home-notices')).toBeNull();
+});
+
+test('FR-REF-12 Recently deleted shows the pack name and the purge date', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  fireEvent.contextMenu(card('armour'));
+  fireEvent.click(await screen.findByTestId('ref-home-card-delete'));
+  fireEvent.click(await screen.findByTestId('ref-dialog-delete-confirm'));
+  const row = await screen.findByTestId('ref-trash-item');
+  expect(row.textContent).toContain('armour');
+  expect(row.textContent).toContain('until 2026-12-08');
+  fireEvent.click(within(row).getByTestId('ref-trash-restore'));
+  await waitFor(() => expect(cardNames()).toEqual(['armour', 'Weapons']));
+  expect(core.calls.find((c) => c.cmd === 'ref_trash_restore')?.input).toEqual({
+    id: expect.stringMatching(/^01JMOCKTRASH/),
+  });
 });

@@ -49,14 +49,9 @@ function set(patch: Partial<BlockState>): void {
   for (const l of listeners) l();
 }
 
-/** The selection as the draft stores it, from the last resolve. */
+/** The selection as the draft stores it: the user's latest, else the core's reconciled one. */
 function current(): DraftReferences {
-  const packs = state.refs?.packs ?? [];
-  if (!state.resolved) return { packs, items: state.refs?.items ?? [] };
-  return {
-    packs,
-    items: state.resolved.items.map((i) => ({ key: i.key, on: i.on, role: i.role ?? null })),
-  };
+  return state.refs ?? state.resolved?.references ?? { packs: [], items: [] };
 }
 
 let watching = false;
@@ -76,12 +71,10 @@ async function resolve(): Promise<void> {
   try {
     const r = await api.references.resolve(modelId, state.refs);
     if (t !== token) return;
-    // Keep the selection in step with what the core reconciled (FR-REF-17), so a later model
-    // change starts from what the user sees.
-    const refs = state.refs && {
-      packs: state.refs.packs,
-      items: r.items.map((i) => ({ key: i.key, on: i.on, role: i.role ?? null })),
-    };
+    // Keep the selection in step with what the core reconciled (FR-REF-17: kept ticks, new
+    // defaults, a renamed pack's new id, missing items kept for Retry). While the draft has no
+    // selection (null), REF's defaults apply and nothing is written.
+    const refs = state.refs && r.references;
     set({ resolved: r, refs, loading: false, error: null, notices: r.notices });
   } catch (e) {
     if (t !== token) return;
@@ -154,11 +147,13 @@ export const block = {
     edit({ ...base, items: base.items.map((i) => (i.key === key ? { ...i, role } : i)) });
   },
 
-  /** + Pack: picked packs keep pick order (FR-REF-16). */
-  pickPack(pack: { pack_id: string; name: string }): void {
+  /** + Pack: picked packs keep pick order (FR-REF-16). A pack without an id can't be picked. */
+  pickPack(pack: { pack_id: string | null; name: string }): void {
+    const id = pack.pack_id;
+    if (!id) return;
     const base = current();
-    if (base.packs.some((p) => p.pack_id === pack.pack_id)) return;
-    edit({ ...base, packs: [...base.packs, { pack_id: pack.pack_id, name: pack.name }] });
+    if (base.packs.some((p) => p.pack_id === id)) return;
+    edit({ ...base, packs: [...base.packs, { pack_id: id, name: pack.name }] });
   },
 
   /** × on a pack group: its items leave the selection. */
@@ -205,8 +200,9 @@ export function referencesDraft(): { references?: DraftReferences } {
 
 /** FR-REF-18 `references_required(slot, min)`: why submit is disabled, or null. */
 export function referencesBlocker(): string | null {
-  if (!state.modelId || !state.resolved) return null;
-  const under = underMin(state.resolved.slots);
+  const r = state.resolved;
+  if (!state.modelId || !r || !r.visible || r.ready) return null;
+  const under = underMin(r.slots);
   if (!under.length) return null;
   return `References: ${under.map((s) => `${slotName(s)} needs at least ${s.min}`).join(', ')}.`;
 }

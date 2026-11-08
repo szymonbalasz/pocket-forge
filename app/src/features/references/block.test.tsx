@@ -323,3 +323,29 @@ test('FR-REF-15 the empty state says where references come from; a resolve error
   setup({ modelId: 'fake-unknown' });
   expect((await screen.findByTestId('ref-block-error')).dataset.code).toBe('unknown_model');
 });
+
+test('FR-REF-26 a picked pack that is gone keeps its items as missing, unticked, with a notice', async () => {
+  const draft: DraftReferences = {
+    packs: [{ pack_id: '01JMOCKPACKGONE00000000000', name: 'Gone' }],
+    items: [{ key: 'pack:01JMOCKPACKGONE00000000000:old.png', on: true, role: null }],
+  };
+  setup({ modelId: 'fake-one', draft });
+  await waitFor(() => expect(items()).toHaveLength(3));
+  const gone = item('pack:01JMOCKPACKGONE00000000000:old.png');
+  expect(gone.dataset.on).toBe('false');
+  expect(within(gone).getByTestId('ref-block-item-badge').dataset.badge).toBe('missing');
+  expect(check('pack:01JMOCKPACKGONE00000000000:old.png').disabled).toBe(true);
+  expect(screen.getAllByTestId('ref-block-notice').map((n) => n.dataset.code)).toContain(
+    'pack_unavailable',
+  );
+  // The missing item stays in the draft, so a restored pack resolves again.
+  expect(referencesDraft().references?.items.map((i) => i.key)).toContain(
+    'pack:01JMOCKPACKGONE00000000000:old.png',
+  );
+});
+
+test('FR-REF-27 the core’s read_only flag disables the block too', async () => {
+  setup({ modelId: 'fake-one' }, { readOnly: true });
+  await waitFor(() => expect(items()).toHaveLength(2));
+  expect(check('project:Mood-a.jpg').disabled).toBe(true);
+});

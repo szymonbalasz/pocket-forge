@@ -54,9 +54,12 @@ export function ReferencesBlock(props: ReferencesBlockProps) {
   return <BlockView readOnly={props.readOnly} />;
 }
 
-function BlockView({ readOnly }: { readOnly: boolean }) {
+function BlockView({ readOnly: projectReadOnly }: { readOnly: boolean }) {
   const s = useBlock();
   const r = s.resolved;
+  // The core hides the block for a model without slots too (FR-REF-15).
+  if (r && !r.visible) return null;
+  const readOnly = projectReadOnly || !!r?.read_only;
   return (
     <div
       className="rgn-section ref-block"
@@ -298,20 +301,21 @@ function PackPicker({ disabled }: { disabled: boolean }) {
             <p className="muted small">No packs yet. Create one under References in the rail.</p>
           )}
           {packs?.map((p) => {
-            const notReady = p.badges.includes('not_ready');
-            const on = picked.has(p.pack_id);
+            const id = p.pack_id;
+            const notReady = !id || p.badges.includes('not_ready');
+            const on = !!id && picked.has(id);
             return (
               <label
-                key={p.pack_id}
+                key={p.id}
                 data-testid="ref-block-pack-option"
-                data-record-id={p.pack_id}
+                data-record-id={p.id}
                 data-disabled={notReady && !on ? 'true' : undefined}
               >
                 <input
                   type="checkbox"
                   checked={on}
                   disabled={notReady && !on}
-                  onChange={() => (on ? block.unpickPack(p.pack_id) : block.pickPack(p))}
+                  onChange={() => (on && id ? block.unpickPack(id) : block.pickPack(p))}
                 />
                 <span>{p.name}</span>
                 <span className="pf-spacer" />

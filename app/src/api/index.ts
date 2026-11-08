@@ -230,8 +230,12 @@ export const api = {
   references: {
     listPacks: () => call('ref_list_packs', {}),
     getPack: (packId: string) => call('ref_pack_get', { pack_id: packId }),
-    create: (name: string, paths?: string[]) =>
-      call('ref_pack_create', paths?.length ? { name, paths } : { name }),
+    create: (name: string, paths?: string[], suffixIfTaken = false) =>
+      call('ref_pack_create', {
+        name,
+        ...(paths?.length ? { paths } : {}),
+        ...(suffixIfTaken ? { suffix_if_taken: true } : {}),
+      }),
     rename: (packId: string, name: string) => call('ref_pack_rename', { pack_id: packId, name }),
     update: (packId: string, patch: { notes?: string; roles?: Record<string, RefRole | null> }) =>
       call('ref_pack_update', { pack_id: packId, ...patch }),
@@ -241,7 +245,7 @@ export const api = {
       call('ref_pack_remove_images', { pack_id: packId, files }),
     delete: (packId: string) => call('ref_pack_delete', { pack_id: packId }),
     trashList: () => call('ref_trash_list', {}),
-    trashRestore: (itemId: string) => call('ref_trash_restore', { item_id: itemId }),
+    trashRestore: (itemId: string) => call('ref_trash_restore', { id: itemId }),
     resolve: (modelId: string, references: DraftReferences | null) =>
       call('ref_resolve', { model_id: modelId, references }),
   },

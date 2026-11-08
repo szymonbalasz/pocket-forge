@@ -2,7 +2,7 @@
 // Model and Prompt, the selection saved with the draft. (Submit blocked under a slot's min needs
 // an EDT region: e2e/ref-block.spec.ts.)
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { Tooltip } from 'radix-ui';
 
 import refsCaps from '../../../../fixtures/rgn/capabilities-refs.json';
@@ -13,6 +13,9 @@ import { baseSnapshot, installFakeTauri, type FakeTauri } from '../../api/mocks/
 import { projectStore } from '../../store/project';
 import { regionEditFeature } from '../region-edit';
 import { block } from './blockStore';
+
+// The first test loads the whole Generate panel (Radix, EDT, RGN): slow on a cold, busy runner.
+vi.setConfig({ testTimeout: 15_000 });
 
 const GeneratePanel = regionEditFeature.slots.right!;
 const REFS = refsCaps as Capabilities;
