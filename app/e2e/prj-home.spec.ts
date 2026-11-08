@@ -202,13 +202,13 @@ test('R40 the provider chip is a status-bar segment next to the PRJ save state; 
 }) => {
   await openFirstCard(page);
   await expect(
-    page.locator('[data-segment="provider:chip"]').getByTestId('prv-header-chip'),
+    page.locator('[data-segment="provider:chip"]').getByTestId('prv-status-chip'),
   ).toBeVisible();
   await expect(
     page.locator('[data-segment="project:save"]').getByTestId('prj-status-save'),
   ).toBeVisible();
   await expect(page.getByTestId('prv-status-mode')).toHaveCount(0);
-  await expect(page.getByTestId('app-slot-rail').getByTestId('prv-header-chip')).toHaveCount(0);
+  await expect(page.getByTestId('app-slot-rail').getByTestId('prv-status-chip')).toHaveCount(0);
 });
 
 test('FR-PRJ-03 #53 + New uses the native image dialog when it is available', async ({ page }) => {

@@ -22,7 +22,7 @@ export function ProviderChip() {
         <button
           type="button"
           className={`prv-chip prv-chip-${chip.state}`}
-          data-testid="prv-header-chip"
+          data-testid="prv-status-chip"
           data-state={chip.state}
           title={chip.linksToSettings ? 'Open the provider settings' : 'Generation provider'}
           onClick={() => providerStore.openSettings()}
