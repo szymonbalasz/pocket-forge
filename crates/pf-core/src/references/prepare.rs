@@ -9,12 +9,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
-use pf_provider::{Capabilities, ReferenceRole};
+use pf_provider::{Capabilities, ReferenceImage, ReferenceRole};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use ulid::Ulid;
 
-use super::resolve::{self, DraftReferences, Notice, ProbeCache, SlotLimits, Source};
+use super::resolve::{self, DraftReferences, Notice, ProbeCache, Slot, Source};
 use super::*;
 
 /// Long-side cap for sent references (OQ-REF-04 A).
@@ -51,8 +51,8 @@ pub struct JobReference {
     pub sent: SentInfo,
 }
 
-/// A reference ready for `JobRequest.references` (FR-PRV-33: `{slot, role?, bytes, hash}`)
-/// plus its job row.
+/// A reference ready for `JobRequest.references` ([`SentReference::to_provider`]) plus its
+/// job row.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SentReference {
     pub key: String,
@@ -73,7 +73,24 @@ pub struct Prepared {
     pub notices: Vec<Notice>,
 }
 
+impl SentReference {
+    /// The PRV request form (FR-PRV-33, R49).
+    pub fn to_provider(&self) -> ReferenceImage {
+        ReferenceImage {
+            slot: self.slot.clone(),
+            role: self.role,
+            bytes: self.bytes.as_ref().clone(),
+            hash: self.hash.clone(),
+        }
+    }
+}
+
 impl Prepared {
+    /// `JobRequest.references`, in request order (FR-PRV-33).
+    pub fn provider_references(&self) -> Vec<ReferenceImage> {
+        self.sent.iter().map(SentReference::to_provider).collect()
+    }
+
     /// The job's `references[]` (FR-REF-25).
     pub fn rows(&self) -> Vec<JobReference> {
         self.sent.iter().map(|s| s.row.clone()).collect()
@@ -82,7 +99,7 @@ impl Prepared {
 
 /// FR-REF-24: the ordered `(slot, sent hash)` list of cost-affecting slots, for the estimate
 /// id. References in other slots never change it.
-pub fn estimate_inputs(sent: &[SentReference], slots: &[SlotLimits]) -> Vec<(String, String)> {
+pub fn estimate_inputs(sent: &[SentReference], slots: &[Slot]) -> Vec<(String, String)> {
     sent.iter()
         .filter(|s| slots.iter().any(|l| l.name == s.slot && l.cost_affecting))
         .map(|s| (s.slot.clone(), s.hash.clone()))
@@ -209,7 +226,7 @@ fn unavailable(key: &str, reason: UnavailableReason) -> CoreError {
     .with_detail(serde_json::json!({ "key": key, "reason": reason }))
 }
 
-fn required(slot: &SlotLimits) -> CoreError {
+fn required(slot: &Slot) -> CoreError {
     CoreError::new(
         ErrorCode::ReferencesRequired,
         format!("{} needs at least {} reference(s)", slot.name, slot.min),
@@ -217,7 +234,7 @@ fn required(slot: &SlotLimits) -> CoreError {
     .with_detail(serde_json::json!({ "slot": slot.name, "min": slot.min }))
 }
 
-fn too_many(slot: &SlotLimits) -> CoreError {
+fn too_many(slot: &Slot) -> CoreError {
     CoreError::new(
         ErrorCode::TooManyReferences,
         format!("{} takes at most {} reference(s)", slot.name, slot.max),
@@ -285,7 +302,7 @@ pub fn prepare(
     session: &RefSession,
     settings: &Settings,
     project_dir: &Path,
-    slots: &[SlotLimits],
+    slots: &[Slot],
     max_side: u32,
     max_bytes: u64,
     refs: Option<&DraftReferences>,
@@ -428,10 +445,16 @@ pub fn prepare_for_send(
             .ok_or_else(|| CoreError::new(ErrorCode::NoProject, "no asset project is open"))?;
         (dir, st.settings.clone())
     };
-    let slots = resolve::slot_limits(caps);
     let (side, bytes) = send_limits(caps);
     prepare(
-        &core.ctx, &core.refs, &settings, &dir, &slots, side, bytes, refs,
+        &core.ctx,
+        &core.refs,
+        &settings,
+        &dir,
+        &caps.slots,
+        side,
+        bytes,
+        refs,
     )
 }
 

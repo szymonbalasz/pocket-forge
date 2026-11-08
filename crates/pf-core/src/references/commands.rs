@@ -454,13 +454,12 @@ impl Command for RefResolve {
             (p.dir.clone(), p.read_only.is_some(), st.settings.clone())
         };
         let caps = crate::region_edit::commands::capabilities(core, &input.model_id)?;
-        let slots = resolve::slot_limits(&caps);
         let mut out = resolve::resolve(
             &core.ctx,
             &settings,
             &core.refs.probes,
             &dir,
-            &slots,
+            &caps.slots,
             input.references.as_ref(),
         );
         resolve::mark_duplicates(&mut out.items, |p| core.refs.prepared.content_hash_of(p));

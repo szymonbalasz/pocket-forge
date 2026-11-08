@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use pf_provider::{Capabilities, ReferenceRole};
+use pf_provider::ReferenceRole;
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -15,40 +15,12 @@ use super::*;
 
 // ---------------------------------------------------------------- slots
 
-/// A reference slot with its limits (FR-PRV-31): `name`, `role`, `min`–`max`, `cost_affecting`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct SlotLimits {
-    pub name: String,
-    pub role: Option<ReferenceRole>,
-    pub min: u32,
-    pub max: u32,
-    pub cost_affecting: bool,
-}
-
-/// The model's reference slots with their limits.
-///
-/// Local adapter until PRV's FR-PRV-31 fields (`min`, `max`, `cost_affecting` on `Slot`) are on
-/// `main`: today's `Slot` has `required` only, so `min` = 1 if required else 0, `max` = 1 (the
-/// FR-PRV-31 fallback), and `cost_affecting` comes from the control of the same name. When PRV
-/// lands, read the fields here; nothing else changes.
-pub fn slot_limits(caps: &Capabilities) -> Vec<SlotLimits> {
-    caps.slots
-        .iter()
-        .map(|s| SlotLimits {
-            name: s.name.clone(),
-            role: s.role,
-            min: u32::from(s.required),
-            max: 1,
-            cost_affecting: caps
-                .controls
-                .iter()
-                .any(|c| c.name == s.name && c.cost_affecting),
-        })
-        .collect()
-}
+/// A model's reference slot with its limits (FR-PRV-31, R49): `name`, `role`, `min`–`max`,
+/// `cost_affecting`, `array`.
+pub use pf_provider::Slot;
 
 /// The slot an item with `role` goes to: the slot with that role, else the first.
-fn slot_index(slots: &[SlotLimits], role: Option<ReferenceRole>) -> usize {
+fn slot_index(slots: &[Slot], role: Option<ReferenceRole>) -> usize {
     role.and_then(|r| slots.iter().position(|s| s.role == Some(r)))
         .unwrap_or(0)
 }
@@ -56,7 +28,7 @@ fn slot_index(slots: &[SlotLimits], role: Option<ReferenceRole>) -> usize {
 /// The item's role: kept if the model has a slot for it, else its pack role if the model has a
 /// slot for that, else the first slot's role (FR-REF-17).
 fn pick_role(
-    slots: &[SlotLimits],
+    slots: &[Slot],
     kept: Option<ReferenceRole>,
     pack_role: Option<ReferenceRole>,
 ) -> Option<ReferenceRole> {
@@ -339,7 +311,7 @@ pub struct Resolved {
 
 /// FR-REF-17 … 19, pure. `prev` = the draft's `references` (`None` = defaults).
 pub fn reconcile(
-    slots: &[SlotLimits],
+    slots: &[Slot],
     available: &[Available],
     picked: &[PickedPack],
     prev: Option<&DraftReferences>,
@@ -583,7 +555,7 @@ pub fn resolve(
     settings: &Settings,
     probes: &ProbeCache,
     project_dir: &Path,
-    slots: &[SlotLimits],
+    slots: &[Slot],
     prev: Option<&DraftReferences>,
 ) -> Resolved {
     let picked = find_picked(ctx, settings, prev.map_or(&[][..], |p| &p.packs));

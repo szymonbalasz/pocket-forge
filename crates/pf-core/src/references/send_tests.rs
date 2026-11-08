@@ -4,34 +4,35 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
-use pf_provider::ReferenceRole;
+use pf_provider::{Provider, ReferenceRole};
 use serde_json::json;
 
 use super::packs;
 use super::prepare::{self, RefSession, SENT_MAX_SIDE, estimate_inputs};
-use super::resolve::{self, DraftItem, DraftPack, DraftReferences, ItemState, SlotLimits, Source};
+use super::resolve::{self, DraftItem, DraftPack, DraftReferences, ItemState, Slot, Source};
 use super::*;
 use crate::test_support::{Env, env, png_bytes};
 
-fn slot(name: &str, role: Option<ReferenceRole>, min: u32, max: u32, cost: bool) -> SlotLimits {
-    SlotLimits {
+fn slot(name: &str, role: Option<ReferenceRole>, min: u32, max: u32, cost: bool) -> Slot {
+    Slot {
         name: name.into(),
         role,
         min,
         max,
         cost_affecting: cost,
+        array: max > 1,
     }
 }
 
 /// Like `fixtures/rgn/capabilities-refs.json`: style ≤ 2 cost-affecting, identity ≤ 1.
-fn style_identity() -> Vec<SlotLimits> {
+fn style_identity() -> Vec<Slot> {
     vec![
         slot("style_refs", Some(ReferenceRole::Style), 0, 2, true),
         slot("identity_ref", Some(ReferenceRole::Identity), 0, 1, false),
     ]
 }
 
-fn one_slot(max: u32) -> Vec<SlotLimits> {
+fn one_slot(max: u32) -> Vec<Slot> {
     vec![slot("style_refs", None, 0, max, false)]
 }
 
@@ -69,7 +70,7 @@ fn resolve(
     e: &Env,
     s: &RefSession,
     dir: &Path,
-    slots: &[SlotLimits],
+    slots: &[Slot],
     prev: Option<&DraftReferences>,
 ) -> resolve::Resolved {
     resolve::resolve(&e.ctx, &e.settings, &s.probes, dir, slots, prev)
@@ -87,7 +88,7 @@ fn prep(
     e: &Env,
     s: &RefSession,
     dir: &Path,
-    slots: &[SlotLimits],
+    slots: &[Slot],
     prev: Option<&DraftReferences>,
 ) -> CoreResult<prepare::Prepared> {
     prepare::prepare(
@@ -576,4 +577,127 @@ fn fr_ref_29_ref_resolve_command() {
         .dispatch("ref_resolve", json!({"model_id": " "}))
         .unwrap_err();
     assert_eq!(err.field.as_deref(), Some("model_id"));
+}
+
+fn png_of(img: image::DynamicImage) -> Vec<u8> {
+    let mut out = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .unwrap();
+    out
+}
+
+/// The loop with the fake provider (§13): resolve against the fake's real slots, prepare, and
+/// check the fake received exactly the sent hashes, with the cost-affecting refs in its estimate.
+#[test]
+fn fr_ref_21_fr_ref_24_fake_provider_receives_the_sent_hashes() {
+    let e = env();
+    let dir = project_with_refs(&e, &[("a.png", swatch(1)), ("b.png", swatch(2))]);
+    let p = pack(&e, "Faces", &[("face.png", swatch(3))]);
+    packs::update(
+        &e.ctx,
+        &p,
+        None,
+        &BTreeMap::from([("face.png".to_owned(), Some(ReferenceRole::Identity))]),
+    )
+    .unwrap();
+    let mut ctx = crate::context::Context::deterministic(
+        e.dir.path().join("data2"),
+        crate::time::Timestamp(0),
+    );
+    ctx.library_override = Some(e.lib());
+    let core = crate::Core::new(ctx).unwrap();
+    core.dispatch("project_open", json!({"path": dir})).unwrap();
+    let draft = json!({"packs": [{"pack_id": p.json.pack_id, "name": "Faces"}], "items": []});
+
+    // fake-alpha-edit has no slots: the block is hidden.
+    let hidden = core
+        .dispatch(
+            "ref_resolve",
+            json!({"model_id": "fake-alpha-edit", "references": draft}),
+        )
+        .unwrap();
+    assert_eq!(hidden["visible"], false);
+
+    let r = core
+        .dispatch(
+            "ref_resolve",
+            json!({"model_id": "fake-black-edit", "references": draft}),
+        )
+        .unwrap();
+    assert_eq!(r["visible"], true);
+    let slots: Vec<(&str, u64, bool)> = r["slots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| {
+            (
+                s["name"].as_str().unwrap(),
+                s["max"].as_u64().unwrap(),
+                s["cost_affecting"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(slots, [("style_refs", 2, true), ("identity_ref", 1, false)]);
+    let face = r["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["file"] == "face.png")
+        .unwrap();
+    assert_eq!(
+        (face["slot"].as_str(), face["on"].as_bool()),
+        (Some("identity_ref"), Some(true))
+    );
+    assert!(face["thumb_url"].as_str().unwrap().contains("/i/l-"));
+
+    let fake = core.ctx.provider.as_fake().unwrap();
+    let caps =
+        pf_provider::block_on(core.ctx.provider.get_capabilities("fake-black-edit")).unwrap();
+    let refs: DraftReferences = serde_json::from_value(r["references"].clone()).unwrap();
+    let prepared = super::prepare_for_send(&core, &caps, Some(&refs)).unwrap();
+    assert_eq!(prepared.sent.len(), 3);
+    let region = png_of(image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+        64,
+        64,
+        image::Rgb([90, 90, 90]),
+    )));
+    let mask = png_of(image::DynamicImage::ImageLuma8(image::GrayImage::from_fn(
+        64,
+        64,
+        |x, _| image::Luma([if x < 32 { 255 } else { 0 }]),
+    )));
+    let request = |references| pf_provider::JobRequest {
+        operation: pf_provider::Operation::EditMasked,
+        model_id: "fake-black-edit".into(),
+        final_prompt: "a mossy flagstone".into(),
+        controls: Default::default(),
+        references,
+        region_png: region.clone(),
+        mask_png: mask.clone(),
+        candidate_count: 3,
+        seed: Some(7),
+    };
+    let with = pf_provider::block_on(
+        core.ctx
+            .provider
+            .estimate(&request(prepared.provider_references())),
+    )
+    .unwrap();
+    let sent: Vec<(String, String)> = prepared
+        .sent
+        .iter()
+        .map(|s| (s.slot.clone(), s.hash.clone()))
+        .collect();
+    assert_eq!(fake.last_reference_hashes(), sent);
+    let without = pf_provider::block_on(core.ctx.provider.estimate(&request(vec![]))).unwrap();
+    let units = |e: &pf_provider::Estimate| match e.cost.amount {
+        pf_provider::CostAmount::Known(v) => v,
+        pf_provider::CostAmount::Unknown => f64::NAN,
+    };
+    assert_eq!(
+        units(&with) - units(&without),
+        2.0,
+        "+1 per style ref, identity free"
+    );
+    assert_eq!(estimate_inputs(&prepared.sent, &caps.slots).len(), 2);
 }
