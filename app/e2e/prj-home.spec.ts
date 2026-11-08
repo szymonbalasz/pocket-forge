@@ -45,6 +45,8 @@ test('FR-PRJ-49 section switching: the rail picks the section; Items is empty; t
 }) => {
   await expect(cards(page)).toHaveCount(2);
   await expect(page.getByTestId('prj-rail-maps')).toHaveAttribute('aria-current', 'page');
+  // ui-guidelines (BL-15): nothing to generate or export on Home, so the right panel collapses.
+  await expect(page.getByTestId('app-slot-right')).toBeHidden();
   await expect(page.getByTestId('prj-home-card-name')).toHaveText(['grid-map', 'Crypt']);
 
   await page.getByTestId('prj-rail-tokens').click();
@@ -59,8 +61,10 @@ test('FR-PRJ-49 section switching: the rail picks the section; Items is empty; t
   await openFirstCard(page);
   await expect(page.getByTestId('edt-canvas-stage')).toHaveAttribute('data-image-loaded', 'true');
   await expect(page.getByTestId('prj-home-dropzone')).toHaveCount(0);
+  await expect(page.getByTestId('app-slot-right')).toBeVisible();
   await page.getByTestId('prj-rail-tokens').click();
   await expect(page.getByTestId('prj-home-card-name')).toHaveText(['Goblin']);
+  await expect(page.getByTestId('app-slot-right')).toBeHidden();
   await expect(page.getByTestId('edt-canvas-stage')).toHaveCount(0);
   const names = (await calls(page)).map((c) => c.cmd);
   expect(names).toContain('project_close');
