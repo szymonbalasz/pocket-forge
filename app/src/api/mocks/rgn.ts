@@ -562,6 +562,8 @@ export function installRgnMock(seed: RgnMockSeed): void {
       return rows.reverse();
     },
     project_put_draft: (input: Rec) => {
+      const f = failOnce('project_put_draft');
+      if (f) return f;
       if (snap.read_only) return fail('read_only', 'The project is read-only.');
       snap.draft = { ...(snap.draft as Rec), ...(input.draft as Rec) };
       return { seq: s.nextId++ };

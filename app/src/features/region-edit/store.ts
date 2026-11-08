@@ -26,6 +26,7 @@ import {
   type RgnPreview,
   type Spend,
 } from '../../api';
+import { projectStore } from '../../store/project';
 import {
   editorBridge,
   pushUndo,
@@ -303,7 +304,8 @@ function saveDraftSoon(): void {
         region: s.inner ? { inner: s.inner, margin: s.margin } : null,
         ...referencesDraft(), // REF's selection (FR-REF-20)
       })
-      .catch(() => undefined); // PRJ surfaces save problems; the next change retries.
+      // Shown in the save segment (walk D3); the next change saves again.
+      .catch((e) => projectStore.draftSaveFailed(uiError(e)));
   }, DRAFT_SAVE_MS);
 }
 
