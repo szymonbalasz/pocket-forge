@@ -136,10 +136,20 @@ test('FR-REF-26 after a submit the Retry flags are cleared and missing items lea
   expect(saved.items.every((i) => i.retry_of === undefined && i.changed === undefined)).toBe(true);
 });
 
-test('FR-RGN-41 estimate and submit send the user’s selection; null while REF’s defaults apply', async () => {
+test('FR-RGN-41 BL-34 estimate and submit send the selection the block shows, the defaults included', async () => {
   setup();
   await waitFor(() => expect(items().length).toBe(3));
-  expect(referencesForSend()).toBeNull();
+  await idle();
+  // REF's defaults (no saved selection): the resolved ticks are sent, so a default-ticked file
+  // that vanishes is refused by the core instead of re-derived without it.
+  const defaults = referencesForSend();
+  expect(defaults).not.toBeNull();
+  expect(defaults!.items.filter((i) => i.on)).toHaveLength(2);
+  expect(defaults!.items.filter((i) => i.on).map((i) => i.key)).toEqual(
+    items()
+      .filter((e) => e.dataset.on === 'true')
+      .map((e) => e.dataset.recordId),
+  );
   const sel: DraftReferences = {
     packs: [],
     items: [{ key: 'project:mood-a.png', on: false, role: 'style' }],

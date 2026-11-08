@@ -169,6 +169,55 @@ test('FR-REF-21 FR-RGN-45 walk R1/R2: the confirm counts the current ticks; a ti
   await expect(item(page, 'project:mood-b.png')).toHaveCount(0);
 });
 
+test('FR-REF-21 BL-34 with the default selection, a default-ticked file gone before Generate fails with no job and no spend', async ({
+  page,
+}) => {
+  await mockRefs(
+    page,
+    refSeed({ slots: SLOTS, projectRefs: [{ file: 'mood-a.png' }, { file: 'mood-b.png' }] }),
+  );
+  await openRgn(page, {
+    models: [{ id: 'fake-refs', name: 'Refs' }],
+    capabilities: { 'fake-refs': REFS },
+  });
+  await drawRegion(page, [400, 500], [800, 900]);
+  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await expect(page.getByTestId('rgn-panel-submit')).toBeEnabled();
+  // REF's defaults (FR-REF-17): both project files ticked, nothing saved as a selection.
+  await expect(check(page, 'project:mood-b.png')).toBeChecked();
+  const spend = () =>
+    page.evaluate(() =>
+      (
+        window as unknown as {
+          __pfRgnMock: { state: () => { jobs: unknown[]; spend: number } };
+        }
+      ).__pfRgnMock.state(),
+    );
+  const before = (await spend()).spend;
+
+  // mood-b is moved away in Explorer, and nothing resolves the block before Generate.
+  await page.evaluate(() => {
+    const m = (window as unknown as { __pfRefMock: { projectRefs: { file: string }[] } })
+      .__pfRefMock;
+    m.projectRefs = m.projectRefs.filter((f) => f.file !== 'mood-b.png');
+  });
+  await page.getByTestId('rgn-panel-submit').click();
+  await page.getByTestId('rgn-confirm').getByTestId('rgn-confirm-ok').click();
+  await expect(page.getByTestId('rgn-panel-submit-error')).toContainText(
+    "mood-b.png can't be sent: it can't be found",
+  );
+  // The selection the block showed was sent, not "defaults" re-derived without the file.
+  const sent = (await inputsOf(page, 'rgn_job_submit'))[0]!.draft as {
+    references: { items: { key: string; on: boolean }[] } | null;
+  };
+  expect(sent.references?.items).toContainEqual(
+    expect.objectContaining({ key: 'project:mood-b.png', on: true }),
+  );
+  const after = await spend();
+  expect(after.jobs).toHaveLength(0);
+  expect(after.spend).toBe(before);
+});
+
 test('walk R3 layout: block rows show their file names; + Pack lists names on one line', async ({
   page,
 }) => {

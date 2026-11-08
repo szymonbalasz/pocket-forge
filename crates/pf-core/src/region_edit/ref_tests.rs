@@ -245,6 +245,66 @@ fn fr_rgn_41_reference_errors_fail_before_any_provider_call() {
     fs.offline.store(false, Ordering::Relaxed);
 }
 
+/// BL-34: with REF's defaults (draft `references: null`) the UI sends the selection the block
+/// resolved. A default-ticked project file deleted before submit then fails with
+/// `reference_unavailable(missing)` before any provider call: no job, no spend. (Sent as `null`,
+/// the defaults would be re-derived without it and the job charged.)
+#[test]
+fn bl_34_fr_ref_21_a_default_ticked_reference_gone_before_submit_fails_without_spend() {
+    let (lab, _) = lab_with(&[("a.png", 10), ("b.png", 20)]);
+    let resolved = lab
+        .core
+        .dispatch(
+            "ref_resolve",
+            json!({"model_id": "fake-white-edit", "references": null}),
+        )
+        .unwrap();
+    let refs = resolved["references"].clone();
+    let on: Vec<&str> = refs["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["on"] == json!(true))
+        .map(|i| i["key"].as_str().unwrap())
+        .collect();
+    assert!(
+        on.contains(&"project:b.png"),
+        "b.png is ticked by default: {refs}"
+    );
+    let d = draft(&lab, "fake-white-edit", refs);
+    let est = lab.estimate(&d);
+    let spend = lab.core.dispatch("rgn_spend_get", json!({})).unwrap()["spend"].clone();
+    let calls = lab.fake().last_reference_hashes();
+
+    std::fs::remove_file(lab.project_dir.join("references").join("b.png")).unwrap();
+    let err = lab
+        .core
+        .dispatch(
+            "rgn_job_submit",
+            json!({"draft": d, "estimate_id": est["estimate_id"], "confirmations": est["needs"]}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::ReferenceUnavailable);
+    assert_eq!(
+        err.detail,
+        json!({"key": "project:b.png", "reason": "missing"})
+    );
+    assert!(
+        lab.manifest()["jobs"].as_array().unwrap().is_empty(),
+        "no job"
+    );
+    assert_eq!(
+        lab.core.dispatch("rgn_spend_get", json!({})).unwrap()["spend"],
+        spend,
+        "no spend"
+    );
+    assert_eq!(
+        lab.fake().last_reference_hashes(),
+        calls,
+        "no provider call"
+    );
+}
+
 /// Walkthrough R1: a ticked item deleted or moved after the estimate is never dropped
 /// silently. Estimate and submit fail with `reference_unavailable(missing)` before any
 /// provider call; no job, no spend.
