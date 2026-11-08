@@ -324,6 +324,20 @@ export function installRgnMock(seed: RgnMockSeed): void {
       model_id: draft.model_id,
     })) as Rec;
     if (!draft.mask_id) return fail('mask_invalid', 'The mask is empty.', 'empty');
+    // pf-core pads the stored mask to the outer rect: one outside it is empty there (e2e only,
+    // where edt-mock keeps the submitted masks).
+    const stored = (w.__pfEdtMasks as Record<string, { rect: Rect }> | undefined)?.[
+      String(draft.mask_id)
+    ];
+    const o = f.outer as Rect;
+    if (
+      stored &&
+      (stored.rect.x >= o.x + o.w ||
+        stored.rect.y >= o.y + o.h ||
+        stored.rect.x + stored.rect.w <= o.x ||
+        stored.rect.y + stored.rect.h <= o.y)
+    )
+      return fail('mask_invalid', 'paint the area to change inside the region first', 'empty');
     const values: Rec = { ...((draft.controls ?? {}) as Rec) };
     const promptCtl = c.controls.find((x) => x.role === 'prompt');
     const seedCtl = c.controls.find((x) => x.role === 'seed');

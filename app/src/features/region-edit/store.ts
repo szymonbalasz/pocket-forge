@@ -304,7 +304,8 @@ async function runEstimate(sig: string): Promise<void> {
   }
 }
 
-/** Writes the panel's draft now. `mask_id` absent keeps the draft's mask (EDT owns it, R55). */
+/** Writes the panel's draft now. `mask_id` absent keeps the draft's mask (EDT owns it, R55);
+ *  without a region it is cleared. */
 function putDraft(mask?: { mask_id: string | null }): void {
   const s = state;
   if (!s.projectId || s.readOnly) return;
@@ -316,7 +317,8 @@ function putDraft(mask?: { mask_id: string | null }): void {
       seed: s.seedMode === 'pinned' ? s.seed : null,
       region: s.inner ? { inner: s.inner, margin: s.margin } : null,
       ...referencesDraft(), // REF's selection (FR-REF-20)
-      ...(mask ?? {}),
+      // No region, no mask (FR-EDT-20): the draft must not keep the removed region's mask.
+      ...(mask ?? (s.inner ? {} : { mask_id: null })),
     })
     // Shown in the save segment (walk D3); the next change saves again.
     .catch((e) => projectStore.draftSaveFailed(e));
@@ -366,12 +368,10 @@ async function refreshProject(): Promise<void> {
       layers: p.layers,
       headRevision: p.head_revision,
       readOnly: p.read_only,
-      // A restore keeps EDT's live mask (OQ-EDT-14 A), not the restored draft's.
-      maskId:
-        restored || (state.inner && !sameRect(state.inner, editorInner))
-          ? state.maskId
-          : (p.draft?.mask_id ?? state.maskId),
     });
+    // A restore keeps EDT's live mask (OQ-EDT-14 A), not the restored draft's.
+    if (!restored && !(state.inner && !sameRect(state.inner, editorInner)))
+      takeMask(p.draft?.mask_id ?? state.maskId);
     if (restored) applyRestoredDraft(p.draft, 'restore');
     syncPicker();
   } catch {
@@ -437,8 +437,19 @@ async function keepLiveRegion(d: ProjectSnapshot['draft'], t: number): Promise<v
     (!state.inner || (region?.margin ?? DEFAULT_MARGIN) === state.margin);
   const sameMask = !mask || (d?.mask_id ?? null) === mask.mask_id;
   if (sameRegion && sameMask) return;
-  if (mask?.mask_id) set({ maskId: mask.mask_id });
+  if (mask?.mask_id) takeMask(mask.mask_id);
   putDraft(mask);
+}
+
+/** The draft's mask changed (EDT submitted the live mask, R7). The mask isn't cost-affecting
+ *  (FR-RGN-12), but an estimate that failed (`mask_invalid` for the previous region's mask)
+ *  runs again for the new one (walk D2). */
+function takeMask(maskId: string | null): void {
+  if (maskId === state.maskId) return;
+  const failed = state.estimate.status === 'error';
+  set({ maskId });
+  if (failed) debouncer.reset();
+  schedule();
 }
 
 async function refreshIterations(): Promise<void> {
@@ -781,8 +792,9 @@ export const rgn = {
   setRegion(inner: RectPx | null): void {
     if (sameRect(inner, editorInner)) return;
     editorInner = inner;
-    // A new region starts with an empty prompt (FR-RGN-11): removing it clears the prompt.
-    set(inner ? { inner } : { inner: null, prompt: '' });
+    // A new region starts with an empty prompt (FR-RGN-11): removing it clears the prompt, and
+    // its mask goes with it (FR-EDT-20); the next region's mask arrives when EDT submits it.
+    set(inner ? { inner } : { inner: null, prompt: '', maskId: null });
     saveDraftSoon();
     void refit();
   },
