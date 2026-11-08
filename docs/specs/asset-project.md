@@ -114,7 +114,7 @@ Full tree and field tables: [manifest-schema](../architecture/manifest-schema.md
 | `project_folder_list` / `project_folder_add` | folder (`working\|references\|structure\|parts\|exports`) / folder, `paths[]` → files `[{name, bytes, mtime, image}]` | `unknown_folder`, `read_only` (add) |
 | `project_put_draft` | draft (+ EXP's unsaved export settings, R30) → `seq` | `read_only`, `locked`, `conflict` |
 | `project_list_revisions` / `project_save_revision` / `project_restore_revision` | — / label? / `rev_id` → `[{id, seq, created_at, reason, label}]` / revision | `unchanged`, `unknown_id`, `read_only` |
-| `project_trash_list` / `project_trash_restore` | — / item id → items / ok | `unknown_id`, `read_only` |
+| `project_trash_list` / `project_trash_restore` | — / item id → items / ok | `unknown_id`, `read_only`, `not_restorable` (kinds other than `candidates`, `job_inputs`, `conflict_copy`; R51) |
 | `project_disk_usage` / `project_relink_original` | — / path → bytes per category + next purge date / ok | — / `hash_mismatch` |
 | `project_prefetch_original` | — → ok (decode starts) | `corrupt`, `not_available_offline` |
 | `project_conflict_get` / `project_resolve_conflict` | — / `keep: this \| other` → both versions / revision | `no_conflict`, `files_missing` |

@@ -157,6 +157,58 @@ fn fr_prj_31_trash_list_and_restore_bring_files_back() {
 }
 
 #[test]
+fn fr_prj_31_restore_only_candidates_job_inputs_and_conflict_copies() {
+    // R51 (BL-24): other kinds are listed but not restorable; the next sweep would undo it.
+    let mut s = setup();
+    let (job, _) = s.fetched("ash", 1);
+    resolve_job(
+        &s.e.ctx,
+        s.e.install(),
+        &mut s.p,
+        job.id,
+        ResolveReason::Dismiss,
+    )
+    .unwrap();
+    let orphan = std::path::Path::new(PFORGE_DIR).join("stray.bin");
+    std::fs::write(s.dir.join(&orphan), b"stray").unwrap();
+    s.reopen();
+    let rows = trash_list(&s.p);
+    let by_kind = |k: TrashKind| rows.iter().find(|r| r.kind == k).unwrap().clone();
+    assert!(by_kind(TrashKind::Candidates).restorable);
+    assert!(by_kind(TrashKind::JobInputs).restorable);
+    let o = by_kind(TrashKind::Orphan);
+    assert!(!o.restorable);
+
+    let err = trash_restore(&s.e.ctx, s.e.install(), &mut s.p, o.id).unwrap_err();
+    assert_eq!(
+        (err.code, err.field.as_deref()),
+        (ErrorCode::NotRestorable, Some("item_id"))
+    );
+    assert_eq!(err.detail["kind"], "orphan");
+    assert!(
+        s.p.manifest.trash.iter().any(|t| t.id == o.id),
+        "still in the trash"
+    );
+    assert!(s.dir.join(TRASH_DIR).join(o.id.to_string()).exists());
+
+    for k in [
+        TrashKind::Candidates,
+        TrashKind::JobInputs,
+        TrashKind::ConflictCopy,
+    ] {
+        assert!(restorable_kind(k));
+    }
+    for k in [
+        TrashKind::Mask,
+        TrashKind::Layer,
+        TrashKind::Manifest,
+        TrashKind::Orphan,
+    ] {
+        assert!(!restorable_kind(k));
+    }
+}
+
+#[test]
 fn fr_prj_20_restore_that_fails_to_commit_leaves_the_item_in_the_trash() {
     let mut s = setup();
     let (job, c) = s.fetched("dust", 1);

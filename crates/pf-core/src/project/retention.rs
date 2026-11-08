@@ -50,6 +50,17 @@ pub struct TrashRow {
     pub trashed_at: Timestamp,
     pub purge_at: Timestamp,
     pub reason: String,
+    /// True if `project_trash_restore` takes it (R51); the UI offers Restore only then.
+    pub restorable: bool,
+}
+
+/// R51 (BL-24): only these kinds can be restored. Any other item (orphan, mask, layer,
+/// manifest) holds files nothing references, so the next open would sweep them back.
+pub fn restorable_kind(kind: TrashKind) -> bool {
+    matches!(
+        kind,
+        TrashKind::Candidates | TrashKind::JobInputs | TrashKind::ConflictCopy
+    )
 }
 
 /// `project_trash_list`: the trash, newest first.
@@ -67,6 +78,7 @@ pub fn trash_list(p: &OpenProject) -> Vec<TrashRow> {
             trashed_at: t.trashed_at,
             purge_at: purge_at(t),
             reason: t.reason.clone(),
+            restorable: restorable_kind(t.kind),
         })
         .collect();
     rows.sort_by_key(|r| std::cmp::Reverse((r.trashed_at, r.id)));
@@ -92,7 +104,8 @@ fn item_bytes(p: &OpenProject, t: &TrashItem) -> u64 {
 // ---------------------------------------------------------------- restore
 
 /// `project_trash_restore` (FR-PRJ-31): brings every file of an item back to its old path and
-/// removes the item, in one commit. Candidates of the item leave the trash (`trash_id` cleared;
+/// removes the item, in one commit. Only R51's kinds are restored (`not_restorable` otherwise,
+/// `detail.kind` names the kind). Candidates of the item leave the trash (`trash_id` cleared;
 /// their status is unchanged). Files move **before** the commit, so a crash in between leaves
 /// the item indexed and the next open moves them back into the trash (state before).
 pub fn trash_restore(
@@ -111,6 +124,14 @@ pub fn trash_restore(
         .ok_or_else(|| {
             CoreError::new(ErrorCode::UnknownId, "unknown trash item").with_field("item_id")
         })?;
+    if !restorable_kind(item.kind) {
+        return Err(CoreError::new(
+            ErrorCode::NotRestorable,
+            "this trash item holds files nothing uses; it can't be restored",
+        )
+        .with_field("item_id")
+        .with_detail(json!({ "kind": item.kind })));
+    }
     for from in &item.files {
         if p.path(&item.trashed_path(from)).is_file() && p.path(from).exists() {
             return Err(CoreError::new(

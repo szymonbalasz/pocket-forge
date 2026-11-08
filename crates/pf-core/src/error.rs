@@ -99,6 +99,9 @@ pub enum ErrorCode {
     NoConflict,
     /// The version to keep needs files that haven't synced yet (FR-PRJ-36).
     FilesMissing,
+    /// `project_trash_restore` of an item kind the next sweep would trash again (R51, BL-24);
+    /// `detail.kind` names it.
+    NotRestorable,
 }
 
 impl ErrorCode {
@@ -157,6 +160,7 @@ impl ErrorCode {
             ErrorCode::TooManyReferences => "too_many_references",
             ErrorCode::NoConflict => "no_conflict",
             ErrorCode::FilesMissing => "files_missing",
+            ErrorCode::NotRestorable => "not_restorable",
         }
     }
 }
