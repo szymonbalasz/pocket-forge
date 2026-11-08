@@ -27,7 +27,7 @@
 | **Provider real calls (PRV 5)** | `prv-real` (kept for the session) | merged | owner's first real edit works (upload `entityId` fix merged) | drafting PRV gate amendments |
 | Reference packs walkthrough | — | — | passed with defects R1–R7 | — |
 | REF walk fixes R1–R7 | — | merged | done | BL-34 open |
-| Single-output cap, empty-mask hint, Mask whole region, blend instruction (#55) | `rgn-ux` | building | — | — |
+| Single-output cap, empty-mask hint, Mask whole region, blend instruction (#55) | — | merged | done (R72, R73) | walkthrough running |
 | Keep every result, easy discard (#56) | — | merged | done (R65–R67) | walkthrough with rgn-ux |
 | Backlog BL-30/31/32/35/36, BL-27 StrictMode | — | merged | done (R69, R70) | — |
 | Seam asymmetry (BL-33) | `fix-seam` | metric change (R68) | no asymmetry found | — |
