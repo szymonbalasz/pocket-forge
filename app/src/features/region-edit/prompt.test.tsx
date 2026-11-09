@@ -174,3 +174,64 @@ test('FR-PRM-12 a read-only project shows the helpers disabled', async () => {
     expect((c as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).readOnly).toBe(true);
 });
+
+test('FR-RGN-11 a new region starts with an empty prompt; a region change keeps it', async () => {
+  await setup();
+  typePrompt('a stone well');
+  // A region change (move / resize, FR-EDT-20) is not a new region.
+  act(() => rgn.setRegion({ ...REGION, x: 300 }));
+  expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).value).toBe(
+    'a stone well',
+  );
+  // Removing the region, then drawing a new one.
+  act(() => rgn.setRegion(null));
+  act(() => rgn.setRegion({ x: 100, y: 100, w: 256, h: 256 }));
+  await waitFor(() => expect(rgn.get().fit).not.toBeNull());
+  expect(rgn.get().prompt).toBe('');
+  expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).value).toBe('');
+  await waitFor(
+    () =>
+      expect(fake.callsOf('project_put_draft').at(-1)?.draft).toMatchObject({
+        final_prompt: '',
+        region: { inner: { x: 100, y: 100, w: 256, h: 256 } },
+      }),
+    { timeout: 4000 },
+  );
+});
+
+test('FR-RGN-11 FR-PRM-06 a remembered tick of a since-hidden helper is neither shown nor sent', async () => {
+  await setup();
+  typePrompt('a stone well');
+  fireEvent.click(chip(NO_PEOPLE));
+  await waitFor(
+    () =>
+      expect(fake.callsOf('project_put_draft').at(-1)?.draft).toMatchObject({
+        prompt_helpers: [NO_PEOPLE],
+      }),
+    { timeout: 4000 },
+  );
+  const list = await api.prompt.listHelpers();
+  await act(() =>
+    api.prompt.saveHelpers(list.map((h) => (h.id === NO_PEOPLE ? { ...h, hidden: true } : h))),
+  );
+  // Reopen: the draft still remembers the tick.
+  cleanup();
+  rgn.detach();
+  projectStore.reset();
+  render(
+    <Tooltip.Provider>
+      <GeneratePanel />
+    </Tooltip.Provider>,
+  );
+  await act(() => projectStore.open('C:/pf-test/library/Maps/map'));
+  await waitFor(() => expect(screen.getAllByTestId('prm-block-helper').length).toBeGreaterThan(0));
+  expect(rgn.get().promptHelpers).toEqual([NO_PEOPLE]);
+  expect(screen.getAllByTestId('prm-block-helper').map((e) => e.dataset.recordId)).not.toContain(
+    NO_PEOPLE,
+  );
+  await waitFor(() =>
+    expect(screen.getAllByTestId('prm-block-part').map((p) => p.dataset.source)).not.toContain(
+      'helper',
+    ),
+  );
+});

@@ -29,13 +29,13 @@ pub fn prm_window_open(app: AppHandle) -> Result<(), CoreError> {
     let rect = app.state::<Core>().state().settings.prompt_chat.window;
     let mut b = WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("index.html".into()))
         .title("Prompt chat · Pocket Forge")
-        .min_inner_size(MIN.0, MIN.1)
-        .inner_size(FIRST.0, FIRST.1);
-    if let Some(r) = rect {
-        b = b.inner_size(f64::from(r.w).max(MIN.0), f64::from(r.h).max(MIN.1));
-        if on_a_monitor(&app, r) {
-            b = b.position(f64::from(r.x), f64::from(r.y));
-        }
+        .min_inner_size(MIN.0, MIN.1);
+    let (w, h) = initial_size(rect);
+    b = b.inner_size(w, h);
+    if let Some(r) = rect
+        && on_a_monitor(&app, r)
+    {
+        b = b.position(f64::from(r.x), f64::from(r.y));
     }
     let w = b
         .build()
@@ -52,17 +52,51 @@ pub fn prm_window_open(app: AppHandle) -> Result<(), CoreError> {
     Ok(())
 }
 
-/// A remembered position is used only while some monitor still shows its top-left corner.
-fn on_a_monitor(app: &AppHandle, r: ChatWindowRect) -> bool {
-    app.available_monitors().is_ok_and(|ms| {
-        ms.iter().any(|m| {
-            let s = m.scale_factor();
-            let p = m.position().to_logical::<f64>(s);
-            let z = m.size().to_logical::<f64>(s);
-            let (x, y) = (f64::from(r.x), f64::from(r.y));
-            x >= p.x && y >= p.y && x < p.x + z.width - 40.0 && y < p.y + z.height - 40.0
-        })
+/// FR-PRM-21: the remembered size (never below the minimum), or the first-run size.
+fn initial_size(rect: Option<ChatWindowRect>) -> (f64, f64) {
+    rect.map_or(FIRST, |r| {
+        (f64::from(r.w).max(MIN.0), f64::from(r.h).max(MIN.1))
     })
+}
+
+/// A monitor's logical rect: x, y, width, height.
+type Monitor = (f64, f64, f64, f64);
+
+/// A remembered position is used only while some monitor still shows its top-left corner,
+/// with at least 40 logical px of the window inside it.
+fn shows_corner(r: ChatWindowRect, monitors: &[Monitor]) -> bool {
+    let (x, y) = (f64::from(r.x), f64::from(r.y));
+    monitors
+        .iter()
+        .any(|&(mx, my, mw, mh)| x >= mx && y >= my && x < mx + mw - 40.0 && y < my + mh - 40.0)
+}
+
+fn on_a_monitor(app: &AppHandle, r: ChatWindowRect) -> bool {
+    let monitors: Vec<Monitor> = app
+        .available_monitors()
+        .map(|ms| {
+            ms.iter()
+                .map(|m| {
+                    let s = m.scale_factor();
+                    let p = m.position().to_logical::<f64>(s);
+                    let z = m.size().to_logical::<f64>(s);
+                    (p.x, p.y, z.width, z.height)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    shows_corner(r, &monitors)
+}
+
+/// The rect to remember from the window's logical position and inner size (rounded, never
+/// below the minimum).
+fn rect_to_save(x: f64, y: f64, w: f64, h: f64) -> ChatWindowRect {
+    ChatWindowRect {
+        x: x.round() as i32,
+        y: y.round() as i32,
+        w: (w.round() as u32).max(MIN.0 as u32),
+        h: (h.round() as u32).max(MIN.1 as u32),
+    }
 }
 
 /// Stores the window's logical rect through `prm_chat_settings_put`.
@@ -73,12 +107,7 @@ fn save_rect(app: &AppHandle, w: &WebviewWindow) {
     };
     let pos = pos.to_logical::<f64>(scale);
     let size = size.to_logical::<f64>(scale);
-    let rect = ChatWindowRect {
-        x: pos.x.round() as i32,
-        y: pos.y.round() as i32,
-        w: (size.width.round() as u32).max(MIN.0 as u32),
-        h: (size.height.round() as u32).max(MIN.1 as u32),
-    };
+    let rect = rect_to_save(pos.x, pos.y, size.width, size.height);
     let input = ChatSettingsInput {
         enabled: None,
         claude_path: None,
@@ -100,5 +129,61 @@ pub fn prm_chat_login(core: tauri::State<'_, Core>) -> Result<(), CoreError> {
 pub fn close_with_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(LABEL) {
         let _ = w.close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect(x: i32, y: i32, w: u32, h: u32) -> ChatWindowRect {
+        ChatWindowRect { x, y, w, h }
+    }
+
+    #[test]
+    fn fr_prm_21_label_matches_the_capability_file() {
+        assert_eq!(LABEL, "prompt-chat");
+        let cap: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/prompt-chat.json")).unwrap();
+        assert_eq!(cap["windows"], serde_json::json!([LABEL]));
+    }
+
+    #[test]
+    fn fr_prm_21_first_run_and_remembered_size_never_below_360_by_480() {
+        assert_eq!(initial_size(None), (420.0, 640.0));
+        assert_eq!(initial_size(Some(rect(10, 20, 800, 900))), (800.0, 900.0));
+        assert_eq!(initial_size(Some(rect(10, 20, 100, 100))), (360.0, 480.0));
+    }
+
+    #[test]
+    fn fr_prm_21_a_remembered_position_needs_a_monitor_showing_its_corner() {
+        let two = [(0.0, 0.0, 1920.0, 1080.0), (1920.0, 0.0, 1280.0, 1024.0)];
+        assert!(shows_corner(rect(100, 100, 420, 640), &two));
+        assert!(
+            shows_corner(rect(2000, 50, 420, 640), &two),
+            "second monitor"
+        );
+        assert!(
+            !shows_corner(rect(-500, 100, 420, 640), &two),
+            "off to the left"
+        );
+        assert!(
+            !shows_corner(rect(3190, 100, 420, 640), &two),
+            "under 40 px left"
+        );
+        assert!(
+            !shows_corner(rect(100, 1050, 420, 640), &two),
+            "below the bottom"
+        );
+        assert!(!shows_corner(rect(100, 100, 420, 640), &[]), "no monitors");
+    }
+
+    #[test]
+    fn fr_prm_21_the_saved_rect_is_rounded_and_never_below_the_minimum() {
+        assert_eq!(
+            rect_to_save(10.4, -20.6, 500.5, 700.2),
+            rect(10, -21, 501, 700)
+        );
+        assert_eq!(rect_to_save(0.0, 0.0, 200.0, 300.0), rect(0, 0, 360, 480));
     }
 }

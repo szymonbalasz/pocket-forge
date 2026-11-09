@@ -635,6 +635,37 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     });
   });
 
+  test('FR-RGN-21 retry restores the model and the blend toggle off', async () => {
+    await setup({ spend: { cap: 100, threshold: 10 } });
+    await chooseOption(screen.getByTestId('rgn-panel-model'), 'Simple');
+    await waitFor(() => expect(rgn.get().modelId).toBe('fake-simple'));
+    fireEvent.click(screen.getByTestId('rgn-panel-blend-instruction'));
+    expect(rgn.get().blendInstruction).toBe(false);
+    await typePrompt('a stone well');
+    await estimated();
+    fireEvent.click(screen.getByTestId('rgn-panel-submit'));
+    fireEvent.click(await screen.findByTestId('rgn-confirm-ok'));
+    await waitFor(() => expect(screen.getAllByTestId('rgn-tracker-item')).toHaveLength(1));
+    expect(fake.callsOf('rgn_job_submit')[0]!.draft).toMatchObject({
+      model_id: 'fake-simple',
+      blend_instruction: false,
+    });
+    act(() => mockControls().fail());
+    await waitFor(() => expect(screen.getByTestId('rgn-job-retry')).toBeTruthy());
+    // Changed since: the other model, blend on (the tracker is a listbox too: no select helper).
+    await act(() => rgn.pickModel('fake-all-types'));
+    await waitFor(() => expect(rgn.get().modelId).toBe('fake-all-types'));
+    fireEvent.click(screen.getByTestId('rgn-panel-blend-instruction'));
+    expect(rgn.get().blendInstruction).toBe(true);
+    fireEvent.click(screen.getByTestId('rgn-job-retry'));
+    await waitFor(() => expect(rgn.get().modelId).toBe('fake-simple'));
+    expect(rgn.get().blendInstruction).toBe(false);
+    expect(screen.getByTestId('rgn-panel-model').textContent).toContain('Simple');
+    expect(screen.getByTestId('rgn-panel-blend-instruction').getAttribute('aria-checked')).toBe(
+      'false',
+    );
+  });
+
   test('FR-RGN-21 retry restores the count the user set; FR-RGN-11 the draft keeps it', async () => {
     await setup();
     act(() => rgn.setValue('num_samples', 4));

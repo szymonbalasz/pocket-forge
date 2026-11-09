@@ -142,6 +142,43 @@ test('FR-PRM-27 FR-PRM-28 FR-PRM-29 send streams the reply; Replace and Copy on 
   expect(fake.callsOf('prm_chat_insert')).toHaveLength(1);
 });
 
+test('FR-PRM-38 an api_key login: the strip warns once per thread and the footer says billed', async () => {
+  setup({ chat: { consent: true } });
+  type H = Record<string, (input: Record<string, unknown>) => unknown>;
+  const h = (window as unknown as { __pfMockHandlers: H }).__pfMockHandlers;
+  const status = h.prm_chat_status!;
+  h.prm_chat_status = (i) => ({
+    ...(status(i) as object),
+    mode: 'claude-code',
+    backend: {
+      state: 'ok',
+      version: '2.1.319',
+      auth_method: 'api_key',
+      plan: null,
+      notional: false,
+    },
+  });
+  // What the core records for a non-plan login (notional: false).
+  const thread = h.prm_chat_thread_get!;
+  h.prm_chat_thread_get = (i) => {
+    const v = thread(i) as { thread: { turns: { usage?: { notional: boolean } }[] } | null };
+    for (const t of v.thread?.turns ?? []) if (t.usage) t.usage.notional = false;
+    return v;
+  };
+  await api.chat.contextPublish(PID, 'rgn', { final_prompt: 'a kitchen' });
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  const warns = () => screen.queryAllByText('Billed to your Anthropic API key.');
+  expect(warns()).toHaveLength(1);
+  for (const text of ['one', 'two']) {
+    await type(text);
+    fireEvent.click(id('prm-chat-send'));
+    await waitFor(() => expect(screen.getByText(new RegExp(`You wrote: "${text}"`))).toBeTruthy());
+  }
+  await waitFor(() => expect(id('prm-chat-usage').textContent).toBe('≈ $0.00 billed'));
+  expect(warns()).toHaveLength(1);
+});
+
 test('FR-PRM-22 M3 the transcript shows the newest turn on open and after a send', async () => {
   setup({ chat: { consent: true } });
   await api.chat.contextPublish(PID, 'rgn', {});
@@ -254,6 +291,31 @@ test('§7 R94 read-only project: the turns show, marked "Not saved"; Replace is 
     'Not saved',
     'Not saved',
   ]);
+});
+
+test('FR-PRM-21 a project switch in the main window switches the window to that thread', async () => {
+  setup({ chat: { consent: true } });
+  await api.chat.contextPublish(PID, 'rgn', { final_prompt: 'a kitchen' });
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  await type('make this a kitchen');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(screen.getByText(/You wrote: "make this a kitchen"/)).toBeTruthy());
+  // The main window opens project B: its (empty) thread, no host yet.
+  const other = { ...baseSnapshot(), project_id: '01JPROJECTB000000000000000' };
+  const w = window as unknown as { __pfMockHandlers: Record<string, () => unknown> };
+  w.__pfMockHandlers.project_get = () => other;
+  act(() => fake.emit('prm:chat-context', { project_id: other.project_id, host: null }));
+  await waitFor(() =>
+    expect(fake.callsOf('prm_chat_thread_get').at(-1)?.project_id).toBe(other.project_id),
+  );
+  await waitFor(() => expect(screen.queryByText(/You wrote: "make this a kitchen"/)).toBeNull());
+  expect(id('prm-chat-host').textContent).toBe('No prompt block');
+  // Back to A: its thread again.
+  w.__pfMockHandlers.project_get = () => baseSnapshot();
+  act(() => fake.emit('prm:chat-context', { project_id: PID, host: 'rgn' }));
+  await waitFor(() => expect(screen.getByText(/You wrote: "make this a kitchen"/)).toBeTruthy());
+  expect(id('prm-chat-host').textContent).toBe('Region edit');
 });
 
 test('FR-PRM-21 the Chat button opens the chat window', async () => {

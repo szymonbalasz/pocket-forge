@@ -453,3 +453,33 @@ fn fr_gen_06_edit_rows_are_unchanged_by_the_generate_rows() {
     );
     assert_eq!(r.t.seen().len(), 2, "one fetch per call");
 }
+
+#[test]
+fn fr_gen_05_offline_the_generate_list_is_the_cached_one_marked_stale() {
+    let models = unique_ids(&SCENARIO_ROWS);
+    let gets = models.iter().map(|m| get_model(m)).collect::<Vec<_>>();
+    // Offline: the first model's fetch fails after its retries.
+    let offline = || {
+        ex(
+            Method::Get,
+            &format!("/models/{}", models[0]),
+            0,
+            json!("offline"),
+        )
+    };
+    let r = rig_all(
+        [gets, vec![offline(), offline(), offline()]].concat(),
+        &models,
+    );
+    let filter = ModelFilter {
+        operation: Some(Operation::Generate),
+    };
+    let fresh = block_on(r.p.list_models_cached(&filter)).unwrap();
+    assert!(!fresh.stale);
+    let cached = block_on(r.p.list_models_cached(&filter)).unwrap();
+    assert!(cached.stale, "offline: the cached list, marked stale");
+    let ids = |l: &ModelList| l.models.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&cached), ids(&fresh));
+    assert_eq!(ids(&cached), [GPT2, FLARE, SUNBURST, I45, V3B, V3Q, V3T]);
+    assert_eq!(r.p.connectivity(), Connectivity::Offline);
+}
