@@ -407,6 +407,7 @@ ul.rgn-warning {
 .rgn-strip-line,
 .rgn-strip-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--pf-space-2);
   align-items: center;
 }

@@ -704,6 +704,24 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     );
   });
 
+  test('FR-RGN-21 R108 a lost job keeps Retry with the possible-charge hint next to it; Retry only pre-fills', async () => {
+    await submitted({}, 'first prompt');
+    act(() => mockControls().lose(true, 'auth', 'Polling stopped. Check the provider first.'));
+    await waitFor(() => expect(screen.getByTestId('rgn-job-retry')).toBeTruthy());
+    const retry = screen.getByTestId('rgn-job-retry');
+    const hint = screen.getByTestId('rgn-job-charge-hint');
+    expect(hint.parentElement).toBe(retry.parentElement);
+    expect(retry.nextElementSibling).toBe(hint);
+    expect(hint.textContent).toBe('Polling stopped. Check the provider first.');
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).value).toBe(
+        'first prompt',
+      ),
+    );
+    expect(fake.callsOf('rgn_job_submit')).toHaveLength(1);
+  });
+
   test('FR-RGN-21 retry pre-fills the panel from the job and requires a new estimate', async () => {
     await submitted({}, 'first prompt');
     act(() => mockControls().fail());

@@ -101,7 +101,6 @@ function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined 
           data-handle={row.handle_kept ? 'kept' : 'none'}
         >
           {lostText(!!row.handle_kept)}
-          <div data-testid="rgn-job-charge-hint">{chargeHint(error ?? row.error)}</div>
         </div>
       )}
       <div className="rgn-strip-buttons">
@@ -131,6 +130,13 @@ function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined 
           >
             Retry
           </button>
+        )}
+        {/* R108: Retry stays on a lost job (a pre-fill plus a new confirm), with the
+            possible-charge hint next to it. */}
+        {state === 'lost' && (
+          <span className="warning small" data-testid="rgn-job-charge-hint">
+            {chargeHint(error ?? row.error)}
+          </span>
         )}
         {canDismiss(state) && (
           <button
@@ -278,6 +284,15 @@ export function IterationTracker() {
                     >
                       Retry
                     </button>
+                  )}
+                  {state === 'lost' && offersRetry(rows, r) && (
+                    <span
+                      className="warning"
+                      data-testid="rgn-job-charge-hint"
+                      data-record-id={r.job_id}
+                    >
+                      {chargeHint(live?.error ?? r.error)}
+                    </span>
                   )}
                 </div>
               )}
