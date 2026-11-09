@@ -127,9 +127,12 @@ fn prm_s10_scrubbed_handmade_lines_parse_the_same_and_do_not_leak() {
     }
 }
 
-/// Real recordings (once the owner has run the probe) parse and are clean.
+/// Real recordings (once the owner has run the probe) parse and are clean: nothing is left for
+/// today's scrubber rules to change (R96). `PF_RESCRUB=1` rewrites them with those rules
+/// instead.
 #[test]
 fn prm_s10_recordings_parse_and_are_scrubbed() {
+    let rescrub = std::env::var("PF_RESCRUB").is_ok_and(|v| v == "1");
     let dir = fixtures().join("claude-code");
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return;
@@ -140,8 +143,21 @@ fn prm_s10_recordings_parse_and_are_scrubbed() {
         if path.extension().is_none_or(|x| x != "jsonl") {
             continue;
         }
-        let text = std::fs::read_to_string(&path).unwrap();
+        let mut text = std::fs::read_to_string(&path).unwrap();
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let mut scrubber = Scrubber::new();
+        let scrubbed: Vec<String> = text.lines().map(|l| scrubber.scrub_line(l)).collect();
+        if rescrub {
+            text = scrubbed.iter().map(|l| format!("{l}\n")).collect();
+            std::fs::write(&path, &text).unwrap();
+        }
+        for (n, (line, again)) in text.lines().zip(&scrubbed).enumerate() {
+            let as_json = |l: &str| serde_json::from_str::<serde_json::Value>(l).ok();
+            match (as_json(line), as_json(again)) {
+                (Some(a), Some(b)) => assert_eq!(a, b, "{name}:{}: not scrubbed", n + 1),
+                _ => assert_eq!(line, again, "{name}:{}: not scrubbed", n + 1),
+            }
+        }
         assert!(
             checker.leaks(&text).is_empty(),
             "{name}: {:?}",
