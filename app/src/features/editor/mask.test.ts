@@ -292,6 +292,37 @@ describe('undo stack across a canvas remount', () => {
     expect(u.snapshot()).toMatchObject({ depth: 0, redo: 0 });
   });
 
+  test('FR-EDT-23 night review 12c an old project’s step never clears busy or sets an error for the new one', async () => {
+    const u = new UndoStack();
+    let failOld!: (e: unknown) => void;
+    u.push({
+      label: 'Accept patch',
+      bytes: 0,
+      undo: () => new Promise<void>((_, reject) => (failOld = reject)),
+      redo: () => undefined,
+    });
+    const oldStep = u.undo();
+    u.clear();
+    // The new project's step starts while the old one is still out.
+    let releaseNew!: () => void;
+    u.push({
+      label: 'Re-tune patch',
+      bytes: 0,
+      undo: () => new Promise<void>((r) => (releaseNew = r)),
+      redo: () => undefined,
+    });
+    const newStep = u.undo();
+    expect(u.snapshot().busy).toBe(true);
+    failOld({ code: 'not_found' });
+    expect(await oldStep).toBe(false);
+    expect(u.snapshot()).toMatchObject({ busy: true, error: null });
+    // A second undo can't start beside the running one.
+    expect(await u.undo()).toBe(false);
+    releaseNew();
+    expect(await newStep).toBe(true);
+    expect(u.snapshot()).toMatchObject({ busy: false, redo: 1 });
+  });
+
   test('FR-GEN-29 the mask controller marks its entries as the canvas’s', () => {
     const u = new UndoStack();
     const c = new MaskController({
