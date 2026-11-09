@@ -143,6 +143,81 @@ fn fr_prm_20_nothing_starts_before_consent() {
 }
 
 #[test]
+fn fr_prm_23_a_published_input_is_capped() {
+    let lab = lab();
+    let at_cap = |extra: usize| {
+        // `{"final_prompt":"…"}` is 19 bytes around the text.
+        let text = "a".repeat(super::MAX_PUBLISHED_INPUT_BYTES - 19 + extra);
+        lab.core.dispatch(
+            "prm_context_publish",
+            json!({"project_id": pid(&lab), "host": "rgn", "input": {"final_prompt": text}}),
+        )
+    };
+    at_cap(0).unwrap();
+    let e = at_cap(1).unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidInput);
+    assert!(e.to_string().contains("256 KiB"), "{e}");
+}
+
+/// A `claude_path` that is absolute on this platform (R96).
+const CC_EXE: &str = if cfg!(windows) {
+    r"C:\cc\claude.exe"
+} else {
+    "/cc/claude.exe"
+};
+
+#[test]
+fn fr_prm_33_claude_path_is_an_absolute_claude_executable() {
+    let lab = Lab::new();
+    let put = |p: &str| {
+        lab.core
+            .dispatch("prm_chat_settings_put", json!({ "claude_path": p }))
+    };
+    let dir = if cfg!(windows) { r"C:\cc\" } else { "/cc/" };
+    for ok in ["claude.exe", "claude.cmd", "claude", "Claude.EXE"] {
+        let p = format!("{dir}{ok}");
+        let st = put(&p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert_eq!(st["claude_path"], json!(p));
+    }
+    let stored = lab.core.state().settings.prompt_chat.claude_path.clone();
+    for (bad, why) in [
+        ("claude.exe", "relative"),
+        (
+            &format!("cc{}claude.exe", std::path::MAIN_SEPARATOR),
+            "relative",
+        ),
+        ("./claude", "relative"),
+        (&format!("{dir}claude.bat") as &str, "end in"),
+        (&format!("{dir}evil.exe"), "end in"),
+        (&format!("{dir}claude.exe.lnk"), "end in"),
+        (&format!("{dir}claude.ps1"), "end in"),
+        (dir, "end in"),
+    ] {
+        let e = put(bad).expect_err(bad);
+        assert_eq!(e.code, ErrorCode::InvalidInput, "{bad}");
+        let msg = e.to_string();
+        assert!(
+            msg.contains(if why == "relative" {
+                "full path"
+            } else {
+                "end in"
+            }),
+            "{bad}: {msg}"
+        );
+        // A refused path leaves the setting as it was (FR-PRM-40).
+        assert_eq!(lab.core.state().settings.prompt_chat.claude_path, stored);
+    }
+    // Blank and null clear it.
+    assert_eq!(put("  ").unwrap()["claude_path"], Value::Null);
+    put(&format!("{dir}claude.exe")).unwrap();
+    let st = lab
+        .core
+        .dispatch("prm_chat_settings_put", json!({ "claude_path": null }))
+        .unwrap();
+    assert_eq!(st["claude_path"], Value::Null);
+}
+
+#[test]
 fn fr_prm_20_consent_then_the_off_switch() {
     let lab = Lab::new();
     let st = consent(&lab);
@@ -747,7 +822,7 @@ fn claude_lab_as(auth_method: &str) -> (Lab, Arc<ReplaySpawner>) {
         .unwrap();
         let sp = Arc::new(
             ReplaySpawner::new(Arc::new(clock.clone()))
-                .with_file("/cc/claude.exe")
+                .with_file(CC_EXE)
                 .on_run(&["--version"], Some(0), "2.1.319 (Claude Code)")
                 .on_run(
                     &["auth", "status", "--json"],
@@ -764,10 +839,7 @@ fn claude_lab_as(auth_method: &str) -> (Lab, Arc<ReplaySpawner>) {
     assert!(!data.join("chat").join("old-thread").exists());
     assert!(!data.join("claude-config").join("projects").exists());
     lab.core
-        .dispatch(
-            "prm_chat_settings_put",
-            json!({"claude_path": "/cc/claude.exe"}),
-        )
+        .dispatch("prm_chat_settings_put", json!({ "claude_path": CC_EXE }))
         .unwrap();
     (lab, spawner.unwrap())
 }
@@ -857,7 +929,7 @@ fn fr_prm_27_stop_keeps_the_partial_reply() {
     let lab = Lab::with_context(|ctx| {
         let sp = Arc::new(
             ReplaySpawner::new(Arc::new(pf_chat::clock::SystemClock::new()))
-                .with_file("/cc/claude.exe")
+                .with_file(CC_EXE)
                 .on_run(&["--version"], Some(0), "2.1.319")
                 .on_run(
                     &["auth", "status", "--json"],
@@ -873,10 +945,7 @@ fn fr_prm_27_stop_keeps_the_partial_reply() {
     });
     let sp = spawner.unwrap();
     lab.core
-        .dispatch(
-            "prm_chat_settings_put",
-            json!({"claude_path": "/cc/claude.exe"}),
-        )
+        .dispatch("prm_chat_settings_put", json!({ "claude_path": CC_EXE }))
         .unwrap();
     consent(&lab);
     let assistant = |t: &str| {

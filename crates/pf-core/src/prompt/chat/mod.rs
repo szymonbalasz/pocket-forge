@@ -642,12 +642,44 @@ pub struct ChatSettingsInput {
     pub window: Option<Option<ChatWindowRect>>,
 }
 
+/// R96: the file names `prompt_chat.claude_path` may end in (any case).
+pub const CLAUDE_FILE_NAMES: [&str; 3] = ["claude", "claude.exe", "claude.cmd"];
+
+/// R96: a set `claude_path` is absolute (a relative one would resolve against the app's
+/// working folder) and names the Claude Code executable itself, so no other program or script
+/// can be put in its place. Blank clears the setting.
+pub(crate) fn check_claude_path(p: &str) -> CoreResult<()> {
+    let p = p.trim();
+    if p.is_empty() {
+        return Ok(());
+    }
+    if p.chars().count() > 1024 {
+        return Err(CoreError::invalid("claude_path", "the path is too long"));
+    }
+    let path = Path::new(p);
+    let named = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| CLAUDE_FILE_NAMES.iter().any(|c| n.eq_ignore_ascii_case(c)));
+    if !named {
+        return Err(CoreError::invalid(
+            "claude_path",
+            "the path must end in claude.exe, claude.cmd or claude",
+        ));
+    }
+    if !path.is_absolute() {
+        return Err(CoreError::invalid(
+            "claude_path",
+            "use the full path to it, not a relative one",
+        ));
+    }
+    Ok(())
+}
+
 impl Validate for ChatSettingsInput {
     fn validate(&self) -> CoreResult<()> {
-        if let Some(Some(p)) = &self.claude_path
-            && p.chars().count() > 1024
-        {
-            return Err(CoreError::invalid("claude_path", "the path is too long"));
+        if let Some(Some(p)) = &self.claude_path {
+            check_claude_path(p)?;
         }
         if let Some(Some(w)) = &self.window
             && (w.w < 360 || w.h < 480)
@@ -762,12 +794,39 @@ pub struct PublishInput {
     pub input: Value,
 }
 
+/// R96: the largest published input, as JSON bytes. A draft input is a few KiB; the cap keeps
+/// a misbehaving window from parking megabytes in memory until the next send.
+pub const MAX_PUBLISHED_INPUT_BYTES: usize = 256 * 1024;
+
+/// Counts the bytes written, to size a value's JSON without building it.
+struct ByteCount(usize);
+
+impl std::io::Write for ByteCount {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0 += buf.len();
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 impl Validate for PublishInput {
     fn validate(&self) -> CoreResult<()> {
         if !self.input.is_object() {
             return Err(CoreError::invalid(
                 "input",
                 "the published input is an object",
+            ));
+        }
+        let mut n = ByteCount(0);
+        if serde_json::to_writer(&mut n, &self.input).is_err() || n.0 > MAX_PUBLISHED_INPUT_BYTES {
+            return Err(CoreError::invalid(
+                "input",
+                format!(
+                    "the published input is at most {} KiB",
+                    MAX_PUBLISHED_INPUT_BYTES / 1024
+                ),
             ));
         }
         Ok(())

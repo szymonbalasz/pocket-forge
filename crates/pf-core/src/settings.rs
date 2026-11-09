@@ -277,10 +277,12 @@ pub fn section_put(
         // the stored consent is kept whatever the input says.
         "prompt_chat" => {
             let mut chat: PromptChatSettings = serde_json::from_value(value).map_err(bad)?;
-            if let Some(p) = &chat.claude_path
-                && p.trim().is_empty()
-            {
-                chat.claude_path = None;
+            if let Some(p) = &chat.claude_path {
+                // R96: the same rule as `prm_chat_settings_put`.
+                crate::prompt::chat::check_claude_path(p)?;
+                if p.trim().is_empty() {
+                    chat.claude_path = None;
+                }
             }
             chat.consent = settings.prompt_chat.consent.clone();
             next.prompt_chat = chat;

@@ -11,8 +11,12 @@
 //! - `system/init`: `tools`, `mcp_servers`, `plugins`, `slash_commands`, `agents` and
 //!   `skills` → `[]`; `apiKeySource` → `<redacted>`.
 //! - Image data → `{"fixture": "<name>.jpg"}`.
+//! - Account state (R96): a thinking block's non-empty `signature` → `<signature>`,
+//!   `credential_expires_at` → `<redacted>`, and `rate_limit_info` keeps only its `status`.
 //!
-//! Non-JSON lines get the text rules. [`Scrubber::leaks`] re-checks the output; the probe
+//! Placeholders are kept as they are, so a recording can be re-scrubbed after a rule is added
+//! (`PF_RESCRUB=1 cargo test -p pf-chat --test stream_fixtures`). Non-JSON lines get the text
+//! rules. [`Scrubber::leaks`] re-checks the output; the probe
 //! refuses to write a recording that still leaks.
 
 use std::collections::HashMap;
@@ -39,6 +43,10 @@ struct IdMap {
 
 impl IdMap {
     fn get(&mut self, ns: &'static str, raw: &str) -> String {
+        // Already a placeholder (a re-scrub, R96): kept, so re-scrubbing changes nothing.
+        if raw.starts_with('<') && raw.ends_with('>') {
+            return raw.to_owned();
+        }
         if let Some(p) = self.map.get(raw) {
             return p.clone();
         }
@@ -148,8 +156,19 @@ impl Scrubber {
             self.images_seen += 1;
             o.insert("source".into(), json!({ "fixture": name }));
         }
+        if let Some(Value::Object(info)) = o.get_mut("rate_limit_info") {
+            info.retain(|k, _| k == "status");
+        }
         for (k, child) in o.iter_mut() {
             if k == "source" && child.get("fixture").is_some() {
+                continue;
+            }
+            if k == "credential_expires_at" && !child.is_null() {
+                *child = json!("<redacted>");
+                continue;
+            }
+            if k == "signature" && child.as_str().is_some_and(|s| !s.is_empty()) {
+                *child = json!("<signature>");
                 continue;
             }
             if k == "memory_paths" {
@@ -552,6 +571,19 @@ mod tests {
         assert_eq!(out["orgId"], "<org-id>");
         assert_eq!(out["accountUuid"], "<account-id>");
         assert_eq!(out["emailAddress"], "<email>");
+    }
+
+    #[test]
+    fn r96_scrub_signatures_credential_expiry_and_rate_limits() {
+        let mut s = Scrubber::new();
+        let line = r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"hm","signature":"CAQS5QcKEAgTGAI4AUII"},{"type":"thinking","thinking":"","signature":""}]},"credential_expires_at":"2026-12-06T16:12:48.896Z","rate_limit_info":{"isUsingOverage":false,"overageDisabledReason":"out_of_credits","overageStatus":"rejected","rateLimitType":"seven_day","resetsAt":1794340800,"status":"allowed","unifiedWindows":{"seven_day":{"utilization":0.65}}}}"#;
+        let out: Value = serde_json::from_str(&s.scrub_line(line)).unwrap();
+        let c = &out["message"]["content"];
+        assert_eq!(c[0]["signature"], "<signature>");
+        assert_eq!(c[0]["thinking"], "hm");
+        assert_eq!(c[1]["signature"], "");
+        assert_eq!(out["credential_expires_at"], "<redacted>");
+        assert_eq!(out["rate_limit_info"], json!({"status": "allowed"}));
     }
 
     #[test]

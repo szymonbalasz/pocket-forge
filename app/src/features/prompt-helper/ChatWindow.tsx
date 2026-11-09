@@ -314,7 +314,8 @@ export function ChatWindow() {
           <button
             type="button"
             className="primary"
-            onClick={() => void api.chat.settingsPut({ enabled: true }).then(setStatus)}
+            data-testid="prm-chat-enable"
+            onClick={() => void emitEvent('prm:chat-enable', {}).catch(() => undefined)}
           >
             Turn it on
           </button>
