@@ -59,7 +59,8 @@
 | GEN 6: prompt block in New image, GenContextSource | — | merged | done (R83) | — |
 | GEN walkthrough (fake) + fixes | — | merged | PASS with defects; all fixed (R84, R85) | BL-40 done (R86); owner: dry-run-generate, 2 paid checks |
 | GEN 5: + New menu, New image tab (mocked) | — | merged | done (R77) | slice 4 picker routing, slice 6 prompt block |
-| PRM 0: `pf-chat` crate + probe | `prm-0` (kept for the probe) | merged | done; pf-chat in CI | **owner runs the probe** (docs/guides/prompt-chat-probe.md) |
+| PRM 0: `pf-chat` crate + probe | — | merged | done; owner probe passed (R87, R88; min 2.1.319) | — |
+| PRM 4: pf-chat adapter | `prm-0` | building | — | — |
 | PRM 1: helpers core | — | merged | done (R78) | — |
 | PRM 2: prompt block + Settings UI (mocked) | — | merged | done | — |
 | PRM 3: prompt block in Region edit | — | merged | done (R81) | PRM 4 waits on the owner's probe |
