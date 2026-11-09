@@ -67,8 +67,8 @@ test('FR-PRM-04 FR-PRM-11 the Region edit tab hosts the prompt block: its placeh
   expect(shown).toEqual([TOP_DOWN, 'builtin:match-style', NO_PEOPLE, 'builtin:no-grid-text']);
   // The blend toggle is an RGN row inside the block.
   expect(block.contains(screen.getByTestId('rgn-panel-blend-instruction'))).toBe(true);
-  // The chat button is a placeholder until PRM slice 6.
-  expect((screen.getByTestId('prm-block-chat') as HTMLButtonElement).disabled).toBe(true);
+  // PRM slice 6: the Chat button opens the chat window.
+  expect((screen.getByTestId('prm-block-chat') as HTMLButtonElement).disabled).toBe(false);
 });
 
 test('FR-PRM-05 FR-PRM-08 a tick is saved with the draft, shown in the final prompt and sent; never re-estimates', async () => {

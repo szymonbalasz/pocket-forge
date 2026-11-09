@@ -430,7 +430,7 @@ function Composer(props: {
             className="primary"
             data-testid="prm-chat-send"
             disabled={!canSend}
-            title="Send (Ctrl+Enter)"
+            aria-keyshortcuts="Control+Enter"
             onClick={send}
           >
             Send
@@ -522,7 +522,6 @@ function ProposalCard(props: {
           className="primary"
           data-testid="prm-chat-proposal-replace"
           disabled={props.readOnly}
-          title={props.readOnly ? 'Read-only project' : 'Replace the typed prompt'}
           onClick={() => void props.onReplace(p)}
         >
           Replace prompt

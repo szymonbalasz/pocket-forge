@@ -163,7 +163,7 @@ export function PromptBlock(props: PromptBlockProps) {
         <button
           type="button"
           data-testid="prm-block-chat"
-          title="Chat about this prompt (opens the chat window)"
+          aria-label="Chat about this prompt (opens the chat window)"
           onClick={() => {
             chatContext.flush();
             void api.chat.openWindow().catch(() => undefined);
