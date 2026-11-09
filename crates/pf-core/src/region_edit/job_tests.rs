@@ -1523,6 +1523,131 @@ fn fr_rgn_28_owner_56_the_next_submit_resolves_the_previous_job_and_keeps_it() {
 }
 
 #[test]
+fn fr_rgn_28_owner_67_an_accepted_candidate_cant_be_discarded() {
+    let lab = Lab::new();
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id);
+    accept(&lab, id, c[0].id, blend(96, true)).unwrap();
+    let before = lab.manifest();
+    let err = lab
+        .core
+        .dispatch(
+            "rgn_candidate_discard",
+            json!({"job_id": id, "candidate_id": c[0].id}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidInput);
+    assert_eq!(err.field.as_deref(), Some("candidate_id"));
+    let c0 = &lab.candidates(id)[0];
+    assert_eq!((c0.status, c0.trash_id), (CandidateStatus::Accepted, None));
+    assert!(lab.project_dir.join(&c0.file).is_file(), "file stays");
+    assert_eq!(lab.manifest(), before, "nothing committed");
+}
+
+#[test]
+fn fr_rgn_28_explicit_discard_of_a_starred_candidate_clears_its_star() {
+    let lab = Lab::new();
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id);
+    lab.core
+        .dispatch(
+            "rgn_candidate_star",
+            json!({"job_id": id, "candidate_id": c[1].id, "starred": true}),
+        )
+        .unwrap();
+    assert!(lab.candidates(id)[1].starred);
+    lab.core
+        .dispatch(
+            "rgn_candidate_discard",
+            json!({"job_id": id, "candidate_id": c[1].id}),
+        )
+        .unwrap();
+    let c1 = &lab.candidates(id)[1];
+    assert_eq!(c1.status, CandidateStatus::Discarded);
+    assert!(!c1.starred, "the star is cleared");
+    assert!(c1.trash_id.is_some());
+    assert!(!lab.project_dir.join(&c1.file).exists(), "left results/");
+    // On disk too.
+    let row = lab.manifest()["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == json!(c[1].id))
+        .cloned()
+        .unwrap();
+    assert_eq!(row["starred"], json!(false));
+    assert_eq!(row["status"], json!("discarded"));
+}
+
+#[test]
+fn fr_rgn_28_owner_66_invalid_candidates_count_as_discarded() {
+    let lab = Lab::new();
+    lab.set_case("bad_candidate");
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id);
+    assert_eq!(c[0].status, CandidateStatus::Invalid);
+    lab.core
+        .dispatch("rgn_job_dismiss", json!({"job_id": id}))
+        .unwrap();
+    let inputs = lab.job(id).input_files();
+    assert!(!inputs.is_empty());
+    lab.core
+        .dispatch(
+            "rgn_candidate_discard",
+            json!({"job_id": id, "candidate_id": c[1].id}),
+        )
+        .unwrap();
+    for f in &inputs {
+        assert!(
+            lab.project_dir.join(f).is_file(),
+            "one candidate still kept"
+        );
+    }
+    lab.core
+        .dispatch(
+            "rgn_candidate_discard",
+            json!({"job_id": id, "candidate_id": c[2].id}),
+        )
+        .unwrap();
+    // Only the invalid one is left; it doesn't keep the inputs (R66).
+    assert_eq!(lab.candidates(id)[0].status, CandidateStatus::Invalid);
+    for f in &inputs {
+        assert!(!lab.project_dir.join(f).exists(), "R66: inputs trashed");
+    }
+}
+
+#[test]
+fn fr_rgn_28_owner_66_a_job_with_no_candidates_trashes_its_inputs_on_resolve() {
+    let lab = Lab::new();
+    lab.set_case("failure");
+    let id = lab.run("kitchen");
+    let job = lab.job(id);
+    assert_eq!(job.state, JobState::Failed);
+    assert!(lab.candidates(id).is_empty());
+    let inputs = job.input_files();
+    assert!(!inputs.is_empty());
+    for f in &inputs {
+        assert!(lab.project_dir.join(f).is_file(), "kept until resolved");
+    }
+    lab.core
+        .dispatch("rgn_job_dismiss", json!({"job_id": id}))
+        .unwrap();
+    assert!(lab.job(id).resolved_at.is_some());
+    for f in &inputs {
+        assert!(!lab.project_dir.join(f).exists(), "R66: trashed on resolve");
+    }
+    let trash = lab.manifest()["trash"].clone();
+    assert!(
+        trash.as_array().unwrap().iter().any(|t| t["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == &json!(inputs[0]))),
+        "the inputs are a trash item, not deleted"
+    );
+}
+
+#[test]
 fn fr_rgn_29_30_retune_and_undo_redo() {
     let lab = Lab::new();
     let id = lab.run("kitchen");
