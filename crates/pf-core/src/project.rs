@@ -770,7 +770,14 @@ pub(crate) fn commit_with(
 
     // R108: the write-once files this commit adds are removed again if it fails before the
     // commit point, so a refused save never turns into history after a restart.
+    // R109: a job.json counts as added too, with the job folder it created.
     let mut added: Vec<PathBuf> = Vec::new();
+    let new_job_dirs: Vec<PathBuf> = plan
+        .jobs_before
+        .iter()
+        .map(|job| p.path(&job.dir()))
+        .filter(|d| !d.exists())
+        .collect();
     let seq = p.last_commit.map_or(0, |c| c.0) + 1;
     let written = (|| {
         for (rel, bytes) in &plan.files {
@@ -786,7 +793,8 @@ pub(crate) fn commit_with(
             write_new(&mut added, &target, |t| fsx::write_json_atomic(ctx, t, rev))?;
         }
         for job in &plan.jobs_before {
-            write_job(ctx, p, job)?;
+            let target = p.path(&format!("{}/{JOB_FILE}", job.dir()));
+            write_new(&mut added, &target, |_| write_job(ctx, p, job))?;
         }
         next.commit = Commit {
             seq,
@@ -805,6 +813,9 @@ pub(crate) fn commit_with(
                 // Unreferenced: the next open's sweep trashes it (FR-PRJ-20).
                 tracing::warn!(error = %err, "a failed commit's file stays for the sweep");
             }
+        }
+        for dir in &new_job_dirs {
+            remove_empty_dirs(dir);
         }
         return Err(e);
     }
@@ -852,6 +863,17 @@ fn write_new(
         added.push(target.to_path_buf());
     }
     Ok(())
+}
+
+/// Removes `dir` and the folders under it if they hold no files (a failed commit's job folder).
+fn remove_empty_dirs(dir: &Path) {
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            remove_empty_dirs(&entry.path());
+        }
+    }
+    // Fails while anything is left in it: that stays for the sweep.
+    let _ = std::fs::remove_dir(dir);
 }
 
 pub(crate) fn write_job(ctx: &Context, p: &OpenProject, job: &JobFile) -> CoreResult<()> {

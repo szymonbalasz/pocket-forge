@@ -2266,3 +2266,40 @@ fn fr_rgn_32_no_visible_seam_with_offset_12() {
     eprintln!("FR-RGN-32: hard {hard:.2?}, steps {steps:.3?} levels/px, residual {residual:.3}");
     assert!(residual <= 0.1, "residual offset {residual} levels");
 }
+
+#[test]
+fn fr_prj_29_r109_a_submit_refused_as_locked_leaves_no_job_file() {
+    use crate::context::{FaultAction, Faults};
+    let mut lab = Lab::new();
+    let set_faults = |lab: &mut Lab, f: Faults| {
+        std::sync::Arc::get_mut(&mut lab.core.ctx).unwrap().faults = f;
+    };
+    set_faults(
+        &mut lab,
+        Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap(),
+    );
+    let draft = lab.draft("moss");
+    let err = lab.submit_draft(draft).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Locked);
+    let jobs = lab.project_dir.join(crate::manifest::JOBS_DIR);
+    let left: Vec<_> = std::fs::read_dir(&jobs)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    assert!(left.is_empty(), "nothing left behind: {left:?}");
+    // After a restart well past the lost window, no "may still run" notice for it.
+    set_faults(&mut lab, Faults::none());
+    lab.close();
+    let lab = lab.restart();
+    lab.clock.advance(std::time::Duration::from_secs(86_400));
+    let snap = lab.open();
+    let lost = snap["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|w| w["code"] == "lost");
+    assert!(!lost, "{snap}");
+    assert!(lab.core.state().project.as_ref().unwrap().jobs.is_empty());
+}
