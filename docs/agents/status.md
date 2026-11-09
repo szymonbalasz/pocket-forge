@@ -50,5 +50,8 @@
 
 | Task | Agent | Branch state | Result | Next |
 |---|---|---|---|---|
-| Spec: new-asset generation (GEN) | `spec-gen` | writing | — | owner OQs, review |
-| Spec: prompt helper (PRM) | `spec-prm` | writing | — | owner OQs, review |
+| Spec: new-asset generation (GEN) | — | merged | complete (#60) | — |
+| Spec: prompt helper (PRM) | `spec-prm` | review fixes + #60 picks | — | complete, then PRM builders |
+| GEN 1: PRV `generate` op, fake gen models | `prv-real` | building | — | owner: free dry-run-generate recordings |
+| GEN 2: image-less project, base layer, pick commit | `gen-2` | building | — | — |
+| GEN 5: + New menu, New image tab (mocked) | `gen-5` | building | — | — |
