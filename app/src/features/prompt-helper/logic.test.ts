@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
-import type { PromptHelper } from '../../api';
-import { fixWorthShowing, replySegments } from './chatLogic';
+import type { ChatStatus, ChatTurn, PromptHelper } from '../../api';
+import { billsApiKey, fixWorthShowing, replySegments, usageLabel } from './chatLogic';
 import { effectiveTicks, fieldError, moveWithin, rowHelpers, toggleTick } from './logic';
 
 const h = (id: string, patch: Partial<PromptHelper> = {}): PromptHelper => ({
@@ -68,5 +68,44 @@ describe('§7 L6 the chat transcript', () => {
     expect(fixWorthShowing('Retry.')).toBe(false);
     expect(fixWorthShowing(undefined)).toBe(false);
     expect(fixWorthShowing('Retry; details show the stderr tail.')).toBe(true);
+  });
+});
+
+describe('FR-PRM-38 usage', () => {
+  const turn = (usage?: ChatTurn['usage']): ChatTurn => ({
+    id: 't',
+    at: '2026-01-01T00:00:00Z',
+    role: 'assistant',
+    host: 'rgn',
+    text: '',
+    state: 'done',
+    ...(usage ? { usage } : {}),
+  });
+  const u = (cost_usd: number, notional: boolean) => ({
+    input_tokens: 1,
+    output_tokens: 1,
+    cost_usd,
+    notional,
+  });
+
+  test('FR-PRM-38 the footer totals the thread: plan usage, billed, or the fake', () => {
+    expect(usageLabel([turn()])).toBeNull();
+    expect(usageLabel([turn(u(0.016, true)), turn(), turn(u(0.024, true))])).toBe(
+      '≈ $0.04 plan usage',
+    );
+    expect(usageLabel([turn(u(0.03, true)), turn(u(0.01, false))])).toBe('≈ $0.04 billed');
+    expect(usageLabel([turn(u(0.01, true))], true)).toBe(
+      '≈ $0.01 notional (fake chat, nothing billed)',
+    );
+  });
+
+  test('FR-PRM-38 only an api_key login warns', () => {
+    const st = (backend: ChatStatus['backend']) => ({ backend }) as ChatStatus;
+    const ok = (auth_method: string | null) =>
+      st({ state: 'ok', version: '2.1.319', auth_method, plan: null, notional: false } as never);
+    expect(billsApiKey(ok('api_key'))).toBe(true);
+    expect(billsApiKey(ok('claude.ai'))).toBe(false);
+    expect(billsApiKey(ok(null))).toBe(false);
+    expect(billsApiKey(st({ state: 'not_checked' } as never))).toBe(false);
   });
 });

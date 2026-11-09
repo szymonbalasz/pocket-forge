@@ -713,8 +713,12 @@ fn fr_prm_35_closing_the_project_ends_the_session() {
 // ---------------------------------------------------------------- the Claude Code adapter
 
 fn logged_in(data: &Path) -> String {
+    logged_in_as(data, "claude.ai")
+}
+
+fn logged_in_as(data: &Path, auth_method: &str) -> String {
     json!({
-        "loggedIn": true, "authMethod": "claude.ai", "subscriptionType": "max",
+        "loggedIn": true, "authMethod": auth_method, "subscriptionType": "max",
         "configDirectory": data.join("claude-config").to_string_lossy(),
         "email": "someone@example.com",
     })
@@ -723,6 +727,11 @@ fn logged_in(data: &Path) -> String {
 
 /// A lab whose chat runs the Claude Code adapter over a replay spawner.
 fn claude_lab() -> (Lab, Arc<ReplaySpawner>) {
+    claude_lab_as("claude.ai")
+}
+
+/// [`claude_lab`] logged in with `auth_method`.
+fn claude_lab_as(auth_method: &str) -> (Lab, Arc<ReplaySpawner>) {
     let clock = pf_chat::clock::FakeClock::new();
     let mut spawner: Option<Arc<ReplaySpawner>> = None;
     let lab = Lab::with_context(|ctx| {
@@ -742,7 +751,7 @@ fn claude_lab() -> (Lab, Arc<ReplaySpawner>) {
                 .on_run(
                     &["auth", "status", "--json"],
                     Some(0),
-                    &logged_in(&ctx.data_dir),
+                    &logged_in_as(&ctx.data_dir, auth_method),
                 ),
         );
         ctx.chat.mode = BackendMode::ClaudeCode;
@@ -1056,4 +1065,296 @@ fn bl_42_fr_prm_26_the_preview_shows_what_the_next_turn_sends() {
     let p = preview(true);
     assert_eq!(p["images"][0]["already_sent"], true);
     assert!(p["summary"].as_str().unwrap().contains("(already sent)"));
+}
+
+#[test]
+fn fr_prm_40_a_failed_command_leaves_the_project_and_settings_unchanged() {
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "make this a kitchen").unwrap();
+    let proposal = events(&lab, super::EVENT_TURN)[0]["proposals"][0]["id"].clone();
+    let before = lab.persisted();
+    let fails = |name: &str, input: Value| -> ErrorCode {
+        let e = lab.core.dispatch(name, input).unwrap_err();
+        assert_eq!(
+            lab.persisted(),
+            before,
+            "{name} failed with {e:?} but changed state"
+        );
+        e.code
+    };
+    let p = pid(&lab);
+    let other = Ulid::from_parts(1, 999);
+    let mut rows = lab
+        .core
+        .dispatch("prm_helpers_list", json!({}))
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .clone();
+    rows[0]["label"] = json!("x".repeat(41));
+    let cases: Vec<(&str, Value, ErrorCode)> = vec![
+        // Settings: helpers and the chat section.
+        (
+            "prm_helpers_save",
+            json!({"helpers": rows}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_helpers_reset",
+            json!({"id": "builtin:nope"}),
+            ErrorCode::NotFound,
+        ),
+        (
+            "prm_helpers_reset",
+            json!({"id": "builtin:top-down", "all": true}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_compose_preview",
+            json!({"kind": "map", "typed_prompt": "a", "nope": 1}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_chat_consent",
+            json!({"accept": false, "nope": 1}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_chat_settings_put",
+            json!({"enabled": false, "window": {"x": 0, "y": 0, "w": 200, "h": 200}}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_chat_settings_put",
+            json!({"enabled": false, "claude_path": "c".repeat(1025)}),
+            ErrorCode::InvalidInput,
+        ),
+        // The project: its thread and the attached blocks.
+        (
+            "prm_chat_send",
+            json!({"project_id": p, "text": "   "}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_chat_send",
+            json!({"project_id": other, "text": "hi"}),
+            ErrorCode::NoProject,
+        ),
+        (
+            "prm_chat_insert",
+            json!({"project_id": p, "proposal_id": other}),
+            ErrorCode::NotFound,
+        ),
+        (
+            "prm_chat_cancel",
+            json!({"turn_id": other}),
+            ErrorCode::NotFound,
+        ),
+        (
+            "prm_context_publish",
+            json!({"project_id": p, "host": "rgn", "input": 3}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_chat_thread_get",
+            json!({"project_id": other}),
+            ErrorCode::NoProject,
+        ),
+    ];
+    for (name, input, want) in cases {
+        assert_eq!(fails(name, input.clone()), want, "{name} {input}");
+    }
+    // No block attached: send and insert fail, nothing written.
+    lab.core
+        .dispatch("prm_context_clear", json!({"project_id": p, "host": "rgn"}))
+        .unwrap();
+    assert_eq!(
+        fails("prm_chat_send", json!({"project_id": p, "text": "hi"})),
+        ErrorCode::NoPromptBlock
+    );
+    assert_eq!(
+        fails(
+            "prm_chat_insert",
+            json!({"project_id": p, "proposal_id": proposal}),
+        ),
+        ErrorCode::NoPromptBlock
+    );
+    // Read-only: insert is refused.
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    lab.core.state().project.as_mut().unwrap().read_only =
+        Some(crate::project::ReadOnlyReason::NewerVersion);
+    assert_eq!(
+        fails(
+            "prm_chat_insert",
+            json!({"project_id": p, "proposal_id": proposal}),
+        ),
+        ErrorCode::ReadOnly
+    );
+}
+
+#[test]
+fn fr_prm_44_a_host_switched_turn_gets_the_now_on_note() {
+    use pf_chat::system_prompt::{HOST_GEN_V1, HOST_RGN_V1, Host, host_note, system_prompt};
+    let (lab, sp) = claude_lab();
+    consent(&lab);
+    sp.push_script(Script::recordings(&[SUCCESS_IMAGE, TWO_PROPOSALS]));
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "make this a kitchen").unwrap();
+    // The tab switch to New image keeps the session (FR-PRM-43).
+    lab.core
+        .dispatch(
+            "prm_context_clear",
+            json!({"project_id": pid(&lab), "host": "rgn"}),
+        )
+        .unwrap();
+    let gen_draft = json!({
+        "model_id": "fake-gen-wh",
+        "controls": {},
+        "seed": null,
+        "size": {"mode": "grid", "cols": 30, "rows": 40, "pps": 70},
+        "structure": null,
+        "references": null,
+        "typed_prompt": "a crypt",
+        "final_prompt": "a crypt",
+    });
+    lab.core
+        .dispatch("provider_list_models", json!({"operation": "generate"}))
+        .unwrap();
+    lab.core
+        .dispatch("gen_job_estimate", json!({"draft": gen_draft}))
+        .unwrap();
+    publish(&lab, "gen", gen_draft);
+    let out = send(&lab, "a flooded crypt").unwrap();
+    assert_eq!(out["host"], "gen");
+    assert_eq!(out["fresh_session"], false);
+
+    let log = sp.log();
+    assert_eq!(log.spawns.len(), 1, "no restart for the host switch");
+    // The session's system prompt is the first turn's host.
+    let args = &log.spawns[0].0.args;
+    let at = args.iter().position(|a| a == "--system-prompt").unwrap();
+    assert_eq!(args[at + 1], system_prompt(Host::Rgn));
+    assert!(!args[at + 1].contains(HOST_GEN_V1));
+    let text_of = |line: &str| -> String {
+        let v: Value = serde_json::from_str(line).unwrap();
+        v["message"]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["type"] == "text")
+            .map(|c| c["text"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+            .join("")
+    };
+    let lines = log.stdin(0);
+    assert_eq!(lines.len(), 2);
+    let first = text_of(&lines[0]);
+    assert!(first.starts_with("[Context]\n"), "same host: no note");
+    assert!(!first.contains("[Now on:"));
+    let second = text_of(&lines[1]);
+    let note = host_note(Host::Gen);
+    assert_eq!(note, format!("[Now on: New image] {HOST_GEN_V1}"));
+    assert!(
+        second.starts_with(&format!("{note}\n\n[Context]\n")),
+        "the note tops the message: {second}"
+    );
+    assert!(second.ends_with("a flooded crypt"));
+    assert!(!second.contains(HOST_RGN_V1));
+}
+
+#[test]
+fn fr_prm_21_closing_the_window_never_cancels_a_job() {
+    use crate::job::JobState;
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "make this a kitchen").unwrap();
+    let id = lab.submit("a kitchen");
+    assert_eq!(lab.job(id).state, JobState::Submitted);
+    let calls = lab.fake().call_count();
+    // What the window's `Destroyed` handler runs (app/src-tauri chat_window.rs).
+    lab.core.chat.end_session();
+    assert_eq!(lab.job(id).state, JobState::Submitted, "still running");
+    assert_eq!(
+        lab.fake().call_count(),
+        calls,
+        "no provider call (no cancel)"
+    );
+    lab.drive();
+    assert_eq!(lab.job(id).state, JobState::Fetched);
+    assert_eq!(lab.candidates(id).len(), 3);
+    // The thread is kept.
+    assert_eq!(
+        thread_view(&lab)["thread"]["turns"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn fr_prm_38_each_turn_records_usage_notional_only_on_a_plan_login() {
+    for (auth, notional) in [("claude.ai", true), ("api_key", false)] {
+        let (lab, sp) = claude_lab_as(auth);
+        let st = consent(&lab);
+        assert_eq!(st["backend"]["auth_method"], auth);
+        assert_eq!(st["backend"]["notional"], notional, "{auth}");
+        sp.push_script(Script::recordings(&[SUCCESS_IMAGE]));
+        publish(&lab, "rgn", lab.draft("a kitchen"));
+        send(&lab, "make this a kitchen").unwrap();
+        let end = events(&lab, super::EVENT_TURN).last().cloned().unwrap();
+        assert_eq!(end["state"], "done");
+        let want = json!({"input_tokens": 2, "output_tokens": 246, "cost_usd": 0.016376,
+            "notional": notional});
+        assert_eq!(end["usage"], want, "{auth}");
+        // Recorded on the reply turn in the thread file.
+        let turns = thread_view(&lab)["thread"]["turns"].clone();
+        assert_eq!(turns[1]["usage"], want, "{auth}");
+        assert!(turns[0]["usage"].is_null(), "the user turn has none");
+    }
+    // The fake bills nothing: notional (L4).
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "hi").unwrap();
+    let end = events(&lab, super::EVENT_TURN).last().cloned().unwrap();
+    assert_eq!(end["usage"]["notional"], true);
+}
+
+#[test]
+fn fr_prm_32_the_mode_picks_the_backend_over_injected_seams() {
+    // Fake mode: the shared fake; the process spawner is never touched.
+    let lab = Lab::with_context(|ctx| {
+        ctx.chat.mode = BackendMode::Fake;
+        ctx.chat.spawner = Arc::new(PanicSpawner);
+    });
+    let st = consent(&lab);
+    assert_eq!(st["mode"], "fake");
+    assert_eq!(st["backend"]["auth_method"], "fake");
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "hi").unwrap();
+    let end = events(&lab, super::EVENT_TURN).last().cloned().unwrap();
+    assert_eq!(end["state"], "done");
+    let view = thread_view(&lab);
+    assert_eq!(view["thread"]["backend"], "fake");
+
+    // Claude Code mode: the adapter, over the injected spawner (replay) and clock.
+    let (lab, sp) = claude_lab();
+    let st = consent(&lab);
+    assert_eq!(st["mode"], "claude-code");
+    assert_eq!(st["backend"]["version"], "2.1.319");
+    assert_eq!(
+        sp.log().runs.len(),
+        2,
+        "detection ran on the injected spawner"
+    );
+    sp.push_script(Script::recordings(&[SUCCESS_IMAGE]));
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "hi").unwrap();
+    assert_eq!(
+        sp.log().spawns.len(),
+        1,
+        "the turn's child came from the seam"
+    );
+    assert_eq!(thread_view(&lab)["thread"]["backend"], "claude-code");
 }
