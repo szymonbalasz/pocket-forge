@@ -293,6 +293,41 @@ impl Lab {
             .collect()
     }
 
+    /// What a failed command must leave alone (FR-GEN-35, FR-PRM-40): every file in the library
+    /// (the project, its chat thread, new projects) with its bytes, `settings.json`, and the
+    /// settings and manifest in memory.
+    pub fn persisted(&self) -> Value {
+        fn files(dir: &Path, out: &mut std::collections::BTreeMap<String, String>) {
+            for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    files(&p, out);
+                } else {
+                    let bytes = std::fs::read(&p).unwrap_or_default();
+                    use sha2::Digest;
+                    let hash: String = sha2::Sha256::digest(&bytes)
+                        .iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect();
+                    out.insert(p.to_string_lossy().replace('\\', "/"), hash);
+                }
+            }
+        }
+        let mut lib = std::collections::BTreeMap::new();
+        files(&self.dir.path().join("lib"), &mut lib);
+        let settings_file = std::fs::read_to_string(crate::settings::settings_path(
+            &self.dir.path().join("data"),
+        ))
+        .ok();
+        let state = self.core.state();
+        json!({
+            "library": lib,
+            "settings_file": settings_file,
+            "settings": serde_json::to_value(&state.settings).unwrap(),
+            "manifest": state.project.as_ref().map(|p| serde_json::to_value(&p.manifest).unwrap()),
+        })
+    }
+
     pub fn states_emitted(&self, job: Ulid) -> Vec<String> {
         let mut out: Vec<String> = self
             .events_named(runner::EVENT_JOB_STATE)
@@ -893,6 +928,39 @@ fn fr_rgn_21_retry_draft_prefills_with_a_new_seed_unless_pinned() {
     assert_eq!(draft["seed"], json!(77));
     // Nothing was submitted by the retry draft.
     assert_eq!(lab.manifest()["jobs"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn fr_rgn_21_owner_73_retry_restores_the_blend_toggle_off_the_model_and_the_typed_prompt() {
+    let lab = Lab::new();
+    let mut d = lab.draft("  a stone well  ");
+    d["model_id"] = json!("fake-black-edit");
+    d["blend_instruction"] = json!(false);
+    let id = lab.submit_draft(d).unwrap();
+    lab.drive();
+    let draft = lab
+        .core
+        .dispatch("rgn_job_retry_draft", json!({"job_id": id}))
+        .unwrap();
+    assert_eq!(draft["model_id"], "fake-black-edit");
+    assert_eq!(draft["blend_instruction"], json!(false), "off stays off");
+    assert_eq!(
+        draft["final_prompt"], "  a stone well  ",
+        "the typed prompt, as typed"
+    );
+    // On is restored as on.
+    let id = lab.submit("a kitchen");
+    lab.drive();
+    let draft = lab
+        .core
+        .dispatch("rgn_job_retry_draft", json!({"job_id": id}))
+        .unwrap();
+    assert_eq!(draft["blend_instruction"], json!(true));
+    assert_eq!(draft["model_id"], "fake-white-edit");
+    assert_eq!(
+        draft["final_prompt"], "a kitchen",
+        "no blend text folded in"
+    );
 }
 
 /// Walk owner-UX M1: the count is sent as `candidate_count`, not in the job's `controls`, so
@@ -1519,6 +1587,131 @@ fn fr_rgn_28_owner_56_the_next_submit_resolves_the_previous_job_and_keeps_it() {
             .iter()
             .all(|c| c.status == CandidateStatus::Dismissed && c.trash_id.is_none()),
         "#56: the rest stays in results/"
+    );
+}
+
+#[test]
+fn fr_rgn_28_owner_67_an_accepted_candidate_cant_be_discarded() {
+    let lab = Lab::new();
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id);
+    accept(&lab, id, c[0].id, blend(96, true)).unwrap();
+    let before = lab.manifest();
+    let err = lab
+        .core
+        .dispatch(
+            "rgn_candidate_discard",
+            json!({"job_id": id, "candidate_id": c[0].id}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::InvalidInput);
+    assert_eq!(err.field.as_deref(), Some("candidate_id"));
+    let c0 = &lab.candidates(id)[0];
+    assert_eq!((c0.status, c0.trash_id), (CandidateStatus::Accepted, None));
+    assert!(lab.project_dir.join(&c0.file).is_file(), "file stays");
+    assert_eq!(lab.manifest(), before, "nothing committed");
+}
+
+#[test]
+fn fr_rgn_28_explicit_discard_of_a_starred_candidate_clears_its_star() {
+    let lab = Lab::new();
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id);
+    lab.core
+        .dispatch(
+            "rgn_candidate_star",
+            json!({"job_id": id, "candidate_id": c[1].id, "starred": true}),
+        )
+        .unwrap();
+    assert!(lab.candidates(id)[1].starred);
+    lab.core
+        .dispatch(
+            "rgn_candidate_discard",
+            json!({"job_id": id, "candidate_id": c[1].id}),
+        )
+        .unwrap();
+    let c1 = &lab.candidates(id)[1];
+    assert_eq!(c1.status, CandidateStatus::Discarded);
+    assert!(!c1.starred, "the star is cleared");
+    assert!(c1.trash_id.is_some());
+    assert!(!lab.project_dir.join(&c1.file).exists(), "left results/");
+    // On disk too.
+    let row = lab.manifest()["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == json!(c[1].id))
+        .cloned()
+        .unwrap();
+    assert_eq!(row["starred"], json!(false));
+    assert_eq!(row["status"], json!("discarded"));
+}
+
+#[test]
+fn fr_rgn_28_owner_66_invalid_candidates_count_as_discarded() {
+    let lab = Lab::new();
+    lab.set_case("bad_candidate");
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id);
+    assert_eq!(c[0].status, CandidateStatus::Invalid);
+    lab.core
+        .dispatch("rgn_job_dismiss", json!({"job_id": id}))
+        .unwrap();
+    let inputs = lab.job(id).input_files();
+    assert!(!inputs.is_empty());
+    lab.core
+        .dispatch(
+            "rgn_candidate_discard",
+            json!({"job_id": id, "candidate_id": c[1].id}),
+        )
+        .unwrap();
+    for f in &inputs {
+        assert!(
+            lab.project_dir.join(f).is_file(),
+            "one candidate still kept"
+        );
+    }
+    lab.core
+        .dispatch(
+            "rgn_candidate_discard",
+            json!({"job_id": id, "candidate_id": c[2].id}),
+        )
+        .unwrap();
+    // Only the invalid one is left; it doesn't keep the inputs (R66).
+    assert_eq!(lab.candidates(id)[0].status, CandidateStatus::Invalid);
+    for f in &inputs {
+        assert!(!lab.project_dir.join(f).exists(), "R66: inputs trashed");
+    }
+}
+
+#[test]
+fn fr_rgn_28_owner_66_a_job_with_no_candidates_trashes_its_inputs_on_resolve() {
+    let lab = Lab::new();
+    lab.set_case("failure");
+    let id = lab.run("kitchen");
+    let job = lab.job(id);
+    assert_eq!(job.state, JobState::Failed);
+    assert!(lab.candidates(id).is_empty());
+    let inputs = job.input_files();
+    assert!(!inputs.is_empty());
+    for f in &inputs {
+        assert!(lab.project_dir.join(f).is_file(), "kept until resolved");
+    }
+    lab.core
+        .dispatch("rgn_job_dismiss", json!({"job_id": id}))
+        .unwrap();
+    assert!(lab.job(id).resolved_at.is_some());
+    for f in &inputs {
+        assert!(!lab.project_dir.join(f).exists(), "R66: trashed on resolve");
+    }
+    let trash = lab.manifest()["trash"].clone();
+    assert!(
+        trash.as_array().unwrap().iter().any(|t| t["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == &json!(inputs[0]))),
+        "the inputs are a trash item, not deleted"
     );
 }
 
