@@ -421,6 +421,9 @@ test('FR-GEN-34 read-only: the tab is shown, no estimate, Generate disabled with
     'The project is read-only.',
   );
   expect(fake.callsOf('gen_job_estimate')).toHaveLength(0);
+  // Walk L3: with no estimate the unit is still the provider's ("fake"), never "CU".
+  await waitFor(() => expect(screen.getByTestId('gen-panel-spend').textContent).toContain('fake'));
+  expect(screen.getByTestId('gen-panel-spend').textContent).not.toContain('CU');
 });
 
 test('walk L2 FR-GEN-14 the sketch list follows structure/ changes (the project panel ⟳, focus, Add)', async () => {

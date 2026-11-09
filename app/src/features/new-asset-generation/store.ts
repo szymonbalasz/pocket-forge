@@ -21,6 +21,7 @@ import {
   type CandidateRecord,
   type ProjectSnapshot,
   type PromptRetryBadges,
+  type ProviderMode,
   type Spend,
 } from '../../api';
 import { isFolderMovedError, projectStore } from '../../store/project';
@@ -57,7 +58,7 @@ export interface GenState {
   readOnly: string | null;
   /** The New image tab is shown (FR-GEN-36); estimates run only then. */
   visible: boolean;
-  provider: { configured: boolean; connectivity: Connectivity } | null;
+  provider: { configured: boolean; connectivity: Connectivity; mode?: ProviderMode } | null;
   models: ModelSummary[];
   modelsStale: boolean;
   modelsLoading: boolean;
@@ -231,6 +232,12 @@ function storedDraft(s: GenState): GenDraft {
   };
 }
 
+/** Walk-gen L3 (as RGN's walk D7): one unit for every amount in the tab: the estimate's, else
+ *  the provider's (the fake reports "fake", Scenario "CU"), also with no estimate (read-only). */
+export function costUnit(s: GenState): string {
+  return s.estimate.result?.cost.unit ?? (s.provider?.mode === 'fake' ? 'fake' : 'CU');
+}
+
 /** The draft estimate and submit send (FR-GEN-22). The core composes the final prompt from the
  *  typed prompt and the ticks (FR-GEN-16, R80); `final_prompt` is informational. This is also
  *  what the tab publishes as its chat context input (FR-PRM-23). */
@@ -321,7 +328,7 @@ function saveDraftSoon(): void {
 async function refreshProvider(): Promise<void> {
   try {
     const st = await api.provider.status();
-    set({ provider: { configured: st.configured, connectivity: st.connectivity } });
+    set({ provider: { configured: st.configured, connectivity: st.connectivity, mode: st.mode } });
   } catch {
     // Unknown status: the estimate's errors say what is wrong.
   }

@@ -32,6 +32,7 @@ import {
   resultLabel,
 } from './size';
 import {
+  costUnit,
   currentDraft,
   gen,
   isOffline,
@@ -550,7 +551,7 @@ function PromptSection({ s }: { s: GenState }) {
 
 function CostSection({ s }: { s: GenState }) {
   const e = s.estimate;
-  const unit = e.result?.cost.unit ?? 'CU';
+  const unit = costUnit(s);
   let line: React.ReactNode;
   if (s.readOnly) line = <span className="muted">No estimate: the project is read-only.</span>;
   else if (isOffline(s)) line = <span className="muted">No estimate while offline.</span>;
