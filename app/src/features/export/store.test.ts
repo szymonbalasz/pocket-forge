@@ -307,6 +307,26 @@ describe('export store', () => {
     }
   });
 
+  test('FR-EXP-19 a closed project’s late export events never end the next export', async () => {
+    await bound();
+    await exportStore.start();
+    const closing = projectStore.close();
+    await exportStore.confirmClose();
+    await closing;
+    await exportStore.bind(null);
+    await exportStore.bind('p2');
+    // The next Start, before export_start returns: the old export's canceled event arrives.
+    let resolve!: (v: { export_id: string }) => void;
+    h.exp.start.mockReturnValueOnce(new Promise((r) => (resolve = r)));
+    const p = exportStore.start();
+    h.emit('export:canceled', { export_id: 'e1' });
+    h.emit('export:progress', { export_id: 'e1', phase: 'write', fraction: 0.9 });
+    expect(exportStore.get().run).toMatchObject({ exportId: null, phase: 'compose' });
+    resolve({ export_id: 'e2' });
+    await p;
+    expect(exportStore.get().run?.exportId).toBe('e2');
+  });
+
   test('FR-EXP-18 a failed export shows its message and Retry starts again', async () => {
     await bound();
     await exportStore.start();

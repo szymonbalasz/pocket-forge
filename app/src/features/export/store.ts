@@ -81,6 +81,12 @@ let listening: Promise<void> | null = null;
 let proceedClose: (() => void) | null = null;
 let cancelClose: (() => void) | null = null;
 let guarding = false;
+/** Bumped per Start and whenever a run is abandoned (project change), so a late `export_start`
+ *  answer never names the wrong run. */
+let runSeq = 0;
+/** Exports this panel no longer follows (a closed project's): their late events are ignored even
+ *  while the next run doesn't know its own id yet. */
+const retired = new Set<string>();
 
 /** PRJ close guard: hold the close while an export runs and ask first (OQ-EXP-09). */
 function closeGuard(proceed: () => void, cancel: () => void): boolean {
@@ -119,7 +125,8 @@ function limitOf(detail: unknown): unknown {
 /** Applies an event only to the current export. */
 function isOurs(exportId: string): boolean {
   const run = state.run;
-  return !!run && (run.exportId === null || run.exportId === exportId);
+  if (!run) return false;
+  return run.exportId === null ? !retired.has(exportId) : run.exportId === exportId;
 }
 
 async function prefetch(projectId: string): Promise<void> {
@@ -145,6 +152,8 @@ export const exportStore = {
   /** Test helper: back to the initial state. */
   reset(): void {
     syncSeq = 0;
+    runSeq++;
+    retired.clear();
     prefetched = null;
     proceedClose = null;
     cancelClose = null;
@@ -195,6 +204,9 @@ export const exportStore = {
     if (state.projectId === projectId) return;
     syncSeq++;
     prefetched = null;
+    // The old project's export (canceled by the close) is no longer ours.
+    runSeq++;
+    if (state.run?.exportId) retired.add(state.run.exportId);
     set({
       ...initial,
       expanded: state.expanded,
@@ -296,6 +308,7 @@ export const exportStore = {
   async start(): Promise<void> {
     const { settings, plan, run } = state;
     if (!settings || !plan || run) return;
+    const mine = ++runSeq;
     set({
       run: {
         exportId: null,
@@ -310,10 +323,16 @@ export const exportStore = {
     });
     try {
       const { export_id } = await api.export.start(settings, plan.exists !== null);
+      // Abandoned meanwhile (project change): not this panel's export any more.
+      if (mine !== runSeq) {
+        retired.add(export_id);
+        return;
+      }
       // Done or failed may already have arrived for this export.
       if (state.run && state.run.exportId === null)
         set({ run: { ...state.run, exportId: export_id } });
     } catch (e) {
+      if (mine !== runSeq) return;
       const err = codeOf(e);
       set({ run: null });
       if (err.code === 'invalid_settings') {
