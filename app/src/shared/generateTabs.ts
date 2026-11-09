@@ -35,6 +35,34 @@ export const projectHasImage = (p: { image_path: string | null }): boolean => !!
 let selected = REGION_TAB;
 /** The tab the next opened project starts on (+ New → Generate new…, FR-GEN-01). */
 let nextOpen: string | null = null;
+/** The open project, whose shown tab is remembered (R85, R94). */
+let openProject: string | null = null;
+
+/** R85 / R94: the shown tab per project, per machine (this webview's storage), so it persists
+ *  across closing and reopening a project and across a restart. A UI preference only: storage
+ *  that fails just forgets. */
+const STORE_KEY = 'pf.generate-tab';
+const STORE_MAX = 200;
+function rememberedTabs(): Record<string, string> {
+  try {
+    const v: unknown = JSON.parse(globalThis.localStorage?.getItem(STORE_KEY) ?? '{}');
+    return v && typeof v === 'object' ? (v as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+function remember(projectId: string, tab: string): void {
+  try {
+    const all = rememberedTabs();
+    delete all[projectId];
+    all[projectId] = tab;
+    const keys = Object.keys(all);
+    for (const k of keys.slice(0, Math.max(0, keys.length - STORE_MAX))) delete all[k];
+    globalThis.localStorage?.setItem(STORE_KEY, JSON.stringify(all));
+  } catch {
+    // No storage: the tab just isn't remembered.
+  }
+}
 const listeners = new Set<() => void>();
 const emit = () => {
   for (const l of listeners) l();
@@ -43,6 +71,7 @@ const emit = () => {
 export const generateTab = {
   get: (): string => selected,
   select(id: string): void {
+    if (openProject && rememberedTabs()[openProject] !== id) remember(openProject, id);
     if (id === selected) return;
     selected = id;
     emit();
@@ -55,11 +84,22 @@ export const generateTab = {
   openNextWith(id: string): void {
     nextOpen = id;
   },
-  /** A project was opened: its starting tab (the requested one, else Region edit). */
-  projectOpened(): void {
-    const id = nextOpen ?? REGION_TAB;
+  /** A project was opened: its starting tab (the requested one, else the one last shown for
+   *  this project, R85 / R94, else Region edit). */
+  projectOpened(projectId?: string): void {
+    openProject = projectId ?? null;
+    const id = nextOpen ?? (projectId ? rememberedTabs()[projectId] : undefined) ?? REGION_TAB;
     nextOpen = null;
     generateTab.select(id);
+  },
+  /** Tests: forget every remembered tab. */
+  forgetAll(): void {
+    openProject = null;
+    try {
+      globalThis.localStorage?.removeItem(STORE_KEY);
+    } catch {
+      // No storage.
+    }
   },
   /** Routes a tracker Retry to the tab that owns the job's operation; false = none does. */
   retry(tabId: string, jobId: string): boolean {
