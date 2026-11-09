@@ -8,6 +8,7 @@ import { providerFeature } from '../features/provider';
 import { regionEditFeature } from '../features/region-edit';
 import { exportFeature } from '../features/export';
 import { referencesFeature } from '../features/references';
+import { newAssetGenerationFeature } from '../features/new-asset-generation';
 
 export const features: readonly Feature[] = [
   libraryFeature,
@@ -17,4 +18,5 @@ export const features: readonly Feature[] = [
   regionEditFeature,
   exportFeature,
   referencesFeature,
+  newAssetGenerationFeature,
 ];
