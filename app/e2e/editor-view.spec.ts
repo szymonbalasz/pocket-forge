@@ -250,3 +250,18 @@ test('FR-EDT-03 R41 Space pans right after a mouse click on a tool or preset but
   await page.getByTestId('edt-view-fit').focus();
   expect(await focused()).toBe('edt-view-fit');
 });
+
+test('FR-EDT-03 FR-EDT-24 a focus loss releases a held Space and backslash', async ({ page }) => {
+  await openMap(page);
+  const stage = page.getByTestId('edt-canvas-stage');
+  const flip = async () => (await hook<{ flipBefore: boolean }>(page, 'store')).flipBefore;
+  await page.keyboard.press('r');
+  await page.keyboard.down('Space');
+  await page.keyboard.down('Backslash');
+  await expect(stage).toHaveClass(/editor-canvas-pan/);
+  expect(await flip()).toBe(true);
+  // Alt-Tab: the keyups go to another window.
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+  await expect(stage).not.toHaveClass(/editor-canvas-pan/);
+  expect(await flip()).toBe(false);
+});

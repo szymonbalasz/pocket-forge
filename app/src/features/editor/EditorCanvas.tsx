@@ -372,11 +372,18 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
       if (e.key === ' ') setSpaceHeld(false);
       if (e.code === 'Backslash') editorStore.set({ flipBefore: false });
     };
+    // A focus loss (Alt-Tab) sends the keyups elsewhere: release what was held (FR-EDT-03/24).
+    const blur = () => {
+      setSpaceHeld(false);
+      if (editorStore.get().flipBefore) editorStore.set({ flipBefore: false });
+    };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
+    window.addEventListener('blur', blur);
     return () => {
       window.removeEventListener('keydown', down);
       window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', blur);
     };
   }, []);
 

@@ -100,6 +100,19 @@ async function attempt<T>(run: () => Promise<T>): Promise<T | null> {
   }
 }
 
+/** Adds run one after another (FR-REF-08). */
+let addQueue: Promise<void> = Promise.resolve();
+
+async function addNow(id: string, paths: string[]): Promise<void> {
+  set({ adding: { done: 0, total: paths.length }, summary: null });
+  const r = await attempt(() => api.references.addImages(id, paths));
+  set({ adding: null });
+  if (r && state.openId === id)
+    set({ pack: r.pack, summary: { pack: r.pack.name, items: r.items } });
+  else await refs.refreshPack();
+  void refs.refreshList();
+}
+
 export const refs = {
   get: (): RefsState => state,
   subscribe(listener: () => void): () => void {
@@ -109,6 +122,7 @@ export const refs = {
   },
   /** Test helper. */
   reset(): void {
+    addQueue = Promise.resolve();
     set(initial);
   },
 
@@ -237,17 +251,15 @@ export const refs = {
     if (pack && state.openId === id) set({ pack });
   },
 
-  /** Copies sources into the open pack (FR-REF-08): drop, Add… or a pasted list. */
-  async addImages(paths: string[]): Promise<void> {
+  /** Copies sources into the open pack (FR-REF-08): drop, Add… or a pasted list. Adds run one
+   *  at a time, into the pack they were dropped on: `ref:add-progress` carries no add id, so two
+   *  at once would clear each other's progress. */
+  addImages(paths: string[]): Promise<void> {
     const id = state.openId;
-    if (!id || !paths.length) return;
-    set({ adding: { done: 0, total: paths.length }, summary: null });
-    const r = await attempt(() => api.references.addImages(id, paths));
-    set({ adding: null });
-    if (r && state.openId === id)
-      set({ pack: r.pack, summary: { pack: r.pack.name, items: r.items } });
-    else await refs.refreshPack();
-    void refs.refreshList();
+    if (!id || !paths.length) return Promise.resolve();
+    const run = addQueue.then(() => addNow(id, paths));
+    addQueue = run.catch(() => undefined);
+    return run;
   },
 
   /** Remove → References trash (FR-REF-12). */

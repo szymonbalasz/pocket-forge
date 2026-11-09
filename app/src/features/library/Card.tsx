@@ -10,7 +10,10 @@ import { libraryStore } from './store';
 
 export function Card({ card }: { card: ProjectCard }) {
   const [renaming, setRenaming] = useState(false);
-  const [thumbFailed, setThumbFailed] = useState(false);
+  // The URL that failed, not a flag: a new thumbnail (a new URL) is tried again (FR-PRJ-50).
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const thumbFailed = !!card.thumb_url && failedUrl === card.thumb_url;
+  const onThumbFail = () => setFailedUrl(card.thumb_url);
 
   return (
     <ContextMenu.Root>
@@ -23,7 +26,7 @@ export function Card({ card }: { card: ProjectCard }) {
         >
           {renaming ? (
             <div className="prj-card-body">
-              <Thumb card={card} failed={thumbFailed} onFail={() => setThumbFailed(true)} />
+              <Thumb card={card} failed={thumbFailed} onFail={onThumbFail} />
               <RenameField card={card} onDone={() => setRenaming(false)} />
             </div>
           ) : (
@@ -39,7 +42,7 @@ export function Card({ card }: { card: ProjectCard }) {
                 }
               }}
             >
-              <Thumb card={card} failed={thumbFailed} onFail={() => setThumbFailed(true)} />
+              <Thumb card={card} failed={thumbFailed} onFail={onThumbFail} />
               <span className="prj-card-name" data-testid="prj-home-card-name">
                 {card.name}
               </span>
