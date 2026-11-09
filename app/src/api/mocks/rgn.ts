@@ -393,15 +393,15 @@ export function installRgnMock(seed: RgnMockSeed): void {
     delete s.failures[cmd];
     return fail(f.code, f.message, f.field);
   };
-  const slugOf = (prompt: string) => {
+  const slugOf = (prompt: string, empty = 'edit') => {
     const t = prompt
       .toLowerCase()
       .replace(/[^\p{L}\p{N}]+/gu, ' ')
       .trim();
-    if (t.length <= 32) return t || 'edit';
+    if (t.length <= 32) return t || empty;
     const cut = t.slice(0, 33);
     const sp = cut.lastIndexOf(' ');
-    return (sp > 0 ? cut.slice(0, sp) : t.slice(0, 32)).trim() || 'edit';
+    return (sp > 0 ? cut.slice(0, sp) : t.slice(0, 32)).trim() || empty;
   };
   const jobEvent = (j: Job, extra: Rec = {}) =>
     emit('rgn:job-state', {
@@ -667,6 +667,9 @@ export function installRgnMock(seed: RgnMockSeed): void {
             cost: { amount: j.cost, unit },
             accepted_in_stack: inStack(j),
             references: j.refs.length,
+            // FR-GEN-25: generate jobs (the GEN mock adds them to this list) carry their output.
+            operation: (j as unknown as Rec).operation ?? 'edit_masked',
+            output: (j as unknown as Rec).output ?? null,
             reference_files: j.refs.map((r) => ({
               file: String(r.path).split('/').pop(),
               pack_name: r.pack_name ?? null,
@@ -766,10 +769,13 @@ export function installRgnMock(seed: RgnMockSeed): void {
       j.state = 'succeeded';
       j.progress = 1;
       jobEvent(j);
-      const c = caps(j.draft.model_id)!;
-      const k = count ?? countOf(c, j.draft.controls);
+      // A generate job (GEN mock) records its count; its model isn't one of this seed's.
+      const c = caps(j.draft.model_id);
+      const k = count ?? j.sent.count?.n ?? (c ? countOf(c, j.draft.controls) : 1);
       j.n = Math.max(0, ...s.jobs.map((x) => x.n ?? 0)) + 1;
-      j.slug = slugOf(j.draft.final_prompt);
+      // FR-GEN-24: a generate job's slug comes from its typed prompt; empty → `new`.
+      const generate = (j as unknown as Rec).operation === 'generate';
+      j.slug = slugOf(j.draft.final_prompt, generate ? 'new' : 'edit');
       j.dir = `results/${String(j.n).padStart(3, '0')} ${j.slug}`;
       for (let i = 0; i < k; i++) {
         const cand: Cand = {

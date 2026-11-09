@@ -1,6 +1,11 @@
 // The References block's state (reference-packs §7, FR-REF-15..20): the draft's `references`, the
 // last `ref_resolve` result and the packs for the picker. The core reconciles (FR-REF-17); this
 // store only applies the user's edit, asks `ref_resolve` again and tells RGN to save the draft.
+//
+// Two hosts render the block (FR-GEN-13): RGN's Region edit tab (`rgn`, `draft.references`) and
+// GEN's New image tab (`gen`, `draft.generate.references`). Only the visible tab is mounted
+// (FR-GEN-36), so the store holds the visible host's block and parks the other one until its tab
+// is shown again; the helpers below take the host they act for (RGN's by default).
 import { useSyncExternalStore } from 'react';
 
 import {
@@ -15,8 +20,14 @@ import {
 import { errorOf, projectStore } from '../../store/project';
 import { slotName, slotOf, underMin } from './format';
 
+/** Who renders the block: RGN's Region edit tab or GEN's New image tab. */
+export type RefHost = 'rgn' | 'gen';
+
 export interface BlockState {
   projectId: string | null;
+  host: RefHost;
+  /** GEN: the chosen structural sketch (its slot's `max` drops by 1, FR-GEN-13); null = None. */
+  structure: string | null;
   /** The selected model, when it has reference slots (FR-REF-15); else null (hidden). */
   modelId: string | null;
   /** The draft's `references` (schema §4.5); null = REF's defaults (FR-REF-17). */
@@ -31,6 +42,8 @@ export interface BlockState {
 
 const initial: BlockState = {
   projectId: null,
+  host: 'rgn',
+  structure: null,
   modelId: null,
   refs: null,
   resolved: null,
@@ -41,6 +54,8 @@ const initial: BlockState = {
 };
 
 let state: BlockState = initial;
+/** The hidden host's block for the open project, kept until its tab is shown again. */
+const parked = new Map<RefHost, BlockState>();
 const listeners = new Set<() => void>();
 let token = 0;
 /** RGN's hook: `save` = a user edit to write with the draft (FR-REF-20). */
@@ -52,8 +67,13 @@ function set(patch: Partial<BlockState>): void {
 }
 
 /** The selection as the draft stores it: the user's latest, else the core's reconciled one. */
-function current(): DraftReferences {
-  return state.refs ?? state.resolved?.references ?? { packs: [], items: [] };
+function current(s: BlockState = state): DraftReferences {
+  return s.refs ?? s.resolved?.references ?? { packs: [], items: [] };
+}
+
+/** The block of `host`: the live one when it is shown, else its parked one (null = none yet). */
+function view(host: RefHost): BlockState | null {
+  return state.host === host ? state : (parked.get(host) ?? null);
 }
 
 let watching = false;
@@ -76,7 +96,11 @@ async function resolve(): Promise<void> {
   const t = ++token;
   set({ loading: true });
   try {
-    const r = await api.references.resolve(modelId, state.refs);
+    const r = await api.references.resolve(
+      modelId,
+      state.refs,
+      state.host === 'gen' ? { operation: 'generate', structure: state.structure } : undefined,
+    );
     if (t !== token) return;
     // Keep the selection in step with what the core reconciled (FR-REF-17: kept ticks, new
     // defaults, a renamed pack's new id, missing items kept for Retry). While the draft has no
@@ -108,6 +132,7 @@ export const block = {
   },
   reset(): void {
     token++;
+    parked.clear();
     state = initial;
     for (const l of listeners) l();
   },
@@ -116,12 +141,34 @@ export const block = {
     changed = cb;
   },
 
-  /** Binds to the open project's draft (once per project; closing the project unbinds). */
-  attach(projectId: string | null, refs: DraftReferences | null): void {
+  /** Binds to the open project's draft (once per project and host; closing the project
+   *  unbinds). Another host of the same project parks the current block and brings back its
+   *  own, resolved again (FR-GEN-13). */
+  attach(projectId: string | null, refs: DraftReferences | null, host: RefHost = 'rgn'): void {
     watchClose();
-    if (projectId === state.projectId) return;
+    if (projectId === state.projectId && host === state.host) return;
     token++;
-    set({ ...initial, projectId, refs, packs: state.packs });
+    if (projectId && projectId === state.projectId) {
+      parked.set(state.host, { ...state, loading: false });
+      const back = parked.get(host);
+      parked.delete(host);
+      set(
+        back
+          ? { ...back, packs: state.packs, error: null }
+          : { ...initial, projectId, host, refs, packs: state.packs },
+      );
+      if (back?.modelId) void resolve();
+      return;
+    }
+    parked.clear();
+    set({ ...initial, projectId, host, refs, packs: state.packs });
+  },
+
+  /** GEN: the sketch choice changed (FR-GEN-13): resolve again with its slot's reduced max. */
+  setStructure(file: string | null): void {
+    if (file === state.structure) return;
+    set({ structure: file });
+    if (state.modelId) void resolve();
   },
 
   /** Retry replaced the draft (FR-RGN-44, FR-REF-26): the job's selection, with its
@@ -233,9 +280,10 @@ export const block = {
 
 /** The draft field RGN writes (FR-REF-20): `{references}` once the draft has one or the user
  *  edited the selection; nothing while REF's defaults apply (null, FR-REF-17). */
-export function referencesDraft(): { references?: DraftReferences } {
-  if (!state.projectId || !state.refs) return {};
-  return { references: current() };
+export function referencesDraft(host: RefHost = 'rgn'): { references?: DraftReferences } {
+  const s = view(host);
+  if (!s?.projectId || !s.refs) return {};
+  return { references: current(s) };
 }
 
 /** The selection estimate and submit send (FR-RGN-41). With REF's defaults (no saved
@@ -243,10 +291,11 @@ export function referencesDraft(): { references?: DraftReferences } {
  *  null without a default-ticked file that vanished and charge the job without it; given the
  *  selection, `prepare` refuses it with `reference_unavailable` before any spend (BL-34). Null
  *  only while the block isn't resolved for the current model. */
-export function referencesForSend(): DraftReferences | null {
-  if (!state.projectId) return null;
-  if (state.refs) return state.refs;
-  return state.modelId && !state.loading ? (state.resolved?.references ?? null) : null;
+export function referencesForSend(host: RefHost = 'rgn'): DraftReferences | null {
+  const s = view(host);
+  if (!s?.projectId) return null;
+  if (s.refs) return s.refs;
+  return s.modelId && !s.loading ? (s.resolved?.references ?? null) : null;
 }
 
 /** FR-RGN-45: the keys of the ticked items as the block shows them now, for the confirm's
@@ -260,9 +309,10 @@ export function referencesOnKeys(s: BlockState = state): string[] | null {
 
 /** FR-RGN-42: the ticked items of cost-affecting slots, in order. RGN re-estimates when it
  *  changes; other slots never do (FR-REF-24). */
-export function referencesCostKey(): string {
-  const r = state.resolved;
-  if (!state.modelId || !r?.visible) return '';
+export function referencesCostKey(host: RefHost = 'rgn'): string {
+  const s = view(host);
+  const r = s?.resolved;
+  if (!s?.modelId || !r?.visible) return '';
   const costly = new Set(r.slots.filter((s) => s.cost_affecting).map((s) => s.name));
   return r.items
     .filter((i) => i.on && costly.has(i.slot))
@@ -271,23 +321,41 @@ export function referencesCostKey(): string {
 }
 
 /** FR-REF-18 `references_required(slot, min)`: why submit is disabled, or null. */
-export function referencesBlocker(): string | null {
-  const r = state.resolved;
-  if (!state.modelId || !r || !r.visible || r.ready) return null;
+export function referencesBlocker(host: RefHost = 'rgn'): string | null {
+  const s = view(host);
+  const r = s?.resolved;
+  if (!s?.modelId || !r || !r.visible || r.ready) return null;
   const under = underMin(r.slots);
   if (!under.length) return null;
   return `References: ${under.map((s) => `${slotName(s)} needs at least ${s.min}`).join(', ')}.`;
 }
 
-/** RGN's Retry (FR-RGN-44): replaces the selection with the job's. */
-export const restoreReferences = (refs: DraftReferences | null): void => block.restore(refs);
-/** RGN after a restore or a resolved conflict: the draft's selection, without a save. */
-export const reloadReferences = (refs: DraftReferences | null): void => block.reload(refs);
-/** RGN after `reference_unavailable` (FR-REF-21): resolve again, so the item that can't be
- *  sent shows its badge or notice. */
-export const refreshReferences = (): void => void resolve();
-/** RGN after a successful submit: clears the Retry flags. */
-export const settleReferences = (): void => block.settle();
+/** A hidden host's selection is replaced: kept parked, resolved when its tab is shown. */
+function parkRefs(host: RefHost, refs: DraftReferences | null): void {
+  const base = parked.get(host) ?? {
+    ...initial,
+    projectId: state.projectId,
+    host,
+    packs: state.packs,
+  };
+  parked.set(host, { ...base, refs, error: null, notices: [] });
+}
+
+/** Retry (FR-RGN-44, FR-GEN-32): replaces the selection with the job's. */
+export const restoreReferences = (refs: DraftReferences | null, host: RefHost = 'rgn'): void =>
+  host === state.host ? block.restore(refs) : parkRefs(host, refs);
+/** After a restore or a resolved conflict: the draft's selection, without a save. */
+export const reloadReferences = (refs: DraftReferences | null, host: RefHost = 'rgn'): void =>
+  host === state.host ? block.reload(refs) : parkRefs(host, refs);
+/** After `reference_unavailable` (FR-REF-21): resolve again, so the item that can't be sent
+ *  shows its badge or notice. A hidden host resolves when it is shown. */
+export const refreshReferences = (host: RefHost = 'rgn'): void => {
+  if (host === state.host) void resolve();
+};
+/** After a successful submit: clears the Retry flags. */
+export const settleReferences = (host: RefHost = 'rgn'): void => {
+  if (host === state.host) block.settle();
+};
 
 export function useBlock(): BlockState {
   return useSyncExternalStore(block.subscribe, block.get, block.get);

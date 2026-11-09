@@ -13,6 +13,7 @@ export {
   restoreReferences,
   settleReferences,
   useBlock as useReferencesBlock,
+  type RefHost,
 } from './blockStore';
 
 // REF: the packs home and pack view in the home (canvas) slot while References is selected

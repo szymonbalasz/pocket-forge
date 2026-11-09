@@ -103,17 +103,20 @@ export function ControlField({
   value,
   state,
   onChange,
+  prefix = 'rgn',
 }: {
   c: Control;
   value: unknown;
   state: ControlState | undefined;
   onChange: (v: unknown) => void;
+  /** Test-id and element-id prefix: `rgn` (Region edit) or `gen` (New image, FR-GEN-06). */
+  prefix?: 'rgn' | 'gen';
 }) {
   const kind = controlKind(c);
   const required = state?.required ?? c.required;
   const label = c.name.replace(/_/g, ' ');
   const allowed = state && state.allowed.length ? state.allowed : c.allowed;
-  const id = `rgn-control-${c.name}`;
+  const id = `${prefix}-control-${c.name}`;
 
   let field: React.ReactNode = null;
   switch (kind) {
@@ -162,7 +165,7 @@ export function ControlField({
                     key={keyOf(a)}
                     className="rgn-select-item"
                     value={keyOf(a)}
-                    data-testid="rgn-control-option"
+                    data-testid={`${prefix}-control-option`}
                   >
                     <Select.ItemText>{String(a)}</Select.ItemText>
                   </Select.Item>
@@ -203,7 +206,7 @@ export function ControlField({
   return (
     <div
       className="rgn-control"
-      data-testid="rgn-control-input"
+      data-testid={`${prefix}-control-input`}
       data-record-id={c.name}
       data-kind={kind}
       data-required={required ? 'true' : 'false'}

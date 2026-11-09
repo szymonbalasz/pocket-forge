@@ -431,3 +431,28 @@
 .rgn-state-canceled {
   color: var(--pf-warn);
 }
+
+/* OQ-GEN-09: the Generate area's tab strip, Region edit | New image. */
+.rgn-tabs {
+  display: flex;
+  gap: var(--pf-space-1);
+  border-bottom: 1px solid var(--pf-border);
+}
+
+.rgn-tab {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--pf-text-dim);
+  padding: var(--pf-space-1) var(--pf-space-2);
+}
+
+.rgn-tab[aria-selected='true'] {
+  color: var(--pf-text);
+  border-bottom-color: var(--pf-accent);
+}
+
+.rgn-tracker-new {
+  white-space: nowrap;
+}
