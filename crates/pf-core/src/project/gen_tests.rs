@@ -447,14 +447,15 @@ impl G {
 
     /// A region edit accepted on top of the current image: one patch layer (FR-GEN-28).
     fn patch(&mut self) {
+        let job = self.edit_job(&[JobState::Submitted, JobState::Running, JobState::Succeeded]);
+        let c = self.edit_results(job.id);
+        self.accept_edit(job.id, c[0].id).unwrap();
+    }
+
+    /// A region edit job on the current image, moved through `states`.
+    fn edit_job(&mut self, states: &[JobState]) -> JobFile {
         let (ctx, install) = (&self.e.ctx, self.e.install());
-        let rect = Rect {
-            x: 2,
-            y: 2,
-            w: 8,
-            h: 6,
-        };
-        let mask = store::put_mask(ctx, install, &mut self.p, rect, vec![255; 48]).unwrap();
+        let mask = store::put_mask(ctx, install, &mut self.p, EDIT_RECT, vec![255; 48]).unwrap();
         let new = NewJob {
             operation: "edit_masked".into(),
             model_id: "fake-model".into(),
@@ -464,10 +465,9 @@ impl G {
             mask_id: Some(mask.id),
             ..Default::default()
         };
-        let png = rgba_png(8, 6, [0, 255, 0, 255]);
-        let job =
-            store::record_job(ctx, install, &mut self.p, new, png.clone(), png.clone()).unwrap();
-        for s in [JobState::Submitted, JobState::Running, JobState::Succeeded] {
+        let png = edit_png();
+        let job = store::record_job(ctx, install, &mut self.p, new, png.clone(), png).unwrap();
+        for &s in states {
             store::update_job(
                 ctx,
                 &mut self.p,
@@ -480,33 +480,45 @@ impl G {
             )
             .unwrap();
         }
-        let c = store::add_candidates(
-            ctx,
-            install,
-            &mut self.p,
-            job.id,
-            vec![NewCandidate {
-                bytes: png.clone(),
-                ..Default::default()
-            }],
-        )
-        .unwrap();
+        self.p.jobs[&job.id].clone()
+    }
+
+    /// The `succeeded` region edit job's one candidate (the job becomes `fetched`).
+    fn edit_results(&mut self, job: Ulid) -> Vec<Candidate> {
+        let one = vec![NewCandidate {
+            bytes: edit_png(),
+            ..Default::default()
+        }];
+        store::add_candidates(&self.e.ctx, self.e.install(), &mut self.p, job, one).unwrap()
+    }
+
+    fn accept_edit(&mut self, job: Ulid, cand: Ulid) -> CoreResult<store::LayerCommit> {
         store::accept_candidate(
-            ctx,
-            install,
+            &self.e.ctx,
+            self.e.install(),
             &mut self.p,
-            job.id,
-            c[0].id,
+            job,
+            cand,
             NewPatch {
-                png,
-                rect: Some(rect),
+                png: edit_png(),
+                rect: Some(EDIT_RECT),
                 region: json!({"inner": {"x": 2, "y": 2, "w": 8, "h": 6}}),
                 blend: json!({"feather_px": 0}),
             },
             None,
         )
-        .unwrap();
     }
+}
+
+const EDIT_RECT: Rect = Rect {
+    x: 2,
+    y: 2,
+    w: 8,
+    h: 6,
+};
+
+fn edit_png() -> Vec<u8> {
+    rgba_png(8, 6, [0, 255, 0, 255])
 }
 
 #[test]
@@ -873,7 +885,11 @@ fn fr_gen_19_undo_and_redo_of_a_pick_keep_draft_generate() {
     .unwrap();
     let generate = |g: &G| g.p.manifest.draft.as_ref().and_then(|d| d.generate.clone());
     restore_revision(&g.e.ctx, g.e.install(), &mut g.p, r0).unwrap();
-    assert_eq!(generate(&g), Some(now.clone()), "undo keeps the tab's draft");
+    assert_eq!(
+        generate(&g),
+        Some(now.clone()),
+        "undo keeps the tab's draft"
+    );
     restore_revision(&g.e.ctx, g.e.install(), &mut g.p, out.revision_id).unwrap();
     assert_eq!(generate(&g), Some(now.clone()), "redo keeps it too");
     // On disk: a reopen shows what the tab shows.
@@ -889,9 +905,75 @@ fn fr_prj_23_restore_still_brings_back_the_region_edit_draft() {
     let (job, c) = g.generate("crypt", &[10]);
     let out = g.pick(job.id, c[0].id).unwrap();
     put_draft(&g.e.ctx, g.e.install(), &mut g.p, rgn_draft("ivy"), None).unwrap();
-    let parent = read_revision(&g.p, out.revision_id).unwrap().parent.unwrap();
+    let parent = read_revision(&g.p, out.revision_id)
+        .unwrap()
+        .parent
+        .unwrap();
     restore_revision(&g.e.ctx, g.e.install(), &mut g.p, parent).unwrap();
     assert_eq!(g.p.manifest.draft.unwrap().final_prompt, "moss");
+}
+
+#[test]
+fn fr_gen_30_r97_pick_is_refused_while_a_job_is_active() {
+    let mut g = gen_env(Kind::Map, "Crypt");
+    let (j1, c1) = g.generate("crypt", &[10, 20]);
+    g.pick(j1.id, c1[0].id).unwrap();
+    let head = g.p.manifest.head_revision;
+    let running = g.edit_job(&[JobState::Submitted, JobState::Running]);
+    let err = g.pick(j1.id, c1[1].id).unwrap_err();
+    assert_eq!(err.code, ErrorCode::JobActive);
+    assert_eq!(err.detail["job_id"], json!(running.id));
+    assert_eq!(g.p.manifest.head_revision, head, "nothing committed");
+    assert_eq!(g.p.manifest.layers[0].candidate_id, Some(c1[0].id));
+    // Fetched (results in, nothing running): picking works again.
+    store::update_job(
+        &g.e.ctx,
+        &mut g.p,
+        running.id,
+        JobUpdate {
+            state: Some(JobState::Succeeded),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    g.edit_results(running.id);
+    g.pick(j1.id, c1[1].id).unwrap();
+}
+
+#[test]
+fn fr_rgn_40_r97_accept_refuses_a_candidate_made_on_another_base_image() {
+    let mut g = gen_env(Kind::Map, "Crypt");
+    let (j1, c1) = g.generate("crypt", &[10, 20]);
+    let b1 = g.pick(j1.id, c1[0].id).unwrap();
+    let edit = g.edit_job(&[JobState::Submitted, JobState::Running, JobState::Succeeded]);
+    assert_eq!(
+        edit.base_layer_id,
+        Some(b1.layer_id),
+        "the job remembers its base"
+    );
+    let rc = g.edit_results(edit.id);
+    // Another base image picked while the results wait.
+    g.pick(j1.id, c1[1].id).unwrap();
+    let head = g.p.manifest.head_revision;
+    let err = g.accept_edit(edit.id, rc[0].id).unwrap_err();
+    assert_eq!(
+        (err.code, err.field.as_deref()),
+        (ErrorCode::InvalidCandidate, Some("candidate_id"))
+    );
+    assert!(
+        err.message.contains("different base image"),
+        "{}",
+        err.message
+    );
+    // The candidate stays; nothing committed.
+    assert_eq!(g.status(rc[0].id), CandidateStatus::New);
+    assert_eq!(g.p.manifest.head_revision, head);
+    assert_eq!(g.p.manifest.layers.len(), 1);
+    // Undo the second pick: B1 is back, and the candidate can be accepted on it.
+    let parent = read_revision(&g.p, head).unwrap().parent.unwrap();
+    restore_revision(&g.e.ctx, g.e.install(), &mut g.p, parent).unwrap();
+    g.accept_edit(edit.id, rc[0].id).unwrap();
+    assert_eq!(g.status(rc[0].id), CandidateStatus::Accepted);
 }
 
 #[test]
@@ -915,7 +997,12 @@ fn r84_r97_candidate_statuses_follow_undo_and_redo_of_a_pick() {
     assert_eq!(g.status(c[1].id), Discarded);
     restore_revision(&g.e.ctx, g.e.install(), &mut g.p, second.revision_id).unwrap();
     assert_eq!(statuses(&g), [Dismissed, Accepted, Dismissed]);
-    let c1 = g.p.manifest.candidates.iter().find(|x| x.id == c[1].id).unwrap();
+    let c1 =
+        g.p.manifest
+            .candidates
+            .iter()
+            .find(|x| x.id == c[1].id)
+            .unwrap();
     assert_eq!(c1.trash_id, None);
     assert!(g.dir.join(&c1.file).is_file(), "moved back to results/");
 }

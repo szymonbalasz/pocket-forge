@@ -91,7 +91,8 @@ fn place_base_file(
 /// `pick_base` (FR-GEN-27, 28, 30): the pick commit behind `gen_candidate_pick`. Any valid,
 /// non-discarded candidate of a `fetched` job (the first pick: the job is closed) or of a
 /// `closed` one (a re-pick from any iteration, no transition, no spend) can be picked; a file
-/// moved to the trash by a sweep is restored in the same commit. Fails with `invalid_candidate`
+/// moved to the trash by a sweep is restored in the same commit. Fails with `job_active` while any
+/// job of the project is active (R97), `invalid_candidate`
 /// (another job's, `invalid`, `discarded`), `not_found` (purged), `invalid_input` (a job with
 /// no candidates to pick) and the commit errors (`read_only`, `locked`, `conflict`). The job's
 /// `operation` is checked by the command (slice 4, `wrong_operation`).
@@ -103,6 +104,18 @@ pub fn pick_base(
     candidate_id: Ulid,
 ) -> CoreResult<BaseCommit> {
     p.require_writable()?;
+    // R97: never while a job runs (a region edit job would come back for another base image).
+    if let Some(active) = p
+        .jobs
+        .values()
+        .find(|j| !j.state.is_terminal() && j.state != JobState::Fetched)
+    {
+        return Err(CoreError::new(
+            ErrorCode::JobActive,
+            "a job is running in this project; pick when it has finished",
+        )
+        .with_detail(serde_json::json!({ "job_id": active.id })));
+    }
     let job = job(p, job_id)?.clone();
     let idx = candidate_index(&p.manifest, candidate_id)?;
     let cand = p.manifest.candidates[idx].clone();

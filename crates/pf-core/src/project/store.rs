@@ -358,6 +358,8 @@ fn record(
         region: new.region,
         fit: new.fit,
         mask_id: new.mask_id,
+        // R97: a region edit job remembers the base image it was built on.
+        base_layer_id: inputs.as_ref().and_then(|_| p.manifest.original_image_id()),
         inputs: inputs.as_ref().map(|_| JobInputs::default()),
         references: new.references,
         estimate: new.estimate,
@@ -804,6 +806,20 @@ fn patch_layer(id: Ulid, patch: &NewPatch, job: &JobFile, candidate_id: Ulid) ->
     Ok(l)
 }
 
+/// R97: a region edit candidate is accepted only on the base image its job was built on (a
+/// pick since then changed `layers[0]`); the candidate stays as it is. Jobs from before R97
+/// carry no base and aren't checked.
+pub fn check_same_base(p: &OpenProject, job: &JobFile) -> CoreResult<()> {
+    match job.base_layer_id {
+        Some(base) if p.manifest.original_image_id() != Some(base) => Err(CoreError::new(
+            ErrorCode::InvalidCandidate,
+            "that candidate was made on a different base image; it can't be accepted on this one",
+        )
+        .with_field("candidate_id")),
+        _ => Ok(()),
+    }
+}
+
 /// The newest job (by creation), which is the only one a re-pick can use (R32).
 fn newest_job(p: &OpenProject) -> Option<&JobFile> {
     p.jobs.values().max_by_key(|j| (j.created_at, j.id))
@@ -839,6 +855,7 @@ pub fn accept_candidate(
             "the candidate won't decode",
         ));
     }
+    check_same_base(p, &job)?;
     let repick = match job.state {
         JobState::Fetched => false,
         JobState::Closed => {
@@ -986,8 +1003,8 @@ pub fn next_purge_at(p: &OpenProject) -> Option<Timestamp> {
 // ---------------------------------------------------------------- pick (GEN)
 
 mod pick;
-pub use pick::{BaseCommit, pick_base, pick_label, working_name};
 pub(crate) use pick::statuses_follow_base;
+pub use pick::{BaseCommit, pick_base, pick_label, working_name};
 
 #[cfg(test)]
 pub(crate) mod tests;
