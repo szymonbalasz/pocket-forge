@@ -77,6 +77,17 @@ export function hasCore(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }
 
+/** The label of the window this page runs in: `main` or `prompt-chat` (R91). Tauri gives it in
+ *  its metadata; a plain browser page (Playwright) may pass `?window=<label>`. */
+export function currentWindowLabel(): string {
+  const meta = (
+    window as unknown as {
+      __TAURI_INTERNALS__?: { metadata?: { currentWindow?: { label?: string } } };
+    }
+  ).__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
+  return meta ?? new URLSearchParams(window.location.search).get('window') ?? 'main';
+}
+
 /** Subscribes to a core event. Returns the unsubscribe function. */
 export function onEvent<E extends keyof Events>(
   name: E,
@@ -348,5 +359,9 @@ export const api = {
     insert: (projectId: string, proposalId: string) =>
       call('prm_chat_insert', { project_id: projectId, proposal_id: proposalId }),
     fakeSetCase: (c: string) => call('prm_chat_fake_set_case', { case: c }),
+    /** Opens or focuses the chat window (FR-PRM-21). */
+    openWindow: () => call('prm_window_open', {}),
+    /** Opens the login console (FR-PRM-45). */
+    login: () => call('prm_chat_login', {}),
   },
 };

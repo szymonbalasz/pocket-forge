@@ -1,5 +1,6 @@
 import type { Feature } from '../../shared/feature';
 import { registerSettingsSection } from '../../shared/settings';
+import { ChatSettings } from './ChatSettings';
 import { installChatSink } from './chatSink';
 import { HelperSettings } from './HelperSettings';
 
@@ -8,6 +9,7 @@ import { HelperSettings } from './HelperSettings';
 // no slot. Its Settings section edits the helper definitions (FR-PRM-02/03).
 export { PromptBlock, type PromptBlockProps, type PromptRetry } from './PromptBlock';
 export { installChatSink } from './chatSink';
+export { ChatWindow } from './ChatWindow';
 export { PLACEHOLDER as promptPlaceholder, type PromptHost } from './logic';
 export {
   loadHelpers as loadPromptHelpers,
@@ -28,4 +30,10 @@ registerSettingsSection({
   id: 'prm-helpers',
   title: 'Prompt helpers',
   Component: HelperSettings,
+});
+
+registerSettingsSection({
+  id: 'prm-chat',
+  title: 'Prompt chat',
+  Component: ChatSettings,
 });

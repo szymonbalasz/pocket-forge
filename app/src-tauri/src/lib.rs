@@ -1,6 +1,7 @@
 //! The thin Tauri layer (AGENTS §9): command registration, the `pf-tiles` URI scheme, the
 //! window and event forwarding. No domain logic: everything is a `pf-core` command.
 
+mod chat_window;
 mod commands;
 #[cfg(debug_assertions)]
 mod smoke_export;
@@ -137,6 +138,15 @@ pub fn run() {
                     let core = handle.state::<Core>();
                     pf_core::region_edit::runner::run_pump(&core)
                 })?;
+            // PRM FR-PRM-21: the chat window closes with the main window.
+            if let Some(main) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                main.on_window_event(move |ev| {
+                    if matches!(ev, tauri::WindowEvent::Destroyed) {
+                        chat_window::close_with_main(&handle);
+                    }
+                });
+            }
             // FR-PRJ-21/40: retry saves that failed with `locked` and replay the spool.
             let handle = app.handle().clone();
             std::thread::spawn(move || {

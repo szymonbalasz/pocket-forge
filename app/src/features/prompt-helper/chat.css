@@ -1,0 +1,184 @@
+/* The prompt chat window (prompt-helper §7). Tokens only (ui-guidelines). */
+.prm-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  box-sizing: border-box;
+  background: var(--pf-bg-2);
+  color: var(--pf-text);
+}
+
+.prm-chat-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pf-space-2);
+  padding: var(--pf-space-2) var(--pf-space-3);
+  border-bottom: 1px solid var(--pf-border);
+}
+
+.prm-chat-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 50%;
+}
+
+.prm-chat-tag,
+.prm-chat-chip {
+  font-size: 11px;
+  padding: 1px var(--pf-space-1);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  color: var(--pf-text-dim);
+}
+
+.prm-chat-chip.is-error {
+  color: var(--pf-danger);
+  border-color: var(--pf-danger);
+}
+
+.prm-chat-chip.is-fake {
+  color: var(--pf-warn);
+  border-color: var(--pf-warn);
+}
+
+.prm-chat-notice {
+  padding: var(--pf-space-4);
+  line-height: 1.5;
+}
+
+.prm-chat-transcript {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: var(--pf-space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-3);
+}
+
+.prm-chat-turn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--pf-space-1);
+}
+
+.prm-chat-turn.is-user {
+  align-self: flex-end;
+  max-width: 85%;
+  padding: var(--pf-space-2);
+  background: var(--pf-bg-3);
+  border-radius: var(--pf-radius);
+}
+
+.prm-chat-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.prm-chat-code {
+  margin: 0;
+  padding: var(--pf-space-2);
+  background: var(--pf-bg-0);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.prm-chat-proposal {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+  padding: var(--pf-space-2);
+  border: 1px solid var(--pf-accent);
+  border-radius: var(--pf-radius);
+}
+
+.prm-chat-caret {
+  display: inline-block;
+  width: 8px;
+  height: 14px;
+  background: var(--pf-text-dim);
+  animation: prm-chat-blink 1s steps(2) infinite;
+}
+
+@keyframes prm-chat-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.prm-chat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.prm-chat-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pf-space-2);
+  padding: var(--pf-space-1) var(--pf-space-3);
+  border-top: 1px solid var(--pf-border);
+}
+
+.prm-chat-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-1);
+  font-size: 11px;
+}
+
+.prm-chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+  padding: var(--pf-space-2) var(--pf-space-3);
+}
+
+.prm-chat-composer textarea {
+  resize: vertical;
+  background: var(--pf-bg-3);
+  color: var(--pf-text);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  padding: var(--pf-space-1);
+  font: inherit;
+}
+
+.prm-chat-foot {
+  padding: var(--pf-space-1) var(--pf-space-3);
+  border-top: 1px solid var(--pf-border);
+  font-variant-numeric: tabular-nums;
+}
+
+.prm-chat-error {
+  color: var(--pf-danger);
+  margin: 0 var(--pf-space-3);
+}
+
+.prm-chat-warn {
+  color: var(--pf-warn);
+}
+
+.prm-chat-empty {
+  color: var(--pf-text-dim);
+  padding: var(--pf-space-4);
+}
+
+.prm-chat-detail {
+  white-space: pre-wrap;
+  font-size: 11px;
+  color: var(--pf-text-dim);
+}

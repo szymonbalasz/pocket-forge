@@ -22,7 +22,12 @@ macro_rules! tauri_commands {
 
         /// The invoke handler with every command above, plus the app-level ones.
         pub fn handler() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
-            tauri::generate_handler![$($name,)* crate::app_ready]
+            tauri::generate_handler![
+                $($name,)*
+                crate::app_ready,
+                crate::chat_window::prm_window_open,
+                crate::chat_window::prm_chat_login,
+            ]
         }
 
         /// Names of the registered core commands (checked against `pf_core::commands::REGISTRY`).

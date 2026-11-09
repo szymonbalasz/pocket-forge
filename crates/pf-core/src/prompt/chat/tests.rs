@@ -224,6 +224,7 @@ fn fr_prm_27_send_streams_and_records_the_turns() {
 
     let view = thread_view(&lab);
     assert!(view["running_turn_id"].is_null());
+    assert_eq!(view["current_host"], "rgn");
     let t = &view["thread"];
     assert_eq!(t["backend"], "fake");
     let turns = t["turns"].as_array().unwrap();
@@ -681,6 +682,8 @@ fn fr_prm_33_detection_is_cached_for_60_s() {
     assert_eq!(st["backend"]["state"], "ok");
     assert_eq!(st["backend"]["notional"], true, "a plan login");
     assert_eq!(st["backend"]["plan"], "max");
+    let cmd = st["login_command"].as_str().unwrap();
+    assert!(cmd.contains("CLAUDE_CONFIG_DIR") && cmd.ends_with("claude auth login"));
     let raw = serde_json::to_string(&st).unwrap();
     assert!(!raw.contains("example.com"), "only the allowed auth fields");
     let runs = || sp.log().runs.len();

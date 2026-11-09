@@ -280,6 +280,11 @@ pub struct ChatStatus {
     /// The fake backend's case (fake mode only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fake_case: Option<String>,
+    /// The login command shown for copying in Settings (FR-PRM-45); after consent only, and
+    /// `null` in fake mode or when Claude Code isn't found.
+    pub login_command: Option<String>,
+    /// The Claude Code path override (Settings).
+    pub claude_path: Option<String>,
 }
 
 /// FR-PRM-20/33: no process before consent or while off, not even detection.
@@ -298,6 +303,12 @@ pub fn status(core: &Core, refresh: bool) -> ChatStatus {
         mode,
         backend,
         fake_case: (mode == BackendMode::Fake).then(|| core.ctx.chat.fake.case().to_string()),
+        login_command: if consented(&chat) {
+            login_copy_text(core).ok().flatten()
+        } else {
+            None
+        },
+        claude_path: chat.claude_path.clone(),
     }
 }
 
@@ -644,6 +655,9 @@ pub struct ThreadView {
     /// The next turn starts a fresh session (FR-PRM-35): "New session: earlier messages
     /// aren't sent".
     pub fresh_session_next: bool,
+    /// The host whose prompt block is attached for the project (the latest published), or
+    /// `null`: the window's header and "Send disabled: no prompt block" (FR-PRM-27/43).
+    pub current_host: Option<ChatHost>,
 }
 
 /// `prm_chat_thread_get` (FR-PRM-22).
@@ -668,11 +682,18 @@ impl Command for PrmChatThreadGet {
                 .try_lock()
                 .map(|s| s.as_ref().is_some_and(|e| e.project_id == input.project_id))
                 .unwrap_or(true);
+        let current_host = lock(&core.chat.rt)
+            .contexts
+            .iter()
+            .filter(|((p, _), _)| *p == input.project_id)
+            .max_by_key(|(_, (seq, _))| *seq)
+            .map(|((_, h), _)| *h);
         Ok(ThreadView {
             thread: loaded.thread,
             running_turn_id,
             corrupt_set_aside: loaded.corrupt_set_aside,
             fresh_session_next,
+            current_host,
         })
     }
 }

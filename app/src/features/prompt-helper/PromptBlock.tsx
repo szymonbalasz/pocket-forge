@@ -8,6 +8,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Popover, Tooltip } from 'radix-ui';
 
 import { api, onEvent, type ComposePreview, type ProjectKind, type PromptHelper } from '../../api';
+import { chatContext } from '../../shared/chatContext';
 import { projectStore } from '../../store/project';
 import {
   PLACEHOLDER,
@@ -57,8 +58,6 @@ export interface PromptBlockProps {
   onPreview?(preview: ComposePreview): void;
 }
 
-const CHAT_TIP = 'Prompt chat is coming in a later update';
-
 /** FR-PRM-29 (slice 5): Replace from the chat reaches only the turn host's attached block, for
  *  the open project, and is applied as a normal edit (the host saves the draft; the preview
  *  follows). A read-only block ignores it. */
@@ -74,14 +73,21 @@ function useChatInsert(host: PromptHost, readOnly: boolean, apply: (text: string
         latest.current(p.text);
     }).then(
       (u) => {
-        if (gone) u();
+        if (gone)
+          void Promise.resolve()
+            .then(u)
+            .catch(() => undefined);
         else off = u;
       },
       () => undefined,
     );
     return () => {
       gone = true;
-      off?.();
+      const u = off;
+      if (u)
+        void Promise.resolve()
+          .then(u)
+          .catch(() => undefined);
     };
   }, [host, readOnly]);
 }
@@ -152,22 +158,19 @@ export function PromptBlock(props: PromptBlockProps) {
         awaitingPrompt={!!props.required && prompt.trim() === ''}
       />
       <div className="prm-block-actions">
-        <Tooltip.Provider delayDuration={400}>
-          <Tooltip.Root>
-            <Tooltip.Trigger asChild>
-              <span className="prm-chat-wrap" tabIndex={0} aria-label={CHAT_TIP}>
-                <button type="button" data-testid="prm-block-chat" disabled>
-                  Chat
-                </button>
-              </span>
-            </Tooltip.Trigger>
-            <Tooltip.Portal>
-              <Tooltip.Content className="pf-tooltip" side="left" sideOffset={6}>
-                {CHAT_TIP}
-              </Tooltip.Content>
-            </Tooltip.Portal>
-          </Tooltip.Root>
-        </Tooltip.Provider>
+        {/* FR-PRM-21: opens or focuses the chat window; the block's context is published
+            first (FR-PRM-23). */}
+        <button
+          type="button"
+          data-testid="prm-block-chat"
+          title="Chat about this prompt (opens the chat window)"
+          onClick={() => {
+            chatContext.flush();
+            void api.chat.openWindow().catch(() => undefined);
+          }}
+        >
+          Chat
+        </button>
       </div>
     </div>
   );
