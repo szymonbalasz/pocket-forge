@@ -41,18 +41,24 @@ pub fn flatten_rgba_in_place(img: &mut RgbaImage) {
 }
 
 /// Any decoded image as RGB8: an image with alpha is composited over [`FLATTEN_BG`]; an opaque
-/// one is converted as is.
+/// one is converted as is. RGBA8 is flattened inside its own buffer, so a 16k original never
+/// holds the RGBA and the RGB copy at once (ADR 0004, review #12).
 pub fn to_rgb8_flattened(img: DynamicImage) -> RgbImage {
     if !img.color().has_alpha() {
         return img.into_rgb8();
     }
     let rgba = img.into_rgba8();
     let (w, h) = rgba.dimensions();
-    let mut out = Vec::with_capacity(w as usize * h as usize * 3);
-    for px in rgba.pixels() {
-        out.extend_from_slice(&flatten_px(px.0));
+    let mut buf = rgba.into_raw();
+    // Pixel i moves from 4i to 3i ≤ 4i: every read is ahead of (or at) the write position.
+    let n = buf.len() / 4;
+    for i in 0..n {
+        let px = [buf[4 * i], buf[4 * i + 1], buf[4 * i + 2], buf[4 * i + 3]];
+        buf[3 * i..3 * i + 3].copy_from_slice(&flatten_px(px));
     }
-    RgbImage::from_raw(w, h, out).expect("w·h·3 bytes")
+    buf.truncate(3 * n);
+    buf.shrink_to_fit();
+    RgbImage::from_raw(w, h, buf).expect("w·h·3 bytes")
 }
 
 #[cfg(test)]
