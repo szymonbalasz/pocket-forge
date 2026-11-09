@@ -297,8 +297,9 @@ pub fn suggest_name(ctx: &Context, settings: &Settings, kind: Kind, raw: Option<
 
 /// `gen_project_create {section, name}` (FR-GEN-02): a project with no image, built like
 /// FR-PRJ-09 (temp folder → rename): every subfolder, `project.json` with `kind` from the section,
-/// `original: null`, `layers: []` and `r0` (reason `create`). No image is copied. The name must
-/// already follow FR-PRJ-44 (`invalid_name`) and be free in the section (`name_taken`).
+/// `original: null`, `layers: []` and `r0` (reason `create`). No image is copied. The name is put
+/// under the FR-PRJ-44 rules (as the dialog shows it); a blank one is `invalid_name`, one taken in
+/// the section `name_taken`. Returns the project folder.
 pub fn create_empty_project(
     ctx: &Context,
     settings: &Settings,
@@ -306,16 +307,10 @@ pub fn create_empty_project(
     name: &str,
     thumbs: Option<&Thumbnails>,
 ) -> CoreResult<PathBuf> {
-    if !naming::is_valid_name(name) {
-        return Err(CoreError::new(
-            ErrorCode::InvalidName,
-            format!(
-                "{name:?} can't be a project name (try {:?})",
-                naming::sanitise_name(name)
-            ),
-        )
-        .with_field("name"));
+    if name.trim().is_empty() {
+        return Err(CoreError::new(ErrorCode::InvalidName, "Enter a name").with_field("name"));
     }
+    let name = &naming::sanitise_name(name);
     let section = library::target_section(ctx, settings, kind)?;
     if name_taken(ctx, settings, kind, name) {
         return Err(CoreError::new(

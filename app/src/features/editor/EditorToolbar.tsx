@@ -14,10 +14,35 @@ import {
   IconRegion,
   IconUndo,
 } from '../../shell/icons';
+import { projectHasImage } from '../../shared/generateTabs';
+import { useProjectState } from '../../store/project';
 import { actions } from './actions';
 import { noMouseFocus } from './shortcuts';
 import { useEditor, type Tool } from './store';
 import { Tip } from './Tip';
+
+/** FR-GEN-03: the tools are there but disabled, with the reason `no_image`. */
+function NoImageToolbar() {
+  return (
+    <div className="edt-toolbar" role="toolbar" aria-orientation="vertical" aria-label="Tools">
+      {TOOLS.map(({ tool: t, label, Icon }) => (
+        <Tip key={t} text={`${label}: ${NO_IMAGE_REASON}`}>
+          <button
+            type="button"
+            className="edt-tool"
+            data-testid={`edt-toolbar-${t}`}
+            data-reason="no_image"
+            aria-label={label}
+            aria-pressed={false}
+            disabled
+          >
+            <Icon />
+          </button>
+        </Tip>
+      ))}
+    </div>
+  );
+}
 
 const TOOLS: { tool: Tool; label: string; key: string; Icon: ComponentType }[] = [
   { tool: 'pan', label: 'Pan', key: 'H', Icon: IconPan },
@@ -26,9 +51,14 @@ const TOOLS: { tool: Tool; label: string; key: string; Icon: ComponentType }[] =
   { tool: 'eraser', label: 'Eraser', key: 'E', Icon: IconEraser },
 ];
 
+/** Shown on the disabled tools of a project with no image (FR-GEN-03, reason `no_image`). */
+export const NO_IMAGE_REASON = 'No image yet. Generate one in New image.';
+
 export function EditorToolbar() {
   const { tool, brushSize, hardness, maskVisible, image, region, undo, originalMissing } =
     useEditor((s) => s);
+  const { project } = useProjectState();
+  if (project && !projectHasImage(project)) return <NoImageToolbar />;
   if (!image) return null;
   // BL-10: with the original missing there is nothing to edit.
   const canPaint = region !== null && !originalMissing;

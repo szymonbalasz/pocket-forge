@@ -78,9 +78,12 @@ fn fr_gen_02_creation_is_atomic_temp_folder_then_rename() {
 #[test]
 fn fr_gen_02_name_rules_invalid_name_and_name_taken() {
     let e = env();
-    let bad = create_empty_project(&e.ctx, &e.settings, Kind::Map, "a/b", None).unwrap_err();
+    let bad = create_empty_project(&e.ctx, &e.settings, Kind::Map, "  ", None).unwrap_err();
     assert_eq!(bad.code, ErrorCode::InvalidName);
     assert_eq!(bad.field.as_deref(), Some("name"));
+    // The name is put under FR-PRJ-44, as the dialog shows it.
+    let dir = create_empty_project(&e.ctx, &e.settings, Kind::Map, "a/b.", None).unwrap();
+    assert_eq!(dir, e.lib().join("Maps/a-b"));
     e.project("Crypt");
     let taken = create_empty_project(&e.ctx, &e.settings, Kind::Map, "crypt", None).unwrap_err();
     assert_eq!(
