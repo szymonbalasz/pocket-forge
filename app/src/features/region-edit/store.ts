@@ -1132,6 +1132,14 @@ export const rgn = {
     void refit();
   },
 
+  /** FR-RGN-12: a failed estimate (rate limit, 5xx, io…) is asked again for the same inputs;
+   *  without this the error stays until a cost-affecting input changes. */
+  retryEstimate(): void {
+    if (state.estimate.status !== 'error') return;
+    debouncer.reset();
+    schedule();
+  },
+
   dismissNotices(): void {
     set({ notices: [] });
   },

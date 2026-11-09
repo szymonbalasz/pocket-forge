@@ -214,6 +214,17 @@ describe('Generate panel (RGN slice 6)', { timeout: 20_000 }, () => {
     await waitFor(() => expect(n()).toBe(3), { timeout: 3000 });
   });
 
+  test('FR-RGN-12 a failed estimate offers Retry, which estimates again with no input change', async () => {
+    await setup();
+    mockControls().failNext('rgn_job_estimate', 'rate_limited', 'Too many requests.');
+    await waitFor(() => expect(rgn.get().estimate.status).toBe('error'), { timeout: 4000 });
+    const n = fake.callsOf('rgn_job_estimate').length;
+    fireEvent.click(screen.getByTestId('rgn-panel-estimate-retry'));
+    await estimated();
+    expect(fake.callsOf('rgn_job_estimate').length).toBe(n + 1);
+    expect(screen.queryByTestId('rgn-panel-estimate-retry')).toBeNull();
+  });
+
   test('FR-RGN-05 fit label recomputed on region and margin change', async () => {
     await setup();
     // 512 + 2×128 = 768, a multiple of 8 and ≤ 2048: unresampled.

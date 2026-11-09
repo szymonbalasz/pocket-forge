@@ -332,7 +332,19 @@ function CostSection({ s }: { s: RgnState }) {
       </span>
     );
   else if (e.status === 'error' && e.error)
-    line = <span className="error">{errorText(e.error.code, e.error.message)}</span>;
+    line = (
+      <>
+        <span className="error">{errorText(e.error.code, e.error.message)}</span>{' '}
+        <button
+          type="button"
+          className="link small"
+          data-testid="rgn-panel-estimate-retry"
+          onClick={() => rgn.retryEstimate()}
+        >
+          Retry
+        </button>
+      </>
+    );
   else line = <span className="muted">Estimate: —</span>;
   const unit = costUnit(s);
   return (
