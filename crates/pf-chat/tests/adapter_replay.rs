@@ -726,3 +726,47 @@ fn fr_prm_37_error_heuristics_map_cli_messages_to_states() {
         }
     }
 }
+
+// ---------------------------------------------------------------- login copy text
+
+/// review-sec 5 (R96): the folder is single-quoted, so `$`, backticks and `"` stay literal.
+#[test]
+fn fr_prm_45_login_copy_text_quotes_the_folder() {
+    use pf_chat::claude_code::login_copy_text;
+    assert_eq!(
+        login_copy_text(r"C:\pf $HOME `n o'brien\claude-config", true),
+        r"$env:CLAUDE_CONFIG_DIR = 'C:\pf $HOME `n o''brien\claude-config'; claude auth login"
+    );
+    assert_eq!(
+        login_copy_text("/pf $HOME `x` o'brien/claude-config", false),
+        r"CLAUDE_CONFIG_DIR='/pf $HOME `x` o'\''brien/claude-config' claude auth login"
+    );
+}
+
+/// The Windows copy text, run by real PowerShell (no CLI: `claude auth login` is replaced by
+/// printing the variable), sets exactly the folder.
+#[cfg(windows)]
+#[test]
+fn fr_prm_45_login_copy_text_round_trips_through_powershell() {
+    use pf_chat::claude_code::login_copy_text;
+    let dir = r"C:\pf $HOME $(whoami) `t o'brien & a;b ünï\claude-config";
+    let script = login_copy_text(dir, true).replace(
+        "claude auth login",
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; [Console]::Out.Write($env:CLAUDE_CONFIG_DIR)",
+    );
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let out = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+        .arg(pf_chat::base64::encode(&utf16))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim_start_matches('\u{feff}'),
+        dir
+    );
+}

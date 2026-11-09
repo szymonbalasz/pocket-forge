@@ -83,6 +83,19 @@ impl ClaudeCodeConfig {
     }
 }
 
+/// The login command shown for copying (FR-PRM-45). The folder is single-quoted so no `$`,
+/// backtick or `"` in it expands (review-sec 5): PowerShell on Windows (`'` doubled),
+/// POSIX sh elsewhere (`'` → `'\''`).
+pub fn login_copy_text(config_dir: &str, windows: bool) -> String {
+    if windows {
+        let dir = config_dir.replace('\'', "''");
+        format!("$env:CLAUDE_CONFIG_DIR = '{dir}'; claude auth login")
+    } else {
+        let dir = config_dir.replace('\'', r"'\''");
+        format!("CLAUDE_CONFIG_DIR='{dir}' claude auth login")
+    }
+}
+
 /// The Claude Code backend.
 pub struct ClaudeCodeBackend {
     cfg: ClaudeCodeConfig,
@@ -274,12 +287,7 @@ impl ChatBackend for ClaudeCodeBackend {
             &self.cfg.data_dir,
             false,
         );
-        let dir = config_dir.to_string_lossy();
-        let copy_text = if self.cfg.windows {
-            format!("$env:CLAUDE_CONFIG_DIR = \"{dir}\"; claude auth login")
-        } else {
-            format!("CLAUDE_CONFIG_DIR=\"{dir}\" claude auth login")
-        };
+        let copy_text = login_copy_text(&config_dir.to_string_lossy(), self.cfg.windows);
         Ok(Some(ConsoleCommand { spec, copy_text }))
     }
 
