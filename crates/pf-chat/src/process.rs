@@ -612,6 +612,7 @@ mod tests {
         assert!(child.wait(Duration::from_secs(5)).is_some());
     }
 
+    #[cfg(windows)]
     fn cmd_spec(script: &str) -> CommandSpec {
         let exe = Executable {
             path: PathBuf::from("cmd.exe"),
