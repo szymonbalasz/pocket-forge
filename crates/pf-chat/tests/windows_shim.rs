@@ -264,6 +264,10 @@ fn fr_prm_34_npm_shim_survives_special_characters_and_text_goes_over_stdin() {
     assert!(same_path(env["HOME"].as_str().unwrap(), &chat_home));
     assert!(env.get("HOMEDRIVE").is_none() && env.get("HOMEPATH").is_none());
     assert!(env.get("PF_DATA_DIR").is_none());
+    // §10's env is "user env − PF_* − HOMEDRIVE/HOMEPATH + …": the API key passes through
+    // (it overrides the plan login; detection reports `api_key`, FR-PRM-38 warns). Whether
+    // to allow-list the environment instead is an open owner question (review-sec 3).
+    assert_eq!(env["ANTHROPIC_API_KEY"], "dummy-not-a-key");
     assert_eq!(env["DISABLE_AUTOUPDATER"], "1");
     assert_eq!(env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"], "1");
     assert!(s.is_alive());

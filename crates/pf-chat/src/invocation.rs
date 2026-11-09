@@ -352,6 +352,47 @@ mod tests {
         assert!(get("PF_DATA_DIR").is_empty());
     }
 
+    /// R87 with Windows' case-insensitive names: lower- and mixed-case home, config and
+    /// `PF_*` variables are replaced or dropped, never duplicated next to ours. Everything
+    /// else follows §10's formula (user env − `PF_*` − `HOMEDRIVE`/`HOMEPATH`).
+    #[test]
+    fn fr_prm_45_chat_child_env_is_case_insensitive_and_follows_s10() {
+        let parent = [
+            ("Path", "/bin"),
+            ("userprofile", "/real/home"),
+            ("home", "/real/home"),
+            ("HomeDrive", "C:"),
+            ("homepath", "/real"),
+            ("claude_config_dir", "/real/home/.claude"),
+            ("Pf_Library_Dir", "/lib"),
+            ("disable_autoupdater", "0"),
+            ("ANTHROPIC_API_KEY", "dummy-not-a-key"),
+            ("APPDATA", "/real/appdata"),
+        ]
+        .map(|(k, v)| (OsString::from(k), OsString::from(v)));
+        let env = chat_child_env(
+            parent,
+            Path::new("/d/claude-config"),
+            Path::new("/d/chat-home"),
+        );
+        let get = |k: &str| {
+            env.iter()
+                .filter(|(n, _)| n.to_string_lossy().eq_ignore_ascii_case(k))
+                .map(|(_, v)| v.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(get("USERPROFILE"), ["/d/chat-home"]);
+        assert_eq!(get("HOME"), ["/d/chat-home"]);
+        assert!(get("HOMEDRIVE").is_empty() && get("HOMEPATH").is_empty());
+        assert_eq!(get(ENV_CONFIG_DIR), ["/d/claude-config"]);
+        assert_eq!(get("DISABLE_AUTOUPDATER"), ["1"]);
+        assert!(get("PF_LIBRARY_DIR").is_empty());
+        assert_eq!(get("PATH"), ["/bin"]);
+        // Passed through by §10's formula (allow-listing is an open owner question).
+        assert_eq!(get("ANTHROPIC_API_KEY"), ["dummy-not-a-key"]);
+        assert_eq!(get("APPDATA"), ["/real/appdata"]);
+    }
+
     fn fs(files: &'static [&'static str]) -> impl Fn(&Path) -> bool {
         move |p: &Path| {
             let s = p.to_string_lossy().replace('\\', "/");
