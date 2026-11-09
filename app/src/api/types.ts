@@ -828,6 +828,8 @@ export interface Events {
   'rgn:spend': { spend: number; cap: number | null };
   'rgn:blend-instruction': BlendInstruction;
   'project:original-ready': Record<string, never> | null;
+  /** R104: the background decode failed (`corrupt`, `io`, `not_found`, …); it isn't retried. */
+  'project:original-failed': { project_id: string; code: string };
   'export:progress': { export_id: string; phase: ExportPhase; fraction: number };
   'export:done': {
     export_id: string;

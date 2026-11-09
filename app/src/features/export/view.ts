@@ -230,6 +230,9 @@ const ERROR_TEXT: Record<string, string> = {
   busy: 'An export is already running for this project',
   exists: 'The file exists; choose Replace',
   original_unavailable: 'The original is still loading',
+  corrupt: "The original can't be decoded (the file may be damaged)",
+  io: "The original can't be read",
+  not_found: 'The original is missing',
   read_only: 'The project is read-only',
   conflict: "The project changed elsewhere; the settings weren't saved",
   layer_unreadable: "A layer file can't be read, so nothing was exported",
@@ -240,6 +243,9 @@ const ERROR_TEXT: Record<string, string> = {
   dest_unavailable: "The library folder isn't available (offline or not writable)",
   no_project: 'No project is open',
 };
+
+/** R104: a failed decode whose code has no message of its own. */
+export const ORIGINAL_FAILED = "The original can't be read";
 
 /** The message for an export error code (EXP §7 Error). */
 export function errorText(code: string, fallback?: string): string {

@@ -61,6 +61,8 @@ export function errorText(code: string, message: string): string {
       return 'Paint a mask inside the region to choose what changes.';
     case 'original_unavailable':
       return 'The original is still loading. Try again in a moment.';
+    case 'corrupt':
+      return 'The original can’t be decoded (the file may be damaged).';
     case 'offline':
       return 'The provider can’t be reached (offline).';
     case 'auth':

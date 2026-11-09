@@ -17,6 +17,7 @@ import {
   errorText,
   formOf,
   invalidSettingsError,
+  ORIGINAL_FAILED,
   overallFraction,
   phaseWeights,
   settingsOf,
@@ -175,6 +176,11 @@ export const exportStore = {
     listening ??= (async () => {
       await onEvent('project:original-ready', () => {
         if (state.projectId) set({ original: { kind: 'ready' } });
+      });
+      // R104: the decode failed, so original-ready won't come.
+      await onEvent('project:original-failed', (p) => {
+        if (state.projectId === p.project_id)
+          set({ original: { kind: 'failed', message: errorText(p.code, ORIGINAL_FAILED) } });
       });
       await onEvent('export:progress', (p) => {
         const run = state.run;
