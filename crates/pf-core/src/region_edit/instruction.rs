@@ -115,14 +115,26 @@ pub fn final_prompt(
     };
     drop(state);
     let blend = (on && !instruction.is_empty()).then_some(instruction.as_str());
-    let typed = match blend {
+    prompt::compose(
+        kind,
+        without_instruction(typed, blend),
+        ticks,
+        &helpers,
+        blend,
+    )
+}
+
+/// #55 "appended once": the typed prompt without a trailing `"\n\n" + instruction` (a pasted
+/// "as sent" prompt), so composing adds it back once. Shared by the send and PRM's preview
+/// (R81, FR-PRM-08: preview = sent). No (or a blank) instruction: the typed prompt as is.
+pub fn without_instruction<'a>(typed: &'a str, instruction: Option<&str>) -> &'a str {
+    match instruction.filter(|b| !b.is_empty()) {
         Some(b) => typed
             .strip_suffix(b)
             .and_then(|t| t.strip_suffix("\n\n"))
             .unwrap_or(typed),
         None => typed,
-    };
-    prompt::compose(kind, typed, ticks, &helpers, blend)
+    }
 }
 
 /// `rgn_blend_instruction_get` / `_set` output.
