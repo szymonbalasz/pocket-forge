@@ -9,6 +9,7 @@ import { regionEditFeature } from '../features/region-edit';
 import { exportFeature } from '../features/export';
 import { referencesFeature } from '../features/references';
 import { newAssetGenerationFeature } from '../features/new-asset-generation';
+import { promptHelperFeature } from '../features/prompt-helper';
 
 export const features: readonly Feature[] = [
   libraryFeature,
@@ -19,4 +20,5 @@ export const features: readonly Feature[] = [
   exportFeature,
   referencesFeature,
   newAssetGenerationFeature,
+  promptHelperFeature,
 ];

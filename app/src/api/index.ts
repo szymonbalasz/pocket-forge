@@ -19,6 +19,7 @@ import type {
   ExportSettingsInput,
   MaskBytes,
   ProjectFolder,
+  PromptHelperInput,
   RectPx,
   RefRole,
   Section,
@@ -316,5 +317,15 @@ export const api = {
       call('gen_candidate_preview', { job_id: jobId, candidate_id: candidateId }),
     pick: (jobId: string, candidateId: string) =>
       call('gen_candidate_pick', { job_id: jobId, candidate_id: candidateId }),
+  },
+  /** prompt-helper §9 (PRM): helper definitions (Settings) and the final prompt preview. */
+  prompt: {
+    listHelpers: (kind?: ProjectKind) =>
+      call('prm_helpers_list', kind === undefined ? {} : { kind }),
+    saveHelpers: (helpers: PromptHelperInput[]) => call('prm_helpers_save', { helpers }),
+    resetHelper: (id: string) => call('prm_helpers_reset', { id }),
+    resetAllHelpers: () => call('prm_helpers_reset', { all: true }),
+    composePreview: (input: Commands['prm_compose_preview'][0]) =>
+      call('prm_compose_preview', input),
   },
 };

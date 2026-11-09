@@ -1,0 +1,170 @@
+/* Prompt block and helper settings (prompt-helper §7). Theme tokens only (ui-guidelines). */
+
+.prm-block-head {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.prm-tips-trigger {
+  padding: 0 6px;
+}
+
+.prm-tips {
+  max-width: 280px;
+  background: var(--pf-bg-3);
+  color: var(--pf-text);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  padding: var(--pf-space-2) var(--pf-space-3);
+  font-size: var(--pf-font-size-meta);
+  z-index: 50;
+}
+
+.prm-tips ul {
+  margin: 0;
+  padding-left: var(--pf-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+}
+
+/* Helpers row: toggle chips, ticked = accent (like a ticked reference). */
+.prm-helpers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pf-space-1);
+}
+
+.prm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--pf-space-1);
+  border-radius: 12px;
+  padding: 1px 8px;
+  font-size: var(--pf-font-size-meta);
+  color: var(--pf-text-dim);
+}
+
+.prm-chip[aria-pressed='true'] {
+  background: var(--pf-accent-soft);
+  border-color: var(--pf-accent);
+  color: var(--pf-text);
+}
+
+.prm-chip[data-skipped] {
+  border-style: dashed;
+}
+
+.prm-chip-badge {
+  font-size: 10px;
+  color: var(--pf-warn);
+}
+
+.prm-chip-tip {
+  max-width: 260px;
+}
+
+.prm-missing {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* Final prompt (as sent): the exact text, parts marked by a faint underline per source. */
+.prm-final pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: var(--pf-space-1) 0 0;
+  padding: var(--pf-space-2);
+  background: var(--pf-bg-1);
+  border-radius: var(--pf-radius);
+}
+
+.prm-part {
+  border-bottom: 1px solid transparent;
+}
+
+.prm-part[data-source='helper'] {
+  border-bottom-color: var(--pf-accent);
+}
+
+.prm-part[data-source='blend'] {
+  color: var(--pf-text-dim);
+}
+
+.prm-block-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.prm-chat-wrap {
+  display: inline-flex;
+}
+
+/* Settings → Prompt helpers. */
+.prm-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+}
+
+.prm-settings-tabs {
+  display: flex;
+  gap: var(--pf-space-1);
+}
+
+.prm-settings-tab[aria-selected='true'] {
+  border-color: var(--pf-accent);
+  color: var(--pf-text);
+}
+
+.prm-settings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+}
+
+.prm-settings-helper {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+  padding: var(--pf-space-2);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+}
+
+.prm-settings-helper[data-hidden] {
+  opacity: 0.6;
+}
+
+.prm-settings-flags,
+.prm-settings-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pf-space-2);
+}
+
+.prm-icon {
+  padding: 1px 6px;
+}
+
+.prm-confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pf-space-2);
+  font-size: var(--pf-font-size-meta);
+}
+
+button.prm-danger {
+  border-color: var(--pf-danger);
+  color: var(--pf-danger);
+}
+
+[aria-invalid='true'] {
+  border-color: var(--pf-danger);
+}
