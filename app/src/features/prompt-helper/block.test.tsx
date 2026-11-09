@@ -134,10 +134,12 @@ describe('Prompt block', () => {
       'helper',
       'blend',
     ]);
-    expect(parts[0]!.getAttribute('title')).toBe('Typed prompt');
-    expect(parts[1]!.getAttribute('title')).toBe('No people or tokens');
+    // L5 (R85): Radix tips, no native title.
+    expect(parts.every((p) => !p.hasAttribute('title'))).toBe(true);
+    expect(parts[0]!.getAttribute('data-tooltip')).toBe('Typed prompt');
+    expect(parts[1]!.getAttribute('data-tooltip')).toBe('No people or tokens');
     expect(parts[1]!.getAttribute('data-record-id')).toBe('builtin:no-people');
-    expect(parts[3]!.getAttribute('title')).toBe('Blend instruction');
+    expect(parts[3]!.getAttribute('data-tooltip')).toBe('Blend instruction');
 
     // Every keystroke updates it, without any provider call.
     fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'a forge' } });

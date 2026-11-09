@@ -281,11 +281,7 @@ function HelpersRow({ helpers, kind, ticks, readOnly, skipped, retry, onChange }
                 >
                   {h.label}
                   {skip && (
-                    <span
-                      className="prm-chip-badge"
-                      data-testid="prm-block-helper-skipped"
-                      title={skipTitle(skip.reason)}
-                    >
+                    <span className="prm-chip-badge" data-testid="prm-block-helper-skipped">
                       {skipLabel(skip.reason)}
                     </span>
                   )}
@@ -299,6 +295,8 @@ function HelpersRow({ helpers, kind, ticks, readOnly, skipped, retry, onChange }
               <Tooltip.Portal>
                 <Tooltip.Content className="pf-tooltip prm-chip-tip" side="top" sideOffset={4}>
                   {h.text}
+                  {/* L5 (R85): the skip reason is part of the chip's Radix tip. */}
+                  {skip && <span className="prm-chip-tip-note">{skipTitle(skip.reason)}</span>}
                 </Tooltip.Content>
               </Tooltip.Portal>
             </Tooltip.Root>
@@ -349,31 +347,42 @@ function FinalPrompt({
         </span>
       </summary>
       {preview && preview.parts.length > 0 && !awaitingPrompt ? (
-        <pre className="small prm-final-text" data-testid="prm-block-final-prompt">
-          {preview.parts.map((p, i) => {
-            const prev = preview.parts[i - 1];
-            // The core joins helper texts with one space and the three blocks with a blank line.
-            const sep = !prev
-              ? ''
-              : prev.source === 'helper' && p.source === 'helper'
-                ? ' '
-                : '\n\n';
-            return (
-              <span key={`${p.source}-${p.id ?? i}`}>
-                {sep}
-                <span
-                  className="prm-part"
-                  data-testid="prm-block-part"
-                  data-source={p.source}
-                  data-record-id={p.id}
-                  title={source(p)}
-                >
-                  {p.text}
+        <Tooltip.Provider delayDuration={400}>
+          <pre className="small prm-final-text" data-testid="prm-block-final-prompt">
+            {preview.parts.map((p, i) => {
+              const prev = preview.parts[i - 1];
+              // The core joins helper texts with one space and the three blocks with a blank line.
+              const sep = !prev
+                ? ''
+                : prev.source === 'helper' && p.source === 'helper'
+                  ? ' '
+                  : '\n\n';
+              return (
+                <span key={`${p.source}-${p.id ?? i}`}>
+                  {sep}
+                  {/* L5 (R85): each part's source as a Radix tip. */}
+                  <Tooltip.Root>
+                    <Tooltip.Trigger asChild data-tooltip={source(p)}>
+                      <span
+                        className="prm-part"
+                        data-testid="prm-block-part"
+                        data-source={p.source}
+                        data-record-id={p.id}
+                      >
+                        {p.text}
+                      </span>
+                    </Tooltip.Trigger>
+                    <Tooltip.Portal>
+                      <Tooltip.Content className="pf-tooltip" side="top" sideOffset={4}>
+                        {source(p)}
+                      </Tooltip.Content>
+                    </Tooltip.Portal>
+                  </Tooltip.Root>
                 </span>
-              </span>
-            );
-          })}
-        </pre>
+              );
+            })}
+          </pre>
+        </Tooltip.Provider>
       ) : (
         <>
           <pre className="small muted" data-testid="prm-block-final-prompt" data-empty="true">
