@@ -18,10 +18,22 @@ serde_json.workspace = true
 # Probe only: the overlay test image (JPEG q85, FR-PRM-25). Approved workspace dependency.
 image = { workspace = true, optional = true }
 
-[lints]
-# Slice 0 has no unsafe code, so the workspace `forbid` stays. Slice 4 switches to its own
-# `[lints]` with `unsafe_code = "deny"` for the Job Object module (R75).
-workspace = true
+[dev-dependencies]
+tempfile.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# R75: Job Object only (chat children end with the job, §10).
+windows-sys.workspace = true
+
+# R75: the workspace lints, except `unsafe_code` is `deny` (not `forbid`) so the one Job
+# Object module (`src/job.rs`) can allow it, with a SAFETY comment per block.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
 
 [[bin]]
 name = "pf-chat-probe"

@@ -57,6 +57,16 @@ pub enum StreamEvent {
     Init(Box<InitInfo>),
     /// The text blocks of one `assistant` message, concatenated.
     AssistantText(String),
+    /// An `assistant` message the CLI marks with an `error` (e.g. `authentication_failed`
+    /// for "Not logged in"). Its text is the CLI's message, not a reply.
+    AssistantError {
+        error: String,
+        text: String,
+    },
+    /// A `rate_limit_event`; `status` is `rejected` when the plan's limit is reached.
+    RateLimit {
+        status: Option<String>,
+    },
     /// One partial text delta (`stream_event` / `content_block_delta` / `text_delta`).
     TextDelta(String),
     Result(TurnResult),
@@ -114,7 +124,19 @@ pub fn parse_event(v: &Value) -> StreamEvent {
     let ty = v["type"].as_str().unwrap_or_default();
     match ty {
         "system" if v["subtype"] == "init" => StreamEvent::Init(Box::new(parse_init(v))),
-        "assistant" => StreamEvent::AssistantText(text_blocks(&v["message"]["content"])),
+        "assistant" => {
+            let text = text_blocks(&v["message"]["content"]);
+            match v["error"].as_str() {
+                Some(e) => StreamEvent::AssistantError {
+                    error: e.to_owned(),
+                    text,
+                },
+                None => StreamEvent::AssistantText(text),
+            }
+        }
+        "rate_limit_event" => StreamEvent::RateLimit {
+            status: opt_str(&v["rate_limit_info"]["status"]),
+        },
         "stream_event" => {
             let ev = &v["event"];
             match (ev["type"].as_str(), ev["delta"]["type"].as_str()) {

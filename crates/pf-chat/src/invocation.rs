@@ -66,6 +66,32 @@ pub fn chat_args(system_prompt: &str) -> Vec<String> {
     .collect()
 }
 
+/// [`chat_args`] with `--system-prompt-file <path>` instead of the text: for the npm shim,
+/// whose `cmd` command line can't carry the prompt's newlines (§10's "fixed arguments only").
+/// `--system-prompt-file` is documented in the CLI reference.
+pub fn chat_args_with_prompt_file(prompt_file: &str) -> Vec<String> {
+    let mut args = chat_args("");
+    if let Some(i) = args.iter().position(|a| a == "--system-prompt") {
+        args[i] = "--system-prompt-file".into();
+        args[i + 1] = prompt_file.into();
+    }
+    args
+}
+
+/// `<data-dir>/claude-config/projects/` (FR-PRM-45 backstop).
+pub fn projects_dir(data_dir: &Path) -> PathBuf {
+    config_dir(data_dir).join("projects")
+}
+
+/// Empties `<data-dir>/claude-config/projects/`, at startup and after each child ends
+/// (FR-PRM-45). A missing folder is fine.
+pub fn sweep_projects(data_dir: &Path) -> std::io::Result<()> {
+    match std::fs::remove_dir_all(projects_dir(data_dir)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
 /// `--version`, for detection (FR-PRM-33).
 pub fn version_args() -> Vec<String> {
     vec!["--version".into()]

@@ -1,0 +1,519 @@
+//! The process seam (§13): every Claude Code process goes through a [`Spawner`], so the
+//! adapter's parser and lifecycle run against recorded stdout in tests ([`crate::replay`])
+//! and no test or CI run ever starts the CLI.
+//!
+//! [`OsSpawner`] is the real one: `std::process` with reader threads (core commands are
+//! synchronous), `CREATE_NO_WINDOW` for chat children, and on Windows one Job Object per
+//! child so a kill or an app crash ends the whole process tree (§10, R75).
+
+use std::collections::VecDeque;
+use std::ffi::OsString;
+use std::io::{self, BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use crate::invocation::{ExeKind, Executable};
+
+/// The last bytes of stderr kept for an error's detail (FR-PRM-37).
+pub const STDERR_TAIL: usize = 2048;
+
+/// One process to start. `args` are the CLI's own arguments; how an npm shim is started
+/// (`cmd /d /s /c`) is the spawner's business ([`ExeKind::CmdShim`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandSpec {
+    pub program: PathBuf,
+    pub kind: ExeKind,
+    pub args: Vec<String>,
+    /// The whole environment (the spawner clears the inherited one).
+    pub env: Vec<(OsString, OsString)>,
+    pub cwd: PathBuf,
+    /// `CREATE_NO_WINDOW` (chat children and detection; never the login console).
+    pub hidden: bool,
+}
+
+impl CommandSpec {
+    pub fn new(
+        exe: &Executable,
+        args: Vec<String>,
+        env: Vec<(OsString, OsString)>,
+        cwd: &Path,
+        hidden: bool,
+    ) -> Self {
+        Self {
+            program: exe.path.clone(),
+            kind: exe.kind,
+            args,
+            env,
+            cwd: cwd.to_owned(),
+            hidden,
+        }
+    }
+
+    /// The value of `name` in `env` (case-insensitive, as Windows compares).
+    pub fn env_var(&self, name: &str) -> Option<&OsString> {
+        self.env
+            .iter()
+            .find(|(k, _)| k.to_string_lossy().eq_ignore_ascii_case(name))
+            .map(|(_, v)| v)
+    }
+}
+
+/// A finished one-shot command.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Captured {
+    pub code: Option<i32>,
+    pub stdout: String,
+    pub timed_out: bool,
+}
+
+/// What [`ChildProcess::next_line`] got.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Next {
+    Line(String),
+    Eof,
+    Timeout,
+}
+
+/// A child that has exited (`code` is `None` when it was killed or ended by a signal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Exited {
+    pub code: Option<i32>,
+}
+
+/// Kills a child (and on Windows its whole job) from any thread: Stop (FR-PRM-27).
+pub trait Kill: Send + Sync {
+    fn kill(&self);
+}
+
+/// A long-lived stream-json child: stdin stays open across turns (FR-PRM-35).
+pub trait ChildProcess: Send {
+    /// Writes one line (the trailing newline is added).
+    fn send_line(&mut self, line: &str) -> io::Result<()>;
+    /// The next stdout line, waiting at most `timeout`.
+    fn next_line(&mut self, timeout: Duration) -> Next;
+    fn close_stdin(&mut self);
+    /// Waits at most `timeout` for the exit; `None` while it still runs.
+    fn wait(&mut self, timeout: Duration) -> Option<Exited>;
+    fn killer(&self) -> Arc<dyn Kill>;
+    /// The last [`STDERR_TAIL`] bytes of stderr, raw (scrub before showing).
+    fn stderr_tail(&self) -> String;
+}
+
+/// Starts processes. Tests use [`crate::replay::ReplaySpawner`]; slice 5's consent test
+/// uses one that panics.
+pub trait Spawner: Send + Sync {
+    /// The file-system check behind executable resolution (§10).
+    fn is_file(&self, path: &Path) -> bool {
+        path.is_file()
+    }
+    /// Runs a one-shot command (stdin closed, stderr dropped unread), killed after `timeout`.
+    fn run(&self, spec: &CommandSpec, timeout: Duration) -> io::Result<Captured>;
+    fn spawn(&self, spec: &CommandSpec) -> io::Result<Box<dyn ChildProcess>>;
+    /// Opens a visible console running `spec` and returns at once (the login, FR-PRM-45).
+    fn open_console(&self, spec: &CommandSpec) -> io::Result<()>;
+}
+
+// ---------------------------------------------------------------- the real spawner
+
+/// The real spawner.
+#[derive(Debug, Default)]
+pub struct OsSpawner;
+
+/// Windows `CREATE_NEW_CONSOLE`: the login runs in its own visible console.
+pub const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+
+/// MSVC-style quoting of one argument, always in double quotes (inside quotes `cmd` leaves
+/// `& | < > ^` alone).
+pub fn quote_arg(arg: &str) -> String {
+    let mut out = String::with_capacity(arg.len() + 2);
+    out.push('"');
+    let mut backslashes = 0usize;
+    for c in arg.chars() {
+        match c {
+            '\\' => backslashes += 1,
+            '"' => {
+                out.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
+                out.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                out.extend(std::iter::repeat_n('\\', backslashes));
+                out.push(c);
+                backslashes = 0;
+            }
+        }
+    }
+    out.extend(std::iter::repeat_n('\\', backslashes * 2));
+    out.push('"');
+    out
+}
+
+/// The `cmd` arguments for an npm shim: `/d /s /c "<"shim"> <"arg">…"`. With `/s`, `cmd`
+/// strips exactly the outer pair of quotes and keeps the rest verbatim, so the quoted shim
+/// path and arguments reach the shim as written. Only fixed arguments ever go here (§10).
+pub fn shim_command_line(shim: &Path, args: &[String]) -> String {
+    let mut inner = quote_arg(&shim.to_string_lossy());
+    for a in args {
+        inner.push(' ');
+        inner.push_str(&quote_arg(a));
+    }
+    format!("/d /s /c \"{inner}\"")
+}
+
+fn os_command(spec: &CommandSpec, creation_flags: u32) -> Command {
+    let mut c = match spec.kind {
+        ExeKind::Native => {
+            let mut c = Command::new(&spec.program);
+            c.args(&spec.args);
+            c
+        }
+        ExeKind::CmdShim => {
+            let mut c = Command::new("cmd");
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                c.raw_arg(shim_command_line(&spec.program, &spec.args));
+            }
+            #[cfg(not(windows))]
+            c.arg(shim_command_line(&spec.program, &spec.args));
+            c
+        }
+    };
+    c.env_clear()
+        .envs(spec.env.iter().map(|(k, v)| (k, v)))
+        .current_dir(&spec.cwd);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        if creation_flags != 0 {
+            c.creation_flags(creation_flags);
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = creation_flags;
+    c
+}
+
+fn hidden_flags(spec: &CommandSpec) -> u32 {
+    if spec.hidden {
+        crate::invocation::CREATE_NO_WINDOW
+    } else {
+        0
+    }
+}
+
+fn wait_child(child: &Mutex<Child>, timeout: Duration) -> Option<Exited> {
+    let start = Instant::now();
+    loop {
+        let polled = child.lock().ok().map(|mut c| c.try_wait());
+        match polled {
+            Some(Ok(Some(status))) => {
+                return Some(Exited {
+                    code: status.code(),
+                });
+            }
+            Some(Ok(None)) if start.elapsed() < timeout => {
+                thread::sleep(Duration::from_millis(20));
+            }
+            Some(Err(_)) | None => return Some(Exited { code: None }),
+            Some(Ok(None)) => return None,
+        }
+    }
+}
+
+impl Spawner for OsSpawner {
+    fn run(&self, spec: &CommandSpec, timeout: Duration) -> io::Result<Captured> {
+        let mut cmd = os_command(spec, hidden_flags(spec));
+        cmd.stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd.spawn()?;
+        #[cfg(windows)]
+        let job = crate::job::JobObject::new()
+            .and_then(|j| j.assign(&child).map(|()| j))
+            .ok();
+        let mut out = child.stdout.take();
+        let mut err = child.stderr.take();
+        let out_t = thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(o) = out.as_mut() {
+                let _ = o.read_to_end(&mut buf);
+            }
+            buf
+        });
+        // Stderr may hold account details: read and dropped (FR-PRM-33).
+        let err_t = thread::spawn(move || {
+            if let Some(e) = err.as_mut() {
+                let _ = io::copy(e, &mut io::sink());
+            }
+        });
+        let child = Mutex::new(child);
+        let status = wait_child(&child, timeout);
+        let timed_out = status.is_none();
+        if timed_out {
+            #[cfg(windows)]
+            if let Some(j) = &job {
+                j.terminate();
+            }
+            if let Ok(mut c) = child.lock() {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+        }
+        let stdout = out_t.join().unwrap_or_default();
+        let _ = err_t.join();
+        Ok(Captured {
+            code: status.and_then(|s| s.code),
+            stdout: String::from_utf8_lossy(&stdout).into_owned(),
+            timed_out,
+        })
+    }
+
+    fn spawn(&self, spec: &CommandSpec) -> io::Result<Box<dyn ChildProcess>> {
+        Ok(Box::new(OsChild::spawn(spec)?))
+    }
+
+    fn open_console(&self, spec: &CommandSpec) -> io::Result<()> {
+        if !cfg!(windows) {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "a login console can only be opened on Windows; run the shown command",
+            ));
+        }
+        // Detached: dropping a std `Child` neither waits for nor kills it.
+        os_command(spec, CREATE_NEW_CONSOLE).spawn().map(drop)
+    }
+}
+
+struct OsKill {
+    child: Arc<Mutex<Child>>,
+    #[cfg(windows)]
+    job: Option<Arc<crate::job::JobObject>>,
+}
+
+impl Kill for OsKill {
+    fn kill(&self) {
+        #[cfg(windows)]
+        if let Some(j) = &self.job {
+            j.terminate();
+        }
+        if let Ok(mut c) = self.child.lock() {
+            let _ = c.kill();
+        }
+    }
+}
+
+/// A real stream-json child.
+pub struct OsChild {
+    child: Arc<Mutex<Child>>,
+    stdin: Option<ChildStdin>,
+    rx: Receiver<Option<String>>,
+    eof: bool,
+    stderr: Arc<Mutex<VecDeque<u8>>>,
+    killer: Arc<OsKill>,
+}
+
+impl OsChild {
+    fn spawn(spec: &CommandSpec) -> io::Result<Self> {
+        let mut cmd = os_command(spec, hidden_flags(spec));
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd.spawn()?;
+        #[cfg(windows)]
+        let job = match crate::job::JobObject::new().and_then(|j| j.assign(&child).map(|()| j)) {
+            Ok(j) => Some(Arc::new(j)),
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(e);
+            }
+        };
+        let stdin = child.stdin.take();
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("no stdout"))?;
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            let mut r = BufReader::new(stdout);
+            let mut buf = Vec::new();
+            loop {
+                buf.clear();
+                match r.read_until(b'\n', &mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {
+                        let line = String::from_utf8_lossy(&buf)
+                            .trim_end_matches(['\r', '\n'])
+                            .to_owned();
+                        if tx.send(Some(line)).is_err() {
+                            return;
+                        }
+                    }
+                }
+            }
+            let _ = tx.send(None);
+        });
+        let stderr = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL)));
+        if let Some(mut e) = child.stderr.take() {
+            let sink = Arc::clone(&stderr);
+            thread::spawn(move || {
+                let mut chunk = [0u8; 4096];
+                while let Ok(n) = e.read(&mut chunk) {
+                    if n == 0 {
+                        break;
+                    }
+                    if let Ok(mut s) = sink.lock() {
+                        s.extend(&chunk[..n]);
+                        let over = s.len().saturating_sub(STDERR_TAIL);
+                        s.drain(..over);
+                    }
+                }
+            });
+        }
+        let child = Arc::new(Mutex::new(child));
+        let killer = Arc::new(OsKill {
+            child: Arc::clone(&child),
+            #[cfg(windows)]
+            job,
+        });
+        Ok(Self {
+            child,
+            stdin,
+            rx,
+            eof: false,
+            stderr,
+            killer,
+        })
+    }
+}
+
+impl ChildProcess for OsChild {
+    fn send_line(&mut self, line: &str) -> io::Result<()> {
+        let s = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "stdin closed"))?;
+        s.write_all(line.as_bytes())?;
+        s.write_all(b"\n")?;
+        s.flush()
+    }
+
+    fn next_line(&mut self, timeout: Duration) -> Next {
+        if self.eof {
+            return Next::Eof;
+        }
+        match self.rx.recv_timeout(timeout) {
+            Ok(Some(l)) => Next::Line(l),
+            Ok(None) | Err(RecvTimeoutError::Disconnected) => {
+                self.eof = true;
+                Next::Eof
+            }
+            Err(RecvTimeoutError::Timeout) => Next::Timeout,
+        }
+    }
+
+    fn close_stdin(&mut self) {
+        self.stdin = None;
+    }
+
+    fn wait(&mut self, timeout: Duration) -> Option<Exited> {
+        wait_child(&self.child, timeout)
+    }
+
+    fn killer(&self) -> Arc<dyn Kill> {
+        self.killer.clone()
+    }
+
+    fn stderr_tail(&self) -> String {
+        self.stderr
+            .lock()
+            .map(|s| String::from_utf8_lossy(&s.iter().copied().collect::<Vec<_>>()).into_owned())
+            .unwrap_or_default()
+    }
+}
+
+impl Drop for OsChild {
+    fn drop(&mut self) {
+        if self.wait(Duration::ZERO).is_none() {
+            self.killer.kill();
+            let _ = self.wait(Duration::from_secs(5));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prm_s10_quote_arg_msvc_rules() {
+        assert_eq!(quote_arg(""), "\"\"");
+        assert_eq!(quote_arg("-p"), "\"-p\"");
+        assert_eq!(quote_arg("a b"), "\"a b\"");
+        assert_eq!(quote_arg(r"C:\x y\"), r#""C:\x y\\""#);
+        assert_eq!(quote_arg(r#"say "hi""#), r#""say \"hi\"""#);
+        assert_eq!(quote_arg("a&b|c"), "\"a&b|c\"");
+    }
+
+    #[test]
+    fn prm_s10_npm_shim_command_line() {
+        let line = shim_command_line(
+            Path::new(r"C:\npm dir\claude.cmd"),
+            &["-p".into(), "--tools".into(), String::new()],
+        );
+        assert_eq!(
+            line,
+            r#"/d /s /c ""C:\npm dir\claude.cmd" "-p" "--tools" """"#
+        );
+        assert!(!line.contains('\n'));
+    }
+
+    /// The real spawner and the job object, on a harmless system command (never the CLI).
+    #[cfg(windows)]
+    #[test]
+    fn prm_s10_os_child_kill_ends_the_process_tree() {
+        let exe = Executable {
+            path: PathBuf::from("cmd.exe"),
+            kind: ExeKind::Native,
+            source: crate::invocation::ExeSource::Override,
+        };
+        let env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+        let cwd = std::env::temp_dir();
+        // `cmd` starts `ping` as a grandchild that holds the stdout pipe.
+        let spec = CommandSpec::new(
+            &exe,
+            vec![
+                "/d".into(),
+                "/c".into(),
+                "echo ready & ping -n 30 127.0.0.1 >nul".into(),
+            ],
+            env,
+            &cwd,
+            true,
+        );
+        let mut child = OsSpawner
+            .spawn(&spec)
+            .unwrap_or_else(|e| panic!("spawn: {e}"));
+        let first = child.next_line(Duration::from_secs(10));
+        assert!(
+            matches!(&first, Next::Line(l) if l.trim() == "ready"),
+            "{first:?}"
+        );
+        let start = Instant::now();
+        child.killer().kill();
+        let mut eof = false;
+        while start.elapsed() < Duration::from_secs(5) {
+            if child.next_line(Duration::from_secs(1)) == Next::Eof {
+                eof = true;
+                break;
+            }
+        }
+        assert!(eof, "stdout stayed open: a grandchild escaped the job");
+        assert!(child.wait(Duration::from_secs(5)).is_some());
+    }
+}
