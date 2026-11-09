@@ -73,3 +73,42 @@ test('FR-PRJ-14 R55 opening another project asks the guards before closing this 
   expect(projectStore.get().project?.name).toBe('Harbour');
   expect(cmds().indexOf('project_close')).toBeLessThan(cmds().indexOf('project_open'));
 });
+
+test('FR-PRJ-21 a restore that couldn’t write never says Saved', async () => {
+  const fail = (code: string) => () => Promise.reject({ code, message: `core: ${code}` });
+  const base = core.handlersSnapshot();
+  projectStore.draftSaveFailed({ code: 'locked', message: 'locked' });
+  core.useHandlers({ ...base, project_restore_revision: fail('locked') });
+  await projectStore.restore('r0');
+  expect(projectStore.get().save).toMatchObject({ kind: 'failed', code: 'locked' });
+  core.useHandlers({ ...base, project_restore_revision: fail('conflict') });
+  await projectStore.restore('r0');
+  expect(projectStore.get().save.kind).toBe('conflict');
+  // Refused without writing anything: the segment stays as it was (still failed).
+  projectStore.draftSaveFailed({ code: 'locked', message: 'locked' });
+  core.useHandlers({ ...base, project_restore_revision: fail('unknown_id') });
+  await projectStore.restore('r0');
+  expect(projectStore.get().save.kind).toBe('failed');
+  expect(projectStore.get().error?.code).toBe('unknown_id');
+});
+
+test('FR-PRJ-23 a save or restore answered after the project closed changes nothing', async () => {
+  const base = core.handlersSnapshot();
+  let reject!: (e: unknown) => void;
+  const pending = () => new Promise((_r, rej) => (reject = rej));
+  for (const run of [() => projectStore.restore('r0'), () => projectStore.save()]) {
+    await projectStore.open(CRYPT);
+    core.useHandlers({
+      ...base,
+      project_restore_revision: pending,
+      project_save_revision: pending,
+    });
+    const p = run();
+    await Promise.resolve();
+    await projectStore.close();
+    reject({ code: 'locked', message: 'locked' });
+    await p;
+    expect(projectStore.get().project).toBeNull();
+    expect(projectStore.get().save).toEqual({ kind: 'saved', at: '' });
+  }
+});

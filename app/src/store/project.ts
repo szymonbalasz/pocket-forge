@@ -268,8 +268,9 @@ export const projectStore = {
       const project = await api.project.get();
       set({ project: project ?? state.project, save: { kind: 'saved', at: rev.created_at } });
     } catch (e) {
+      if (!state.project) return; // closed meanwhile: nothing to show it on
       const err = errorOf(e);
-      const at = state.project ? savedAt(state.project) : '';
+      const at = savedAt(state.project);
       set({
         save:
           err.code === 'unchanged'
@@ -285,19 +286,30 @@ export const projectStore = {
   /** Restores a revision as a new `restore` revision (FR-PRJ-23, 43). */
   async restore(revId: string): Promise<void> {
     if (!state.project) return;
+    const before = state.save;
     set({ save: { kind: 'saving' } });
     try {
       const rev = await api.project.restoreRevision(revId);
       const project = await api.project.get();
       set({ project: project ?? state.project, save: { kind: 'saved', at: rev.created_at } });
     } catch (e) {
+      if (!state.project) return; // closed meanwhile: nothing to show it on
+      const err = errorOf(e);
       const code = saveCode(e);
+      // A refusal that writes nothing (unknown or missing revision) leaves the segment as it
+      // was; one that couldn't write never says Saved (FR-PRJ-21, §7).
       set({
-        error: errorOf(e),
+        error: err,
         save:
           code === 'folder_moved'
             ? { kind: 'failed', code, message: '', retrying: false }
-            : { kind: 'saved', at: savedAt(state.project) },
+            : code === 'conflict'
+              ? { kind: 'conflict' }
+              : code === 'locked' || code === 'io'
+                ? { kind: 'failed', ...err, retrying: false }
+                : before.kind === 'saving'
+                  ? settled(state.project)
+                  : before,
       });
     }
     bump();
