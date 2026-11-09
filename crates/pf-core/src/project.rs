@@ -348,6 +348,7 @@ pub fn open(
     let manifest_path = dir.join(MANIFEST_FILE);
     let mut warnings = vec![];
     let mut read_only = None;
+    let mut broken: Option<Vec<u8>> = None;
     let manifest = if std::fs::symlink_metadata(&manifest_path).is_ok() {
         library::hydrate_if_needed(ctx, &manifest_path)?;
         let bytes =
@@ -368,10 +369,22 @@ pub fn open(
                     format!("project.json was made by a newer Pocket Forge and can't be read: {e}"),
                 ));
             }
-            Err(e) => {
-                tracing::warn!(error = %e, "project.json unreadable; rebuilding");
-                None
-            }
+            Err(e) => match newer_enum_manifest(&bytes, &e, library::kind_of_folder(&dir)) {
+                // R102: an enum value only a newer build knows. Never rebuilt or written.
+                Some(m) => {
+                    read_only = Some(ReadOnlyReason::NewerVersion);
+                    warnings.push(Warning::new(
+                        "newer_version",
+                        "Made by a newer Pocket Forge. The project opens read-only.",
+                    ));
+                    Some(m)
+                }
+                None => {
+                    tracing::warn!(error = %e, "project.json unreadable; rebuilding");
+                    broken = Some(bytes);
+                    None
+                }
+            },
         }
     } else {
         None
@@ -380,7 +393,17 @@ pub fn open(
         Some(m) => (m, false),
         // FR-PRJ-24: rebuilt from the revision and job files, if there are any.
         None => match sweep::rebuild_manifest(ctx, settings, &dir)? {
-            Some(m) => (m, true),
+            Some(mut m) => {
+                if let Some(bytes) = &broken {
+                    // R102: the broken file is copied aside before anything can overwrite it,
+                    // and the rebuild keeps its project_id (spool, export, settings key on it).
+                    back_up_broken(ctx, &dir, bytes)?;
+                    if let Some(id) = peek_project_id(bytes) {
+                        m.project_id = id;
+                    }
+                }
+                (m, true)
+            }
             None => return Err(library::not_a_project(&dir)),
         },
     };
@@ -446,6 +469,87 @@ pub fn open(
         p.request_thumbnail(ctx);
     }
     Ok(p)
+}
+
+/// Where an unreadable `project.json` is copied before a rebuild (R102).
+pub const BROKEN_DIR: &str = ".pforge/broken";
+
+/// R102: copies the unreadable `project.json` bytes to `.pforge/broken/project.<stamp>.json`
+/// (once: an identical copy already there is enough). Fails, so nothing is overwritten, if the
+/// copy can't be written.
+fn back_up_broken(ctx: &Context, dir: &Path, bytes: &[u8]) -> CoreResult<()> {
+    let broken = dir.join(BROKEN_DIR);
+    let same = std::fs::read_dir(&broken)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .any(|e| std::fs::read(e.path()).is_ok_and(|b| b == bytes));
+    if same {
+        return Ok(());
+    }
+    std::fs::create_dir_all(&broken).map_err(|e| CoreError::io("creating .pforge/broken", &e))?;
+    let stamp = ctx.now().file_stamp();
+    let mut target = broken.join(format!("project.{stamp}.json"));
+    if std::fs::symlink_metadata(&target).is_ok() {
+        target = broken.join(format!("project.{stamp}-{}.json", ctx.new_id()));
+    }
+    fsx::write_atomic(ctx, &target, bytes)
+}
+
+/// The `project_id` of manifest bytes that may not parse (truncated by a sync): from the JSON
+/// if it parses, else the first `"project_id": "<ulid>"` in the text.
+fn peek_project_id(bytes: &[u8]) -> Option<Ulid> {
+    if let Ok(v) = serde_json::from_slice::<Value>(bytes) {
+        return v.get("project_id")?.as_str()?.parse().ok();
+    }
+    let text = String::from_utf8_lossy(bytes);
+    let rest = &text[text.find("\"project_id\"")? + "\"project_id\"".len()..];
+    let rest = rest
+        .trim_start()
+        .strip_prefix(':')?
+        .trim_start()
+        .strip_prefix('"')?;
+    rest.get(..26)?.parse().ok()
+}
+
+/// R102: a manifest that is valid JSON but holds an enum value this build doesn't know (a newer
+/// build added it) is read leniently for a read-only view: list entries that don't parse are
+/// left out, an unknown `kind` follows the folder, an unknown draft is dropped. `None` for any
+/// other error (then it is rebuilt).
+fn newer_enum_manifest(
+    bytes: &[u8],
+    err: &serde_json::Error,
+    folder_kind: Option<Kind>,
+) -> Option<Manifest> {
+    fn retain<T: serde::de::DeserializeOwned>(o: &mut serde_json::Map<String, Value>, key: &str) {
+        if let Some(Value::Array(a)) = o.get_mut(key) {
+            a.retain(|v| serde_json::from_value::<T>(v.clone()).is_ok());
+        }
+    }
+    if !err.is_data() || !err.to_string().contains("unknown variant") {
+        return None;
+    }
+    let Value::Object(mut o) = serde_json::from_slice::<Value>(bytes).ok()? else {
+        return None;
+    };
+    retain::<Layer>(&mut o, "layers");
+    retain::<Mask>(&mut o, "masks");
+    retain::<JobIndex>(&mut o, "jobs");
+    retain::<Candidate>(&mut o, "candidates");
+    retain::<RevisionEntry>(&mut o, "revisions");
+    retain::<TrashItem>(&mut o, "trash");
+    if o.get("kind")
+        .is_some_and(|k| serde_json::from_value::<Kind>(k.clone()).is_err())
+    {
+        let kind = serde_json::to_value(folder_kind.unwrap_or(Kind::Map)).ok()?;
+        o.insert("kind".into(), kind);
+    }
+    if o.get("draft")
+        .is_some_and(|d| serde_json::from_value::<Option<Draft>>(d.clone()).is_err())
+    {
+        o.insert("draft".into(), Value::Null);
+    }
+    serde_json::from_value(Value::Object(o)).ok()
 }
 
 /// FR-PRJ-15/16/17: hydrate, then compare size and mtime, then the hash. A project made by
