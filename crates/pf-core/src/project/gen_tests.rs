@@ -843,3 +843,53 @@ fn r84_fr_prj_15_a_changed_or_missing_base_image_opens_read_only() {
     std::fs::write(&path, kept).unwrap();
     assert_eq!(g.e.open(&g.dir).read_only, None);
 }
+
+// ---------------------------------------------------------------- phase 4 code review (R97)
+
+#[test]
+fn fr_gen_19_undo_and_redo_of_a_pick_keep_draft_generate() {
+    let mut g = gen_env(Kind::Token, "Goblin");
+    let r0 = g.p.manifest.head_revision;
+    let first = json!({"model_id": "fake-gen-wh", "typed_prompt": "goblin"});
+    put_draft(
+        &g.e.ctx,
+        g.e.install(),
+        &mut g.p,
+        DraftInput::generate_only(Some(first)),
+        None,
+    )
+    .unwrap();
+    let (job, c) = g.generate("goblin", &[10, 20]);
+    let out = g.pick(job.id, c[0].id).unwrap();
+    // The tab changed after the pick; r0 has no draft at all.
+    let now = json!({"model_id": "fake-gen-wh", "typed_prompt": "goblin with a bow"});
+    put_draft(
+        &g.e.ctx,
+        g.e.install(),
+        &mut g.p,
+        DraftInput::generate_only(Some(now.clone())),
+        None,
+    )
+    .unwrap();
+    let generate = |g: &G| g.p.manifest.draft.as_ref().and_then(|d| d.generate.clone());
+    restore_revision(&g.e.ctx, g.e.install(), &mut g.p, r0).unwrap();
+    assert_eq!(generate(&g), Some(now.clone()), "undo keeps the tab's draft");
+    restore_revision(&g.e.ctx, g.e.install(), &mut g.p, out.revision_id).unwrap();
+    assert_eq!(generate(&g), Some(now.clone()), "redo keeps it too");
+    // On disk: a reopen shows what the tab shows.
+    let again = g.e.open(&g.dir);
+    assert_eq!(again.manifest.draft.and_then(|d| d.generate), Some(now));
+}
+
+#[test]
+fn fr_prj_23_restore_still_brings_back_the_region_edit_draft() {
+    let mut g = gen_env(Kind::Map, "Crypt");
+    put_draft(&g.e.ctx, g.e.install(), &mut g.p, rgn_draft("moss"), None).unwrap();
+    save_revision(&g.e.ctx, g.e.install(), &mut g.p, None).unwrap();
+    let (job, c) = g.generate("crypt", &[10]);
+    let out = g.pick(job.id, c[0].id).unwrap();
+    put_draft(&g.e.ctx, g.e.install(), &mut g.p, rgn_draft("ivy"), None).unwrap();
+    let parent = read_revision(&g.p, out.revision_id).unwrap().parent.unwrap();
+    restore_revision(&g.e.ctx, g.e.install(), &mut g.p, parent).unwrap();
+    assert_eq!(g.p.manifest.draft.unwrap().final_prompt, "moss");
+}
