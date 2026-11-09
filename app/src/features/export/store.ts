@@ -210,7 +210,8 @@ export const exportStore = {
     } catch {
       // No settings yet (or EXP unavailable): keep the empty form.
     }
-    await exportStore.sync();
+    // Loading isn't an edit: only plan (R101, FR-EXP-25: opening never commits).
+    await exportStore.sync(false);
   },
 
   /** Re-reads the settings in effect (after a resolved conflict) and re-plans. */
@@ -225,7 +226,7 @@ export const exportStore = {
     }
     if (state.projectId !== projectId) return;
     set({ form });
-    await exportStore.sync();
+    await exportStore.sync(false);
   },
 
   setExpanded(expanded: boolean): void {
@@ -245,8 +246,10 @@ export const exportStore = {
     return exportStore.sync();
   },
 
-  /** Sends the form to the core and refreshes the plan; the latest call wins. */
-  async sync(): Promise<void> {
+  /** Sends the form to the core and refreshes the plan; the latest call wins. `push` false (the
+   *  form was just loaded from the core) only plans: the core's settings are already these, and
+   *  sending them would mark them for a commit (R101, FR-EXP-25). */
+  async sync(push = true): Promise<void> {
     const projectId = state.projectId;
     if (!projectId) return;
     const seq = ++syncSeq;
@@ -257,8 +260,10 @@ export const exportStore = {
     }
     const stale = () => seq !== syncSeq || state.projectId !== projectId;
     try {
-      await api.export.setSettings(parsed.settings);
-      if (stale()) return;
+      if (push) {
+        await api.export.setSettings(parsed.settings);
+        if (stale()) return;
+      }
       const plan = await api.export.plan(parsed.settings);
       if (stale()) return;
       set({ settings: parsed.settings, plan, planError: null, fieldError: null });

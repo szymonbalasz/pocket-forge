@@ -82,7 +82,9 @@ describe('export store', () => {
   test('FR-EXP-25 open loads the saved settings and plans them without a commit', async () => {
     await bound();
     expect(exportStore.get().form).toMatchObject({ mode: 'cells', cols: '30', rows: '40' });
-    expect(h.exp.setSettings).toHaveBeenCalledWith({
+    // R101: loading is not an edit, so nothing is sent back to be committed.
+    expect(h.exp.setSettings).not.toHaveBeenCalled();
+    expect(h.exp.plan).toHaveBeenCalledWith({
       grid: { mode: 'cells', source_px_per_square: null, cols: 30, rows: 40 },
       target_px_per_square: null,
       format: 'png',
@@ -92,6 +94,24 @@ describe('export store', () => {
     await exportStore.edit({ target: '70' });
     await exportStore.edit({ target: '7' });
     expect(h.exp.start).not.toHaveBeenCalled();
+  });
+
+  test('FR-EXP-25 R101 opening a project never sends settings, saved or not', async () => {
+    // A never-exported project, and one whose settings can't be read: the empty form stays local.
+    h.exp.getSettings.mockResolvedValueOnce({
+      source_px_per_square: null,
+      target_px_per_square: null,
+    });
+    await bound();
+    await exportStore.bind(null);
+    h.exp.getSettings.mockRejectedValueOnce(coreError('io'));
+    await exportStore.bind('p2');
+    // A resolved conflict reloads the kept settings the same way.
+    await exportStore.reloadSettings();
+    expect(h.exp.setSettings).not.toHaveBeenCalled();
+    // The user's first edit is what sends them.
+    await exportStore.edit({ mode: 'cells', cols: '30', rows: '40' });
+    expect(h.exp.setSettings).toHaveBeenCalledTimes(1);
   });
 
   test('FR-EXP-26 every edit sends the settings to the core (which emits settings-changed)', async () => {
@@ -372,6 +392,10 @@ test('FR-PRJ-36 after a resolved conflict the form reloads the kept settings (wa
   });
   await projectStore.resolved('other');
   await vi.waitFor(() => expect(exportStore.get().form.format).toBe('webp'));
-  expect(h.exp.setSettings.mock.calls.at(-1)?.[0]).toMatchObject({ format: 'webp' });
+  // Planned, not sent back: the core's settings are the kept ones already (R101).
+  await vi.waitFor(() =>
+    expect(h.exp.plan.mock.calls.at(-1)?.[0]).toMatchObject({ format: 'webp' }),
+  );
+  expect(h.exp.setSettings.mock.calls.at(-1)?.[0]).toMatchObject({ format: 'jpeg' });
   projectStore.reset();
 });
