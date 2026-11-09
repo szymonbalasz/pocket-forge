@@ -327,6 +327,29 @@ describe('export store', () => {
     expect(exportStore.get().run?.exportId).toBe('e2');
   });
 
+  test('FR-EXP-28 a failed prefetch is tried again, so Start never stays on Loading', async () => {
+    h.exp.prefetchOriginal.mockRejectedValueOnce(coreError('not_available_offline'));
+    await bound();
+    exportStore.setExpanded(true);
+    await vi.waitFor(() => expect(exportStore.get().original.kind).toBe('failed'));
+    // Start says the original isn't there: the prefetch runs again and its answer counts.
+    h.exp.start.mockRejectedValueOnce(coreError('original_unavailable'));
+    h.exp.prefetchOriginal.mockResolvedValueOnce({ ready: true });
+    await exportStore.start();
+    expect(h.exp.prefetchOriginal).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(exportStore.get().original.kind).toBe('ready'));
+    // Collapsing and expanding after a failure tries again too.
+    exportStore.reset();
+    h.exp.prefetchOriginal.mockReset();
+    h.exp.prefetchOriginal.mockRejectedValueOnce(coreError('io'));
+    await bound();
+    exportStore.setExpanded(true);
+    await vi.waitFor(() => expect(exportStore.get().original.kind).toBe('failed'));
+    exportStore.setExpanded(false);
+    exportStore.setExpanded(true);
+    expect(h.exp.prefetchOriginal).toHaveBeenCalledTimes(2);
+  });
+
   test('FR-EXP-18 a failed export shows its message and Retry starts again', async () => {
     await bound();
     await exportStore.start();

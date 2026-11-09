@@ -138,6 +138,8 @@ async function prefetch(projectId: string): Promise<void> {
       set({ original: { kind: 'ready' } });
   } catch (e) {
     if (state.projectId !== projectId) return;
+    // Not for good: the next expand or Start asks again (FR-EXP-28).
+    prefetched = null;
     const { code, message } = codeOf(e);
     set({ original: { kind: 'failed', message: errorText(code, message) } });
   }
@@ -339,7 +341,14 @@ export const exportStore = {
         set({ fieldError: invalidSettingsError(err.field, limitOf(err.detail)) });
         return;
       }
-      if (err.code === 'original_unavailable') set({ original: { kind: 'loading' } });
+      if (err.code === 'original_unavailable') {
+        // Start waits for the original again: ask for it, else Loading would never end.
+        set({ original: { kind: 'loading' } });
+        if (state.projectId) {
+          prefetched = null;
+          void prefetch(state.projectId);
+        }
+      }
       set({ error: { code: err.code, message: errorText(err.code, err.message) } });
       if (err.code === 'exists') await exportStore.refreshPlan();
     }
