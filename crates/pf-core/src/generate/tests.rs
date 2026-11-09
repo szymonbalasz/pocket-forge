@@ -1655,3 +1655,61 @@ fn fr_rgn_04_owner_60_estimate_and_submit_with_no_image_are_no_image() {
     );
     assert!(g.lab.manifest()["jobs"].as_array().unwrap().is_empty());
 }
+
+// ---------------------------------------------------------------- FR-GEN-23 / 34 sub-clauses
+
+#[test]
+fn fr_gen_23_cancel_and_a_submit_timeout_run_as_rgn_and_never_resubmit() {
+    let g = G::empty("maps", "Crypt");
+    // Cancel on the provider's ack.
+    let id = g.submit(&g.two("crypt")).unwrap();
+    let out = g.dispatch("rgn_job_cancel", json!({"job_id": id})).unwrap();
+    assert_eq!(out, json!({"result": "canceled"}));
+    assert_eq!(g.lab.job(id).state, JobState::Canceled);
+    g.lab.drive();
+    assert_eq!(g.lab.job(id).state, JobState::Canceled);
+    assert!(g.lab.candidates(id).is_empty());
+    // A submit that times out has no handle: `lost`, never resubmitted.
+    g.lab.set_case("submit_timeout");
+    let calls = g.lab.fake().call_count();
+    let e = g.submit(&g.two("again")).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Provider);
+    assert_eq!(e.detail["provider"]["code"], "timeout");
+    assert_eq!(e.detail["possible_charge"], true);
+    let id: Ulid = e.detail["job_id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(g.lab.job(id).state, JobState::Lost);
+    let after = g.lab.fake().call_count();
+    g.lab.set_case("success");
+    g.lab.drive();
+    assert_eq!(g.lab.job(id).state, JobState::Lost);
+    assert_eq!(g.lab.fake().call_count(), after, "never resubmitted");
+    assert!(after > calls);
+    assert!(g.lab.core.state().rgn.runner.tracked().is_empty());
+}
+
+#[test]
+fn fr_gen_34_read_only_star_and_discard_fail_fast() {
+    let g = G::empty("maps", "Crypt");
+    let job = g.run(&g.two("crypt"));
+    let c = g.cands(job);
+    let before = g.lab.persisted();
+    g.lab.core.state().project.as_mut().unwrap().read_only = Some(ReadOnlyReason::NewerVersion);
+    for (name, input) in [
+        (
+            "rgn_candidate_star",
+            json!({"job_id": job, "candidate_id": c[0], "starred": true}),
+        ),
+        (
+            "rgn_candidate_discard",
+            json!({"job_id": job, "candidate_id": c[1]}),
+        ),
+        ("rgn_job_discard_rest", json!({"job_id": job})),
+        (
+            "gen_candidate_pick",
+            json!({"job_id": job, "candidate_id": c[0]}),
+        ),
+    ] {
+        assert_eq!(code(g.dispatch(name, input)), ErrorCode::ReadOnly, "{name}");
+    }
+    assert_eq!(g.lab.persisted(), before, "nothing written");
+}
