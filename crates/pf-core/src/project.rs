@@ -712,6 +712,9 @@ pub struct CommitPlan {
     pub jobs_before: Vec<JobFile>,
     /// Job files written after the manifest (follow-ups rolled forward on open).
     pub jobs_after: Vec<JobFile>,
+    /// Housekeeping (the open sweep, the trash purge): `commit.at` stays, so opening a project
+    /// doesn't move it in the last-edited order (FR-PRJ-49, R108).
+    pub keep_at: bool,
 }
 
 /// One commit (FR-PRJ-18). `change` edits a copy of the manifest and fills the plan; on any
@@ -788,7 +791,11 @@ pub(crate) fn commit_with(
         next.commit = Commit {
             seq,
             install_id,
-            at: ctx.now(),
+            at: if plan.keep_at {
+                p.manifest.commit.at
+            } else {
+                ctx.now()
+            },
         };
         fsx::write_json_atomic(ctx, &p.manifest_path(), &next)
     })();

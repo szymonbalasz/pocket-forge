@@ -717,3 +717,39 @@ fn fr_prj_23_r108_a_save_refused_as_locked_never_becomes_history() {
     assert_eq!(p.manifest.revisions.len(), 1);
     assert!(p.manifest.revisions.iter().all(|r| r.label.is_none()));
 }
+
+#[test]
+fn fr_prj_49_r108_an_open_sweep_commit_keeps_the_last_edited_time() {
+    let mut e = env();
+    let dir = e.project("Crypt");
+    let at = e.open(&dir).manifest.commit.at;
+    let stray = format!("{LAYERS_DIR}/{}.png", Ulid::from_parts(9, 9));
+    std::fs::write(dir.join(&stray), b"x").unwrap();
+    e.ctx.clock = Box::new(crate::context::ManualClock::new(Timestamp(T0 + 86_400_000)));
+    let p = e.open(&dir);
+    assert!(!dir.join(&stray).exists(), "swept");
+    assert!(p.manifest.trash.iter().any(|t| t.kind == TrashKind::Orphan));
+    assert_eq!(p.manifest.commit.at, at, "last edited stays (FR-PRJ-49)");
+    let disk: Manifest = read_json(&dir.join("project.json")).unwrap();
+    assert_eq!(disk.commit.at, at);
+}
+
+#[test]
+fn fr_prj_20_r108_a_locked_project_json_defers_the_open_sweep() {
+    let mut e = env();
+    let dir = e.project("Crypt");
+    let stray = format!("{LAYERS_DIR}/{}.png", Ulid::from_parts(9, 9));
+    std::fs::write(dir.join(&stray), b"x").unwrap();
+    e.ctx.faults = Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap();
+    let p = open(&e.ctx, &e.settings, &dir, None).expect("a lock doesn't fail the open");
+    assert!(
+        dir.join(&stray).exists(),
+        "the sweep waits for the next open"
+    );
+    assert!(p.manifest.trash.is_empty());
+    e.ctx.faults = Faults::none();
+    drop(p);
+    let p = e.open(&dir);
+    assert!(!dir.join(&stray).exists());
+    assert!(p.manifest.trash.iter().any(|t| t.kind == TrashKind::Orphan));
+}
