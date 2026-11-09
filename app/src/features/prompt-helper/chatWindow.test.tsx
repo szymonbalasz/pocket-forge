@@ -364,6 +364,55 @@ test('FR-PRM-21 a project switch in the main window switches the window to that 
   expect(id('prm-chat-host').textContent).toBe('Region edit');
 });
 
+test('FR-PRM-27 night review 9 after a switch, the other project’s finishing turn disables Send with the reason', async () => {
+  setup({ chat: { consent: true, case: 'slow(4)' } });
+  const other = { ...baseSnapshot(), project_id: '01JPROJECTB000000000000000' };
+  await api.chat.contextPublish(PID, 'rgn', {});
+  await api.chat.contextPublish(other.project_id, 'rgn', {});
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  await type('a kitchen');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(id('prm-chat-stop')).toBeTruthy());
+  // The main window opens B while A's reply still streams.
+  const w = window as unknown as { __pfMockHandlers: Record<string, () => unknown> };
+  w.__pfMockHandlers.project_get = () => other;
+  act(() => fake.emit('prm:chat-context', { project_id: other.project_id, host: 'rgn' }));
+  await waitFor(() =>
+    expect(fake.callsOf('prm_chat_thread_get').at(-1)?.project_id).toBe(other.project_id),
+  );
+  await type('a crypt');
+  await waitFor(() => expect(id('prm-chat-blocked').textContent).toMatch(/another project/));
+  expect((id('prm-chat-send') as HTMLButtonElement).disabled).toBe(true);
+  // A's turn ends: Send is live again for B.
+  await waitFor(() => expect((id('prm-chat-send') as HTMLButtonElement).disabled).toBe(false), {
+    timeout: 5000,
+  });
+  expect(screen.queryByTestId('prm-chat-blocked')).toBeNull();
+  expect(fake.callsOf('prm_chat_send')).toHaveLength(1);
+});
+
+test('FR-PRM-27 night review 9 a send refused with turn_active waits, saying why, not an error', async () => {
+  setup({ chat: { consent: true, case: 'slow(4)' } });
+  const other = { ...baseSnapshot(), project_id: '01JPROJECTB000000000000000' };
+  await api.chat.contextPublish(PID, 'rgn', {});
+  await api.chat.contextPublish(other.project_id, 'rgn', {});
+  // A's turn started before this window knew of it; the window shows B.
+  await api.chat.send(PID, 'a kitchen', false);
+  const w = window as unknown as { __pfMockHandlers: Record<string, () => unknown> };
+  w.__pfMockHandlers.project_get = () => other;
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  await type('a crypt');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(id('prm-chat-blocked').textContent).toMatch(/another project/));
+  expect(screen.queryByTestId('prm-chat-error')).toBeNull();
+  expect((id('prm-chat-send') as HTMLButtonElement).disabled).toBe(true);
+  await waitFor(() => expect(screen.queryByTestId('prm-chat-blocked')).toBeNull(), {
+    timeout: 5000,
+  });
+});
+
 test('FR-PRM-22 §11 a locked thread file: the turns show "Not saved" with the banner', async () => {
   setup({ chat: { consent: true, locked: true } });
   await api.chat.contextPublish(PID, 'rgn', {});

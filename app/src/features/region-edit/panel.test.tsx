@@ -677,6 +677,21 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(fake.callsOf('rgn_job_submit')).toHaveLength(1);
   });
 
+  test('FR-RGN-24 R108 after a reopen a fetch error and Fetch again come back from the row', async () => {
+    await submitted();
+    act(() => mockControls().fetchError('provider_failure', 'Download failed.'));
+    await waitFor(() => expect(screen.getByTestId('rgn-job-fetch-again')).toBeTruthy());
+    // A reopen: the session's live state is gone, only the iterations row carries the error.
+    const project = projectStore.get().project!;
+    act(() => rgn.detach());
+    await act(() => rgn.attach(project));
+    await waitFor(() => expect(screen.getAllByTestId('rgn-tracker-item')).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByTestId('rgn-job-fetch-error').dataset.code).toBe('provider_failure'),
+    );
+    expect(screen.getByTestId('rgn-job-fetch-again')).toBeTruthy();
+  });
+
   test('FR-RGN-23 R108 a lost job without a handle says its result can’t be recovered, with the hint', async () => {
     await submitted();
     act(() =>
@@ -940,6 +955,39 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(fake.callsOf('rgn_patch_retune')[1]!.layer_id).toBe(retuneResults[0]);
     await waitFor(() =>
       expect(screen.getByTestId('rgn-tracker-notice').textContent).toBe('Patch re-tuned.×'),
+    );
+  });
+
+  test('FR-RGN-30 night review 12b a second accept of another candidate while one runs is refused visibly', async () => {
+    await submitted();
+    act(() => mockControls().finish(2));
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(2));
+    const [a, b] = rgn.get().candidates.map((c) => c.id);
+    // The first accept stays in flight until the gate opens.
+    const handlers = (
+      window as unknown as { __pfMockHandlers: Record<string, (i: unknown) => unknown> }
+    ).__pfMockHandlers;
+    const accept = handlers.rgn_candidate_accept!;
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    handlers.rgn_candidate_accept = async (i) => {
+      await gate;
+      return accept(i);
+    };
+    let first!: Promise<void>;
+    act(() => {
+      first = rgn.accept(a!);
+    });
+    await act(() => rgn.accept(b!));
+    expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(
+      /Another patch is still being accepted/,
+    );
+    open();
+    await act(() => first);
+    expect(fake.callsOf('rgn_candidate_accept').map((c) => c.candidate_id)).toEqual([a]);
+    // The first's notice keeps saying the second wasn't done.
+    expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(
+      /^Patch accepted\. The other candidate wasn’t accepted/,
     );
   });
 

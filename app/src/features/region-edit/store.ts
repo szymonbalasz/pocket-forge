@@ -619,7 +619,8 @@ async function refreshIterations(): Promise<void> {
           state: r.state,
           progress: null,
           cost: r.cost,
-          error: null,
+          // R108: the row keeps a fetch error across a reopen (the strip's hint, Fetch again).
+          error: r.error ?? null,
           longRunning: false,
           startedAt: Date.now(),
         };
@@ -857,8 +858,15 @@ async function pickNow(pid: string | null, jobId: string, candidateId: string): 
   await Promise.all([refreshProject(), refreshIterations()]);
 }
 
-/** The accept in flight (FR-RGN-30): a second one while it runs joins it. */
+/** The accept in flight (FR-RGN-30): a second one of the same candidate while it runs joins
+ *  it; one of another candidate is refused with a notice (night review 12b). */
 let accepting: Promise<void> | null = null;
+let acceptingKey: string | null = null;
+/** A refused accept stays said after the running one ends (its notice would hide it). */
+let acceptRefused = false;
+export const ACCEPT_BUSY_TEXT = 'Another patch is still being accepted. Accept this one after it.';
+const ACCEPTED_REFUSED_TEXT =
+  'Patch accepted. The other candidate wasn’t accepted: accept it again.';
 /** Re-tunes run one after another (FR-RGN-30). */
 let retuning: Promise<void> = Promise.resolve();
 
@@ -872,7 +880,8 @@ async function acceptNow(jobId: string, candidateId: string): Promise<void> {
       blend: s.blend,
     });
     if (parent) pushUndo(revisionUndoEntry('Accept patch', parent, r.revision_id));
-    set({ prompt: '', trackerNotice: { kind: 'info', text: 'Patch accepted.' }, preview: null });
+    const text = acceptRefused ? ACCEPTED_REFUSED_TEXT : 'Patch accepted.';
+    set({ prompt: '', trackerNotice: { kind: 'info', text }, preview: null });
     editorBridge.setCompare(null);
     saveDraftSoon();
   } catch (e) {
@@ -1102,7 +1111,8 @@ export const rgn = {
     editorInner = null;
     regionTaken = false;
     thumbsInFlight.clear();
-    accepting = null; // another project's accept doesn't hold this one's
+    accepting = acceptingKey = null; // another project's accept doesn't hold this one's
+    acceptRefused = false;
     retuning = Promise.resolve();
     for (const k of Object.keys(tokens)) nextToken(k);
     if (state.projectId) editorBridge.setCandidates(null);
@@ -1419,11 +1429,19 @@ export const rgn = {
     if (!jobId) return Promise.resolve();
     if (isGenerateJob(s, jobId)) return pickNewImage(jobId, candidateId);
     // FR-RGN-30: a second Enter while the accept runs is the same accept, not a refused one.
-    if (accepting) return accepting;
+    const key = `${jobId}/${candidateId}`;
+    if (accepting && acceptingKey === key) return accepting;
+    if (accepting) {
+      acceptRefused = true;
+      set({ trackerNotice: { kind: 'error', text: ACCEPT_BUSY_TEXT } });
+      return Promise.resolve();
+    }
+    acceptRefused = false;
     const run = acceptNow(jobId, candidateId).finally(() => {
-      if (accepting === run) accepting = null;
+      if (accepting === run) accepting = acceptingKey = null;
     });
     accepting = run;
+    acceptingKey = key;
     return run;
   },
 
