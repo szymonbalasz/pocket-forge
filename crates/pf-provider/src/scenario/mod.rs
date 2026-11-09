@@ -104,6 +104,7 @@ const APP_FIXTURES: &[(&str, &str, &str)] = fixture_table![
     "fake-alpha-edit" / "get-model",
     "fake-gen-wh" / "get-model",
     "fake-gen-aspect" / "get-model",
+    "fake-gen-refs" / "get-model",
 ];
 
 #[cfg(test)]

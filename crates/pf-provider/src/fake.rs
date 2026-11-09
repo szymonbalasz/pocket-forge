@@ -9,9 +9,11 @@
 //!   (one, optional); `fake-alpha-edit` has none. Candidates mix the ordered reference hashes
 //!   into the pattern; with none they are byte-identical to before. Tests read the last
 //!   request's references with [`FakeProvider::last_reference_hashes`].
-//! - Two `generate` models (GEN §10): `fake-gen-wh` (`wh` 64–2048 step 16, count 1–4, a
+//! - Three `generate` models (GEN §10): `fake-gen-wh` (`wh` 64–2048 step 16, count 1–4, a
 //!   `background` with `transparent`, one `refs` slot ≤ 4 that also takes the sketch, +1 unit
-//!   per image) and `fake-gen-aspect` (ratios 1:1, 3:4, 4:3, 2:3; no count; `style_refs` ≤ 2).
+//!   per image), `fake-gen-aspect` (ratios 1:1, 3:4, 4:3, 2:3; no count; `style_refs` ≤ 2) and
+//!   `fake-gen-refs` (as `fake-gen-wh` with `refs` ≤ 12, so a sketch + 8 references can be on:
+//!   PRM §13 step 7).
 //!   Candidates are a deterministic pattern from the seed, the final prompt and the ordered
 //!   reference hashes (sketch included), at the asked size (`aspect`: long side 1024);
 //!   `transparent` → RGBA with an opaque disc and alpha 0 around it.
@@ -48,7 +50,7 @@ pub const FAKE_UNIT: &str = "fake";
 pub const FAKE_MODEL_IDS: [&str; 3] = ["fake-white-edit", "fake-black-edit", "fake-alpha-edit"];
 
 /// The fake `generate` models (GEN §10).
-pub const FAKE_GENERATE_MODEL_IDS: [&str; 2] = ["fake-gen-wh", "fake-gen-aspect"];
+pub const FAKE_GENERATE_MODEL_IDS: [&str; 3] = ["fake-gen-wh", "fake-gen-aspect", "fake-gen-refs"];
 
 /// The long side of a fake `aspect` candidate.
 pub const FAKE_ASPECT_LONG_SIDE: u32 = 1024;
