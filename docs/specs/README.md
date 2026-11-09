@@ -4,9 +4,11 @@ Specs use [_template.md](_template.md) and are written just in time (see [proces
 
 | Spec | Prefix | Phase | Status |
 |---|---|---|---|
-| [asset-project](asset-project.md) | PRJ | 1b (milestone loop) | in-review (#51 amendments) |
-| [editor-canvas](editor-canvas.md) | EDT | 1b (milestone loop) | in-review (#44) |
-| [region-edit](region-edit.md) | RGN | 1b (milestone loop) | in-review (#51 amendments) |
-| [provider](provider.md) | PRV | 1b (milestone loop) | in-review (#51 amendments) |
-| [export](export.md) | EXP | 1b (milestone loop) | in-review (#44) |
-| [reference-packs](reference-packs.md) | REF | 3 (MVP addition, #51) | in-review |
+| [asset-project](asset-project.md) | PRJ | 1b (milestone loop) | complete |
+| [editor-canvas](editor-canvas.md) | EDT | 1b (milestone loop) | complete |
+| [region-edit](region-edit.md) | RGN | 1b (milestone loop) | complete |
+| [provider](provider.md) | PRV | 1b (milestone loop) | complete |
+| [export](export.md) | EXP | 1b (milestone loop) | complete |
+| [reference-packs](reference-packs.md) | REF | 3 (MVP addition, #51) | complete |
+| [new-asset-generation](new-asset-generation.md) | GEN | 4 (#52, #59) | claimed |
+| [prompt-helper](prompt-helper.md) | PRM | 4 (#58) | claimed |

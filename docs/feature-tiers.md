@@ -38,7 +38,8 @@
 | Tags and collections | A | A |
 | Token workflow and presets | A | A |
 | Item art workflow and presets | A | A |
-| Text-to-image generation of a new asset | A | A (first after the MVP, #52) |
+| Text-to-image generation of a new asset | A | **next phase** (#52, #59) |
+| Prompt helpers (presets) and prompt chat (Claude Code headless) | — | **next phase** (#58) |
 | Joining / overlapping map sections (map extension) | B | B |
 | Comments / notes pinned to image locations | B | B |
 | Links to campaign subjects (locations, NPCs, items) | B | B |
