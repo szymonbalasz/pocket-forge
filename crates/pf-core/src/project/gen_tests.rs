@@ -893,3 +893,29 @@ fn fr_prj_23_restore_still_brings_back_the_region_edit_draft() {
     restore_revision(&g.e.ctx, g.e.install(), &mut g.p, parent).unwrap();
     assert_eq!(g.p.manifest.draft.unwrap().final_prompt, "moss");
 }
+
+#[test]
+fn r84_r97_candidate_statuses_follow_undo_and_redo_of_a_pick() {
+    use CandidateStatus::*;
+    let mut g = gen_env(Kind::Map, "Crypt");
+    let r0 = g.p.manifest.head_revision;
+    let (job, c) = g.generate("crypt", &[10, 20, 30]);
+    let first = g.pick(job.id, c[0].id).unwrap();
+    let second = g.pick(job.id, c[1].id).unwrap();
+    let statuses = |g: &G| c.iter().map(|x| g.status(x.id)).collect::<Vec<_>>();
+    assert_eq!(statuses(&g), [Dismissed, Accepted, Dismissed]);
+    // Undo the re-pick: #1 is the base again, and the only accepted one.
+    restore_revision(&g.e.ctx, g.e.install(), &mut g.p, first.revision_id).unwrap();
+    assert_eq!(statuses(&g), [Accepted, Dismissed, Dismissed]);
+    // Undo the first pick: no image, nothing accepted.
+    restore_revision(&g.e.ctx, g.e.install(), &mut g.p, r0).unwrap();
+    assert_eq!(statuses(&g), [Dismissed, Dismissed, Dismissed]);
+    // #2 discarded meanwhile; redo to the re-pick brings it back from the trash, accepted.
+    store::discard_candidate(&g.e.ctx, g.e.install(), &mut g.p, c[1].id).unwrap();
+    assert_eq!(g.status(c[1].id), Discarded);
+    restore_revision(&g.e.ctx, g.e.install(), &mut g.p, second.revision_id).unwrap();
+    assert_eq!(statuses(&g), [Dismissed, Accepted, Dismissed]);
+    let c1 = g.p.manifest.candidates.iter().find(|x| x.id == c[1].id).unwrap();
+    assert_eq!(c1.trash_id, None);
+    assert!(g.dir.join(&c1.file).is_file(), "moved back to results/");
+}

@@ -778,7 +778,8 @@ pub fn save_revision(
 /// `project_restore_revision` (FR-PRJ-23, 43): a new `restore` revision with that revision's
 /// layers and draft. The New image draft (`draft.generate`, FR-GEN-19) is not part of undo: it
 /// keeps its current value, so undoing a pick never resets the tab (screen = disk). Candidate
-/// statuses and the trash are unchanged (R3).
+/// statuses and the trash are unchanged (R3), except that generate candidates follow the
+/// restored base image (R97, R84).
 pub fn restore_revision(
     ctx: &Context,
     install_id: Ulid,
@@ -803,7 +804,7 @@ pub fn restore_revision(
             ));
         }
     }
-    commit(ctx, install_id, p, |ctx, _, m, plan| {
+    commit(ctx, install_id, p, |ctx, p, m, plan| {
         m.layers = rev.layers.clone();
         let generate = m.draft.as_ref().and_then(|d| d.generate.clone());
         m.draft = rev.draft.clone();
@@ -816,6 +817,7 @@ pub fn restore_revision(
             }
             (None, None) => {}
         }
+        store::statuses_follow_base(p, m);
         plan.revisions
             .push(push_revision(ctx, m, RevisionReason::Restore, None));
         Ok(())

@@ -212,3 +212,42 @@ pub fn pick_base(
         patches_dropped,
     })
 }
+
+/// R97 (R84 across undo/redo): after a restore, among generate candidates only the restored base
+/// image's is `accepted`; an earlier base's goes back to `dismissed`, and with no base image none
+/// is `accepted`. A restored base candidate in the trash comes back with it while its file can
+/// (else it stays as it is: the base image is its own copy in `working/`).
+pub(crate) fn statuses_follow_base(p: &OpenProject, m: &mut Manifest) {
+    let generate_jobs: std::collections::HashSet<Ulid> = p
+        .jobs
+        .values()
+        .filter(|j| j.is_generate())
+        .map(|j| j.id)
+        .collect();
+    let base = m
+        .layers
+        .first()
+        .filter(|l| l.kind == LayerKind::Base)
+        .and_then(|l| l.candidate_id);
+    for c in m.candidates.iter_mut().filter(|c| {
+        Some(c.id) != base
+            && c.status == CandidateStatus::Accepted
+            && generate_jobs.contains(&c.job_id)
+    }) {
+        c.status = CandidateStatus::Dismissed;
+    }
+    let Some(idx) = base.and_then(|id| m.candidates.iter().position(|c| c.id == id)) else {
+        return;
+    };
+    let c = m.candidates[idx].clone();
+    match c.status {
+        CandidateStatus::Accepted | CandidateStatus::Invalid => {}
+        _ if c.trash_id.is_some() => {
+            if restorable(p, &c) {
+                m.candidates[idx].status = CandidateStatus::Accepted;
+                untrash_candidate(m, idx);
+            }
+        }
+        _ => m.candidates[idx].status = CandidateStatus::Accepted,
+    }
+}
