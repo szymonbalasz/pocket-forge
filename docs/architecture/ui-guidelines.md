@@ -36,10 +36,11 @@
 └────┴─────────────┴──────────────────────────────┴──────────────┘
 ```
 - **Section rail** (56 px): Maps, Tokens, Items, **References**, then Settings at the bottom. Owner: asset-project (PRJ). References is not a section: selecting it shows the packs home (reference-packs, REF) in the home slot.
-- **Home** (no project open): a grid of project cards for the selected section (thumbnail of the working image, name, iteration count, last edited) and **+ New**. Owner: PRJ.
+- **Home** (no project open): a grid of project cards for the selected section (thumbnail of the working image, name, iteration count, last edited) and **+ New**, a menu: **From image…** | **Generate new…** (OQ-GEN-10, GEN's name dialog). Owner: PRJ.
 - **Left panel** (240–360 px, resizable): the project's folders (Working, References, Structure, Parts, Results), then History (revisions) and Storage (disk use). Owner: PRJ.
 - **Canvas, toolbar, status bar, candidate picker:** editor-canvas (EDT).
-- **Right panel** (300–380 px): Generate (region-edit, RGN), then Export (EXP), as collapsible sections. Inside Generate, the **References block** (owned by REF, rendered by RGN through REF's `index.ts`) sits between Model and Prompt and is hidden when the model has no reference slots. The multi-select pack picker uses Radix Popover.
+- **Right panel** (300–380 px): Generate, then Export (EXP), as collapsible sections. Inside Generate, the **References block** (owned by REF, rendered through REF's `index.ts`) sits between Model and Prompt in each tab and is hidden when the model has no reference slots. The multi-select pack picker uses Radix Popover.
+- **Generate tab strip** (OQ-GEN-09): **Region edit** (RGN) | **New image** (GEN). RGN's Generate section draws the strip (`gen-tab`, `role="tab"`, ←/→ move) and its own tab; other features add tabs with `registerGenerateTab` (`app/src/shared/generateTabs.ts`). Only the visible tab is mounted (FR-GEN-36). A project with no image shows only New image. A project opens on Region edit, except after **+ New → Generate new…** (New image). Retry on a generate job in the tracker switches to New image.
 - The right panel hides itself while every component in it reports idle through `useSlotIdle(idle)` (`app/src/shared/slot.ts`), for example on Home with no project open (BL-15). A component that doesn't call it keeps the panel open.
 - **Iteration tracker:** the bottom strip lists iterations (`results/NNN`). Owner: RGN, using EDT's picker for the selected iteration.
 - **Status bar** is shared: features register **segments** (EDT zoom and mask, PRJ save state, RGN job state, PRV provider chip) through the feature registry, ordered by a `priority` number. EDT owns the bar itself.
