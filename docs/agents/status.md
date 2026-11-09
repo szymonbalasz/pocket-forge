@@ -61,7 +61,8 @@
 | GEN 5: + New menu, New image tab (mocked) | — | merged | done (R77) | slice 4 picker routing, slice 6 prompt block |
 | PRM 0: `pf-chat` crate + probe | — | merged | done; owner probe passed (R87, R88; min 2.1.319) | — |
 | PRM 4: pf-chat adapter | — | merged | done (R89) | — |
-| PRM 5: chat core | `prm-0` | building | — | — |
+| PRM 5: chat core | — | merged | done (R90) | — |
+| PRM 6: chat window + Settings login | `prm-0` | building | — | needs the window capability (orchestrator) |
 | PRM 1: helpers core | — | merged | done (R78) | — |
 | PRM 2: prompt block + Settings UI (mocked) | — | merged | done | — |
 | PRM 3: prompt block in Region edit | — | merged | done (R81) | PRM 4 waits on the owner's probe |
