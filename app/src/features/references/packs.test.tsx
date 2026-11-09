@@ -273,6 +273,20 @@ test('FR-REF-10 renaming from the pack view and from the card menu; a taken name
   await waitFor(() => expect(cardNames()).toEqual(['Armour set', 'Blades']));
 });
 
+test('FR-REF-11 notes changed outside the app show after Refresh; a blur doesn’t write the old text back', async () => {
+  setup();
+  await openWeapons();
+  const notes = () => screen.getByTestId('ref-pack-notes') as HTMLTextAreaElement;
+  mock.packs.get(WEAPONS)!.notes = 'Edited in Explorer';
+  fireEvent.click(screen.getByTestId('ref-pack-refresh'));
+  await waitFor(() => expect(notes().value).toBe('Edited in Explorer'));
+  fireEvent.focus(notes());
+  fireEvent.blur(notes());
+  await act(() => new Promise((r) => setTimeout(r, 50)));
+  expect(core.calls.filter((c) => c.cmd === 'ref_pack_update')).toHaveLength(0);
+  expect(mock.packs.get(WEAPONS)!.notes).toBe('Edited in Explorer');
+});
+
 test('FR-REF-11 notes and per-image roles are saved with ref_pack_update', async () => {
   setup();
   await openWeapons();

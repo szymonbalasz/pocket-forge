@@ -413,6 +413,13 @@ function BackButton() {
 /** Notes (≤ 2000 chars, never sent, #9): saved on blur in one `pack.json` write (FR-REF-11). */
 function Notes({ notes }: { notes: string }) {
   const [text, setText] = useState(notes);
+  // The notes as last shown: a change from outside (Explorer, another machine, then Refresh)
+  // replaces the text unless the DM has unsaved typing, so a blur never writes stale text back.
+  const [shown, setShown] = useState(notes);
+  if (notes !== shown) {
+    setShown(notes);
+    if (text === shown) setText(notes);
+  }
   return (
     <textarea
       className="ref-notes"
