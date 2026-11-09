@@ -52,7 +52,7 @@
 |---|---|---|---|---|
 | Spec: new-asset generation (GEN) | — | merged | complete (#60) | — |
 | Spec: prompt helper (PRM) | — | merged | complete (#60) | — |
-| GEN 1: PRV `generate` op, fake gen models | `prv-real` | building | — | owner: free dry-run-generate recordings |
+| GEN 1: PRV `generate` op, fake gen models | — | merged | done (R76) | owner: free dry-run-generate recordings |
 | GEN 2: image-less project, base layer, pick commit | `gen-2` | building | — | — |
 | GEN 5: + New menu, New image tab (mocked) | `gen-5` | building | — | — |
 | PRM 0: `pf-chat` crate + probe | `prm-0` | building | — | owner runs the probe |
