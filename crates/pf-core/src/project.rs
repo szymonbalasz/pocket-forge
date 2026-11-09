@@ -74,6 +74,9 @@ pub(crate) struct RevisionRefs {
     /// Bottom-image layers of revisions: id → `Some(file)` for a base image (FR-GEN-27), `None`
     /// for the original (its file is the manifest's `original.file`).
     pub base_images: HashMap<Ulid, Option<String>>,
+    /// A revision or job file couldn't be read at open (R102): these sets may miss ids, so
+    /// nothing is trashed as unreferenced (orphans, superseded masks).
+    pub incomplete: bool,
 }
 
 impl RevisionRefs {

@@ -178,6 +178,10 @@ pub(crate) fn trash_superseded_masks(
     m: &mut Manifest,
     plan: &CommitPlan,
 ) {
+    if p.refs.incomplete {
+        // R102: a mask only an unreadable revision or job uses would look superseded.
+        return;
+    }
     let mut used: HashSet<Ulid> = p.refs.masks.clone();
     used.extend(m.draft.as_ref().and_then(|d| d.mask_id));
     used.extend(m.layers.iter().filter_map(|l| l.mask_id));
