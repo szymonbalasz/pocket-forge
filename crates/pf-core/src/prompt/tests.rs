@@ -770,3 +770,59 @@ fn fr_prm_12_settings_editing_needs_no_project() {
     assert!(e.run("prm_helpers_save", json!({"helpers": rows})).is_ok());
     assert!(e.run("prm_helpers_reset", json!({"all": true})).is_ok());
 }
+
+#[test]
+fn fr_prm_25_a_context_image_is_lanczos3_to_1568_then_jpeg_q85() {
+    use super::context::{CHAT_IMAGE_MAX_SIDE, CHAT_IMAGE_QUALITY, chat_jpeg, chat_jpeg_rgb};
+    use image::ImageEncoder;
+    assert_eq!((CHAT_IMAGE_MAX_SIDE, CHAT_IMAGE_QUALITY), (1568, 85));
+    let encode = |rgb: &image::RgbImage| {
+        let mut out = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85)
+            .write_image(
+                rgb.as_raw(),
+                rgb.width(),
+                rgb.height(),
+                image::ExtendedColorType::Rgb8,
+            )
+            .unwrap();
+        out
+    };
+    // A wide textured image: Lanczos3 to 1568 × 500, then JPEG q85, byte for byte.
+    let big = image::RgbImage::from_fn(3136, 1000, |x, y| {
+        image::Rgb([
+            (x % 251) as u8,
+            (y % 241) as u8,
+            ((x * 7 + y * 13) % 256) as u8,
+        ])
+    });
+    let (jpeg, w, h) = chat_jpeg_rgb(big.clone()).unwrap();
+    assert_eq!((w, h), (1568, 500));
+    let want = encode(&pf_imaging::resize_lanczos3(&big, 1568, 500).unwrap());
+    assert_eq!(jpeg, want, "Lanczos3 then q85");
+    // A small one is not resized; a q70 encode differs (the quality is really 85).
+    let small = image::RgbImage::from_fn(300, 200, |x, y| image::Rgb([x as u8, y as u8, 99]));
+    let (jpeg, w, h) = chat_jpeg_rgb(small.clone()).unwrap();
+    assert_eq!((w, h), (300, 200));
+    assert_eq!(jpeg, encode(&small));
+    let mut q70 = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut q70, 70)
+        .write_image(small.as_raw(), 300, 200, image::ExtendedColorType::Rgb8)
+        .unwrap();
+    assert_ne!(jpeg, q70);
+    // A tall PNG with alpha: flattened over the flatten colour first, long side 1568.
+    let rgba = image::RgbaImage::from_fn(800, 2000, |x, _| {
+        image::Rgba([200, 10, 20, if x < 400 { 0 } else { 255 }])
+    });
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png)
+        .write_image(rgba.as_raw(), 800, 2000, image::ExtendedColorType::Rgba8)
+        .unwrap();
+    let (jpeg, w, h) = chat_jpeg(&png).unwrap();
+    assert_eq!((w, h), (627, 1568));
+    let flat = pf_imaging::to_rgb8_flattened(image::DynamicImage::ImageRgba8(rgba));
+    assert_eq!(
+        jpeg,
+        encode(&pf_imaging::resize_lanczos3(&flat, 627, 1568).unwrap())
+    );
+}
