@@ -91,6 +91,16 @@ function closeGuard(proceed: () => void, cancel: () => void): boolean {
   return false;
 }
 
+/** The export ended (done, failed, canceled): a close it was holding no longer needs the
+ *  question, so the banner goes and the close goes on (OQ-EXP-09). */
+function runEnded(patch: Partial<ExportState>): void {
+  const proceed = proceedClose;
+  proceedClose = null;
+  cancelClose = null;
+  set({ ...patch, run: null, closeAsk: false });
+  proceed?.();
+}
+
 function set(patch: Partial<ExportState>): void {
   state = { ...state, ...patch };
   for (const l of listeners) l();
@@ -163,16 +173,16 @@ export const exportStore = {
       });
       await onEvent('export:done', (p) => {
         if (!isOurs(p.export_id)) return;
-        set({ run: null, done: p, error: null });
+        runEnded({ done: p, error: null });
         void exportStore.refreshPlan();
       });
       await onEvent('export:failed', (p) => {
         if (!isOurs(p.export_id)) return;
-        set({ run: null, error: { code: p.code, message: errorText(p.code) } });
+        runEnded({ error: { code: p.code, message: errorText(p.code) } });
         void exportStore.refreshPlan();
       });
       await onEvent('export:canceled', (p) => {
-        if (isOurs(p.export_id)) set({ run: null });
+        if (isOurs(p.export_id)) runEnded({});
       });
     })().catch(() => {
       listening = null;

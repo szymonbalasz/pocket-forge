@@ -261,6 +261,32 @@ describe('export store', () => {
     expect(h.prj.close).toHaveBeenLastCalledWith(false);
   });
 
+  test('OQ-EXP-09 an export that ends before the answer lets the held close go on', async () => {
+    for (const end of ['done', 'failed', 'canceled'] as const) {
+      exportStore.reset();
+      await bound();
+      await exportStore.start();
+      h.prj.close.mockReset();
+      h.exp.cancel.mockClear();
+      const closing = projectStore.close();
+      expect(exportStore.get().closeAsk).toBe(true);
+      if (end === 'done') h.emit('export:done', doneEvent('e1'));
+      else if (end === 'failed')
+        h.emit('export:failed', { export_id: 'e1', code: 'locked', detail: null });
+      else h.emit('export:canceled', { export_id: 'e1' });
+      await closing;
+      expect(exportStore.get().closeAsk).toBe(false);
+      expect(h.prj.close).toHaveBeenCalledTimes(1);
+      // The next export doesn't inherit the old question or its close.
+      h.exp.start.mockResolvedValueOnce({ export_id: 'e2' });
+      await exportStore.start();
+      expect(exportStore.get().closeAsk).toBe(false);
+      await exportStore.confirmClose();
+      expect(h.prj.close).toHaveBeenCalledTimes(1);
+      h.emit('export:canceled', { export_id: 'e2' });
+    }
+  });
+
   test('FR-EXP-18 a failed export shows its message and Retry starts again', async () => {
     await bound();
     await exportStore.start();
