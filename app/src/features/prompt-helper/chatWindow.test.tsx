@@ -378,6 +378,19 @@ test('FR-PRM-20 FR-PRM-45 Settings → Prompt chat: on/off, the status, the path
   expect(screen.getByText(/Prompt chat sends data to Anthropic/)).toBeTruthy();
 });
 
+test('FR-PRM-33 R96 Settings shows an ignored saved Claude path and clears it', async () => {
+  setup({ chat: { consent: true, claudePath: 'tools/evil.exe' } });
+  render(<ChatSettings />);
+  await waitFor(() =>
+    expect(id('prm-settings-chat-path-issue').textContent).toContain('looking for claude on PATH'),
+  );
+  expect((id('prm-settings-chat-path') as HTMLInputElement).value).toBe('tools/evil.exe');
+  fireEvent.click(id('prm-settings-chat-path-clear'));
+  await waitFor(() => expect(screen.queryByTestId('prm-settings-chat-path-issue')).toBeNull());
+  expect(fake.callsOf('prm_chat_settings_put').at(-1)).toEqual({ claude_path: null });
+  expect((id('prm-settings-chat-path') as HTMLInputElement).value).toBe('');
+});
+
 test('FR-PRM-45 L2 Settings Log in… / Log out / Recheck work on the fake and the status follows', async () => {
   setup({ chat: { consent: true } });
   render(<ChatSettings />);

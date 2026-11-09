@@ -937,6 +937,8 @@ export interface ChatStatus {
   login_command: string | null;
   /** The Claude Code path override (Settings → Prompt chat). */
   claude_path: string | null;
+  /** Why the saved path is ignored (R96: checked on use), or null when unset or valid. */
+  claude_path_issue: string | null;
 }
 
 export interface ChatWindowRect {

@@ -844,6 +844,75 @@ fn claude_lab_as(auth_method: &str) -> (Lab, Arc<ReplaySpawner>) {
     (lab, spawner.unwrap())
 }
 
+/// R96 on use: a `claude_path` saved before the rule (or edited into settings.json by hand) is
+/// checked like a new one. A failing one is ignored for detection, and the status says why.
+#[test]
+fn fr_prm_33_a_saved_claude_path_is_checked_on_use() {
+    let clock = pf_chat::clock::FakeClock::new();
+    let (dir, native) = if cfg!(windows) {
+        (r"C:\onpath", r"C:\onpath\claude.exe")
+    } else {
+        ("/onpath", "/onpath/claude")
+    };
+    let evil = if cfg!(windows) {
+        r"C:\cc\evil.exe"
+    } else {
+        "/cc/evil.exe"
+    };
+    let mut spawner: Option<Arc<ReplaySpawner>> = None;
+    let lab = Lab::with_context(|ctx| {
+        let sp = Arc::new(
+            ReplaySpawner::new(Arc::new(clock.clone()))
+                .with_file(evil)
+                .with_file(native)
+                .on_run(&["--version"], Some(0), "2.1.319 (Claude Code)")
+                .on_run(
+                    &["auth", "status", "--json"],
+                    Some(0),
+                    &logged_in(&ctx.data_dir),
+                ),
+        );
+        ctx.chat.mode = BackendMode::ClaudeCode;
+        ctx.chat.spawner = sp.clone();
+        ctx.chat.clock = Arc::new(clock.clone());
+        ctx.chat.parent_env = vec![("PATH".into(), dir.into())];
+        spawner = Some(sp);
+    });
+    let sp = spawner.unwrap();
+    // As loaded from an older settings.json: the put's check never ran on it.
+    lab.core.state().settings.prompt_chat.claude_path = Some(evil.to_owned());
+    let st = consent(&lab);
+    assert_eq!(st["backend"]["state"], "ok", "found on PATH instead");
+    assert_eq!(
+        st["claude_path"],
+        json!(evil),
+        "kept, so Settings can show it"
+    );
+    let issue = st["claude_path_issue"].as_str().unwrap();
+    assert!(
+        issue.contains("ignored") && issue.contains("PATH") && issue.contains("end in"),
+        "{issue}"
+    );
+    let log = sp.log();
+    assert!(!log.runs.is_empty());
+    assert!(
+        log.runs.iter().all(|r| r.program == Path::new(native)),
+        "the saved path never runs"
+    );
+    // Clearing it clears the notice.
+    let st = lab
+        .core
+        .dispatch("prm_chat_settings_put", json!({ "claude_path": null }))
+        .unwrap();
+    assert_eq!(st["claude_path_issue"], Value::Null);
+    // A valid saved path has no notice.
+    let st = lab
+        .core
+        .dispatch("prm_chat_settings_put", json!({ "claude_path": CC_EXE }))
+        .unwrap();
+    assert_eq!(st["claude_path_issue"], Value::Null);
+}
+
 #[test]
 fn fr_prm_33_detection_is_cached_for_60_s() {
     let (lab, sp) = claude_lab();
