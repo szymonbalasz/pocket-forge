@@ -1,0 +1,29 @@
+[package]
+name = "pf-chat"
+description = "Pocket Forge prompt chat backend (#58, #60): Claude Code headless adapter pieces and the slice-0 probe."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# The dev-only probe that runs the real Claude Code CLI (PRM slice 0). Never set in CI
+# (scripts/check-hygiene.sh refuses `real-call` in workflows; the probe refuses to run under CI).
+real-call = ["dep:image"]
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+# Probe only: the overlay test image (JPEG q85, FR-PRM-25). Approved workspace dependency.
+image = { workspace = true, optional = true }
+
+[lints]
+# Slice 0 has no unsafe code, so the workspace `forbid` stays. Slice 4 switches to its own
+# `[lints]` with `unsafe_code = "deny"` for the Job Object module (R75).
+workspace = true
+
+[[bin]]
+name = "pf-chat-probe"
+path = "src/bin/pf-chat-probe/main.rs"
+required-features = ["real-call"]
