@@ -7,7 +7,15 @@ import { Tooltip } from 'radix-ui';
 
 import { IconCheck } from '../../shell/icons';
 import { projectStore, useProjectState } from '../../store/project';
-import { costLabel, elapsedLabel, iterationNumber, jobErrorText, STATE_LABEL } from './format';
+import {
+  chargeHint,
+  costLabel,
+  elapsedLabel,
+  iterationNumber,
+  jobErrorText,
+  lostText,
+  STATE_LABEL,
+} from './format';
 import { rgn, useRgn, type LiveJob } from './store';
 import {
   canCancel,
@@ -87,8 +95,12 @@ function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined 
         </div>
       )}
       {state === 'lost' && (
-        <div className="warning small" data-testid="rgn-job-lost">
-          The job may have been charged, but its result can’t be recovered.
+        <div
+          className="warning small"
+          data-testid="rgn-job-lost"
+          data-handle={row.handle_kept ? 'kept' : 'none'}
+        >
+          {lostText(!!row.handle_kept)}
         </div>
       )}
       <div className="rgn-strip-buttons">
@@ -118,6 +130,13 @@ function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined 
           >
             Retry
           </button>
+        )}
+        {/* R108: Retry stays on a lost job (a pre-fill plus a new confirm), with the
+            possible-charge hint next to it. */}
+        {state === 'lost' && (
+          <span className="warning small" data-testid="rgn-job-charge-hint">
+            {chargeHint(error ?? row.error)}
+          </span>
         )}
         {canDismiss(state) && (
           <button
@@ -265,6 +284,15 @@ export function IterationTracker() {
                     >
                       Retry
                     </button>
+                  )}
+                  {state === 'lost' && offersRetry(rows, r) && (
+                    <span
+                      className="warning"
+                      data-testid="rgn-job-charge-hint"
+                      data-record-id={r.job_id}
+                    >
+                      {chargeHint(live?.error ?? r.error)}
+                    </span>
                   )}
                 </div>
               )}

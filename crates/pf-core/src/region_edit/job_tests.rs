@@ -777,6 +777,16 @@ fn fr_rgn_22_a_crash_before_the_handle_is_lost_with_a_possible_charge_notice() {
         lab.core.state().rgn.runner.tracked().is_empty(),
         "never resubmitted"
     );
+    // R108: no handle, so the strip says the result can't be recovered.
+    let rows = lab.core.dispatch("rgn_iterations_list", json!({})).unwrap();
+    let row = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["job_id"] == json!(id))
+        .unwrap();
+    assert_eq!(row["handle_kept"], false);
+    assert_eq!(row["error"]["code"], "lost");
 }
 
 /// A `requested` record without a handle, as a submit in flight (or a crash before it
@@ -1113,6 +1123,22 @@ fn fr_rgn_23_ten_poll_errors_in_a_row_end_the_job_as_lost_with_its_handle() {
     assert!(lab.core.state().rgn.runner.tracked().is_empty());
     let last = lab.events_named(runner::EVENT_JOB_STATE).pop().unwrap();
     assert_eq!(last["state"], "lost");
+    // R108: the strip learns the handle is kept, and the hint, from the iteration row.
+    let rows = lab.core.dispatch("rgn_iterations_list", json!({})).unwrap();
+    let row = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["job_id"] == json!(id))
+        .unwrap();
+    assert_eq!(row["handle_kept"], true);
+    assert_eq!(row["error"]["code"], "auth");
+    assert!(
+        row["error"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("check the provider")
+    );
 }
 
 #[test]

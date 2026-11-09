@@ -49,6 +49,19 @@ export function jobErrorText(e: { code: string; hint?: string; message?: string 
   return e.hint ? `${base}. ${e.hint}` : base;
 }
 
+/** R108: what a lost job's strip says. With its handle kept it may still finish at the
+ *  provider; without one its result can't be recovered. */
+export function lostText(handleKept: boolean): string {
+  return handleKept
+    ? 'The job may still finish at the provider.'
+    : 'Its result can’t be recovered.';
+}
+
+/** R108: the possible-charge hint of a lost job: the core's hint, else a generic one. */
+export function chargeHint(e: { hint?: string } | null | undefined): string {
+  return e?.hint || 'The job may have been charged; check the provider before retrying.';
+}
+
 /** Messages for command errors the panel shows inline. */
 export function errorText(code: string, message: string): string {
   switch (code) {

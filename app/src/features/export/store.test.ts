@@ -288,6 +288,7 @@ describe('export store', () => {
       await exportStore.start();
       h.prj.close.mockReset();
       h.exp.cancel.mockClear();
+      const planned = h.exp.plan.mock.calls.length;
       const closing = projectStore.close();
       expect(exportStore.get().closeAsk).toBe(true);
       if (end === 'done') h.emit('export:done', doneEvent('e1'));
@@ -297,6 +298,8 @@ describe('export store', () => {
       await closing;
       expect(exportStore.get().closeAsk).toBe(false);
       expect(h.prj.close).toHaveBeenCalledTimes(1);
+      // Walk-night L4: the project is closing, so no late re-plan (no `no_project` noise).
+      expect(h.exp.plan).toHaveBeenCalledTimes(planned);
       // The next export doesn't inherit the old question or its close.
       h.exp.start.mockResolvedValueOnce({ export_id: 'e2' });
       await exportStore.start();

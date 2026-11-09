@@ -488,6 +488,12 @@ pub struct IterationRow {
     pub operation: String,
     /// A generate job's sent size (`output{}`, FR-GEN-22); `null` for a region edit.
     pub output: Value,
+    /// The job's provider handle is saved (R108: a `lost` job with its handle may still finish
+    /// at the provider; one without can't be recovered).
+    pub handle_kept: bool,
+    /// The job's normalised error (`{code, hint}`), `null` when none: the strip's hint after a
+    /// reopen, when no live event has carried it yet (R108).
+    pub error: Value,
 }
 
 /// One sent reference as the tracker tooltip lists it (FR-RGN-45).
@@ -554,6 +560,8 @@ impl Command for RgnIterationsList {
                     j.operation.clone()
                 },
                 output: j.extra.get("output").cloned().unwrap_or(Value::Null),
+                handle_kept: live.has_handle(),
+                error: live.error.clone().unwrap_or(Value::Null),
             }
         };
         let mut rows: Vec<IterationRow> = p

@@ -677,6 +677,51 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(fake.callsOf('rgn_job_submit')).toHaveLength(1);
   });
 
+  test('FR-RGN-23 R108 a lost job without a handle says its result can’t be recovered, with the hint', async () => {
+    await submitted();
+    act(() =>
+      mockControls().lose(false, 'timeout', 'The provider didn’t confirm the submit. Check it.'),
+    );
+    await waitFor(() => expect(screen.getByTestId('rgn-job-state').textContent).toBe('Lost'));
+    const lost = screen.getByTestId('rgn-job-lost');
+    expect(lost.dataset.handle).toBe('none');
+    expect(lost.textContent).toMatch(/can’t be recovered/);
+    expect(screen.getByTestId('rgn-job-charge-hint').textContent).toBe(
+      'The provider didn’t confirm the submit. Check it.',
+    );
+  });
+
+  test('FR-RGN-23 R108 a lost job with its handle kept may still finish at the provider', async () => {
+    await submitted();
+    act(() => mockControls().lose(true, 'auth'));
+    await waitFor(() => expect(screen.getByTestId('rgn-job-lost').dataset.handle).toBe('kept'));
+    const lost = screen.getByTestId('rgn-job-lost');
+    expect(lost.textContent).toMatch(/may still finish at the provider/);
+    expect(lost.textContent).not.toMatch(/can’t be recovered/);
+    // No hint from the core: the generic possible-charge hint.
+    expect(screen.getByTestId('rgn-job-charge-hint').textContent).toMatch(
+      /may have been charged; check the provider before retrying/,
+    );
+  });
+
+  test('FR-RGN-21 R108 a lost job keeps Retry with the possible-charge hint next to it; Retry only pre-fills', async () => {
+    await submitted({}, 'first prompt');
+    act(() => mockControls().lose(true, 'auth', 'Polling stopped. Check the provider first.'));
+    await waitFor(() => expect(screen.getByTestId('rgn-job-retry')).toBeTruthy());
+    const retry = screen.getByTestId('rgn-job-retry');
+    const hint = screen.getByTestId('rgn-job-charge-hint');
+    expect(hint.parentElement).toBe(retry.parentElement);
+    expect(retry.nextElementSibling).toBe(hint);
+    expect(hint.textContent).toBe('Polling stopped. Check the provider first.');
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).value).toBe(
+        'first prompt',
+      ),
+    );
+    expect(fake.callsOf('rgn_job_submit')).toHaveLength(1);
+  });
+
   test('FR-RGN-21 retry pre-fills the panel from the job and requires a new estimate', async () => {
     await submitted({}, 'first prompt');
     act(() => mockControls().fail());

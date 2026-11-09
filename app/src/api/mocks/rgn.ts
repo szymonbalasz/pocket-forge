@@ -46,6 +46,8 @@ export function installRgnMock(seed: RgnMockSeed): void {
     slug: string | null;
     resolved: boolean;
     error: Rec | null;
+    /** R108: the provider handle is saved (a lost job may still finish at the provider). */
+    handleKept?: boolean;
     progress: number | null;
     /** The job's `references[]` (FR-RGN-43), from the REF mock's prepare hook. */
     refs: Rec[];
@@ -714,6 +716,8 @@ export function installRgnMock(seed: RgnMockSeed): void {
             // FR-GEN-25: generate jobs (the GEN mock adds them to this list) carry their output.
             operation: (j as unknown as Rec).operation ?? 'edit_masked',
             output: (j as unknown as Rec).output ?? null,
+            handle_kept: !!j.handleKept,
+            error: j.error,
             reference_files: j.refs.map((r) => ({
               file: String(r.path).split('/').pop(),
               pack_name: r.pack_name ?? null,
@@ -869,6 +873,16 @@ export function installRgnMock(seed: RgnMockSeed): void {
       j.state = 'succeeded';
       j.progress = 1;
       j.error = { code, hint };
+      jobEvent(j);
+    },
+    /** R102/R106: → lost. `handleKept`: 10 poll errors in a row (the handle stays); else an
+     *  unconfirmed submit or a job found on open (no handle). */
+    lose(handleKept = false, code = handleKept ? 'auth' : 'timeout', hint?: string) {
+      const j = active();
+      if (!j) return;
+      j.state = 'lost';
+      j.handleKept = handleKept;
+      j.error = { code, ...(hint ? { hint } : {}) };
       jobEvent(j);
     },
     /** → failed with a normalised error. */
