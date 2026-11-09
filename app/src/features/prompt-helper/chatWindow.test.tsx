@@ -269,7 +269,7 @@ test('FR-PRM-22 §11 an interrupted turn offers Resend; a double click sends onc
   await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
   // The app was killed mid-reply: on reopen the reply reads `interrupted` (§11, R103).
   const w = window as unknown as { __pfMockHandlers: Record<string, (i: never) => unknown> };
-  const get = w.__pfMockHandlers.prm_chat_thread_get;
+  const get = w.__pfMockHandlers.prm_chat_thread_get!;
   w.__pfMockHandlers.prm_chat_thread_get = (i: never) => {
     const v = get(i) as { thread: { turns: { state: string; text: string }[] } };
     const last = v.thread.turns.at(-1)!;
@@ -485,7 +485,7 @@ test('R103 FR-PRM-26 the strip follows a main-window publish without a refocus',
   w.__pfMockHandlers.project_open = () => baseSnapshot();
   projectStore.reset();
   await act(() => projectStore.open(baseSnapshot().project_dir));
-  const preview = w.__pfMockHandlers.prm_chat_preview;
+  const preview = w.__pfMockHandlers.prm_chat_preview!;
   let refs = 0;
   w.__pfMockHandlers.prm_chat_preview = (i: never) => ({
     ...(preview(i) as object),

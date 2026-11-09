@@ -170,7 +170,7 @@ test('FR-GEN-29 walk-p4r L6 a refused pick notice ends with the next submit', as
   await setup();
   await generate('crypt');
   const w = window as unknown as { __pfMockHandlers: Record<string, (i: never) => unknown> };
-  const pick = w.__pfMockHandlers.gen_candidate_pick;
+  const pick = w.__pfMockHandlers.gen_candidate_pick!;
   w.__pfMockHandlers.gen_candidate_pick = () =>
     Promise.reject({ code: 'job_active', message: 'a job is already running' });
   await act(async () => fireEvent.click(screen.getAllByTestId('edt-picker-item')[0]!));
