@@ -16,6 +16,8 @@ export interface ProviderState {
 let state: ProviderState = { status: null, balance: null, spend: null, settingsOpen: false };
 const listeners = new Set<() => void>();
 let listening = false;
+/** Bumped by every `refresh` (FR-PRV-22). */
+let refreshSeq = 0;
 
 function set(patch: Partial<ProviderState>): void {
   state = { ...state, ...patch };
@@ -32,10 +34,15 @@ export const providerStore = {
   /** Reloads the status and the balance. Balance never fails (it becomes `unknown`). */
   async refresh(): Promise<void> {
     if (!hasCore()) return;
+    // The newest refresh wins: a late status or balance (a slow network call for the previous
+    // key) never replaces a newer one.
+    const seq = ++refreshSeq;
     try {
       const status = await api.provider.status();
+      if (seq !== refreshSeq) return;
       set({ status });
       const balance = status.configured ? await api.provider.balance() : null;
+      if (seq !== refreshSeq) return;
       set({ balance });
     } catch {
       // The chip keeps its last state; the next status change retries.

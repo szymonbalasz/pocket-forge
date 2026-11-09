@@ -129,7 +129,8 @@ function MarginInput({ margin }: { margin: number }) {
   const [text, setText] = useState(String(margin));
   useEffect(() => setText(String(margin)), [margin]);
   const commit = () => {
-    const n = Number(text);
+    // A cleared field is no value (`Number('')` is 0): the margin stays as it was.
+    const n = text.trim() === '' ? NaN : Number(text);
     if (Number.isFinite(n)) rgn.setMargin(n);
     else setText(String(margin));
   };
@@ -332,7 +333,19 @@ function CostSection({ s }: { s: RgnState }) {
       </span>
     );
   else if (e.status === 'error' && e.error)
-    line = <span className="error">{errorText(e.error.code, e.error.message)}</span>;
+    line = (
+      <>
+        <span className="error">{errorText(e.error.code, e.error.message)}</span>{' '}
+        <button
+          type="button"
+          className="link small"
+          data-testid="rgn-panel-estimate-retry"
+          onClick={() => rgn.retryEstimate()}
+        >
+          Retry
+        </button>
+      </>
+    );
   else line = <span className="muted">Estimate: —</span>;
   const unit = costUnit(s);
   return (

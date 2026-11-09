@@ -48,6 +48,10 @@ export interface MaskControllerDeps {
   onChange?: () => void;
 }
 
+const sameRect = (a: Rect, b: Rect) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+const sameRegion = (a: RegionState | null, b: RegionState | null) =>
+  a === b || (!!a && !!b && sameRect(a.inner, b.inner) && sameRect(a.outer, b.outer));
+
 export class MaskController {
   private mask: MaskBuffer | null = null;
   private region: RegionState | null = null;
@@ -57,7 +61,20 @@ export class MaskController {
   /** Bumped on every content change; slice 5 compares it with the last submitted version. */
   version = 0;
 
-  constructor(private readonly deps: MaskControllerDeps) {}
+  /** FR-EDT-21: one stroke is one entry, so undo and redo wait for the pointer up. An undo
+   *  mid-stroke would change rows the stroke already saved as its "before" (or swap the buffer
+   *  under it, for a region entry). */
+  private readonly release: () => void;
+
+  constructor(private readonly deps: MaskControllerDeps) {
+    this.release = deps.undo.hold(() => this.stroke !== null);
+  }
+
+  /** The canvas unmounted: the stack is no longer held by this controller's strokes. */
+  dispose(): void {
+    this.stroke = null;
+    this.release();
+  }
 
   /** Draws the current mask on a new view: the Stage remounted with a new mask layer (D1). */
   setView(view: MaskView): void {
@@ -91,6 +108,8 @@ export class MaskController {
    *  discards the mask. One undo step. */
   changeRegion(next: RegionState | null): void {
     const prev = { region: this.region, mask: this.mask };
+    // The same rect (a Region-tool click inside the box): no change, no step, Redo stays.
+    if (sameRegion(prev.region, next)) return;
     const nextMask = next
       ? this.mask
         ? remap(this.mask, next.inner)
@@ -129,9 +148,8 @@ export class MaskController {
       this.load({ inner: { ...next.inner }, outer: { ...next.outer } }, null);
       return;
     }
-    const same = (a: Rect, b: Rect) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
-    if (cur && same(cur.inner, next.inner)) {
-      if (same(cur.outer, next.outer)) return;
+    if (cur && sameRect(cur.inner, next.inner)) {
+      if (sameRect(cur.outer, next.outer)) return;
       this.region = { inner: { ...next.inner }, outer: { ...next.outer } };
       this.deps.setRegion(this.region);
       return;
