@@ -1172,6 +1172,32 @@ pub struct FolderFile {
     /// A `pf-tiles` URL for images (EDT `library` key space), set by the command.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thumb_url: Option<String>,
+    /// `cloud_only` (not hydrated) or `corrupt` (an image whose header won't probe); absent when
+    /// fine. Set by the command (the sketch block's badges, FR-GEN-14).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<FileState>,
+}
+
+/// A listed file's badge state (FR-GEN-14, FR-REF-01 rules).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileState {
+    CloudOnly,
+    Corrupt,
+}
+
+/// Fills `state` for listed files: cloud-only files are never opened (FR-PRJ-17); a local image
+/// is probed from its header only.
+pub fn set_file_states(ctx: &Context, files: &mut [FolderFile]) {
+    for f in files.iter_mut() {
+        f.state = if ctx.fs.is_cloud_only(&f.path) {
+            Some(FileState::CloudOnly)
+        } else if f.image && pf_imaging::probe_file(&f.path).is_err() {
+            Some(FileState::Corrupt)
+        } else {
+            None
+        };
+    }
 }
 
 fn check_folder(folder: &str, allowed: &[&str]) -> CoreResult<()> {
@@ -1224,6 +1250,7 @@ fn collect_files(dir: &Path, prefix: &str, out: &mut Vec<FolderFile>) {
                 mtime: mtime_of(&meta),
                 name: rel,
                 thumb_url: None,
+                state: None,
             });
         }
     }

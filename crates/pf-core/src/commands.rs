@@ -586,8 +586,10 @@ pub struct ProjectPutDraft;
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectPutDraftInput {
-    /// The region edit draft. Absent = keep it (a New image save, FR-GEN-19).
-    #[serde(default)]
+    /// The region edit draft. Absent = keep it (a New image save, FR-GEN-19). A draft that holds
+    /// only `generate` (`{draft: {generate: {…}}}`, the New image tab's save) is the same: the
+    /// region edit fields keep their saved values and `generate` is merged in.
+    #[serde(default, deserialize_with = "draft_or_generate_only")]
     pub draft: Option<DraftInput>,
     /// The New image tab's `draft.generate` (FR-GEN-19): an object, or `null` to clear it.
     /// Absent = keep it. Wins over `draft.generate`.
@@ -596,6 +598,27 @@ pub struct ProjectPutDraftInput {
     /// EXP's unsaved export settings (R30): `grid`, `target_px_per_square`, `format`.
     #[serde(default)]
     pub export: Option<serde_json::Map<String, Value>>,
+}
+
+/// `draft` as given, or a generate-only save when its only key is `generate` (FR-GEN-19).
+fn draft_or_generate_only<'de, D>(d: D) -> Result<Option<DraftInput>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let v = Option::<Value>::deserialize(d)?;
+    let Some(v) = v else { return Ok(None) };
+    let only_generate = v
+        .as_object()
+        .is_some_and(|o| o.len() == 1 && o.contains_key("generate"));
+    if only_generate {
+        let g = v.get("generate").cloned().unwrap_or(Value::Null);
+        let g = if g.is_null() { None } else { Some(g) };
+        return Ok(Some(DraftInput::generate_only(g)));
+    }
+    serde_json::from_value(v)
+        .map(Some)
+        .map_err(D::Error::custom)
 }
 
 /// Largest `draft.generate`, serialised (GEN owns its fields; PRJ only bounds the size).
@@ -877,6 +900,8 @@ impl Command for ProjectFolderList {
             project::require_folder(p)?;
             project::folder_list(p, &input.folder)?
         };
+        let mut files = files;
+        project::set_file_states(&core.ctx, &mut files);
         Ok(with_thumb_urls(core, files))
     }
 }
@@ -918,6 +943,8 @@ impl Command for ProjectFolderAdd {
             let paths: Vec<PathBuf> = input.paths.iter().map(PathBuf::from).collect();
             project::folder_add(&core.ctx, p, &input.folder, &paths)?
         };
+        let mut files = files;
+        project::set_file_states(&core.ctx, &mut files);
         Ok(with_thumb_urls(core, files))
     }
 }

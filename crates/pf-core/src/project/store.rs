@@ -958,5 +958,10 @@ pub fn next_purge_at(p: &OpenProject) -> Option<Timestamp> {
         .min()
 }
 
+// ---------------------------------------------------------------- pick (GEN)
+
+mod pick;
+pub use pick::{BaseCommit, pick_base, pick_label, working_name};
+
 #[cfg(test)]
 pub(crate) mod tests;
