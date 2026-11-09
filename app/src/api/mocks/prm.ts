@@ -19,6 +19,8 @@ export interface PrmMockSeed {
     case?: string;
     /** The thread file can't be written (locked, §11): turns are kept "not saved". */
     locked?: boolean;
+    /** A `claude_path` already in settings.json (never checked by a put, R96). */
+    claudePath?: string;
   };
 }
 
@@ -267,7 +269,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     consent: seed.chat?.consent ?? false,
     enabled: seed.chat?.consent ?? false,
     fakeCase: seed.chat?.case ?? 'success',
-    claudePath: null as string | null,
+    claudePath: (seed.chat?.claudePath ?? null) as string | null,
     windowOpens: 0,
     seq: 0,
     contexts: new Map<string, { seq: number; input: unknown }>(),
@@ -280,6 +282,20 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
   };
   const chatId = () => `01CHAT${String(++chat.ids).padStart(20, '0')}`;
   const now = () => new Date().toISOString();
+  // R96, as the core: absolute, and the file name is claude, claude.exe or claude.cmd.
+  const claudePathRule = (p: string): string | null => {
+    const name = p.split(/[\\/]/).pop() ?? '';
+    if (!/^claude(\.exe|\.cmd)?$/i.test(name))
+      return 'the path must end in claude.exe, claude.cmd or claude';
+    if (!/^([a-z]:[\\/]|[\\/])/i.test(p)) return 'use the full path to it, not a relative one';
+    return null;
+  };
+  const claudePathIssue = (p: string | null): string | null => {
+    const why = p ? claudePathRule(p) : null;
+    return why
+      ? `The saved Claude Code path is ignored (${why}); looking for claude on PATH instead. Clear or fix it below.`
+      : null;
+  };
   const statusOf = () => {
     const off = !chat.consent || !chat.enabled;
     const errs: Record<string, [string, string]> = {
@@ -317,6 +333,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       fake_case: chat.fakeCase,
       login_command: null,
       claude_path: chat.claudePath,
+      claude_path_issue: claudePathIssue(chat.claudePath),
     };
   };
   const hostLabel = (h: Host) => (h === 'rgn' ? 'Region edit' : 'New image');
@@ -335,7 +352,12 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
   };
   handlers.prm_chat_settings_put = (input) => {
     if (typeof input.enabled === 'boolean') chat.enabled = input.enabled;
-    if ('claude_path' in input) chat.claudePath = (input.claude_path as string | null) ?? null;
+    if ('claude_path' in input) {
+      const p = ((input.claude_path as string | null) ?? '').trim();
+      const why = p ? claudePathRule(p) : null;
+      if (why) return fail('invalid_input', why);
+      chat.claudePath = p || null;
+    }
     if (!chat.enabled) chat.session = null;
     return announced();
   };

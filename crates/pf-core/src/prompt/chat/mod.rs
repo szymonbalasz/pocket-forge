@@ -372,7 +372,7 @@ fn backend(core: &Core, chat: &PromptChatSettings) -> Arc<dyn ChatBackend> {
             ClaudeCodeBackend::new(
                 ClaudeCodeConfig {
                     data_dir: core.ctx.data_dir.clone(),
-                    claude_path: chat.claude_path.as_ref().map(PathBuf::from),
+                    claude_path: usable_claude_path(chat),
                     parent_env: seams.parent_env.clone(),
                     windows: cfg!(windows),
                 },
@@ -382,6 +382,23 @@ fn backend(core: &Core, chat: &PromptChatSettings) -> Arc<dyn ChatBackend> {
             .with_budget(seams.budget),
         ),
     }
+}
+
+/// The saved `claude_path` when it passes R96's rule. A path saved before that rule (or edited
+/// into settings.json by hand) is checked on every use too, and ignored when it fails.
+fn usable_claude_path(chat: &PromptChatSettings) -> Option<PathBuf> {
+    let p = chat.claude_path.as_deref()?;
+    check_claude_path(p).ok()?;
+    Some(PathBuf::from(p.trim()))
+}
+
+/// Why the saved `claude_path` is ignored, for Settings (R96): `None` when it is unset or valid.
+fn claude_path_issue(chat: &PromptChatSettings) -> Option<String> {
+    let e = check_claude_path(chat.claude_path.as_deref()?).err()?;
+    Some(format!(
+        "The saved Claude Code path is ignored ({}); looking for claude on PATH instead. Clear or fix it below.",
+        e.message
+    ))
 }
 
 fn backend_name(mode: BackendMode) -> &'static str {
@@ -433,6 +450,8 @@ pub struct ChatStatus {
     pub login_command: Option<String>,
     /// The Claude Code path override (Settings).
     pub claude_path: Option<String>,
+    /// Why the saved `claude_path` is ignored (R96), or `null` when it is unset or valid.
+    pub claude_path_issue: Option<String>,
 }
 
 /// FR-PRM-20/33: no process before consent or while off, not even detection.
@@ -457,6 +476,7 @@ pub fn status(core: &Core, refresh: bool) -> ChatStatus {
             None
         },
         claude_path: chat.claude_path.clone(),
+        claude_path_issue: claude_path_issue(&chat),
     }
 }
 
@@ -478,6 +498,7 @@ fn status_without_process(core: &Core) -> ChatStatus {
         fake_case: (mode == BackendMode::Fake).then(|| core.ctx.chat.fake.case().to_string()),
         login_command: None,
         claude_path: chat.claude_path.clone(),
+        claude_path_issue: claude_path_issue(&chat),
     }
 }
 

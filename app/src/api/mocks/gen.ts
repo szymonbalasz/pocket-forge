@@ -487,6 +487,17 @@ export function installGenMock(seed: GenMockSeed): void {
     },
     gen_candidate_pick: (input: Rec) => {
       if (snap.read_only) return fail('read_only', 'The project is read-only.');
+      // R97: never while a job runs (a region edit job would come back for another base image).
+      const running = rgn()!.jobs.find(
+        (x) => !['failed', 'canceled', 'lost', 'closed', 'fetched'].includes(String(x.state)),
+      );
+      if (running)
+        return fail(
+          'job_active',
+          'a job is running in this project; pick when it has finished',
+          undefined,
+          { job_id: running.id },
+        );
       const r = lookup(input);
       if (r.err) return r.err;
       const { s, j, c } = r;
@@ -547,6 +558,23 @@ export function installGenMock(seed: GenMockSeed): void {
       const s = rgn();
       if (s) {
         if (input.rev_id === 'r0' && r0NoImage) s.layers = [];
+        // R97 (R84 across undo/redo): among generate candidates only the restored base image's
+        // is `accepted`; a trashed one comes back with it (the mock's files never go away).
+        const layers = s.layers as Layer[];
+        const base =
+          layers[0]?.kind === 'base'
+            ? ((layers[0].candidate_id as string | undefined) ?? null)
+            : null;
+        const genJobs = new Set(s.jobs.filter((x) => x.operation === 'generate').map((x) => x.id));
+        for (const c of s.cands as GenCand[]) {
+          if (!genJobs.has(c.job_id)) continue;
+          if (c.id === base) {
+            if (c.status !== 'invalid') {
+              c.status = 'accepted';
+              c.trash_id = null;
+            }
+          } else if (c.status === 'accepted') c.status = 'dismissed';
+        }
         applyImage(s.layers as Layer[]);
         rgnMock().commit();
       }

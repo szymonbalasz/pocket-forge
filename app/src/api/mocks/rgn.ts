@@ -54,6 +54,8 @@ export function installRgnMock(seed: RgnMockSeed): void {
     sent: { controls: Rec; count: { name: string; n: number } | null };
     /** FR-PRM-09: the job's `prompt_helpers[]` (from the PRM mock's compose hook). */
     helpers: Rec[];
+    /** R97/R98: `layers[0]`'s id at submit; accept refuses the candidate on another base. */
+    base_layer_id?: string | null;
   }
   interface Cand {
     id: string;
@@ -503,6 +505,7 @@ export function installRgnMock(seed: RgnMockSeed): void {
           return row;
         }),
         sent: sentOf(ok.c, draft.controls ?? {}),
+        base_layer_id: s.layers[0]?.id as string | undefined,
         // FR-PRM-09: the helpers sent, as PRM's compose picks them.
         helpers: handlers.__prm_sent
           ? ((await handlers.__prm_sent({
@@ -591,6 +594,13 @@ export function installRgnMock(seed: RgnMockSeed): void {
         return fail('invalid_candidate', 'The candidate can’t be used.');
       if (j !== s.jobs.filter((x) => x.n !== null).at(-1) || (j.state === 'closed' && inStack(j)))
         return fail('repick_unavailable', 'Only the newest iteration can be accepted.');
+      // R97: a pick since the submit changed the base image; the candidate stays as it is.
+      if (j.base_layer_id && j.base_layer_id !== s.layers[0]?.id)
+        return fail(
+          'invalid_candidate',
+          'that candidate was made on a different base image; it can’t be accepted on this one',
+          'candidate_id',
+        );
       const layer = {
         ...original,
         id: id('01JLAYERP'),
@@ -741,9 +751,22 @@ export function installRgnMock(seed: RgnMockSeed): void {
     project_restore_revision: (input: Rec) => {
       const r = s.revs.find((x) => x.id === input.rev_id);
       // r0's draft is null (a fresh project); the mock doesn't keep later revisions' drafts.
+      // R98: the New image draft (`draft.generate`) is not part of undo; it stays.
       if (input.rev_id === 'r0') {
         s.layers = [original];
-        snap.draft = null;
+        const generate = (snap.draft as Rec | null)?.generate;
+        snap.draft = generate
+          ? {
+              final_prompt: '',
+              model_id: null,
+              controls: {},
+              seed: null,
+              region: null,
+              mask_id: null,
+              updated_at: '2026-11-07T11:00:00.000Z',
+              generate,
+            }
+          : null;
       } else if (!r) return fail('unknown_id', 'no such revision');
       else s.layers = r.layers.map((l) => ({ ...l }));
       const rev = {

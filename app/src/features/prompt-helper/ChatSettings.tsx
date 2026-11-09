@@ -118,6 +118,21 @@ export function ChatSettings() {
         onChange={(e) => setPath(e.target.value)}
         onBlur={() => run(api.chat.settingsPut({ claude_path: path.trim() || null }))}
       />
+      {status.claude_path_issue && (
+        <p className="prv-meta prv-error" data-testid="prm-settings-chat-path-issue">
+          {status.claude_path_issue}{' '}
+          <button
+            type="button"
+            data-testid="prm-settings-chat-path-clear"
+            onClick={() => {
+              setPath('');
+              run(api.chat.settingsPut({ claude_path: null }));
+            }}
+          >
+            Clear
+          </button>
+        </p>
+      )}
       <div className="prv-actions">
         <button type="button" onClick={() => setNotice((n) => !n)}>
           {notice ? 'Hide privacy notice' : 'Show privacy notice'}
