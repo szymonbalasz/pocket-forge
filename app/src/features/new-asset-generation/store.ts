@@ -24,7 +24,7 @@ import {
   type ProviderMode,
   type Spend,
 } from '../../api';
-import { isFolderMovedError, projectStore } from '../../store/project';
+import { isFolderMovedError, projectStore, type CloseGuard } from '../../store/project';
 import {
   referencesBlocker,
   referencesCostKey,
@@ -308,12 +308,25 @@ async function runEstimate(sig: string): Promise<void> {
   }
 }
 
-function putDraft(): void {
+function putDraft(): Promise<void> {
   const s = state;
-  if (!s.projectId || s.readOnly) return;
-  if (projectStore.get().project?.project_id !== s.projectId) return;
-  api.project.putDraft({ generate: storedDraft(s) }).catch((e) => projectStore.draftSaveFailed(e));
+  if (!s.projectId || s.readOnly) return Promise.resolve();
+  if (projectStore.get().project?.project_id !== s.projectId) return Promise.resolve();
+  return api.project
+    .putDraft({ generate: storedDraft(s) })
+    .then(() => undefined)
+    .catch((e) => projectStore.draftSaveFailed(e));
 }
+
+/** FR-PRJ-19 "…and on close" (R97): a save still waiting is written before the project closes
+ *  or another one opens (PRJ's close guard); a failed write still lets it close. */
+const flushOnClose: CloseGuard = (proceed) => {
+  if (!draftTimer) return true;
+  clearTimeout(draftTimer);
+  draftTimer = null;
+  void putDraft().then(proceed);
+  return false;
+};
 
 function saveDraftSoon(): void {
   if (draftTimer) clearTimeout(draftTimer);
@@ -508,6 +521,7 @@ function subscribe(): void {
   // The project closed or another one opened, maybe while this tab was hidden: let it go.
   // `structure/` changed (⟳, focus, an Add in the project panel): the sketch list follows.
   let structureSeq = projectStore.get().folders.structure ?? 0;
+  const offGuard = projectStore.addCloseGuard(flushOnClose);
   const offProject = projectStore.subscribe(() => {
     const ps = projectStore.get();
     if (state.projectId && ps.project?.project_id !== state.projectId) return gen.detach();
@@ -518,6 +532,7 @@ function subscribe(): void {
     }
   });
   unsubscribe = () => {
+    offGuard();
     offProject();
     subs.forEach((p) => void p.then((u) => u()).catch(() => undefined));
   };

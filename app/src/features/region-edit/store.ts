@@ -29,7 +29,12 @@ import {
   type Spend,
 } from '../../api';
 import { generateTab, NEW_IMAGE_TAB, REGION_TAB } from '../../shared/generateTabs';
-import { folderMoved, isFolderMovedError, projectStore } from '../../store/project';
+import {
+  folderMoved,
+  isFolderMovedError,
+  projectStore,
+  type CloseGuard,
+} from '../../store/project';
 import { refreshProviderStatus } from '../provider';
 import {
   editorBridge,
@@ -390,10 +395,11 @@ async function runEstimate(sig: string): Promise<void> {
 
 /** Writes the panel's draft now. `mask_id` absent keeps the draft's mask (EDT owns it, R55);
  *  without a region it is cleared. */
-function putDraft(mask?: { mask_id: string | null }): void {
+function putDraft(mask?: { mask_id: string | null }): Promise<void> {
   const s = state;
-  if (!s.projectId || s.readOnly) return;
-  api.project
+  if (!s.projectId || s.readOnly) return Promise.resolve();
+  // A failed write shows in the save segment (walk D3); the next change saves again.
+  return api.project
     .putDraft({
       final_prompt: s.prompt,
       model_id: s.modelId,
@@ -406,9 +412,19 @@ function putDraft(mask?: { mask_id: string | null }): void {
       // No region, no mask (FR-EDT-20): the draft must not keep the removed region's mask.
       ...(mask ?? (s.inner ? {} : { mask_id: null })),
     })
-    // Shown in the save segment (walk D3); the next change saves again.
+    .then(() => undefined)
     .catch((e) => projectStore.draftSaveFailed(e));
 }
+
+/** FR-PRJ-19 "…and on close" (R97): a save still waiting is written before the project closes
+ *  or another one opens (PRJ's close guard); a failed write still lets it close. */
+const flushOnClose: CloseGuard = (proceed) => {
+  if (!draftTimer) return true;
+  clearTimeout(draftTimer);
+  draftTimer = null;
+  void putDraft().then(proceed);
+  return false;
+};
 
 function saveDraftSoon(): void {
   if (draftTimer) clearTimeout(draftTimer);
@@ -914,7 +930,9 @@ function subscribe(): void {
   };
   syncMoved();
   const offProject = projectStore.subscribe(syncMoved);
+  const offGuard = projectStore.addCloseGuard(flushOnClose);
   unsubscribe = () => {
+    offGuard();
     offProject();
     subs.forEach(
       (p) =>

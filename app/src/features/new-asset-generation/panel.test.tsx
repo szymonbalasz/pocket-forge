@@ -497,3 +497,40 @@ test('BL-40 a project just made by Generate new… opens focused on Generate whe
   // Once only: a later open doesn't steal the focus.
   expect(gen.focusRequested()).toBe(false);
 });
+
+const mockWindow = () =>
+  window as unknown as {
+    __pfMockHandlers: Record<string, (i: Record<string, unknown>) => unknown>;
+    __pfMockSnapshot: Record<string, unknown>;
+  };
+const PROJECT_B = '01JPROJECTB000000000000000';
+
+test('FR-PRJ-19 R97 a New image edit still waiting for its save is written on close and on project switch', async () => {
+  await setup();
+  const order = () =>
+    fake.calls.map((c) => c.cmd).filter((c) => c === 'project_put_draft' || c === 'project_close');
+
+  // Close inside the 2 s debounce: the edit is saved first, not dropped.
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'sunken temple' } });
+  await act(() => projectStore.close());
+  expect(order()).toEqual(['project_put_draft', 'project_close']);
+  expect(fake.callsOf('project_put_draft')[0]).toMatchObject({
+    draft: { generate: { typed_prompt: 'sunken temple' } },
+  });
+
+  // Switch to another project the same way.
+  await act(() => projectStore.open(PROJECT_DIR));
+  await waitFor(() => expect(gen.get().fit).not.toBeNull());
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'sunken hall' } });
+  mockWindow().__pfMockSnapshot.project_id = PROJECT_B;
+  await act(() => projectStore.open('C:/pf-test/library/Maps/other'));
+  expect(order()).toEqual([
+    'project_put_draft',
+    'project_close',
+    'project_put_draft',
+    'project_close',
+  ]);
+  expect(fake.callsOf('project_put_draft')[1]).toMatchObject({
+    draft: { generate: { typed_prompt: 'sunken hall' } },
+  });
+});
