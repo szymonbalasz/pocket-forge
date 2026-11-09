@@ -27,6 +27,7 @@ import {
   type RgnPreview,
   type Spend,
 } from '../../api';
+import { generateTab, NEW_IMAGE_TAB, REGION_TAB } from '../../shared/generateTabs';
 import { folderMoved, isFolderMovedError, projectStore } from '../../store/project';
 import { refreshProviderStatus } from '../provider';
 import {
@@ -47,7 +48,7 @@ import {
   restoreReferences,
   settleReferences,
 } from '../references';
-import type { ConfirmPlan } from './confirm';
+import { withinConfirmed, type ConfirmPlan } from './confirm';
 import {
   costSignature,
   evaluateInput,
@@ -202,16 +203,6 @@ function set(patch: Partial<RgnState> | ((s: RgnState) => Partial<RgnState>)): v
   const p = typeof patch === 'function' ? patch(state) : patch;
   state = { ...state, ...p };
   for (const l of listeners) l();
-}
-
-/** BL-36: a fresh estimate may be submitted under the plan the DM confirmed: within its cap, no
- *  dearer than the cost shown, and needing no confirmation that wasn't given. */
-function withinConfirmed(fresh: JobEstimate, plan: ConfirmPlan): boolean {
-  const cost = fresh.cost.amount;
-  if (plan.cap === null) return false;
-  if (fresh.spend + (cost === 'unknown' ? 0 : cost) > plan.cap) return false;
-  if (!fresh.needs.every((n) => plan.confirmations.includes(n))) return false;
-  return plan.cost === 'unknown' || (cost !== 'unknown' && cost <= plan.cost);
 }
 
 const uiError = (e: unknown): UiError =>
@@ -1117,8 +1108,16 @@ export const rgn = {
     void refreshIterations();
   },
 
-  /** FR-RGN-21: pre-fill the panel from the job, then estimate → confirm again. */
+  /** FR-RGN-21: pre-fill the panel from the job, then estimate → confirm again. A generate
+   *  job's Retry goes to the New image tab (FR-GEN-32). */
   async retry(jobId: string): Promise<void> {
+    const row = state.iterations.find((r) => r.job_id === jobId);
+    if (row?.operation === 'generate') {
+      if (!generateTab.retry(NEW_IMAGE_TAB, jobId))
+        set({ trackerNotice: { kind: 'error', text: 'This job can’t be retried here.' } });
+      return;
+    }
+    generateTab.select(REGION_TAB);
     try {
       const d = await api.region.retryDraft(jobId);
       set({
@@ -1291,4 +1290,14 @@ export function useRgn<T>(select: (s: RgnState) => T): T {
     () => select(state),
     () => select(state),
   );
+}
+
+/** GEN (FR-GEN-22): the project's active job, shared by both tabs (one per project). */
+export function useActiveJobId(): string | null {
+  return useRgn(activeJobId);
+}
+
+/** GEN after its submit or a tracker action: the tracker, the spend and the candidates again. */
+export async function refreshJobs(): Promise<void> {
+  await Promise.all([refreshIterations(), loadSpend(), refreshProject()]);
 }

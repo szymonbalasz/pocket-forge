@@ -11,6 +11,8 @@ pub mod record;
 #[cfg(test)]
 mod contract_tests;
 #[cfg(test)]
+mod generate_tests;
+#[cfg(test)]
 mod reference_tests;
 #[cfg(test)]
 mod tests;
@@ -24,8 +26,8 @@ use serde_json::Value;
 pub use self::api::DEFAULT_BASE_URL;
 use self::api::{Api, Retry, seg};
 use self::cache::{CacheFile, ModelCache};
-pub use self::overlay::scenario_model_ids;
-use self::overlay::{OverlayRow, SCENARIO_ROWS, row_in};
+use self::overlay::{OverlayRow, SCENARIO_ROWS, row_for, unique_ids};
+pub use self::overlay::{scenario_model_ids, scenario_model_ids_for};
 use crate::credentials::CredentialStore;
 use crate::replay::Recording;
 use crate::transport::{HttpTransport, Method, RuntimeSleeper, Sleeper, Transport};
@@ -65,8 +67,9 @@ pub struct ScenarioProvider {
     creds: Mutex<Option<Credentials>>,
     account: Mutex<ProviderAccount>,
     cache: ModelCache,
-    /// Capabilities fetched this session (estimate/submit read these first).
-    caps: Mutex<HashMap<String, Capabilities>>,
+    /// Capabilities fetched this session, per model and operation (estimate/submit read these
+    /// first).
+    caps: Mutex<HashMap<(String, Operation), Capabilities>>,
     /// Per model: the inputs that take a list of files (from the same fetch as `caps`).
     pub(crate) arrays: Mutex<HashMap<String, Vec<String>>>,
     /// Upload ref cache: content hash → asset ref, per session (R15).
@@ -99,6 +102,8 @@ const APP_FIXTURES: &[(&str, &str, &str)] = fixture_table![
     "fake-white-edit" / "get-model",
     "fake-black-edit" / "get-model",
     "fake-alpha-edit" / "get-model",
+    "fake-gen-wh" / "get-model",
+    "fake-gen-aspect" / "get-model",
 ];
 
 #[cfg(test)]
@@ -203,16 +208,17 @@ impl ScenarioProvider {
         }
     }
 
-    pub(crate) fn row(&self, model_id: &str) -> Option<&OverlayRow> {
-        row_in(&self.overlay, model_id)
+    pub(crate) fn row(&self, model_id: &str, operation: Operation) -> Option<&OverlayRow> {
+        row_for(&self.overlay, model_id, operation)
     }
 
-    /// `GET /models/{id}` → normalised. 404 → `None`.
+    /// `GET /models/{id}` → normalised once per overlay row of the model (one per operation).
+    /// 404 → `None`.
     async fn fetch_model(
         &self,
         creds: &Credentials,
         model_id: &str,
-    ) -> ProviderResult<Option<(String, Capabilities)>> {
+    ) -> ProviderResult<Option<(String, Vec<(Operation, Capabilities)>)>> {
         let path = self.path(&format!("/models/{}", seg(model_id)));
         let body = match self
             .api
@@ -223,15 +229,37 @@ impl ScenarioProvider {
             Err(ProviderError::InvalidRequest { .. }) => return Ok(None),
             Err(e) => return Err(e),
         };
-        let n = normalise::normalise(model_id, &body, self.row(model_id))?;
-        lock(&self.caps).insert(model_id.to_owned(), n.capabilities.clone());
-        lock(&self.arrays).insert(model_id.to_owned(), n.array_inputs.clone());
-        Ok(Some((n.name, n.capabilities)))
+        let rows: Vec<&OverlayRow> = self
+            .overlay
+            .iter()
+            .filter(|r| r.model_id == model_id)
+            .collect();
+        let mut name = model_id.to_owned();
+        let mut all = vec![];
+        // No row: normalised once as an edit model (not offered, with the warning).
+        let ops: Vec<Option<&OverlayRow>> = if rows.is_empty() {
+            vec![None]
+        } else {
+            rows.into_iter().map(Some).collect()
+        };
+        for row in ops {
+            let op = row.map_or(Operation::EditMasked, |r| r.operation);
+            let n = normalise::normalise(model_id, &body, row)?;
+            lock(&self.caps).insert((model_id.to_owned(), op), n.capabilities.clone());
+            lock(&self.arrays).insert(model_id.to_owned(), n.array_inputs.clone());
+            name = n.name;
+            all.push((op, n.capabilities));
+        }
+        Ok(Some((name, all)))
     }
 
-    /// The masked-edit models (FR-PRV-25), from the network, or the cache when offline.
+    /// The models offering the filtered operation (FR-PRV-25; `generate`: GEN OQ-GEN-01), from
+    /// the network, or the cache when offline. Each entry lists every operation it offers.
     pub async fn list_models_cached(&self, filter: &ModelFilter) -> ProviderResult<ModelList> {
-        if !matches!(filter.operation, None | Some(Operation::EditMasked)) {
+        // An operation no row offers (upscale, …): nothing to fetch.
+        if let Some(op) = filter.operation
+            && !self.overlay.iter().any(|r| r.operation == op)
+        {
             return Ok(ModelList {
                 models: vec![],
                 stale: false,
@@ -240,21 +268,27 @@ impl ScenarioProvider {
         let creds = self.credentials()?;
         let mut file = CacheFile::default();
         let mut failure = None;
-        for row in &self.overlay {
-            match self.fetch_model(&creds, row.model_id).await {
-                Ok(Some((name, caps))) => {
-                    if caps.operations.contains(&Operation::EditMasked) {
+        for model_id in unique_ids(&self.overlay) {
+            match self.fetch_model(&creds, model_id).await {
+                Ok(Some((name, all))) => {
+                    let mut operations: Vec<Operation> =
+                        all.iter().flat_map(|(_, c)| c.operations.clone()).collect();
+                    operations.sort();
+                    operations.dedup();
+                    if !operations.is_empty() {
                         file.models.push(ModelSummary {
-                            id: row.model_id.into(),
+                            id: model_id.into(),
                             name,
-                            operations: caps.operations.clone(),
+                            operations,
                         });
                     }
-                    file.capabilities.insert(row.model_id.into(), caps);
+                    for (op, caps) in all {
+                        file.capabilities.insert(cache::key(model_id, op), caps);
+                    }
                 }
                 Ok(None) => {}
                 Err(ProviderError::ProviderFailure { hint }) => {
-                    tracing::warn!(model = row.model_id, %hint, "model skipped");
+                    tracing::warn!(model = model_id, %hint, "model skipped");
                 }
                 Err(e) => {
                     failure = Some(e);
@@ -262,17 +296,19 @@ impl ScenarioProvider {
                 }
             }
         }
+        let offers =
+            |m: &ModelSummary| filter.operation.is_none_or(|op| m.operations.contains(&op));
         match failure {
             None => {
                 self.cache.store(&file);
                 Ok(ModelList {
-                    models: file.models,
+                    models: file.models.into_iter().filter(offers).collect(),
                     stale: false,
                 })
             }
             Some(ProviderError::Offline | ProviderError::Timeout) => match self.cache.load() {
                 Some(cached) => Ok(ModelList {
-                    models: cached.models,
+                    models: cached.models.into_iter().filter(offers).collect(),
                     stale: true,
                 }),
                 None => Err(ProviderError::Offline),
@@ -281,13 +317,27 @@ impl ScenarioProvider {
         }
     }
 
-    /// Capabilities, fresh from the network (the cache when offline).
-    pub async fn fetch_capabilities(&self, model_id: &str) -> ProviderResult<Capabilities> {
+    /// Capabilities for one operation, fresh from the network (the cache when offline). A
+    /// model with no row for that operation → `invalid_request(operation)`.
+    pub async fn fetch_capabilities(
+        &self,
+        model_id: &str,
+        operation: Operation,
+    ) -> ProviderResult<Capabilities> {
         let creds = self.credentials()?;
         match self.fetch_model(&creds, model_id).await {
-            Ok(Some((_, caps))) => {
-                self.cache.put_capabilities(&caps);
-                Ok(caps)
+            Ok(Some((_, all))) => {
+                for (op, caps) in &all {
+                    self.cache
+                        .put_capabilities(&cache::key(model_id, *op), caps);
+                }
+                let mine = all
+                    .into_iter()
+                    .find(|(op, _)| *op == operation)
+                    .map(|(_, c)| c);
+                mine.ok_or_else(|| ProviderError::InvalidRequest {
+                    field: "operation".into(),
+                })
             }
             Ok(None) => Err(ProviderError::InvalidRequest {
                 field: "model_id".into(),
@@ -295,18 +345,27 @@ impl ScenarioProvider {
             Err(e @ (ProviderError::Offline | ProviderError::Timeout)) => self
                 .cache
                 .load()
-                .and_then(|f| f.capabilities.get(model_id).cloned())
+                .and_then(|f| {
+                    f.capabilities
+                        .get(&cache::key(model_id, operation))
+                        .cloned()
+                })
                 .ok_or(e),
             Err(e) => Err(e),
         }
     }
 
     /// Capabilities for a job: this session's copy, else fetched (estimate/submit).
-    pub(crate) async fn job_capabilities(&self, model_id: &str) -> ProviderResult<Capabilities> {
-        if let Some(c) = lock(&self.caps).get(model_id).cloned() {
+    pub(crate) async fn job_capabilities(
+        &self,
+        model_id: &str,
+        operation: Operation,
+    ) -> ProviderResult<Capabilities> {
+        let key = (model_id.to_owned(), operation);
+        if let Some(c) = lock(&self.caps).get(&key).cloned() {
             return Ok(c);
         }
-        self.fetch_capabilities(model_id).await
+        self.fetch_capabilities(model_id, operation).await
     }
 
     /// One free call (`GET /models?pageSize=1`) that proves the credentials work.
@@ -325,8 +384,12 @@ impl Provider for ScenarioProvider {
         self.list_models_cached(filter).await.map(|l| l.models)
     }
 
-    async fn get_capabilities(&self, model_id: &str) -> ProviderResult<Capabilities> {
-        self.fetch_capabilities(model_id).await
+    async fn get_capabilities(
+        &self,
+        model_id: &str,
+        operation: Operation,
+    ) -> ProviderResult<Capabilities> {
+        self.fetch_capabilities(model_id, operation).await
     }
 
     async fn upload(&self, bytes: &[u8], purpose: UploadPurpose) -> ProviderResult<AssetRef> {

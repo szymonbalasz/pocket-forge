@@ -4,6 +4,13 @@
 import { useEffect, useState } from 'react';
 import { Collapsible, Select, Slider, Switch, Tooltip } from 'radix-ui';
 
+import {
+  generateTab,
+  generateTabs,
+  projectHasImage,
+  REGION_TAB,
+  useGenerateTab,
+} from '../../shared/generateTabs';
 import { useSlotIdle } from '../../shared/slot';
 import { useProjectState } from '../../store/project';
 import { useEditorMaskPainted, useEditorRegion, useEditorRegionRestored } from '../editor';
@@ -483,13 +490,68 @@ function BlendSection({ s }: { s: RgnState }) {
   );
 }
 
+/** The tabs the open project offers (OQ-GEN-09): Region edit first, then the registered ones; a
+ *  project with no image only those that work without one (FR-GEN-03). */
+function useTabs(hasImage: boolean) {
+  const pid = useProjectState().project?.project_id ?? null;
+  // A project opened: its starting tab (Generate new… asks for New image, FR-GEN-01).
+  useEffect(() => {
+    if (pid) generateTab.projectOpened();
+  }, [pid]);
+  const chosen = useGenerateTab();
+  const extra = generateTabs().filter((t) => hasImage || t.withoutImage);
+  const all = [
+    ...(hasImage ? [{ id: REGION_TAB, label: 'Region edit' }] : []),
+    ...extra.map((t) => ({ id: t.id, label: t.label })),
+  ];
+  const current = all.some((t) => t.id === chosen) ? chosen : (all[0]?.id ?? REGION_TAB);
+  return { all, current, Tab: extra.find((t) => t.id === current)?.Component ?? null };
+}
+
+/** The tab strip (ui-guidelines: Region edit | New image). Arrow keys move between tabs. */
+function TabStrip({ tabs, current }: { tabs: { id: string; label: string }[]; current: string }) {
+  if (tabs.length < 2 && tabs[0]?.id === REGION_TAB) return null;
+  const move = (dir: number) => {
+    const i = tabs.findIndex((t) => t.id === current);
+    const next = tabs[(i + dir + tabs.length) % tabs.length];
+    if (next) generateTab.select(next.id);
+  };
+  return (
+    <div className="rgn-tabs" role="tablist" aria-label="Generate" data-testid="gen-tabs">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          className="rgn-tab"
+          aria-selected={t.id === current}
+          tabIndex={t.id === current ? 0 : -1}
+          data-testid="gen-tab"
+          data-record-id={t.id}
+          onClick={() => generateTab.select(t.id)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+              e.preventDefault();
+              move(e.key === 'ArrowRight' ? 1 : -1);
+            }
+          }}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function GeneratePanel() {
   useRgnSession();
   const s = useRgn((x) => x);
   const { project } = useProjectState();
   const [open, setOpen] = useState(true);
+  const tabs = useTabs(!project || projectHasImage(project));
   useSlotIdle(!s.projectId);
   if (!s.projectId) return null;
+  const { Tab } = tabs;
   return (
     <Collapsible.Root open={open} onOpenChange={setOpen} asChild>
       <section className="rgn-panel" data-testid="rgn-panel" aria-label="Generate">
@@ -499,28 +561,41 @@ export function GeneratePanel() {
           </button>
         </Collapsible.Trigger>
         <Collapsible.Content className="rgn-panel-body">
-          {s.readOnly && (
-            <p className="rgn-warning small" data-testid="rgn-panel-readonly">
-              Read-only project: you can view, pick a region and paint, but not submit or accept.
-            </p>
-          )}
-          <RegionSection s={s} />
-          <ModelSection s={s} />
-          <ReferencesBlock
-            projectId={s.projectId}
-            draftReferences={project?.draft?.references}
-            modelId={s.caps ? s.modelId : null}
-            hasSlots={(s.caps?.slots.length ?? 0) > 0}
-            readOnly={!!s.readOnly}
-            onChange={rgn.referencesChanged}
-          />
-          <PromptSection s={s} />
-          <CostSection s={s} />
-          <SubmitSection s={s} />
-          <BlendSection s={s} />
+          <TabStrip tabs={tabs.all} current={tabs.current} />
+          {/* FR-GEN-36: only the visible tab is mounted. */}
+          {Tab ? <Tab /> : <RegionEditTab s={s} />}
         </Collapsible.Content>
         <ConfirmDialog />
       </section>
     </Collapsible.Root>
+  );
+}
+
+/** RGN's own tab: the region-edit sections (§7). */
+function RegionEditTab({ s }: { s: RgnState }) {
+  const { project } = useProjectState();
+  if (!s.projectId) return null;
+  return (
+    <>
+      {s.readOnly && (
+        <p className="rgn-warning small" data-testid="rgn-panel-readonly">
+          Read-only project: you can view, pick a region and paint, but not submit or accept.
+        </p>
+      )}
+      <RegionSection s={s} />
+      <ModelSection s={s} />
+      <ReferencesBlock
+        projectId={s.projectId}
+        draftReferences={project?.draft?.references}
+        modelId={s.caps ? s.modelId : null}
+        hasSlots={(s.caps?.slots.length ?? 0) > 0}
+        readOnly={!!s.readOnly}
+        onChange={rgn.referencesChanged}
+      />
+      <PromptSection s={s} />
+      <CostSection s={s} />
+      <SubmitSection s={s} />
+      <BlendSection s={s} />
+    </>
   );
 }

@@ -32,8 +32,8 @@ use crate::scenario::record::content_hash;
 use crate::transport::Method;
 use crate::{
     AssetRef, Balance, CancelAck, CandidateImage, Candidates, Capabilities, ControlRole, Cost,
-    CostAmount, Credentials, Estimate, JobRequest, JobStatus, Operation, ProviderError,
-    ProviderJobState, ProviderRecord, ProviderResult, UploadPurpose,
+    CostAmount, Credentials, Estimate, JobRequest, JobStatus, Operation, OutputRequest,
+    ProviderError, ProviderJobState, ProviderRecord, ProviderResult, UploadPurpose,
 };
 
 /// Files below this go to `POST /assets` (base64); the rest use multipart `/uploads`.
@@ -141,11 +141,15 @@ type Download<'a> = Pin<Box<dyn Future<Output = ProviderResult<Result<Vec<u8>, u
 
 /// What a job request turns into before it is sent.
 struct Prepared {
+    operation: Operation,
     caps: Capabilities,
     /// Inputs that take a list of files (the source too, for GPT Image and Ideogram 4.5).
     arrays: Vec<String>,
+    /// Empty for `generate` (no source, no mask).
     image: Vec<u8>,
     mask: Vec<u8>,
+    /// `generate`: the output size asked for (checked against `output_size`).
+    output: Option<OutputRequest>,
 }
 
 /// One uploaded reference: its slot, the caller's hash and the provider ref.
@@ -156,23 +160,32 @@ struct ReferenceRef {
     r: AssetRef,
 }
 
-/// Uploaded refs for one job (Appendix B `asset_refs`).
+/// Uploaded source and mask (none for `generate`).
 #[derive(Clone)]
-struct Refs {
+struct Inputs {
     image: AssetRef,
     mask: AssetRef,
     hash_image: String,
     hash_mask: String,
+}
+
+/// Uploaded refs for one job (Appendix B `asset_refs`).
+#[derive(Clone)]
+struct Refs {
+    inputs: Option<Inputs>,
     /// In request order.
     references: Vec<ReferenceRef>,
 }
 
 impl Refs {
     fn json(&self) -> Value {
-        let mut v = json!({
-            "image": self.image, "mask": self.mask,
-            "hash_image": self.hash_image, "hash_mask": self.hash_mask,
-        });
+        let mut v = match &self.inputs {
+            Some(i) => json!({
+                "image": i.image, "mask": i.mask,
+                "hash_image": i.hash_image, "hash_mask": i.hash_mask,
+            }),
+            None => json!({}),
+        };
         if !self.references.is_empty() {
             v["references"] = self
                 .references
@@ -364,7 +377,8 @@ impl ScenarioProvider {
         }
     }
 
-    /// Uploads the image, the mask and every reference (once per content hash, FR-PRV-34).
+    /// Uploads the image, the mask (not for `generate`) and every reference (once per content
+    /// hash, FR-PRV-34).
     async fn upload_all(
         &self,
         creds: &Credentials,
@@ -372,12 +386,22 @@ impl ScenarioProvider {
         request: &JobRequest,
         force: bool,
     ) -> ProviderResult<Refs> {
-        let (image, hash_image) = self
-            .upload_bytes(creds, &p.image, UploadPurpose::Source, force)
-            .await?;
-        let (mask, hash_mask) = self
-            .upload_bytes(creds, &p.mask, UploadPurpose::Mask, force)
-            .await?;
+        let inputs = if p.operation == Operation::Generate {
+            None
+        } else {
+            let (image, hash_image) = self
+                .upload_bytes(creds, &p.image, UploadPurpose::Source, force)
+                .await?;
+            let (mask, hash_mask) = self
+                .upload_bytes(creds, &p.mask, UploadPurpose::Mask, force)
+                .await?;
+            Some(Inputs {
+                image,
+                mask,
+                hash_image,
+                hash_mask,
+            })
+        };
         let mut references = Vec::with_capacity(request.references.len());
         let mut forced = std::collections::HashSet::new();
         for x in &request.references {
@@ -392,23 +416,53 @@ impl ScenarioProvider {
                 r,
             });
         }
-        Ok(Refs {
-            image,
-            mask,
-            hash_image,
-            hash_mask,
-            references,
-        })
+        Ok(Refs { inputs, references })
     }
 
     // ------------------------------------------------------------ requests
 
     /// Local checks and conversion, before any network call (FR-PRV-12/13).
     async fn prepare(&self, request: &JobRequest) -> ProviderResult<Prepared> {
-        if request.operation != Operation::EditMasked {
+        match request.operation {
+            Operation::EditMasked => self.prepare_edit(request).await,
+            Operation::Generate => self.prepare_generate(request).await,
+            _ => Err(invalid("operation")),
+        }
+    }
+
+    /// `generate` (GEN OQ-GEN-01): no source, no mask; the output size must match the model's
+    /// `output_size`; references are backstopped as for edits (FR-PRV-33).
+    async fn prepare_generate(&self, request: &JobRequest) -> ProviderResult<Prepared> {
+        let caps = self
+            .job_capabilities(&request.model_id, Operation::Generate)
+            .await?;
+        if !caps.operations.contains(&Operation::Generate) {
             return Err(invalid("operation"));
         }
-        let caps = self.job_capabilities(&request.model_id).await?;
+        limits::check_output(&caps, request)?;
+        limits::check_references(&caps, request)?;
+        let values = self.values_for(&caps, request);
+        if let Some(e) = caps.evaluate(&values).errors.first() {
+            return Err(invalid(&e.control));
+        }
+        let arrays = lock(&self.arrays)
+            .get(&request.model_id)
+            .cloned()
+            .unwrap_or_default();
+        Ok(Prepared {
+            operation: Operation::Generate,
+            caps,
+            arrays,
+            image: vec![],
+            mask: vec![],
+            output: request.output.clone(),
+        })
+    }
+
+    async fn prepare_edit(&self, request: &JobRequest) -> ProviderResult<Prepared> {
+        let caps = self
+            .job_capabilities(&request.model_id, Operation::EditMasked)
+            .await?;
         let support = match (caps.operations.contains(&Operation::EditMasked), caps.mask) {
             (true, Some(m)) => m,
             _ => return Err(invalid("operation")),
@@ -427,10 +481,12 @@ impl ScenarioProvider {
             .cloned()
             .unwrap_or_default();
         Ok(Prepared {
+            operation: Operation::EditMasked,
             caps,
             arrays,
             image: request.region_png.clone(),
             mask,
+            output: None,
         })
     }
 
@@ -472,9 +528,11 @@ impl ScenarioProvider {
         for c in &p.caps.controls {
             let v = match c.role {
                 // A list input (GPT Image's `referenceImages`) gets the source as its first item.
-                ControlRole::Source if p.arrays.contains(&c.name) => refs.map(|r| json!([r.image])),
-                ControlRole::Source => refs.map(|r| json!(r.image)),
-                ControlRole::Mask => refs.map(|r| json!(r.mask)),
+                ControlRole::Source if p.arrays.contains(&c.name) => refs
+                    .and_then(|r| r.inputs.as_ref())
+                    .map(|i| json!([i.image])),
+                ControlRole::Source => refs.and_then(|r| r.inputs.as_ref()).map(|i| json!(i.image)),
+                ControlRole::Mask => refs.and_then(|r| r.inputs.as_ref()).map(|i| json!(i.mask)),
                 ControlRole::Reference => refs.and_then(|r| {
                     let sent: Vec<&AssetRef> = r.for_slot(&c.name).collect();
                     let array = p.caps.slots.iter().any(|s| s.name == c.name && s.array);
@@ -490,14 +548,24 @@ impl ScenarioProvider {
                 body.insert(c.name.clone(), v);
             }
         }
-        // Inputs the overlay fills: fixed values and the sent size (never controls).
-        if let Some(row) = self.row(&request.model_id) {
+        // Inputs the overlay fills: fixed values, and the sent size (edit) or the output size
+        // asked for (generate). Never controls.
+        if let Some(row) = self.row(&request.model_id, p.operation) {
             for (name, value) in row.fixed {
                 body.insert((*name).to_owned(), json!(value));
             }
-            if let (Some((w, h)), Some((sw, sh))) = (row.size_inputs, png_size(&p.image)) {
+            let size = match &p.output {
+                Some(OutputRequest::Wh { w, h }) => Some((*w, *h)),
+                Some(OutputRequest::Aspect { .. }) => None,
+                None => png_size(&p.image),
+            };
+            if let (Some((w, h)), Some((sw, sh))) = (row.size_inputs, size) {
                 body.insert(w.to_owned(), json!(sw));
                 body.insert(h.to_owned(), json!(sh));
+            }
+            if let (Some(a), Some(OutputRequest::Aspect { aspect })) = (row.aspect_input, &p.output)
+            {
+                body.insert(a.to_owned(), json!(aspect));
             }
         }
         Value::Object(body)
@@ -555,7 +623,9 @@ impl ScenarioProvider {
                     continue;
                 }
                 let text = String::from_utf8_lossy(&resp.body).to_ascii_lowercase();
-                return Err(invalid(if text.contains("mask") {
+                return Err(invalid(if p.operation == Operation::Generate {
+                    "reference"
+                } else if text.contains("mask") {
                     "mask"
                 } else if text.contains("reference") {
                     "reference"
@@ -584,9 +654,7 @@ impl ScenarioProvider {
         let p = self.prepare(request).await?;
         let creds = self.credentials()?;
         let with_assets = self
-            .overlay
-            .iter()
-            .find(|r| r.model_id == request.model_id)
+            .row(&request.model_id, p.operation)
             .is_none_or(|r| r.dry_run_assets);
         let refs = if with_assets {
             Some(self.upload_all(&creds, &p, request, false).await?)

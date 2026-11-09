@@ -240,7 +240,9 @@ test('FR-PRJ-03 #53 + New uses the native image dialog when it is available', as
     h['plugin:dialog|open'] = () => ['D:/maps/Bridge.png', 'D:/maps/Ford.webp'];
   });
   await expect(cards(page)).toHaveCount(2);
+  // OQ-GEN-10: + New is a menu, From image… | Generate new….
   await page.getByTestId('prj-home-new').click();
+  await page.getByTestId('prj-home-new-image').click();
   await expect(page.getByTestId('prj-import-summary-text')).toHaveText('2 created');
   await expect(cards(page)).toHaveCount(4);
   await expect(page.getByTestId('prj-home-new-paths')).toHaveCount(0);

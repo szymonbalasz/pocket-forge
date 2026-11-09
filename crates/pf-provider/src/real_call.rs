@@ -19,8 +19,8 @@ use crate::pixels::{decode_grey8, decode_rgb8, sniff};
 use crate::scenario::record::content_hash;
 use crate::transport::Sleeper;
 use crate::{
-    Capabilities, ControlRole, Cost, CostAmount, JobRequest, Operation, Provider, ProviderError,
-    ProviderJobState, ProviderRecord, ReferenceImage, poll_delay,
+    Capabilities, ControlRole, Cost, CostAmount, JobRequest, Operation, OutputRequest, OutputSize,
+    Provider, ProviderError, ProviderJobState, ProviderRecord, ReferenceImage, poll_delay,
 };
 
 /// The environment variable that turns the gated real-call tests on (`PF_REAL_CALL=1`).
@@ -83,6 +83,71 @@ pub fn test_request(caps: &Capabilities) -> Result<JobRequest, String> {
         ));
     }
     let side = side_for(caps);
+    let (controls, references) = fill(caps)?;
+    Ok(JobRequest {
+        operation: Operation::EditMasked,
+        model_id: caps.model_id.clone(),
+        final_prompt: PROMPT.into(),
+        controls,
+        references,
+        region_png: room_png(side),
+        mask_png: disc_mask_png(side),
+        candidate_count: 1,
+        seed: caps.seed.then_some(1),
+        output: None,
+    })
+}
+
+/// The output a `generate` check asks for: 1024 × 1024 within the model's limits (snapped to
+/// its step), or ratio `1:1` if allowed, else the first allowed ratio.
+pub fn test_output(caps: &Capabilities) -> Option<OutputRequest> {
+    match caps.output_size.as_ref()? {
+        OutputSize::Wh { min, max, step } => {
+            let step = (*step).max(1);
+            let side = (1024u32.clamp(*min, (*max).max(*min)) / step).max(1) * step;
+            Some(OutputRequest::Wh { w: side, h: side })
+        }
+        OutputSize::Aspect { allowed } => {
+            let pick = allowed
+                .iter()
+                .find(|a| *a == "1:1")
+                .or_else(|| allowed.first())?;
+            Some(OutputRequest::Aspect {
+                aspect: pick.clone(),
+            })
+        }
+    }
+}
+
+/// A `generate` request (GEN §10): the prompt, the [`test_output`] size, one result, no
+/// sketch; required controls and slots filled as for [`test_request`].
+pub fn test_generate_request(caps: &Capabilities) -> Result<JobRequest, String> {
+    if !caps.operations.contains(&Operation::Generate) {
+        return Err(format!(
+            "{} does not offer generate: {}",
+            caps.model_id,
+            caps.warnings.join("; ")
+        ));
+    }
+    let output = test_output(caps).ok_or_else(|| format!("{}: no output size", caps.model_id))?;
+    let (controls, references) = fill(caps)?;
+    Ok(JobRequest {
+        operation: Operation::Generate,
+        model_id: caps.model_id.clone(),
+        final_prompt: PROMPT.into(),
+        controls,
+        references,
+        region_png: vec![],
+        mask_png: vec![],
+        candidate_count: 1,
+        seed: caps.seed.then_some(1),
+        output: Some(output),
+    })
+}
+
+/// Required controls without a default get their first allowed value; a required reference
+/// slot gets generated noise images.
+fn fill(caps: &Capabilities) -> Result<(BTreeMap<String, Value>, Vec<ReferenceImage>), String> {
     let mut controls = BTreeMap::new();
     for c in &caps.controls {
         if c.role != ControlRole::Other || !c.required || c.default.is_some() {
@@ -112,17 +177,7 @@ pub fn test_request(caps: &Capabilities) -> Result<JobRequest, String> {
             });
         }
     }
-    Ok(JobRequest {
-        operation: Operation::EditMasked,
-        model_id: caps.model_id.clone(),
-        final_prompt: PROMPT.into(),
-        controls,
-        references,
-        region_png: room_png(side),
-        mask_png: disc_mask_png(side),
-        candidate_count: 1,
-        seed: caps.seed.then_some(1),
-    })
+    Ok((controls, references))
 }
 
 // ------------------------------------------------------------------ free checks
@@ -131,6 +186,8 @@ pub fn test_request(caps: &Capabilities) -> Result<JobRequest, String> {
 #[derive(Debug)]
 pub struct ModelCheck {
     pub model: String,
+    /// The operation checked (`edit_masked` or `generate`).
+    pub operation: Operation,
     /// `GET /models/{id}` succeeded (a 404 → false).
     pub found: bool,
     pub capabilities: Option<Capabilities>,
@@ -144,7 +201,7 @@ impl ModelCheck {
     pub fn offered(&self) -> bool {
         self.capabilities
             .as_ref()
-            .is_some_and(|c| c.operations.contains(&Operation::EditMasked))
+            .is_some_and(|c| c.operations.contains(&self.operation))
     }
 
     /// One readable line for the console.
@@ -184,17 +241,24 @@ pub fn cost_text(c: &Cost) -> String {
     }
 }
 
-/// Free calls for one model: its capabilities, then (if `dry_run` and the model is offered)
-/// one dry run, which spends nothing (`?dryRun=true`, never `ipDetection`, FR-PRV-16).
-pub async fn check_model<P: Provider>(p: &P, model: &str, dry_run: bool) -> ModelCheck {
+/// Free calls for one model and operation: its capabilities, then (if `dry_run` and the
+/// model offers it) one dry run, which spends nothing (`?dryRun=true`, never `ipDetection`,
+/// FR-PRV-16).
+pub async fn check_model<P: Provider>(
+    p: &P,
+    model: &str,
+    operation: Operation,
+    dry_run: bool,
+) -> ModelCheck {
     let mut out = ModelCheck {
         model: model.into(),
+        operation,
         found: false,
         capabilities: None,
         estimate: None,
         error: None,
     };
-    match p.get_capabilities(model).await {
+    match p.get_capabilities(model, operation).await {
         Ok(c) => {
             out.found = true;
             out.capabilities = Some(c);
@@ -206,7 +270,11 @@ pub async fn check_model<P: Provider>(p: &P, model: &str, dry_run: bool) -> Mode
     }
     if dry_run && out.offered() {
         let caps = out.capabilities.as_ref().expect("set above");
-        out.estimate = Some(match test_request(caps) {
+        let request = match operation {
+            Operation::Generate => test_generate_request(caps),
+            _ => test_request(caps),
+        };
+        out.estimate = Some(match request {
             Ok(req) => p
                 .estimate(&req)
                 .await
@@ -341,7 +409,7 @@ pub async fn masked_edit<P: Provider>(
     mut log: impl FnMut(&str),
 ) -> Result<EditOutcome, String> {
     let caps = p
-        .get_capabilities(model)
+        .get_capabilities(model, Operation::EditMasked)
         .await
         .map_err(|e| format!("capabilities: {}", error_text(&e)))?;
     let request = test_request(&caps)?;
@@ -450,6 +518,51 @@ mod tests {
         ci_guard_env().unwrap();
     }
 
+    /// The recorder's free `dry-run-generate` (GEN §10): 1024 × 1024 on `wh` models, `1:1` on
+    /// aspect models; the dry run goes through (here over the fake, which needs no network).
+    #[test]
+    fn fr_gen_05_dry_run_generate_request_and_check_over_the_fake() {
+        let p = crate::fake::FakeProvider::default();
+        for (model, output) in [
+            ("fake-gen-wh", OutputRequest::Wh { w: 1024, h: 1024 }),
+            (
+                "fake-gen-aspect",
+                OutputRequest::Aspect {
+                    aspect: "1:1".into(),
+                },
+            ),
+        ] {
+            let caps = block_on(p.get_capabilities(model, Operation::Generate)).unwrap();
+            let req = test_generate_request(&caps).unwrap();
+            assert_eq!(req.output, Some(output), "{model}");
+            assert!(req.region_png.is_empty() && req.mask_png.is_empty());
+            let c = block_on(check_model(&p, model, Operation::Generate, true));
+            assert!(c.offered(), "{}", c.summary());
+            assert!(matches!(c.estimate, Some(Ok(_))), "{}", c.summary());
+        }
+        let edit = block_on(check_model(
+            &p,
+            "fake-white-edit",
+            Operation::Generate,
+            true,
+        ));
+        assert!(!edit.offered() && edit.estimate.is_none());
+        let wide = OutputSize::Wh {
+            min: 16,
+            max: 512,
+            step: 16,
+        };
+        let caps = crate::Capabilities {
+            output_size: Some(wide),
+            ..block_on(p.get_capabilities("fake-gen-wh", Operation::Generate)).unwrap()
+        };
+        assert_eq!(
+            test_output(&caps),
+            Some(OutputRequest::Wh { w: 512, h: 512 }),
+            "clamped to the model's max"
+        );
+    }
+
     #[test]
     fn fr_prv_28_ci_guard_table() {
         assert!(ci_guard(None, Some("1"), true).is_ok(), "outside CI");
@@ -528,11 +641,21 @@ mod tests {
     #[test]
     fn fr_prv_28_errors_are_readable_text() {
         let p = fake(FakeCase::Auth);
-        let c = block_on(check_model(&p, "fake-white-edit", true));
+        let c = block_on(check_model(
+            &p,
+            "fake-white-edit",
+            Operation::EditMasked,
+            true,
+        ));
         assert!(!c.found);
         assert!(c.summary().contains("NOT FOUND (auth"), "{}", c.summary());
         let p = AnyProvider::fake();
-        let c = block_on(check_model(&p, "fake-black-edit", true));
+        let c = block_on(check_model(
+            &p,
+            "fake-black-edit",
+            Operation::EditMasked,
+            true,
+        ));
         assert!(
             c.offered() && matches!(c.estimate, Some(Ok(_))),
             "{}",

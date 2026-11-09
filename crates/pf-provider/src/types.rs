@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// A provider operation (ADR 0001 "Job request").
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Operation {
     Generate,
@@ -55,6 +55,8 @@ pub enum ControlRole {
     CandidateCount,
     Seed,
     Reference,
+    /// The output background (`opaque` / `transparent`, GEN OQ-GEN-07).
+    Background,
     Other,
 }
 
@@ -191,6 +193,38 @@ pub struct Capabilities {
     pub prompt_required: bool,
     pub slots: Vec<Slot>,
     pub warnings: Vec<String>,
+    /// `generate` only: the output size the model takes (GEN FR-GEN-07–11). Its inputs are
+    /// never controls.
+    #[serde(default)]
+    pub output_size: Option<OutputSize>,
+    /// `generate` only: the slot that takes the structural sketch, sent first (FR-GEN-14/15).
+    /// Null on every real model until a paid check confirms one (OQ-GEN-05).
+    #[serde(default)]
+    pub structure: Option<StructureSlot>,
+}
+
+/// The output size a `generate` model takes: exact width × height, or one of its ratios.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum OutputSize {
+    /// Each side within `min`–`max`, a multiple of `step`.
+    Wh { min: u32, max: u32, step: u32 },
+    /// One of these `w:h` ratios (non-ratio values such as `auto` are left out).
+    Aspect { allowed: Vec<String> },
+}
+
+/// The reference slot a structural sketch goes to (FR-GEN-15).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StructureSlot {
+    pub slot: String,
+}
+
+/// The output size a `generate` request asks for (matches the model's [`OutputSize`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum OutputRequest {
+    Wh { w: u32, h: u32 },
+    Aspect { aspect: String },
 }
 
 /// Purpose of an upload.
@@ -224,7 +258,8 @@ pub struct ReferenceImage {
 /// A generic job request (ADR 0001).
 ///
 /// `region_png` is the outer rect as sent (after fit); `mask_png` is the canonical mask
-/// (8-bit grey, white = editable) at exactly the same size (FR-PRV-12).
+/// (8-bit grey, white = editable) at exactly the same size (FR-PRV-12). A `generate` request
+/// sends neither (both empty) and sets `output` instead.
 #[derive(Debug, Clone, PartialEq)]
 pub struct JobRequest {
     pub operation: Operation,
@@ -237,6 +272,9 @@ pub struct JobRequest {
     pub mask_png: Vec<u8>,
     pub candidate_count: u32,
     pub seed: Option<u64>,
+    /// `generate` only: the output size asked for (`invalid_request(output)` if it doesn't
+    /// match the model's `output_size`).
+    pub output: Option<OutputRequest>,
 }
 
 /// A cost amount: a number of provider units, or unknown.

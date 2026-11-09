@@ -70,11 +70,12 @@ fn request(model: &str) -> JobRequest {
         mask_png: disc_mask_png(256),
         candidate_count: 2,
         seed: Some(7),
+        output: None,
     }
 }
 
 fn full_job<P: Provider>(p: &P, model: &str) {
-    block_on(p.get_capabilities(model)).unwrap();
+    block_on(p.get_capabilities(model, Operation::EditMasked)).unwrap();
     block_on(p.estimate(&request(model))).unwrap();
     let mut rec: ProviderRecord = block_on(p.submit(&request(model))).unwrap();
     for _ in 0..3 {

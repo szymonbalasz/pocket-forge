@@ -60,7 +60,13 @@ fn check_controls_map(field: &str, c: &BTreeMap<String, Value>) -> CoreResult<()
 
 /// The model's capabilities through PRV; a model the provider doesn't know → `unknown_model`.
 pub fn capabilities(core: &Core, model_id: &str) -> CoreResult<Capabilities> {
-    provider_call(core, core.ctx.provider.get_capabilities(model_id.trim())).map_err(|e| {
+    provider_call(
+        core,
+        core.ctx
+            .provider
+            .get_capabilities(model_id.trim(), Operation::EditMasked),
+    )
+    .map_err(|e| {
         let p = &e.detail["provider"];
         if e.code == ErrorCode::Provider
             && p["code"] == "invalid_request"
@@ -255,6 +261,7 @@ impl PreparedJob {
             mask_png: self.images.mask_png.clone(),
             candidate_count: self.sent.candidate_count,
             seed: self.sent.seed,
+            output: None,
         }
     }
 }

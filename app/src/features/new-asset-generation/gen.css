@@ -1,0 +1,97 @@
+/* New-asset generation: the New image tab and the Generate new dialog (ui-guidelines tokens). */
+.gen-tab {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-3);
+}
+
+.gen-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--pf-space-2);
+}
+
+.gen-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gen-times {
+  padding-bottom: var(--pf-space-1);
+}
+
+.gen-sketch-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-1);
+}
+
+.gen-sketch-row {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  min-height: 28px;
+}
+
+.gen-sketch-row[data-disabled='true'] {
+  color: var(--pf-text-dim);
+}
+
+.gen-sketch-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gen-sketch-thumb {
+  width: 28px;
+  height: 28px;
+  object-fit: cover;
+  border-radius: var(--pf-radius);
+  background: var(--pf-bg-3);
+}
+
+.gen-radio {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--pf-border);
+  border-radius: 50%;
+  background: var(--pf-bg-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gen-radio[data-state='checked'] {
+  border-color: var(--pf-accent);
+}
+
+.gen-radio-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pf-accent);
+}
+
+.gen-add-form {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--pf-space-1);
+}
+
+.gen-confirm-summary {
+  margin: var(--pf-space-2) 0 0;
+  font-weight: 600;
+}
+
+.gen-new-dialog form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+  margin-top: var(--pf-space-2);
+}

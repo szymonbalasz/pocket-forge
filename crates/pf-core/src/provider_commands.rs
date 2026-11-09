@@ -292,6 +292,13 @@ pub struct ProviderGetCapabilities;
 #[serde(deny_unknown_fields)]
 pub struct GetCapabilitiesInput {
     pub model_id: String,
+    /// The operation the capabilities are for (GEN OQ-GEN-01); `edit_masked` when omitted.
+    #[serde(default = "edit_masked")]
+    pub operation: Operation,
+}
+
+fn edit_masked() -> Operation {
+    Operation::EditMasked
 }
 
 impl Validate for GetCapabilitiesInput {
@@ -312,7 +319,9 @@ impl Command for ProviderGetCapabilities {
     fn run(core: &Core, input: GetCapabilitiesInput) -> CoreResult<Capabilities> {
         provider_call(
             core,
-            core.ctx.provider.get_capabilities(input.model_id.trim()),
+            core.ctx
+                .provider
+                .get_capabilities(input.model_id.trim(), input.operation),
         )
     }
 }
@@ -596,5 +605,42 @@ mod tests {
         assert_eq!(bal["kind"], "known");
         core.dispatch("provider_test_connection", json!({}))
             .unwrap();
+    }
+
+    /// GEN FR-GEN-05/06 through the core commands: `generate` lists the two fake generate
+    /// models, and their capabilities carry `output_size` (no mask); omitting the operation
+    /// still means `edit_masked`.
+    #[test]
+    fn fr_gen_05_list_and_capabilities_take_the_generate_operation() {
+        let (_d, core, _events) = core_with(ProviderMode::Fake, Arc::new(MemoryStore::default()));
+        let list = core
+            .dispatch("provider_list_models", json!({"operation": "generate"}))
+            .unwrap();
+        let ids: Vec<_> = list["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["id"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(ids, ["fake-gen-wh", "fake-gen-aspect"]);
+        let caps = core
+            .dispatch(
+                "provider_get_capabilities",
+                json!({"model_id": "fake-gen-wh", "operation": "generate"}),
+            )
+            .unwrap();
+        assert_eq!(
+            caps["output_size"],
+            json!({"mode": "wh", "min": 64, "max": 2048, "step": 16})
+        );
+        assert_eq!(caps["structure"], json!({"slot": "refs"}));
+        assert!(caps["mask"].is_null());
+        let err = core
+            .dispatch(
+                "provider_get_capabilities",
+                json!({"model_id": "fake-gen-wh"}),
+            )
+            .unwrap_err();
+        assert_eq!(err.detail["provider"]["field"], "model_id");
     }
 }
