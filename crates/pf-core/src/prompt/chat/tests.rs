@@ -142,6 +142,23 @@ fn fr_prm_20_nothing_starts_before_consent() {
     assert!(s.get("consent").is_none());
 }
 
+#[test]
+fn fr_prm_23_a_published_input_is_capped() {
+    let lab = lab();
+    let at_cap = |extra: usize| {
+        // `{"final_prompt":"…"}` is 19 bytes around the text.
+        let text = "a".repeat(super::MAX_PUBLISHED_INPUT_BYTES - 19 + extra);
+        lab.core.dispatch(
+            "prm_context_publish",
+            json!({"project_id": pid(&lab), "host": "rgn", "input": {"final_prompt": text}}),
+        )
+    };
+    at_cap(0).unwrap();
+    let e = at_cap(1).unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidInput);
+    assert!(e.to_string().contains("256 KiB"), "{e}");
+}
+
 /// A `claude_path` that is absolute on this platform (R96).
 const CC_EXE: &str = if cfg!(windows) {
     r"C:\cc\claude.exe"

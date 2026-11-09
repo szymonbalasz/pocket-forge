@@ -684,12 +684,39 @@ pub struct PublishInput {
     pub input: Value,
 }
 
+/// R96: the largest published input, as JSON bytes. A draft input is a few KiB; the cap keeps
+/// a misbehaving window from parking megabytes in memory until the next send.
+pub const MAX_PUBLISHED_INPUT_BYTES: usize = 256 * 1024;
+
+/// Counts the bytes written, to size a value's JSON without building it.
+struct ByteCount(usize);
+
+impl std::io::Write for ByteCount {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0 += buf.len();
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 impl Validate for PublishInput {
     fn validate(&self) -> CoreResult<()> {
         if !self.input.is_object() {
             return Err(CoreError::invalid(
                 "input",
                 "the published input is an object",
+            ));
+        }
+        let mut n = ByteCount(0);
+        if serde_json::to_writer(&mut n, &self.input).is_err() || n.0 > MAX_PUBLISHED_INPUT_BYTES {
+            return Err(CoreError::invalid(
+                "input",
+                format!(
+                    "the published input is at most {} KiB",
+                    MAX_PUBLISHED_INPUT_BYTES / 1024
+                ),
             ));
         }
         Ok(())
