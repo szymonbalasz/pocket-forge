@@ -23,6 +23,7 @@ import {
   type ControlState,
   type JobDraft,
   type JobEstimate,
+  type PromptRetryBadges,
   type RgnIteration,
   type RgnPreview,
   type Spend,
@@ -109,6 +110,10 @@ export interface RgnState {
   blendInstruction: boolean;
   /** #55: what this project appends (the Settings text + kind sentence); null until loaded. */
   blendText: string | null;
+  /** PRM's helper ticks (FR-PRM-05, in the draft); null = the defaults. */
+  promptHelpers: string[] | null;
+  /** FR-PRM-10: the prompt block's badges after a Retry; null = none. */
+  promptRetry: PromptRetryBadges | null;
   fit: RegionFit | null;
   fitError: UiError | null;
   estimate: {
@@ -174,6 +179,8 @@ const initial: RgnState = {
   maskPainted: null,
   blendInstruction: true,
   blendText: null,
+  promptHelpers: null,
+  promptRetry: null,
   fit: null,
   fitError: null,
   estimate: { status: 'idle', result: null, error: null, signature: null },
@@ -264,15 +271,11 @@ export const MASK_HINT = 'Paint a mask inside the region to choose what changes.
 export const maskUnpainted = (s: RgnState): boolean =>
   s.maskPainted === false || (!s.maskId && s.maskPainted !== true);
 
-/** #55: the prompt as the core will send it (same rule as pf-core `instruction::compose`). */
-export function finalPrompt(s: RgnState): string {
+/** #55 / FR-PRM-06: the blend instruction as the core appends it (the prompt block's preview
+ *  input); null while the toggle is off or the text is blank or not loaded. */
+export function blendForPreview(s: RgnState): string | null {
   const text = s.blendText?.trim() ?? '';
-  if (!s.blendInstruction || !text) return s.prompt;
-  const suffix = `
-
-${text}`;
-  if (s.prompt.endsWith(suffix)) return s.prompt;
-  return s.prompt ? s.prompt + suffix : text;
+  return s.blendInstruction && text ? text : null;
 }
 
 /** Walk owner-UX L2: why Generate is disabled while the project folder is moved (§11). */
@@ -315,6 +318,7 @@ export function currentDraft(s: RgnState): JobDraft | null {
     seed: s.seedMode === 'pinned' ? s.seed : null,
     references: referencesForSend(), // REF's selection (FR-RGN-41)
     blend_instruction: s.blendInstruction, // #55
+    prompt_helpers: s.promptHelpers, // FR-PRM-05
   };
 }
 
@@ -379,6 +383,7 @@ function putDraft(mask?: { mask_id: string | null }): void {
       region: s.inner ? { inner: s.inner, margin: s.margin } : null,
       ...referencesDraft(), // REF's selection (FR-REF-20)
       blend_instruction: s.blendInstruction, // #55
+      prompt_helpers: s.promptHelpers, // FR-PRM-05
       // No region, no mask (FR-EDT-20): the draft must not keep the removed region's mask.
       ...(mask ?? (s.inner ? {} : { mask_id: null })),
     })
@@ -514,6 +519,8 @@ function applyRestoredDraft(d: ProjectSnapshot['draft'], why: 'restore' | 'kept'
     seedMode: d?.seed !== null && d?.seed !== undefined ? 'pinned' : 'random',
     seed: d?.seed ?? null,
     blendInstruction: d?.blend_instruction !== false,
+    promptHelpers: d?.prompt_helpers ?? null,
+    promptRetry: null,
   });
   const model = d?.model_id ?? state.modelId;
   let loaded = Promise.resolve();
@@ -877,6 +884,8 @@ export const rgn = {
       seedMode: d?.seed !== null && d?.seed !== undefined ? 'pinned' : 'random',
       seed: d?.seed ?? null,
       blendInstruction: d?.blend_instruction !== false,
+      promptHelpers: d?.prompt_helpers ?? null,
+      promptRetry: null,
       margin: region?.margin ?? DEFAULT_MARGIN,
       maskId: d?.mask_id ?? null,
       modelId: d?.model_id ?? null,
@@ -970,6 +979,13 @@ export const rgn = {
     }
   },
 
+  /** FR-PRM-05: a helper tick change (always the explicit list); saved with the draft, not on
+   *  the undo stack, never re-estimates (FR-PRM-08). */
+  setPromptHelpers(ids: string[]): void {
+    set({ promptHelpers: ids });
+    saveDraftSoon();
+  },
+
   setPrompt(prompt: string): void {
     set({ prompt });
     saveDraftSoon();
@@ -1060,6 +1076,7 @@ export const rgn = {
         selectedJobId: job_id,
         selectedCandidateId: null,
         preview: null,
+        promptRetry: null, // FR-PRM-10: the badges were about the retried job
         live: {
           ...cur.live,
           [job_id]: cur.live[job_id] ?? {
@@ -1125,6 +1142,9 @@ export const rgn = {
         seedMode: d.seed === null ? 'random' : 'pinned',
         seed: d.seed,
         blendInstruction: d.blend_instruction !== false,
+        // FR-PRM-10: the job's helpers ticked again, changed / missing ones badged.
+        promptHelpers: d.prompt_helpers ?? null,
+        promptRetry: d.prompt_retry ?? null,
         margin: d.region.margin,
         inner: d.region.inner,
         maskId: d.mask_id,

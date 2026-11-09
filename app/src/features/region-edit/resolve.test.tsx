@@ -52,7 +52,7 @@ async function openWithConflictOnSave(keptPrompt: string, failSave = true): Prom
 
 test('FR-PRJ-36 Keep other: the panel shows the kept prompt and a seed toggle saves it, not ours (walk 2 N1)', async () => {
   await openWithConflictOnSave('theirs');
-  fireEvent.change(screen.getByTestId('rgn-panel-prompt'), { target: { value: 'ours, unsaved' } });
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'ours, unsaved' } });
   await waitFor(() => expect(projectStore.get().save).toMatchObject({ code: 'conflict' }), {
     timeout: DRAFT_SAVE_MS + 2000,
   });
@@ -62,7 +62,7 @@ test('FR-PRJ-36 Keep other: the panel shows the kept prompt and a seed toggle sa
     await projectStore.resolved('other');
   });
   await waitFor(() =>
-    expect((screen.getByTestId('rgn-panel-prompt') as HTMLTextAreaElement).value).toBe('theirs'),
+    expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).value).toBe('theirs'),
   );
   expect(rgn.get().seed).toBe(7);
   expect(projectStore.get().save.kind).toBe('saved');
@@ -78,7 +78,7 @@ test('FR-PRJ-36 Keep other: the panel shows the kept prompt and a seed toggle sa
 
 test('FR-PRJ-36 a draft save still waiting at the resolve is dropped, not written over the kept version', async () => {
   await openWithConflictOnSave('theirs');
-  fireEvent.change(screen.getByTestId('rgn-panel-prompt'), { target: { value: 'typed just now' } });
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'typed just now' } });
   // Resolved before the debounced save fires.
   await act(async () => {
     await api.project.resolveConflict('other');
@@ -86,17 +86,17 @@ test('FR-PRJ-36 a draft save still waiting at the resolve is dropped, not writte
   });
   await new Promise((r) => setTimeout(r, DRAFT_SAVE_MS + 200));
   expect(fake.callsOf('project_put_draft')).toHaveLength(0);
-  expect((screen.getByTestId('rgn-panel-prompt') as HTMLTextAreaElement).value).toBe('theirs');
+  expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).value).toBe('theirs');
 }, 15_000);
 
 test('FR-PRJ-36 Keep this: the panel keeps this machine’s text and its waiting save goes through', async () => {
   await openWithConflictOnSave('this machine, saved by the resolve', false);
-  fireEvent.change(screen.getByTestId('rgn-panel-prompt'), { target: { value: 'typed just now' } });
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'typed just now' } });
   await act(async () => {
     await api.project.resolveConflict('this');
     await projectStore.resolved('this');
   });
-  expect((screen.getByTestId('rgn-panel-prompt') as HTMLTextAreaElement).value).toBe(
+  expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).value).toBe(
     'typed just now',
   );
   await waitFor(() => expect(fake.callsOf('project_put_draft')).toHaveLength(1), {

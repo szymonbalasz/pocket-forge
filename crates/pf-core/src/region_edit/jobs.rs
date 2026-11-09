@@ -12,7 +12,6 @@ use ulid::Ulid;
 
 use super::commands::{DraftRegion, JobDraft, prepare_job};
 use super::fit::RectIn;
-use super::instruction;
 use super::runner::{self, commit_job_update, emit_spend, emit_state, provider_raw};
 use super::spend::{self, Confirmations, Need};
 use super::spool::SpoolUpdate;
@@ -22,6 +21,7 @@ use crate::job::{JobFile, JobState};
 use crate::manifest::{CandidateStatus, Extra};
 use crate::project::OpenProject;
 use crate::project::store::{self, NewJob, ResolveReason};
+use crate::prompt;
 use crate::references::{self, prepare::JobReference};
 
 /// A job blocks the next submit until it's `fetched` or terminal (#40).
@@ -145,9 +145,9 @@ impl Command for RgnJobSubmit {
             .sent
             .seed
             .or_else(|| prepared.caps.seed.then(|| random_seed(core)));
-        // #55: the prompt as sent; the estimate (cost) never depends on it.
-        let final_prompt =
-            instruction::sent_prompt(core, &draft.final_prompt, draft.blend_instruction);
+        // FR-RGN-09 / FR-PRM-06: the prompt as sent (typed + helpers + blend instruction); the
+        // estimate (cost) never depends on it.
+        let final_prompt = prepared.prompt.text.clone();
         let mut request = prepared.request(&draft.model_id, &final_prompt);
         request.seed = seed;
         let fit = prepared.fit;
@@ -165,6 +165,8 @@ impl Command for RgnJobSubmit {
         // #55: whether the instruction was appended, and the prompt as typed (Retry, names).
         extra.insert("blend_instruction".into(), json!(draft.blend_instruction));
         extra.insert("typed_prompt".into(), json!(draft.final_prompt));
+        // FR-PRM-09: the helpers actually sent, in this `requested` commit (write-once).
+        prompt::record_on_job(&mut extra, &prepared.prompt.sent);
         let new = NewJob {
             operation: crate::job::OPERATION_EDIT.into(),
             model_id: draft.model_id.trim().to_owned(),
@@ -430,13 +432,25 @@ fn draft_region(job: &JobFile) -> CoreResult<DraftRegion> {
     Ok(DraftRegion { inner, margin })
 }
 
+/// `rgn_job_retry_draft` output: the job's draft (its `prompt_helpers` = the job's helper ids,
+/// FR-PRM-10) and the prompt block's Retry badges.
+#[derive(Debug, Clone, Serialize)]
+pub struct RetryDraftOutput {
+    #[serde(flatten)]
+    pub draft: JobDraft,
+    /// FR-PRM-10: helpers changed since the job or missing now; absent = nothing to badge (so a
+    /// plain retry draft can be submitted as is).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_retry: Option<prompt::PromptRetry>,
+}
+
 impl Command for RgnJobRetryDraft {
     const NAME: &'static str = "rgn_job_retry_draft";
     type Input = JobIdInput;
-    type Output = JobDraft;
+    type Output = RetryDraftOutput;
 
-    fn run(core: &Core, input: JobIdInput) -> CoreResult<JobDraft> {
-        let (job, mask_id, dir, settings) = {
+    fn run(core: &Core, input: JobIdInput) -> CoreResult<RetryDraftOutput> {
+        let (job, mask_id, dir, settings, kind) = {
             let state = core.state();
             let (_, _, job) = find_job(&state, input.job_id)?;
             let p = state.project.as_ref().ok_or_else(no_project)?;
@@ -449,11 +463,24 @@ impl Command for RgnJobRetryDraft {
                         "the job's mask is gone; paint the mask again",
                     )
                 })?;
-            (job, mask_id, p.dir.clone(), state.settings.clone())
+            (
+                job,
+                mask_id,
+                p.dir.clone(),
+                state.settings.clone(),
+                p.manifest.kind,
+            )
         };
         let pinned = job.extra.get("seed_pinned").and_then(Value::as_bool) == Some(true);
         let references = retry_references(core, &job, &dir, &settings);
-        Ok(JobDraft {
+        // FR-PRM-10: the job's helpers, ticked; changed ones badged, gone ones listed as missing.
+        let ticks = prompt::retry_ticks(
+            kind,
+            &job.prompt_helpers(),
+            &prompt::helpers::effective(&settings),
+        );
+        let prompt_retry = ticks.badges(&iteration_label(&job));
+        let draft = JobDraft {
             region: draft_region(&job)?,
             mask_id,
             model_id: job.model_id.clone(),
@@ -468,7 +495,21 @@ impl Command for RgnJobRetryDraft {
             // #55: as the job had it; a job from before #55 sent no instruction.
             blend_instruction: job.extra.get("blend_instruction").and_then(Value::as_bool)
                 == Some(true),
+            prompt_helpers: Some(ticks.ticks),
+        };
+        Ok(RetryDraftOutput {
+            draft,
+            prompt_retry,
         })
+    }
+}
+
+/// The job's iteration as `NNN` (Retry badges, FR-RGN-44 / FR-PRM-10), or "the job" before it
+/// has one.
+fn iteration_label(job: &JobFile) -> String {
+    match &job.iteration {
+        Some(it) => format!("{:03}", it.n),
+        None => "the job".to_owned(),
     }
 }
 
@@ -507,10 +548,7 @@ pub(crate) fn retry_references(
     let has_slots = job.capability_snapshot["slots"]
         .as_array()
         .is_some_and(|s| !s.is_empty());
-    let label = match &job.iteration {
-        Some(it) => format!("{:03}", it.n),
-        None => "the job".to_owned(),
-    };
+    let label = iteration_label(job);
     references::retry::retry_references(
         &core.ctx,
         settings,

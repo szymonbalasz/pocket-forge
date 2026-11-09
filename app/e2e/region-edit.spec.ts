@@ -30,7 +30,7 @@ test('FR-RGN-27 region → controls → prompt → estimate → confirm → prog
   await expect(
     page.locator('[data-testid="rgn-control-input"][data-record-id="style"]'),
   ).toHaveAttribute('data-required', 'true');
-  await page.getByTestId('rgn-panel-prompt').fill('Turn this room into a kitchen');
+  await page.getByTestId('prm-block-prompt').fill('Turn this room into a kitchen');
   await expect(page.getByTestId('rgn-panel-submit-reason')).toHaveText('Required: style.');
   await choose(page, 'style', 'ink');
 
@@ -85,7 +85,7 @@ test('FR-RGN-21 R62 Retry is offered on the newest job once it is closed by an a
 }) => {
   await openRgn(page);
   await drawMaskedRegion(page, [400, 500], [800, 900]);
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await page.getByTestId('rgn-panel-submit').click();
   await page.getByTestId('rgn-confirm-ok').click();
@@ -97,7 +97,7 @@ test('FR-RGN-21 R62 Retry is offered on the newest job once it is closed by an a
   await expect(item).toHaveAttribute('data-state', 'closed');
   await item.getByTestId('rgn-job-retry').click();
   await expect.poll(async () => (await inputsOf(page, 'rgn_job_retry_draft')).length).toBe(1);
-  await expect(page.getByTestId('rgn-panel-prompt')).toHaveValue('A stone well');
+  await expect(page.getByTestId('prm-block-prompt')).toHaveValue('A stone well');
 });
 
 test('FR-RGN-28 a job closed by the next submit shows Closed on its chip (walk D6)', async ({
@@ -105,7 +105,7 @@ test('FR-RGN-28 a job closed by the next submit shows Closed on its chip (walk D
 }) => {
   await openRgn(page);
   await drawMaskedRegion(page, [400, 500], [800, 900]);
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await page.getByTestId('rgn-panel-submit').click();
   await page.getByTestId('rgn-confirm-ok').click();
@@ -125,7 +125,7 @@ test('FR-RGN-24 a candidate in another aspect shows the warning badge in the pic
 }) => {
   await openRgn(page);
   await drawMaskedRegion(page, [400, 500], [800, 900]);
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await page.getByTestId('rgn-panel-submit').click();
   await page.getByTestId('rgn-confirm-ok').click();
@@ -142,7 +142,7 @@ test('FR-RGN-14 over-cap dialog: spend, estimate and cap; an explicit raise, the
 }) => {
   await openRgn(page, { spend: { cap: 1, threshold: 10 } });
   await drawMaskedRegion(page, [400, 500], [800, 900]);
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await page.getByTestId('rgn-panel-submit').click();
   const dlg = page.getByTestId('rgn-confirm');
@@ -162,7 +162,7 @@ test('FR-RGN-14 over-cap dialog: spend, estimate and cap; an explicit raise, the
 test('FR-RGN-15 above the threshold Enter never confirms', async ({ page }) => {
   await openRgn(page, { spend: { cap: 100, threshold: 1 } });
   await drawMaskedRegion(page, [400, 500], [800, 900]);
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await page.getByTestId('rgn-panel-submit').click();
   const dlg = page.getByTestId('rgn-confirm');
@@ -180,7 +180,7 @@ test('FR-RGN-15 above the threshold Enter never confirms', async ({ page }) => {
 test('FR-RGN-19 cancel a running job', async ({ page }) => {
   await openRgn(page);
   await drawMaskedRegion(page, [400, 500], [800, 900]);
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await page.getByTestId('rgn-panel-submit').click();
   await page.getByTestId('rgn-confirm-ok').click();

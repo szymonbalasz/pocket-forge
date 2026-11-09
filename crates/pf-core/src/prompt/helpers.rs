@@ -353,6 +353,17 @@ pub fn load_warning(settings: &Settings) -> Option<SettingsWarning> {
     })
 }
 
+/// A draft's ticks (FR-PRM-05) at a command boundary: at most [`MAX_HELPERS`] ids, each 1–100
+/// bytes. Unknown ids are allowed (a deleted helper is simply not sent, FR-PRM-06).
+pub fn check_ticks(field: &str, ticks: Option<&[String]>) -> CoreResult<()> {
+    if let Some(t) = ticks
+        && (t.len() > MAX_HELPERS || t.iter().any(|id| id.is_empty() || id.len() > 100))
+    {
+        return Err(CoreError::invalid(field, "not a list of prompt helper ids"));
+    }
+    Ok(())
+}
+
 /// The ticked helpers: the draft's explicit list, or (`None`) the defaults: every helper shown
 /// for this kind with `default_on` (FR-PRM-05).
 pub fn ticked_ids(kind: Kind, ticks: Option<&[String]>, helpers: &[Helper]) -> Vec<String> {
@@ -377,6 +388,27 @@ pub struct RetryTicks {
     /// Recorded helpers that can't be sent any more (deleted, hidden, or no longer for this
     /// kind): listed, unticked, not sent.
     pub missing: Vec<super::SentHelper>,
+}
+
+/// FR-PRM-10: what the prompt block badges after a Retry (RGN `rgn_job_retry_draft`, GEN
+/// `gen_job_retry_draft`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PromptRetry {
+    /// The job's iteration `NNN` (`changed since NNN`), or "the job" before it has one.
+    pub since: String,
+    pub changed: Vec<String>,
+    pub missing: Vec<super::SentHelper>,
+}
+
+impl RetryTicks {
+    /// The badges for the prompt block; `None` when nothing changed and nothing is missing.
+    pub fn badges(&self, since: &str) -> Option<PromptRetry> {
+        (!self.changed.is_empty() || !self.missing.is_empty()).then(|| PromptRetry {
+            since: since.to_owned(),
+            changed: self.changed.clone(),
+            missing: self.missing.clone(),
+        })
+    }
 }
 
 /// FR-PRM-10: the ticks a Retry sets from the job's recorded helpers.
