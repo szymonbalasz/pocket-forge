@@ -121,14 +121,23 @@ pub const CHAT_MAX_BYTES: usize = 4 * 1024 * 1024;
 
 /// FR-PRM-25: an image as a context image: decoded (alpha over the flatten colour, FR-GEN-12),
 /// downscaled with Lanczos3 to a long side ≤ 1568 px, encoded as JPEG q85. Returns the JPEG and
-/// its size.
+/// its size. The decode is limited to the app's largest image side (`pf_imaging::MAX_SIDE`)
+/// as well as the image crate's default allocation cap (R96).
 pub fn chat_jpeg(bytes: &[u8]) -> CoreResult<(Vec<u8>, u32, u32)> {
-    let img = image::load_from_memory(bytes).map_err(|e| {
+    let corrupt = |e: &dyn std::fmt::Display| {
         crate::error::CoreError::new(
             crate::error::ErrorCode::Corrupt,
             format!("the image won't decode: {e}"),
         )
-    })?;
+    };
+    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| corrupt(&e))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(pf_imaging::MAX_SIDE);
+    limits.max_image_height = Some(pf_imaging::MAX_SIDE);
+    reader.limits(limits);
+    let img = reader.decode().map_err(|e| corrupt(&e))?;
     chat_jpeg_rgb(pf_imaging::to_rgb8_flattened(img))
 }
 
@@ -176,4 +185,28 @@ pub fn dropped_fact(dropped: &[ChatImage]) -> Option<String> {
         let names: Vec<&str> = dropped.iter().map(|i| i.label.as_str()).collect();
         format!("not sent (turn limit): {}", names.join(", "))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn png(w: u32, h: u32) -> Vec<u8> {
+        let mut out = Vec::new();
+        image::RgbImage::new(w, h)
+            .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
+        out
+    }
+
+    #[test]
+    fn fr_prm_25_chat_jpeg_refuses_an_image_over_the_max_side() {
+        let side = pf_imaging::MAX_SIDE;
+        let (_, w, h) = chat_jpeg(&png(side, 1)).unwrap();
+        assert_eq!((w, h), (CHAT_IMAGE_MAX_SIDE, 1));
+        for (w, h) in [(side + 1, 1), (1, side + 1)] {
+            let e = chat_jpeg(&png(w, h)).unwrap_err();
+            assert_eq!(e.code, crate::error::ErrorCode::Corrupt, "{w}x{h}");
+        }
+    }
 }
