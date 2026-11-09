@@ -69,6 +69,47 @@ fn fr_prj_32_purge_after_30_days_keeps_starred_and_accepted() {
 }
 
 #[test]
+fn fr_prj_32_r102_a_file_that_fails_to_purge_stays_in_its_trash_item() {
+    let mut s = setup();
+    let (job, c) = s.fetched("moss", 2);
+    s.dismiss_and_discard(job.id);
+    let item =
+        s.p.manifest
+            .trash
+            .iter()
+            .find(|t| t.kind == TrashKind::Candidates)
+            .unwrap()
+            .clone();
+    // c[1]'s trashed file can't be removed (a lock; here a folder in its place).
+    let stuck = s.dir.join(item.trashed_path(&s.cand(c[1].id).file));
+    std::fs::remove_file(&stuck).unwrap();
+    std::fs::create_dir_all(&stuck).unwrap();
+    std::fs::write(stuck.join("x"), b"x").unwrap();
+    set_now(&mut s.e.ctx, T0 + 31 * DAY_MS);
+    let out = purge_expired(&s.e.ctx, s.e.install(), &mut s.p).unwrap();
+    assert_eq!(out.count, 1, "only the job inputs item is gone");
+    let left = s.p.manifest.trash.iter().find(|t| t.id == item.id).unwrap();
+    assert_eq!(
+        left.files,
+        [s.cand(c[1].id).file],
+        "still indexed, retried next open"
+    );
+    assert_eq!(s.cand(c[0].id).purged_at, Some(Timestamp(T0 + 31 * DAY_MS)));
+    assert_eq!(s.cand(c[1].id).purged_at, None, "its file wasn't deleted");
+    // Unlocked: the next purge finishes it.
+    std::fs::remove_dir_all(&stuck).unwrap();
+    std::fs::write(&stuck, b"x").unwrap();
+    assert_eq!(
+        purge_expired(&s.e.ctx, s.e.install(), &mut s.p)
+            .unwrap()
+            .count,
+        1
+    );
+    assert!(s.p.manifest.trash.is_empty());
+    assert!(s.cand(c[1].id).purged_at.is_some());
+}
+
+#[test]
 fn fr_prj_32_purge_date_math_and_next_purge() {
     let mut s = setup();
     assert_eq!(disk_usage(&s.p).next_purge, None);

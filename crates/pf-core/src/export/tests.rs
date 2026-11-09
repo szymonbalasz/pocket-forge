@@ -495,6 +495,56 @@ fn fr_exp_25_fr_prj_21_settings_a_lock_keeps_from_saving_make_close_ask() {
 }
 
 #[test]
+fn fr_prj_21_opening_another_project_never_drops_the_open_ones_waiting_save() {
+    let mut t = setup();
+    let src = t.dir.path().join("Harbour.png");
+    std::fs::write(&src, png_of(&map_image(32, 24))).unwrap();
+    let out = t
+        .core
+        .dispatch(
+            "project_create",
+            json!({"section": "maps", "paths": [src.to_string_lossy()]}),
+        )
+        .unwrap();
+    let other = out["items"][0]["path"].as_str().unwrap().to_owned();
+    let open_other = |t: &T| t.core.dispatch("project_open", json!({"path": other}));
+    let crypt = t.core.state().project.as_ref().unwrap().manifest.project_id;
+    Arc::get_mut(&mut t.core.ctx).unwrap().faults =
+        Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap();
+    // A draft save that hit the lock waits in memory; so do EXP's settings.
+    let err = t
+        .core
+        .dispatch(
+            "project_put_draft",
+            json!({"draft": {"final_prompt": "moss"}}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Locked);
+    for _ in 0..2 {
+        let err = open_other(&t).unwrap_err();
+        assert_eq!(err.code, ErrorCode::Unsaved);
+        assert_eq!(err.detail["reason"], "locked");
+        let open = t.core.state().project.as_ref().unwrap().manifest.project_id;
+        assert_eq!(open, crypt, "the waiting project stays open");
+        t.core
+            .dispatch(
+                "export_set_settings",
+                json!({"settings": settings(Some(16.0), Some(8), "jpeg")}),
+            )
+            .unwrap();
+    }
+    // Unlocked: the last try saves both, and the open goes ahead.
+    Arc::get_mut(&mut t.core.ctx).unwrap().faults = Faults::none();
+    open_other(&t).unwrap();
+    let back = t
+        .core
+        .dispatch("project_open", json!({"path": t.project}))
+        .unwrap();
+    assert_eq!(back["draft"]["final_prompt"], "moss");
+    assert_eq!(t.manifest_export()["format"], "jpeg");
+}
+
+#[test]
 fn fr_exp_26_settings_changed_fires_when_source_or_target_change() {
     let t = setup();
     let got = t.core.dispatch("export_get_settings", json!({})).unwrap();

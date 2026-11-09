@@ -311,6 +311,13 @@ pub fn serve(served: &Mutex<Served>, path: &str) -> SchemeResponse {
                 None => SchemeResponse::status(404),
                 Some((_, _, false)) => SchemeResponse::status(425),
                 Some((file, spec, true)) => match std::fs::read(&file) {
+                    // R105: a tile left empty by a power cut (tiles aren't fsynced) is a failed
+                    // fetch, so FR-EDT-12's retries and Rebuild badge follow. A corrupt one fails
+                    // the UI's decode, which takes the same path.
+                    Ok(body) if body.is_empty() => {
+                        tracing::warn!(key, level, col, row, "pf-tiles: tile empty");
+                        SchemeResponse::status(404)
+                    }
                     Ok(body) => images::ok(spec.mime(), body),
                     Err(e) => {
                         tracing::warn!(key, level, col, row, error = %e, "pf-tiles: tile unreadable");
@@ -577,9 +584,37 @@ fn dir_size(dir: &Path) -> u64 {
         .sum()
 }
 
+/// Caches of other builder versions (`cache/tiles/v1/` after the bump to v2) are never served
+/// and sit outside the cap, so they are deleted whole (review #17, R5). Only next to a
+/// [`cache_root`]: `root` must be `…/tiles/v<BUILDER_VERSION>`.
+fn remove_old_builders(root: &Path) {
+    let current = format!("v{BUILDER_VERSION}");
+    let Some(tiles) = root
+        .parent()
+        .filter(|_| root.file_name().is_some_and(|n| n == current.as_str()))
+        .filter(|p| p.file_name().is_some_and(|n| n == "tiles"))
+    else {
+        return;
+    };
+    for e in std::fs::read_dir(tiles).into_iter().flatten().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let old_builder = name != current
+            && name
+                .strip_prefix('v')
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()));
+        if old_builder
+            && e.file_type().is_ok_and(|t| t.is_dir())
+            && let Err(err) = std::fs::remove_dir_all(e.path())
+        {
+            tracing::warn!(dir = name, error = %err, "tile cache: could not remove an old builder's cache");
+        }
+    }
+}
+
 /// FR-EDT-11: while the cache is over `cap`, deletes the least recently opened entries that
-/// aren't in use. Returns the keys removed.
+/// aren't in use. Returns the keys removed. Old builders' caches go first, whole.
 pub fn evict(root: &Path, cap: u64, in_use: &HashSet<String>) -> Vec<String> {
+    remove_old_builders(root);
     let Ok(rd) = std::fs::read_dir(root) else {
         return vec![];
     };
