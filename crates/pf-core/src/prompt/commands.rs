@@ -310,12 +310,14 @@ impl Command for PrmComposePreview {
 
     fn run(core: &Core, input: ComposePreviewInput) -> CoreResult<ComposePreviewOutput> {
         let list = helpers::effective(&core.state().settings);
+        let blend = input.blend_instruction.as_deref();
         let f = compose(
             input.kind,
-            &input.typed_prompt,
+            // R81 / FR-PRM-08: a pasted trailing instruction is stripped as the send does.
+            crate::region_edit::instruction::without_instruction(&input.typed_prompt, blend),
             input.helper_ids.as_deref(),
             &list,
-            input.blend_instruction.as_deref(),
+            blend,
         );
         Ok(ComposePreviewOutput {
             chars: f.text.chars().count(),

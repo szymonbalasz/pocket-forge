@@ -255,7 +255,7 @@ function NewButton({
         onOpenChange={setNaming}
         onCreated={(path) => {
           void libraryStore.refresh();
-          void projectStore.open(path);
+          return projectStore.open(path);
         }}
       />
       <Popover.Portal>

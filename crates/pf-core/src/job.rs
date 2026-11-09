@@ -149,6 +149,11 @@ pub struct JobFile {
     /// The draft mask the job was built from.
     #[serde(default)]
     pub mask_id: Option<Ulid>,
+    /// The bottom image's layer id (`layers[0]`, the original or a picked base image) a region
+    /// edit job was built on (R97). Accept refuses a candidate made on another base image.
+    /// Absent: a `generate` job, or a job from before R97 (not checked).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_layer_id: Option<Ulid>,
     /// `null` for a `generate` job, which sends no input files (FR-GEN-22, schema §4.6).
     /// Absent (a job from before GEN) = the default names.
     #[serde(default = "default_inputs")]

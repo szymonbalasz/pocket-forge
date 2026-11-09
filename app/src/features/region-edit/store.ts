@@ -29,7 +29,12 @@ import {
   type Spend,
 } from '../../api';
 import { generateTab, NEW_IMAGE_TAB, REGION_TAB } from '../../shared/generateTabs';
-import { folderMoved, isFolderMovedError, projectStore } from '../../store/project';
+import {
+  folderMoved,
+  isFolderMovedError,
+  projectStore,
+  type CloseGuard,
+} from '../../store/project';
 import { refreshProviderStatus } from '../provider';
 import {
   editorBridge,
@@ -390,10 +395,11 @@ async function runEstimate(sig: string): Promise<void> {
 
 /** Writes the panel's draft now. `mask_id` absent keeps the draft's mask (EDT owns it, R55);
  *  without a region it is cleared. */
-function putDraft(mask?: { mask_id: string | null }): void {
+function putDraft(mask?: { mask_id: string | null }): Promise<void> {
   const s = state;
-  if (!s.projectId || s.readOnly) return;
-  api.project
+  if (!s.projectId || s.readOnly) return Promise.resolve();
+  // A failed write shows in the save segment (walk D3); the next change saves again.
+  return api.project
     .putDraft({
       final_prompt: s.prompt,
       model_id: s.modelId,
@@ -406,9 +412,19 @@ function putDraft(mask?: { mask_id: string | null }): void {
       // No region, no mask (FR-EDT-20): the draft must not keep the removed region's mask.
       ...(mask ?? (s.inner ? {} : { mask_id: null })),
     })
-    // Shown in the save segment (walk D3); the next change saves again.
+    .then(() => undefined)
     .catch((e) => projectStore.draftSaveFailed(e));
 }
+
+/** FR-PRJ-19 "…and on close" (R97): a save still waiting is written before the project closes
+ *  or another one opens (PRJ's close guard); a failed write still lets it close. */
+const flushOnClose: CloseGuard = (proceed) => {
+  if (!draftTimer) return true;
+  clearTimeout(draftTimer);
+  draftTimer = null;
+  void putDraft().then(proceed);
+  return false;
+};
 
 function saveDraftSoon(): void {
   if (draftTimer) clearTimeout(draftTimer);
@@ -788,9 +804,25 @@ export const PATCHES_KEPT = (n: number): string =>
     ? '1 patch layer kept in history (undo restores it).'
     : `${n} patch layers kept in history (undo restores them).`;
 
+/** Picks run one at a time (FR-GEN-29): each takes its undo parent after the one before it
+ *  refreshed the head, so a quick second pick never skips the first in the undo stack. */
+let picking: Promise<void> = Promise.resolve();
+
 /** FR-GEN-27/28/30: picks a generate candidate as the new bottom image (one revision, undoable),
  *  from any generate iteration (no spend). */
-async function pickNewImage(jobId: string, candidateId: string): Promise<void> {
+function pickNewImage(jobId: string, candidateId: string): Promise<void> {
+  const pid = state.projectId;
+  const run = picking.then(() => pickNow(pid, jobId, candidateId));
+  picking = run.catch(() => undefined);
+  return run;
+}
+
+async function pickNow(pid: string | null, jobId: string, candidateId: string): Promise<void> {
+  if (!pid || state.projectId !== pid) return;
+  // Enter twice on one candidate: it is the base image already (no second revision).
+  const layers = state.layers as (Layer & { candidate_id?: string })[];
+  if (layers.length === 1 && layers[0]?.kind === 'base' && layers[0].candidate_id === candidateId)
+    return;
   const parent = state.headRevision;
   try {
     const r = await api.gen.pick(jobId, candidateId);
@@ -914,7 +946,9 @@ function subscribe(): void {
   };
   syncMoved();
   const offProject = projectStore.subscribe(syncMoved);
+  const offGuard = projectStore.addCloseGuard(flushOnClose);
   unsubscribe = () => {
+    offGuard();
     offProject();
     subs.forEach(
       (p) =>
@@ -1224,8 +1258,11 @@ export const rgn = {
       return;
     }
     generateTab.select(REGION_TAB);
+    const pid = state.projectId;
     try {
       const d = await api.region.retryDraft(jobId);
+      // Another project opened meanwhile: this job's draft is not its draft (FR-GEN-19).
+      if (state.projectId !== pid) return;
       set({
         prompt: d.final_prompt,
         seedMode: d.seed === null ? 'random' : 'pinned',
@@ -1247,8 +1284,9 @@ export const rgn = {
       // FR-RGN-44: the job's references, with changed / missing flags (REF resets its block).
       restoreReferences(d.references ?? null);
       await selectModel(d.model_id, d.controls);
-      saveDraftSoon();
+      if (state.projectId === pid) saveDraftSoon();
     } catch (e) {
+      if (state.projectId !== pid) return;
       const err = uiError(e);
       set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
     }
