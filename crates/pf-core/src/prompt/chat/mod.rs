@@ -19,6 +19,7 @@ mod tests;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
+use std::time::{Duration, Instant};
 
 use pf_chat::backend::{
     BackendMode, CancelHandle, ChatBackend, ChatSession, SessionOptions, TurnEvent, TurnImage,
@@ -257,6 +258,41 @@ impl ChatRuntime {
             c.cancel();
         }
         self.close_detached(None);
+    }
+
+    /// R109: the app quits. The running turn is canceled and given up to `within` to finish
+    /// into its thread ("Stopped.", R103), then the session closes here, before the process
+    /// ends (a quit skips the windows' own teardown). Never call it on the main thread: it
+    /// waits for the turn and the child.
+    pub fn shutdown(&self, within: Duration) {
+        let deadline = Instant::now() + within;
+        let cancel = lock(&self.rt).running.as_ref().map(|r| r.cancel.clone());
+        if let Some(c) = cancel {
+            c.cancel();
+        }
+        while lock(&self.rt).running.is_some() {
+            if Instant::now() >= deadline {
+                tracing::warn!("the chat turn didn't stop before the quit");
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let entry = loop {
+            match self.session.try_lock() {
+                Ok(mut slot) => break slot.take(),
+                Err(TryLockError::Poisoned(e)) => break e.into_inner().take(),
+                Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(TryLockError::WouldBlock) => {
+                    tracing::warn!("the chat session wasn't closed before the quit");
+                    return;
+                }
+            }
+        };
+        if let Some(mut e) = entry {
+            e.session.close();
+        }
     }
 
     /// Takes the session (`only`: just that project's) out of its slot and closes it on its

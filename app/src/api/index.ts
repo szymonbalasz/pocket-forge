@@ -164,6 +164,27 @@ export async function appCloseGuard(): Promise<void> {
   }
 }
 
+/** R109: the close guards stopped listening (the UI unmounted, a crash): the window X no longer
+ *  waits for them. */
+export async function appCloseUnguard(): Promise<void> {
+  try {
+    await invoke('app_close_unguard');
+  } catch {
+    // Nothing was guarded outside the app.
+  }
+}
+
+/** R109: the UI got `app:close-requested`; one not acked within 3 s closes the app anyway.
+ *  True if the app really asked (only Rust sends it); false: ignore the event. */
+export async function appCloseAck(): Promise<boolean> {
+  try {
+    return (await invoke<boolean>('app_close_ack')) === true;
+  } catch {
+    // Outside the app there is no close to ack.
+    return false;
+  }
+}
+
 /** R101: the project is closed (or none was open): the app exits. */
 export async function appExit(): Promise<void> {
   try {
