@@ -363,6 +363,99 @@ impl Command for ProjectRename {
     }
 }
 
+// ---------------------------------------------------------------- Generate new (GEN)
+
+pub struct GenProjectCreate;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenProjectCreateInput {
+    pub section: SectionInput,
+    pub name: String,
+}
+
+impl Validate for GenProjectCreateInput {
+    fn validate(&self) -> CoreResult<()> {
+        if self.name.chars().count() > 4 * naming::MAX_NAME_CHARS {
+            return Err(
+                CoreError::new(ErrorCode::InvalidName, "the name is too long").with_field("name"),
+            );
+        }
+        Ok(())
+    }
+}
+
+impl Command for GenProjectCreate {
+    const NAME: &'static str = "gen_project_create";
+    type Input = GenProjectCreateInput;
+    type Output = PathOutput;
+
+    /// FR-GEN-02: a project with no image (`original: null`, `layers: []`, `r0`). The UI then
+    /// opens it with `project_open` (FR-GEN-01).
+    fn run(core: &Core, input: Self::Input) -> CoreResult<PathOutput> {
+        let _one_at_a_time = core.create_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let settings = core.state().settings.clone();
+        let path = create::create_empty_project(
+            &core.ctx,
+            &settings,
+            input.section.into(),
+            &input.name,
+            Some(&core.thumbs),
+        )?;
+        Ok(PathOutput { path })
+    }
+}
+
+pub struct GenProjectSuggestName;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenProjectSuggestNameInput {
+    pub section: SectionInput,
+    /// Default: the section's prefill (`New map` / `New token` / `New item`).
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+impl Validate for GenProjectSuggestNameInput {
+    fn validate(&self) -> CoreResult<()> {
+        if self
+            .name
+            .as_ref()
+            .is_some_and(|n| n.chars().count() > 4 * naming::MAX_NAME_CHARS)
+        {
+            return Err(
+                CoreError::new(ErrorCode::InvalidName, "the name is too long").with_field("name"),
+            );
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct NameOutput {
+    pub name: String,
+}
+
+impl Command for GenProjectSuggestName {
+    const NAME: &'static str = "gen_project_suggest_name";
+    type Input = GenProjectSuggestNameInput;
+    type Output = NameOutput;
+
+    /// FR-GEN-01: the name dialog's prefill under FR-PRJ-44, with ` (2)` on collision.
+    fn run(core: &Core, input: Self::Input) -> CoreResult<NameOutput> {
+        let settings = core.state().settings.clone();
+        Ok(NameOutput {
+            name: create::suggest_name(
+                &core.ctx,
+                &settings,
+                input.section.into(),
+                input.name.as_deref(),
+            ),
+        })
+    }
+}
+
 // ---------------------------------------------------------------- project
 
 pub struct ProjectOpen;
@@ -493,35 +586,106 @@ pub struct ProjectPutDraft;
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProjectPutDraftInput {
-    pub draft: DraftInput,
+    /// The region edit draft. Absent = keep it (a New image save, FR-GEN-19). A draft that holds
+    /// only `generate` (`{draft: {generate: {…}}}`, the New image tab's save) is the same: the
+    /// region edit fields keep their saved values and `generate` is merged in.
+    #[serde(default, deserialize_with = "draft_or_generate_only")]
+    pub draft: Option<DraftInput>,
+    /// The New image tab's `draft.generate` (FR-GEN-19): an object, or `null` to clear it.
+    /// Absent = keep it. Wins over `draft.generate`.
+    #[serde(default, deserialize_with = "crate::project::present_field")]
+    pub generate: Option<Option<Value>>,
     /// EXP's unsaved export settings (R30): `grid`, `target_px_per_square`, `format`.
     #[serde(default)]
     pub export: Option<serde_json::Map<String, Value>>,
 }
 
+/// `draft` as given, or a generate-only save when its only key is `generate` (FR-GEN-19).
+fn draft_or_generate_only<'de, D>(d: D) -> Result<Option<DraftInput>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    let v = Option::<Value>::deserialize(d)?;
+    let Some(v) = v else { return Ok(None) };
+    let only_generate = v
+        .as_object()
+        .is_some_and(|o| o.len() == 1 && o.contains_key("generate"));
+    if only_generate {
+        let g = v.get("generate").cloned().unwrap_or(Value::Null);
+        let g = if g.is_null() { None } else { Some(g) };
+        return Ok(Some(DraftInput::generate_only(g)));
+    }
+    serde_json::from_value(v)
+        .map(Some)
+        .map_err(D::Error::custom)
+}
+
+/// Largest `draft.generate`, serialised (GEN owns its fields; PRJ only bounds the size).
+const MAX_GENERATE_DRAFT_BYTES: usize = 256 * 1024;
+
+fn check_generate_draft(field: &str, g: &Option<Value>) -> CoreResult<()> {
+    match g {
+        None => Ok(()),
+        Some(Value::Object(_)) => {
+            let n = serde_json::to_vec(g).map_or(usize::MAX, |b| b.len());
+            if n > MAX_GENERATE_DRAFT_BYTES {
+                Err(CoreError::invalid(
+                    field,
+                    "the New image draft is too large",
+                ))
+            } else {
+                Ok(())
+            }
+        }
+        Some(_) => Err(CoreError::invalid(field, "an object or null")),
+    }
+}
+
+impl ProjectPutDraftInput {
+    /// The one draft input the store takes.
+    fn into_draft(self) -> (DraftInput, Option<serde_json::Map<String, Value>>) {
+        let mut d = self.draft.unwrap_or_else(|| DraftInput {
+            keep_region_edit: true,
+            ..Default::default()
+        });
+        if self.generate.is_some() {
+            d.generate = self.generate;
+        }
+        (d, self.export)
+    }
+}
+
 impl Validate for ProjectPutDraftInput {
     fn validate(&self) -> CoreResult<()> {
-        let d = &self.draft;
-        if d.final_prompt.chars().count() > MAX_PROMPT_CHARS {
-            return Err(CoreError::invalid(
-                "draft.final_prompt",
-                "the prompt is too long",
-            ));
+        if let Some(g) = &self.generate {
+            check_generate_draft("generate", g)?;
         }
-        if d.model_id
-            .as_ref()
-            .is_some_and(|m| m.is_empty() || m.len() > 200)
-        {
-            return Err(CoreError::invalid("draft.model_id", "not a valid model id"));
-        }
-        if let Some(ticks) = &d.prompt_helpers
-            && (ticks.len() > crate::prompt::helpers::MAX_HELPERS
-                || ticks.iter().any(|t| t.is_empty() || t.len() > 100))
-        {
-            return Err(CoreError::invalid(
-                "draft.prompt_helpers",
-                "not a list of prompt helper ids",
-            ));
+        if let Some(d) = &self.draft {
+            if let Some(g) = &d.generate {
+                check_generate_draft("draft.generate", g)?;
+            }
+            if d.final_prompt.chars().count() > MAX_PROMPT_CHARS {
+                return Err(CoreError::invalid(
+                    "draft.final_prompt",
+                    "the prompt is too long",
+                ));
+            }
+            if d.model_id
+                .as_ref()
+                .is_some_and(|m| m.is_empty() || m.len() > 200)
+            {
+                return Err(CoreError::invalid("draft.model_id", "not a valid model id"));
+            }
+            if let Some(ticks) = &d.prompt_helpers
+                && (ticks.len() > crate::prompt::helpers::MAX_HELPERS
+                    || ticks.iter().any(|t| t.is_empty() || t.len() > 100))
+            {
+                return Err(CoreError::invalid(
+                    "draft.prompt_helpers",
+                    "not a list of prompt helper ids",
+                ));
+            }
         }
         if let Some(e) = &self.export
             && let Some(k) = e
@@ -554,10 +718,9 @@ impl Command for ProjectPutDraft {
         let p = project.as_mut().ok_or_else(no_project)?;
         // R30: the same commit carries EXP's unsaved session settings.
         let from_session = input.export.is_none();
-        let export = input
-            .export
-            .or_else(|| crate::export::pending_fields(exp, p));
-        let seq = project::put_draft(&core.ctx, install_id, p, input.draft, export)?;
+        let (draft, export) = input.into_draft();
+        let export = export.or_else(|| crate::export::pending_fields(exp, p));
+        let seq = project::put_draft(&core.ctx, install_id, p, draft, export)?;
         if from_session {
             crate::export::clear_pending(exp);
         }
@@ -691,7 +854,9 @@ impl Command for ProjectPrefetchOriginal {
                     "the original is missing",
                 ));
             }
-            library::hydrate_if_needed(&core.ctx, &p.original_path())?;
+            // FR-GEN-03: a project with no image has nothing to decode (`no_image`).
+            let base = p.base_path().ok_or_else(crate::decoded::no_image)?;
+            library::hydrate_if_needed(&core.ctx, &base)?;
             p.decoded.clone()
         };
         let was_ready = decoded.is_ready();
@@ -744,6 +909,8 @@ impl Command for ProjectFolderList {
             project::require_folder(p)?;
             project::folder_list(p, &input.folder)?
         };
+        let mut files = files;
+        project::set_file_states(&core.ctx, &mut files);
         Ok(with_thumb_urls(core, files))
     }
 }
@@ -785,6 +952,8 @@ impl Command for ProjectFolderAdd {
             let paths: Vec<PathBuf> = input.paths.iter().map(PathBuf::from).collect();
             project::folder_add(&core.ctx, p, &input.folder, &paths)?
         };
+        let mut files = files;
+        project::set_file_states(&core.ctx, &mut files);
         Ok(with_thumb_urls(core, files))
     }
 }
@@ -1053,6 +1222,8 @@ registry![
     PrmHelpersSave,
     PrmHelpersReset,
     PrmComposePreview,
+    GenProjectCreate,
+    GenProjectSuggestName,
 ];
 
 #[cfg(test)]

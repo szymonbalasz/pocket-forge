@@ -1,6 +1,7 @@
 //! An image file as RGB8 rows (ADR 0004 "pixel format"): non-interlaced PNGs are streamed in row
 //! bands, so the whole image is never in memory; JPEG, WebP and interlaced PNGs are decoded whole,
-//! once, with explicit limits. Alpha is dropped, grey is expanded, 16-bit is stripped to 8-bit.
+//! once, with explicit limits. Alpha is composited over the flatten colour (`FLATTEN_BG`, FR-GEN-12),
+//! grey is expanded, 16-bit is stripped to 8-bit.
 
 use std::fs::File;
 use std::io::BufReader;
@@ -80,7 +81,7 @@ impl RgbSource {
                 kind: Kind::Png(path.to_path_buf()),
             });
         }
-        let img = decode_whole(path)?.into_rgb8();
+        let img = crate::alpha::to_rgb8_flattened(decode_whole(path)?);
         Ok(RgbSource {
             width: img.width(),
             height: img.height(),
@@ -159,13 +160,13 @@ fn push_rgb(out: &mut Vec<u8>, row: &[u8], color: png::ColorType) -> Result<(), 
             .as_chunks::<4>()
             .0
             .iter()
-            .for_each(|p| out.extend_from_slice(&p[..3])),
+            .for_each(|p| out.extend_from_slice(&crate::alpha::flatten_px(*p))),
         C::Grayscale => row.iter().for_each(|&g| out.extend_from_slice(&[g, g, g])),
         C::GrayscaleAlpha => row
             .as_chunks::<2>()
             .0
             .iter()
-            .for_each(|p| out.extend_from_slice(&[p[0], p[0], p[0]])),
+            .for_each(|p| out.extend_from_slice(&crate::alpha::flatten_grey_alpha(p[0], p[1]))),
         C::Indexed => return Err(ProbeError::data("unexpanded palette row")),
     }
     Ok(())
@@ -187,6 +188,43 @@ mod tests {
         let idat = bytes.windows(4).position(|w| w == b"IDAT").unwrap() + 4;
         bytes[idat..idat + 6].copy_from_slice(&[0xFF; 6]);
         std::fs::write(path, bytes).unwrap();
+    }
+
+    /// FR-GEN-12 golden: the streamed PNG path, the whole-image path (WebP) and grey + alpha all
+    /// composite alpha over the flatten colour.
+    #[test]
+    fn fr_gen_12_decode_rgb8_flattens_alpha_over_mid_grey() {
+        let tmp = tempfile::tempdir().unwrap();
+        let img = image::RgbaImage::from_fn(4, 2, |x, _| match x {
+            0 => image::Rgba([200, 10, 10, 0]),
+            1 => image::Rgba([255, 0, 128, 128]),
+            _ => image::Rgba([1, 2, 3, 255]),
+        });
+        let png = tmp.path().join("a.png");
+        img.save(&png).unwrap();
+        let webp = tmp.path().join("a.webp");
+        image::DynamicImage::ImageRgba8(img.clone())
+            .save_with_format(&webp, image::ImageFormat::WebP)
+            .unwrap();
+        for path in [&png, &webp] {
+            let rgb = decode_rgb8(path).unwrap();
+            assert_eq!(
+                rgb.get_pixel(0, 0).0,
+                crate::FLATTEN_BG,
+                "{}",
+                path.display()
+            );
+            assert_eq!(rgb.get_pixel(1, 0).0, [192, 64, 128], "{}", path.display());
+            assert_eq!(rgb.get_pixel(3, 1).0, [1, 2, 3], "{}", path.display());
+        }
+        let la = tmp.path().join("la.png");
+        image::GrayAlphaImage::from_pixel(2, 2, image::LumaA([0, 0]))
+            .save(&la)
+            .unwrap();
+        assert_eq!(
+            decode_rgb8(&la).unwrap().get_pixel(1, 1).0,
+            crate::FLATTEN_BG
+        );
     }
 
     /// BL-27: a broken body says the image data is unreadable, not the header.

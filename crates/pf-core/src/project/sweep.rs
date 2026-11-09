@@ -327,7 +327,7 @@ pub(super) fn rebuild_manifest(
     let Some(newest) = revs.last() else {
         return Ok(None);
     };
-    let original = rebuild_original(ctx, dir)?;
+    let original = rebuild_original(ctx, dir, &revs)?;
     let jobs = load_jobs(dir);
     let accepted: HashSet<Ulid> = newest
         .layers
@@ -424,11 +424,31 @@ pub(super) fn add_missing_candidates(p: &mut OpenProject) {
     p.manifest.candidates.extend(add);
 }
 
-fn rebuild_original(ctx: &Context, dir: &Path) -> CoreResult<Original> {
+/// The original for a rebuilt manifest: none for a project made by Generate new (its `r0` stack is
+/// empty, FR-GEN-02); otherwise the first file in `working/` that no revision names as a base
+/// image (FR-GEN-27).
+fn rebuild_original(
+    ctx: &Context,
+    dir: &Path,
+    revs: &[RevisionFile],
+) -> CoreResult<Option<Original>> {
+    if revs.first().is_some_and(|r0| r0.layers.is_empty()) {
+        return Ok(None);
+    }
+    let bases: HashSet<String> = revs
+        .iter()
+        .flat_map(|r| &r.layers)
+        .filter(|l| l.kind == LayerKind::Base)
+        .filter_map(|l| l.file.clone())
+        .collect();
     let working = dir.join(WORKING_DIR);
     let name = read_dir_names(&working)
         .into_iter()
-        .find(|n| !n.contains(fsx::TEMP_MARKER) && working.join(n).is_file())
+        .find(|n| {
+            !n.contains(fsx::TEMP_MARKER)
+                && working.join(n).is_file()
+                && !bases.contains(&format!("{WORKING_DIR}/{n}"))
+        })
         .ok_or_else(|| {
             CoreError::new(
                 ErrorCode::Corrupt,
@@ -439,7 +459,7 @@ fn rebuild_original(ctx: &Context, dir: &Path) -> CoreResult<Original> {
     library::hydrate_if_needed(ctx, &path)?;
     let info = pf_imaging::probe_file_complete(&path).map_err(super::probe_error)?;
     let meta = std::fs::metadata(&path).map_err(|e| CoreError::io("reading the original", &e))?;
-    Ok(Original {
+    Ok(Some(Original {
         file: format!("{WORKING_DIR}/{name}"),
         content_hash: fsx::hash_file(&path)
             .map_err(|e| CoreError::io("hashing the original", &e))?,
@@ -449,7 +469,7 @@ fn rebuild_original(ctx: &Context, dir: &Path) -> CoreResult<Original> {
         height: info.height,
         format: info.format.as_str().into(),
         extra: Extra::new(),
-    })
+    }))
 }
 
 /// Masks whose rect is known: the draft's (its region) and each job's (its region).

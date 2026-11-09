@@ -160,15 +160,15 @@ enum Source<'a> {
 }
 
 /// Builds one project in a temp folder and renames it into place (FR-PRJ-09). Returns the
-/// project folder. On any error the temp folder is removed.
+/// project folder. On any error the temp folder is removed. `image` = `None` builds a project
+/// with no image (Generate new, FR-GEN-02): `original: null`, `layers: []`.
 fn build_project(
     ctx: &Context,
     settings: &Settings,
     section: &Path,
     kind: Kind,
     name: &str,
-    source: Source<'_>,
-    info: pf_imaging::ImageInfo,
+    image: Option<(Source<'_>, pf_imaging::ImageInfo)>,
 ) -> CoreResult<(PathBuf, Manifest)> {
     let temp = fsx::temp_path(ctx, &section.join(name));
     let result = (|| {
@@ -176,26 +176,14 @@ fn build_project(
             std::fs::create_dir_all(temp.join(d))
                 .map_err(|e| CoreError::io(format!("creating {d}"), &e))?;
         }
-        let (file_name, hash, size) = match &source {
-            Source::File(path) => {
-                let file_name = crate::project::folder_name(path);
-                let (hash, size) =
-                    fsx::copy_atomic_new(ctx, path, &temp.join(WORKING_DIR).join(&file_name))?;
-                (file_name, hash, size)
+        let (original, layers) = match image {
+            Some((source, info)) => {
+                let (original, layer) = copy_original(ctx, &temp, &source, info)?;
+                (Some(original), vec![layer])
             }
-            Source::Bytes { name, bytes } => {
-                let target = temp.join(WORKING_DIR).join(name);
-                fsx::write_atomic(ctx, &target, bytes)?;
-                let hash = fsx::hash_file(&target)
-                    .map_err(|e| CoreError::io("hashing the pasted image", &e))?;
-                (name.clone(), hash, bytes.len() as u64)
-            }
+            None => (None, vec![]),
         };
-        let rel = format!("{WORKING_DIR}/{file_name}");
-        let meta = std::fs::metadata(temp.join(&rel))
-            .map_err(|e| CoreError::io("reading the copy", &e))?;
         let now = ctx.now();
-        let original_layer = Layer::original(ctx.new_id(), info.width, info.height);
         let r0 = RevisionFile {
             schema_version: REVISION_SCHEMA_VERSION,
             id: ctx.new_id(),
@@ -204,7 +192,7 @@ fn build_project(
             reason: RevisionReason::Create,
             label: None,
             parent: None,
-            layers: vec![original_layer.clone()],
+            layers: layers.clone(),
             draft: None,
             extra: Extra::new(),
         };
@@ -218,17 +206,8 @@ fn build_project(
                 install_id: settings.install_id,
                 at: now,
             },
-            original: Original {
-                file: rel,
-                content_hash: hash,
-                size,
-                mtime: mtime_of(&meta),
-                width: info.width,
-                height: info.height,
-                format: info.format.as_str().into(),
-                extra: Extra::new(),
-            },
-            layers: vec![original_layer],
+            original,
+            layers,
             masks: vec![],
             draft: None,
             jobs: vec![],
@@ -257,6 +236,94 @@ fn build_project(
         let _ = std::fs::remove_dir_all(&temp);
     }
     result
+}
+
+/// Copies (or writes) the source into the temp project's `working/` and returns its record and
+/// its `[0]` layer.
+fn copy_original(
+    ctx: &Context,
+    temp: &Path,
+    source: &Source<'_>,
+    info: pf_imaging::ImageInfo,
+) -> CoreResult<(Original, Layer)> {
+    let (file_name, hash, size) = match source {
+        Source::File(path) => {
+            let file_name = crate::project::folder_name(path);
+            let (hash, size) =
+                fsx::copy_atomic_new(ctx, path, &temp.join(WORKING_DIR).join(&file_name))?;
+            (file_name, hash, size)
+        }
+        Source::Bytes { name, bytes } => {
+            let target = temp.join(WORKING_DIR).join(name);
+            fsx::write_atomic(ctx, &target, bytes)?;
+            let hash = fsx::hash_file(&target)
+                .map_err(|e| CoreError::io("hashing the pasted image", &e))?;
+            (name.clone(), hash, bytes.len() as u64)
+        }
+    };
+    let rel = format!("{WORKING_DIR}/{file_name}");
+    let meta =
+        std::fs::metadata(temp.join(&rel)).map_err(|e| CoreError::io("reading the copy", &e))?;
+    let original_layer = Layer::original(ctx.new_id(), info.width, info.height);
+    let original = Original {
+        file: rel,
+        content_hash: hash,
+        size,
+        mtime: mtime_of(&meta),
+        width: info.width,
+        height: info.height,
+        format: info.format.as_str().into(),
+        extra: Extra::new(),
+    };
+    Ok((original, original_layer))
+}
+
+/// The prefilled name of a Generate new project (FR-GEN-01): `New map` / `New token` /
+/// `New item`.
+pub fn default_generate_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Map => "New map",
+        Kind::Token => "New token",
+        Kind::Item => "New item",
+    }
+}
+
+/// `gen_project_suggest_name`: `raw` (default: the section's prefill) under the FR-PRJ-44 rules,
+/// with ` (2)`, ` (3)`, … when taken in the section of any root (FR-GEN-01).
+pub fn suggest_name(ctx: &Context, settings: &Settings, kind: Kind, raw: Option<&str>) -> String {
+    let base = naming::sanitise_name(raw.unwrap_or(default_generate_name(kind)));
+    naming::first_free(&base, |c| name_taken(ctx, settings, kind, c))
+}
+
+/// `gen_project_create {section, name}` (FR-GEN-02): a project with no image, built like
+/// FR-PRJ-09 (temp folder → rename): every subfolder, `project.json` with `kind` from the section,
+/// `original: null`, `layers: []` and `r0` (reason `create`). No image is copied. The name is put
+/// under the FR-PRJ-44 rules (as the dialog shows it); a blank one is `invalid_name`, one taken in
+/// the section `name_taken`. Returns the project folder.
+pub fn create_empty_project(
+    ctx: &Context,
+    settings: &Settings,
+    kind: Kind,
+    name: &str,
+    thumbs: Option<&Thumbnails>,
+) -> CoreResult<PathBuf> {
+    if name.trim().is_empty() {
+        return Err(CoreError::new(ErrorCode::InvalidName, "Enter a name").with_field("name"));
+    }
+    let name = &naming::sanitise_name(name);
+    let section = library::target_section(ctx, settings, kind)?;
+    if name_taken(ctx, settings, kind, name) {
+        return Err(CoreError::new(
+            ErrorCode::NameTaken,
+            format!("{name:?} is taken in {}", kind.section_dir()),
+        )
+        .with_field("name"));
+    }
+    let (dir, m) = build_project(ctx, settings, &section, kind, name, None)?;
+    if let Some(t) = thumbs {
+        t.request(ThumbJob::new(ctx, &dir, &m));
+    }
+    Ok(dir)
 }
 
 /// What a creation run shares: settings, the target section, the dedupe index.
@@ -295,11 +362,13 @@ impl<'a> Creator<'a> {
     }
 
     fn finish(&mut self, dir: &Path, m: &Manifest) {
-        self.known.push(Known {
-            size: m.original.size,
-            hash: m.original.content_hash.clone(),
-            dir: dir.to_path_buf(),
-        });
+        if let Some(o) = &m.original {
+            self.known.push(Known {
+                size: o.size,
+                hash: o.content_hash.clone(),
+                dir: dir.to_path_buf(),
+            });
+        }
         if let Some(t) = self.thumbs {
             t.request(ThumbJob::new(self.ctx, dir, m));
         }
@@ -346,8 +415,7 @@ impl<'a> Creator<'a> {
             &self.section,
             self.kind,
             &name,
-            Source::File(source),
-            info,
+            Some((Source::File(source), info)),
         ) {
             Ok((dir, m)) => {
                 self.finish(&dir, &m);
@@ -394,11 +462,13 @@ impl<'a> Creator<'a> {
             &self.section,
             self.kind,
             &name,
-            Source::Bytes {
-                name: format!("{stamp}.png"),
-                bytes: png_bytes,
-            },
-            info,
+            Some((
+                Source::Bytes {
+                    name: format!("{stamp}.png"),
+                    bytes: png_bytes,
+                },
+                info,
+            )),
         )?;
         self.finish(&dir, &m);
         Ok(dir)

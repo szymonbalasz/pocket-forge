@@ -23,7 +23,9 @@ pub const THUMB_QUALITY: u8 = 80;
 pub struct ThumbJob {
     pub project_id: Ulid,
     pub dir: PathBuf,
-    pub original: PathBuf,
+    /// `layers[0]`'s file; `None` with no image: the thumbnail is removed and the card shows a
+    /// placeholder (FR-GEN-03).
+    pub original: Option<PathBuf>,
     /// Visible patch layers in draw order: file, top-left, opacity.
     pub patches: Vec<(PathBuf, i64, i64, f32)>,
     /// The temp file name, from the ID seam.
@@ -45,7 +47,7 @@ impl ThumbJob {
         ThumbJob {
             project_id: m.project_id,
             dir: dir.to_path_buf(),
-            original: dir.join(&m.original.file),
+            original: m.base_file().map(|f| dir.join(f)),
             patches,
             temp: fsx::temp_path(ctx, &target),
         }
@@ -53,6 +55,14 @@ impl ThumbJob {
 
     /// Renders and writes the thumbnail. Errors are returned for logging only.
     pub fn run(&self) -> Result<(), String> {
+        let target = self.dir.join(THUMB_FILE);
+        let Some(original) = &self.original else {
+            // No image (yet, or again after undoing the first pick, FR-GEN-29).
+            return match std::fs::remove_file(&target) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.to_string()),
+                _ => Ok(()),
+            };
+        };
         let patches: Vec<_> = self
             .patches
             .iter()
@@ -64,13 +74,12 @@ impl ThumbJob {
             })
             .collect();
         let (jpeg, _, _) = pf_imaging::thumbnail::working_thumbnail_jpeg(
-            &self.original,
+            original,
             &patches,
             THUMB_MAX_SIDE,
             THUMB_QUALITY,
         )
         .map_err(|e| e.to_string())?;
-        let target = self.dir.join(THUMB_FILE);
         let result = (|| {
             use std::io::Write;
             let mut f = std::fs::OpenOptions::new()

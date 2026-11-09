@@ -201,6 +201,8 @@ export interface StartState {
 /** Start's label and whether it can run (FR-EXP-15, FR-EXP-28, FR-EXP-29). */
 export function startState(input: {
   hasProject: boolean;
+  /** FR-GEN-03: a project made by Generate new before its first pick. */
+  noImage?: boolean;
   readOnly: ReadOnlyReason | null;
   original: OriginalState;
   plan: ExportPlan | null;
@@ -211,6 +213,7 @@ export function startState(input: {
   const label = input.plan?.exists ? 'Replace' : 'Export';
   const no = (reason: string | null): StartState => ({ enabled: false, label, reason });
   if (!input.hasProject) return no('Open a project to export');
+  if (input.noImage) return no('No image yet');
   if (input.readOnly) return no(READ_ONLY_TEXT[input.readOnly]);
   if (input.running) return no(null);
   if (input.original.kind === 'loading') return no('Loading original…');

@@ -1,8 +1,10 @@
-//! `DecodedOriginal` (FR-PRJ-42, R11): the original as RGB8 (ADR 0004), owned by PRJ. Decoded
-//! lazily on the first RGN or EXP use or by `project_prefetch_original`, in the background, and
-//! released when the project closes. Until it's ready, callers get `original_unavailable`.
+//! `DecodedOriginal` (FR-PRJ-42, R11): `layers[0]`'s file as RGB8 (ADR 0004), owned by PRJ: the
+//! original, or a picked base image (FR-GEN-33), its alpha over the flatten colour (FR-GEN-12).
+//! Decoded lazily on the first RGN or EXP use or by `project_prefetch_original`, in the
+//! background, and released when the project closes. Until it's ready, callers get
+//! `original_unavailable`; a project with no image gets `no_image` (FR-GEN-03).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use image::RgbImage;
@@ -24,17 +26,40 @@ enum State {
 #[derive(Debug, Clone)]
 pub struct DecodedOriginal {
     project_id: Ulid,
-    path: PathBuf,
+    /// `None` in a project with no image (FR-GEN-03).
+    path: Option<PathBuf>,
     state: Arc<Mutex<State>>,
+}
+
+/// `no_image` (FR-GEN-03): region edit and export need an image.
+pub fn no_image() -> CoreError {
+    CoreError::new(
+        ErrorCode::NoImage,
+        "No image yet. Generate one in New image.",
+    )
 }
 
 impl DecodedOriginal {
     pub fn new(project_id: Ulid, path: PathBuf) -> Self {
         DecodedOriginal {
             project_id,
-            path,
+            path: Some(path),
             state: Arc::new(Mutex::new(State::Idle)),
         }
+    }
+
+    /// The handle of a project with no image: every use fails with `no_image`.
+    pub fn none(project_id: Ulid) -> Self {
+        DecodedOriginal {
+            project_id,
+            path: None,
+            state: Arc::new(Mutex::new(State::Idle)),
+        }
+    }
+
+    /// The decoded file, if the project has an image.
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -62,6 +87,9 @@ impl DecodedOriginal {
     /// The pixels, or `original_unavailable` while the decode runs (starting it if needed), or
     /// the decode's error (`corrupt`, `not_found`, …).
     pub fn get(&self, ctx: &Context) -> CoreResult<Arc<RgbImage>> {
+        if self.path.is_none() {
+            return Err(no_image());
+        }
         self.start(ctx);
         match &*self.lock() {
             State::Ready(img) => Ok(img.clone()),
@@ -76,6 +104,9 @@ impl DecodedOriginal {
     /// Starts the decode unless it's running or done (`project_prefetch_original`). A failed
     /// decode is retried. Emits `project:original-ready` when the pixels are in memory.
     pub fn start(&self, ctx: &Context) {
+        if self.path.is_none() {
+            return;
+        }
         {
             let mut s = self.lock();
             if matches!(*s, State::Decoding | State::Ready(_)) {
@@ -99,7 +130,8 @@ impl DecodedOriginal {
     }
 
     fn run(&self, events: &dyn EventSink) {
-        let result = pf_imaging::decode_rgb8(&self.path);
+        let Some(path) = &self.path else { return };
+        let result = pf_imaging::decode_rgb8(path);
         let mut s = self.lock();
         // A close drops the handle; a late result for a released handle is simply discarded.
         match result {
@@ -192,6 +224,31 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         panic!("decode never finished");
+    }
+
+    #[test]
+    fn fr_gen_03_no_image_handle_fails_with_no_image() {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = Context::deterministic(dir.path().into(), Timestamp(0));
+        let d = DecodedOriginal::none(Ulid::from_parts(0, 1));
+        assert_eq!(d.get(&ctx).unwrap_err().code, ErrorCode::NoImage);
+        assert!(!d.is_ready() && d.path().is_none());
+    }
+
+    /// FR-GEN-12, FR-GEN-33: a base image with alpha decodes over the flatten colour.
+    #[test]
+    fn fr_gen_12_decoded_layer_0_flattens_alpha() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("001 token 01.png");
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([9, 9, 9, 0]))
+            .save(&path)
+            .unwrap();
+        let ctx = Context::deterministic(dir.path().into(), Timestamp(0));
+        let d = DecodedOriginal::new(Ulid::from_parts(0, 1), path);
+        assert_eq!(
+            d.get(&ctx).unwrap().get_pixel(2, 2).0,
+            pf_imaging::FLATTEN_BG
+        );
     }
 
     #[test]

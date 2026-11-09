@@ -268,7 +268,9 @@ fn sides(p: &OpenProject) -> CoreResult<Sides> {
 /// Files a version needs to be kept: the original, its layer files, its head revision and the
 /// draft's mask.
 fn missing_files(p: &OpenProject, m: &Manifest) -> Vec<String> {
-    let mut need = vec![m.original.file.clone()];
+    // A base image's file is a layer file (FR-GEN-27); a project made by Generate new has no
+    // original (FR-GEN-02).
+    let mut need: Vec<String> = m.original.iter().map(|o| o.file.clone()).collect();
     need.extend(m.layers.iter().filter_map(|l| l.file.clone()));
     if m.revisions.iter().any(|r| r.id == m.head_revision) {
         need.push(revision_file(m.head_revision));
@@ -314,11 +316,11 @@ pub(crate) fn side_image(p: &OpenProject, image_id: Ulid) -> Option<(String, boo
     let s = sides(p).ok()?;
     [s.this, s.other].into_iter().flatten().find_map(|m| {
         if m.original_image_id() == Some(image_id) {
-            let f = &m.original.file;
+            let f = m.base_file()?;
             let inside = Path::new(f)
                 .components()
                 .all(|c| matches!(c, std::path::Component::Normal(_)));
-            return inside.then(|| (f.clone(), true));
+            return inside.then(|| (f.to_owned(), true));
         }
         m.layers
             .iter()

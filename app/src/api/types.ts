@@ -53,7 +53,9 @@ export type CreateItem =
   | { status: 'already_in_library'; source: string; path: string }
   | { status: 'skipped'; source: string; reason: SkipReason };
 
-export type CardBadge = 'read_only' | 'conflict' | 'unreadable' | 'not_available_offline';
+/** `no_image`: made by Generate new, no pick yet; the card shows a placeholder (FR-GEN-03). */
+export type CardBadge =
+  'read_only' | 'conflict' | 'unreadable' | 'not_available_offline' | 'no_image';
 
 /** A home-grid card (FR-PRJ-49), read from `project.json` and `.pforge/thumb.jpg` only. */
 export interface ProjectCard {
@@ -129,7 +131,8 @@ export interface DiskUsage {
 
 export interface Layer {
   id: string;
-  kind: 'original' | 'patch';
+  /** `base`: a picked generate candidate as the bottom image (FR-GEN-27); drawn like the original. */
+  kind: 'original' | 'patch' | 'base';
   file: string | null;
   cx: number;
   cy: number;
@@ -214,14 +217,19 @@ export interface ProjectSnapshot {
   image_path: string | null;
   /** The project folder (absolute). */
   project_dir: string;
-  /** The original's stable image id (= `layers[0].id`, #48 (3)); EDT opens tiles with it. */
-  original_image_id?: string;
+  /** `layers[0].id`: the original's stable image id (#48 (3)) or the base image's layer id
+   *  (FR-GEN-33); EDT opens tiles with it. Null with no image. */
+  original_image_id?: string | null;
+  /** False for a project made by Generate new until its first pick (FR-GEN-03). */
+  has_image?: boolean;
   saved: boolean;
   read_only: ReadOnlyReason | null;
   warnings: ProjectWarning[];
+  /** `layers[0]`'s size; 0 × 0 with no image. */
   width: number;
   height: number;
-  format: 'png' | 'jpeg' | 'webp';
+  /** `layers[0]`'s format; null with no image. */
+  format: 'png' | 'jpeg' | 'webp' | null;
   layers: Layer[];
   draft: Draft | null;
   revisions: RevisionEntry[];

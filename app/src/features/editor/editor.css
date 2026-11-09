@@ -28,6 +28,14 @@
   touch-action: none;
 }
 
+/* FR-GEN-03: a project with no image yet. */
+.editor-no-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+}
+
 .editor-canvas-pan:active {
   cursor: grabbing;
 }

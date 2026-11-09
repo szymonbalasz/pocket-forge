@@ -44,7 +44,8 @@ export function LayerStack({
 }: LayerStackProps) {
   const [loaded, setLoaded] = useState<Record<string, LoadState>>({});
 
-  const original = layers.find((l) => l.kind === 'original');
+  // The bottom image: the original or a base image (FR-GEN-27).
+  const original = layers.find((l) => l.kind === 'original' || l.kind === 'base');
   const patches = layers.filter((l) => l.kind === 'patch' && l.visible);
   const missing = new Set(missingFiles);
   const isMissing = (l: Layer) => l.file !== null && missing.has(l.file);
@@ -54,12 +55,12 @@ export function LayerStack({
     let live = true;
     const miss = new Set(missingFiles);
     for (const l of layers) {
-      const drawn = l.kind === 'original' || l.visible;
+      const bottom = l.kind === 'original' || l.kind === 'base';
+      const drawn = bottom || l.visible;
       if (!drawn || (l.file !== null && miss.has(l.file))) continue;
-      const open =
-        l.kind === 'original'
-          ? api.editor.imageOpen(projectId, l.id, STACK_ORIGINAL_MAX_SIDE)
-          : api.editor.imageOpen(projectId, l.id);
+      const open = bottom
+        ? api.editor.imageOpen(projectId, l.id, STACK_ORIGINAL_MAX_SIDE)
+        : api.editor.imageOpen(projectId, l.id);
       open.then(
         (img) => {
           if (live)

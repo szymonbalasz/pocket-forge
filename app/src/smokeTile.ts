@@ -11,7 +11,8 @@ export async function smokeTile(image: string): Promise<{ ok: boolean; detail: s
     if (!item || item.status === 'skipped')
       throw new Error(`project_create: ${JSON.stringify(item)}`);
     const project = await api.project.open(item.path);
-    const original = project.layers.find((l) => l.kind === 'original') ?? project.layers[0];
+    const original =
+      project.layers.find((l) => l.kind === 'original' || l.kind === 'base') ?? project.layers[0];
     if (!original) throw new Error('the project has no original layer');
     const desc = await api.editor.tilesOpen(project.project_id, original.id);
     const lv = desc.levels[0];
