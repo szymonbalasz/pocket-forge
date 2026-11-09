@@ -876,6 +876,9 @@ export interface Events {
    *  context now; the main window answers `prm:context-flushed` with the same id. */
   'prm:context-flush': { id: string };
   'prm:context-flushed': { id: string };
+  /** R96 (window to window): the chat window's "Turn it on" asks the main window to turn the
+   *  chat on, since only the main window may call `prm_chat_settings_put`. */
+  'prm:chat-enable': Record<string, never>;
   /** BL-41: the open project or its attached host changed (the chat window follows it). */
   'prm:chat-context': { project_id: string | null; host: ChatHostId | null };
   /** Replace (FR-PRM-29): applied only by that host's attached prompt block. */

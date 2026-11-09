@@ -21,8 +21,19 @@ function answerFlushRequests(): void {
   }).catch(() => undefined);
 }
 
+/** R96: the chat window may not call `prm_chat_settings_put`; its "Turn it on" asks this
+ *  window, which turns the chat on (and only on). The new status reaches both windows as
+ *  `prm:chat-status`. */
+function answerEnableRequests(): void {
+  if (currentWindowLabel() === 'prompt-chat') return;
+  void onEvent('prm:chat-enable', () => {
+    void api.chat.settingsPut({ enabled: true }).catch(() => undefined);
+  }).catch(() => undefined);
+}
+
 export function installChatSink(): void {
   answerFlushRequests();
+  answerEnableRequests();
   chatContext.setSink({
     publish(host, input) {
       const pid = projectId();

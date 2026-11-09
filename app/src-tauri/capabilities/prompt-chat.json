@@ -1,7 +1,20 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "prompt-chat",
-  "description": "Prompt chat pop-out window (#58, #60): core IPC and events only. Created at runtime from Rust; no dialogs, no shell.",
-  "windows": ["prompt-chat"],
-  "permissions": ["core:default"]
+  "description": "Prompt chat pop-out window (#58, #60): core IPC and events, and only the app commands the chat window calls (R96): no settings, logout, provider, library or export commands. Created at runtime from Rust; no dialogs, no shell.",
+  "windows": [
+    "prompt-chat"
+  ],
+  "permissions": [
+    "core:default",
+    "allow-prm-chat-status",
+    "allow-prm-chat-consent",
+    "allow-prm-chat-thread-get",
+    "allow-prm-chat-preview",
+    "allow-prm-chat-send",
+    "allow-prm-chat-cancel",
+    "allow-prm-chat-insert",
+    "allow-prm-chat-login",
+    "allow-project-get"
+  ]
 }

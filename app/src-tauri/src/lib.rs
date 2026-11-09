@@ -1,6 +1,8 @@
 //! The thin Tauri layer (AGENTS §9): command registration, the `pf-tiles` URI scheme, the
 //! window and event forwarding. No domain logic: everything is a `pf-core` command.
 
+#[cfg(test)]
+mod acl;
 mod chat_window;
 mod commands;
 #[cfg(debug_assertions)]

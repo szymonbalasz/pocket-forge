@@ -84,6 +84,23 @@ test('FR-PRM-20 L6 the window follows Settings → off without a refocus', async
   await waitFor(() => expect(screen.getByText('Prompt chat is off.')).toBeTruthy());
 });
 
+test('R96 FR-PRM-20 "Turn it on" asks the main window; the chat window never calls settings_put', async () => {
+  setup({ chat: { consent: true } });
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
+  await act(() => api.chat.settingsPut({ enabled: false }));
+  await waitFor(() => expect(screen.getByText('Prompt chat is off.')).toBeTruthy());
+  // No main window listening: the click calls no command itself.
+  fireEvent.click(id('prm-chat-enable'));
+  await waitFor(() => expect(fake.callsOf('plugin:event|emit')).toHaveLength(1));
+  expect(fake.callsOf('prm_chat_settings_put')).toEqual([{ enabled: false }]);
+  // The main window's sink answers: it turns the chat on, and the window follows the status.
+  installChatSink();
+  fireEvent.click(id('prm-chat-enable'));
+  await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
+  expect(fake.callsOf('prm_chat_settings_put')).toEqual([{ enabled: false }, { enabled: true }]);
+});
+
 test('FR-PRM-21 no project open: "Open a project to chat about it"', async () => {
   setup({ chat: { consent: true } }, null);
   render(<ChatWindow />);
