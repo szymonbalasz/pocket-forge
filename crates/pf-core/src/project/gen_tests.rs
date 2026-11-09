@@ -1006,3 +1006,82 @@ fn r84_r97_candidate_statuses_follow_undo_and_redo_of_a_pick() {
     assert_eq!(c1.trash_id, None);
     assert!(g.dir.join(&c1.file).is_file(), "moved back to results/");
 }
+
+/// FR-GEN-34 → FR-RGN-37 / FR-PRJ-40 for a generate job: while `project.json` is locked the paid
+/// candidates wait in the spool (never dropped) and a user write fails with `locked`; once
+/// unlocked the replay stores them and the iteration can be picked.
+#[test]
+fn fr_gen_34_a_locked_project_spools_generate_candidates_until_unlocked() {
+    let mut g = gen_env(Kind::Map, "Crypt");
+    let install = g.e.install();
+    let mut extra = Extra::new();
+    extra.insert("typed_prompt".into(), json!("crypt"));
+    let new = NewJob {
+        operation: "generate".into(),
+        model_id: "fake-gen-wh".into(),
+        final_prompt: "crypt, top-down".into(),
+        candidate_count: 2,
+        extra,
+        ..Default::default()
+    };
+    let job = store::record_job(&g.e.ctx, install, &mut g.p, new, vec![], vec![]).unwrap();
+    for s in [JobState::Submitted, JobState::Running, JobState::Succeeded] {
+        store::update_job(
+            &g.e.ctx,
+            &mut g.p,
+            job.id,
+            JobUpdate {
+                state: Some(s),
+                provider: Some(json!({"handle": "h-1"})),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    }
+    let cands = || {
+        [10u8, 20]
+            .iter()
+            .map(|&s| NewCandidate {
+                bytes: token_png(s),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>()
+    };
+    let pid = g.p.manifest.project_id;
+    g.e.ctx.faults = Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap();
+    let err = store::add_candidates(&g.e.ctx, install, &mut g.p, job.id, cands()).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Locked);
+    assert!(spool::spoolable(&err));
+    spool::push_candidates(&g.e.ctx, pid, job.id, &cands()).unwrap();
+    // A user write (the New image draft) fails with `locked` meanwhile.
+    let err = put_draft(
+        &g.e.ctx,
+        install,
+        &mut g.p,
+        DraftInput::generate_only(Some(json!({"model_id": "fake-gen-wh"}))),
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Locked);
+    let r = spool::replay(&g.e.ctx, install, &mut g.p).unwrap();
+    assert_eq!(r.entries, 0, "still locked: kept");
+    assert_eq!(spool::pending_count(&g.e.ctx, pid), 1);
+    assert_eq!(g.p.jobs[&job.id].state, JobState::Succeeded);
+    // Unlocked: the replay stores the iteration, and the pick works.
+    g.e.ctx.faults = Faults::none();
+    let r = spool::replay(&g.e.ctx, install, &mut g.p).unwrap();
+    assert_eq!(r.entries, 1);
+    assert_eq!(spool::pending_count(&g.e.ctx, pid), 0);
+    assert_eq!(g.p.jobs[&job.id].state, JobState::Fetched);
+    let stored: Vec<_> =
+        g.p.manifest
+            .candidates
+            .iter()
+            .filter(|c| c.job_id == job.id)
+            .cloned()
+            .collect();
+    assert_eq!(stored.len(), 2);
+    assert!(stored.iter().all(|c| g.dir.join(&c.file).is_file()));
+    g.pick(job.id, stored[0].id).unwrap();
+    assert_eq!(g.p.manifest.layers[0].candidate_id, Some(stored[0].id));
+}

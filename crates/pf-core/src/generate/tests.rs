@@ -1713,3 +1713,62 @@ fn fr_gen_34_read_only_star_and_discard_fail_fast() {
     }
     assert_eq!(g.lab.persisted(), before, "nothing written");
 }
+
+/// FR-GEN-34 → FR-RGN-37 for a generate job: a sync conflict mid-job spools the paid candidates
+/// (FR-PRJ-40) and polling goes on; user writes fail with `conflict` meanwhile; the resolve
+/// replays the spool, and the iteration can be picked.
+#[test]
+fn fr_gen_34_a_conflict_during_a_generate_job_spools_the_candidates_and_replays() {
+    let g = G::empty("maps", "Crypt");
+    let mut d = g.draft("flooded crypt");
+    d["controls"] = json!({"num_samples": 2});
+    let id = g.submit(&d).unwrap();
+    for _ in 0..3 {
+        crate::region_edit::runner::tick(&g.lab.core, true);
+    }
+    assert_eq!(g.lab.job(id).state, JobState::Succeeded);
+    // Another machine committed: project.json's seq moved on.
+    let path = g.lab.project_dir.join(crate::manifest::MANIFEST_FILE);
+    let mut theirs: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    theirs["commit"]["seq"] = json!(theirs["commit"]["seq"].as_u64().unwrap() + 7);
+    std::fs::write(&path, serde_json::to_vec_pretty(&theirs).unwrap()).unwrap();
+    g.lab.drive();
+    assert_eq!(
+        g.lab.job(id).state,
+        JobState::Succeeded,
+        "not committed yet"
+    );
+    assert!(g.lab.candidates(id).is_empty());
+    let pid = g.lab.manifest()["project_id"].as_str().unwrap().to_owned();
+    let spool = g.lab.dir.path().join("data/pending").join(&pid);
+    assert!(spool.join("1.json").is_file(), "paid output spooled");
+    // A user write (the New image draft) fails with `conflict` and is kept for later.
+    let r = g.dispatch(
+        "project_put_draft",
+        json!({"generate": {"model_id": WH, "typed_prompt": "meanwhile"}}),
+    );
+    assert_eq!(code(r), ErrorCode::Conflict);
+    // Resolved (FR-PRJ-36): the resolve runs the runner tick, which replays (R48).
+    let rev = g
+        .dispatch("project_resolve_conflict", json!({"keep": "this"}))
+        .unwrap();
+    assert_eq!(rev["reason"], "conflict");
+    assert_eq!(g.lab.job(id).state, JobState::Fetched);
+    let cands = g.lab.candidates(id);
+    assert_eq!(cands.len(), 2);
+    assert!(!spool.exists());
+    assert_eq!(
+        g.lab.job(id).iteration.unwrap().dir,
+        "results/001 flooded crypt"
+    );
+    // Writes work again: pick the first candidate as the base image.
+    g.dispatch(
+        "gen_candidate_pick",
+        json!({"job_id": id, "candidate_id": cands[0].id}),
+    )
+    .unwrap();
+    assert_eq!(
+        g.lab.manifest()["layers"][0]["candidate_id"],
+        json!(cands[0].id)
+    );
+}
