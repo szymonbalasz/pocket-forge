@@ -373,9 +373,14 @@ async function loadSketches(): Promise<void> {
 }
 
 async function loadModels(remembered: Values | null): Promise<void> {
+  const pid = state.projectId;
+  const t = nextToken('models');
+  // A late answer belongs to the project (and load) that asked: never into another one's tab.
+  const late = () => !isCurrent('models', t) || state.projectId !== pid;
   set({ modelsLoading: true, modelsError: null });
   try {
     const { models, stale } = await api.provider.listModels('generate');
+    if (late()) return;
     set({ models, modelsStale: stale, modelsLoading: false });
     const keep = state.modelId && models.some((m) => m.id === state.modelId) ? state.modelId : null;
     if (state.modelId && !keep)
@@ -386,6 +391,7 @@ async function loadModels(remembered: Values | null): Promise<void> {
     if (id) await selectModel(id, remembered);
     else set({ modelId: null, caps: null, evaluation: null, fit: null });
   } catch (e) {
+    if (late()) return;
     set({ modelsLoading: false, modelsError: uiError(e) });
   }
   schedule();
@@ -790,8 +796,10 @@ export const gen = {
   async retry(jobId: string): Promise<void> {
     const project = projectStore.get().project;
     if (project) await gen.attach(project);
+    const pid = state.projectId;
     try {
       const d = await api.gen.retryDraft(jobId);
+      if (state.projectId !== pid) return; // another project opened meanwhile (FR-GEN-19)
       const flag = d.structure?.changed_since || d.structure?.missing ? d.structure : null;
       set({
         notices: [],
@@ -809,8 +817,9 @@ export const gen = {
       debouncer.reset();
       restoreReferences(d.references, 'gen'); // FR-REF-26 flags (REF resolves them)
       if (d.model_id) await selectModel(d.model_id, d.controls);
-      saveDraftSoon();
+      if (state.projectId === pid) saveDraftSoon();
     } catch (e) {
+      if (state.projectId !== pid) return;
       const err = uiError(e);
       set({ info: null, submitError: err });
     }

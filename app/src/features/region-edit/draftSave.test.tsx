@@ -93,3 +93,35 @@ test('FR-PRJ-19 R97 a region edit still waiting for its save is written on close
   ]);
   expect(fake.callsOf('project_put_draft')[1]).toMatchObject({ draft: { final_prompt: 'ivy' } });
 });
+
+test('FR-GEN-19 R97 a late Retry answer is dropped when another project opened meanwhile', async () => {
+  await openPanel();
+  let release: () => void = () => undefined;
+  mockWindow().__pfMockHandlers.rgn_job_retry_draft = () =>
+    new Promise<void>((r) => (release = r)).then(() => ({
+      final_prompt: 'from project A',
+      seed: 7,
+      blend_instruction: true,
+      prompt_helpers: null,
+      region: { inner: { x: 0, y: 0, w: 256, h: 256 }, margin: 32 },
+      mask_id: null,
+      model_id: 'fake-all-types',
+      controls: {},
+      references: null,
+    }));
+  const retry = rgn.retry('01JJOBA0000000000000000000');
+  mockWindow().__pfMockSnapshot.project_id = '01JPROJECTB000000000000000';
+  await act(() => projectStore.open('C:/pf-test/library/Maps/other'));
+  await waitFor(() => expect(rgn.get().projectId).toBe('01JPROJECTB000000000000000'));
+  await waitFor(() => expect(rgn.get().evaluation).not.toBeNull());
+  const saves = fake.callsOf('project_put_draft').length;
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  await act(async () => {
+    release();
+    await retry;
+  });
+  await act(() => vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS + 10));
+  expect(rgn.get().prompt).not.toBe('from project A');
+  expect(rgn.get().seed).not.toBe(7);
+  expect(fake.callsOf('project_put_draft').slice(saves)).toEqual([]);
+});

@@ -534,3 +534,41 @@ test('FR-PRJ-19 R97 a New image edit still waiting for its save is written on cl
     draft: { generate: { typed_prompt: 'sunken hall' } },
   });
 });
+
+test('FR-GEN-19 R97 a late model list of the previous project never lands in the next one', async () => {
+  let release: (v: unknown) => void = () => undefined;
+  polyfillRadix();
+  fake = mockGenCore();
+  const h = mockWindow().__pfMockHandlers;
+  const list = h.provider_list_models!;
+  let first = true;
+  h.provider_list_models = (i) => {
+    if (!first || i.operation !== 'generate') return list(i);
+    first = false;
+    // Project A's answer comes late, and lists only the aspect model.
+    return new Promise((r) => (release = r)).then(() => ({
+      models: [{ id: 'fake-gen-aspect', name: 'Fake gen (aspect)', operations: ['generate'] }],
+      stale: false,
+    }));
+  };
+  generateTab.openNextWith('new-image');
+  await act(() => projectStore.open(PROJECT_DIR));
+  render(
+    <Tooltip.Provider>
+      <GeneratePanel />
+    </Tooltip.Provider>,
+  );
+  await waitFor(() => expect(gen.get().modelsLoading).toBe(true));
+  // Project B opens and loads its own list.
+  mockWindow().__pfMockSnapshot.project_id = PROJECT_B;
+  generateTab.openNextWith('new-image');
+  await act(() => projectStore.open('C:/pf-test/library/Maps/other'));
+  await waitFor(() => expect(gen.get().projectId).toBe(PROJECT_B));
+  await waitFor(() => expect(gen.get().fit).not.toBeNull());
+  expect(gen.get().modelId).toBe('fake-gen-wh');
+  await act(async () => release(null));
+  await act(() => new Promise((r) => setTimeout(r, 50)));
+  expect(gen.get().models.map((m) => m.id)).toEqual(['fake-gen-wh', 'fake-gen-aspect']);
+  expect(gen.get().modelId).toBe('fake-gen-wh');
+  expect(gen.get().notices).toEqual([]);
+});

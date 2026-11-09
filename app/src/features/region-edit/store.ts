@@ -1242,8 +1242,11 @@ export const rgn = {
       return;
     }
     generateTab.select(REGION_TAB);
+    const pid = state.projectId;
     try {
       const d = await api.region.retryDraft(jobId);
+      // Another project opened meanwhile: this job's draft is not its draft (FR-GEN-19).
+      if (state.projectId !== pid) return;
       set({
         prompt: d.final_prompt,
         seedMode: d.seed === null ? 'random' : 'pinned',
@@ -1265,8 +1268,9 @@ export const rgn = {
       // FR-RGN-44: the job's references, with changed / missing flags (REF resets its block).
       restoreReferences(d.references ?? null);
       await selectModel(d.model_id, d.controls);
-      saveDraftSoon();
+      if (state.projectId === pid) saveDraftSoon();
     } catch (e) {
+      if (state.projectId !== pid) return;
       const err = uiError(e);
       set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
     }
