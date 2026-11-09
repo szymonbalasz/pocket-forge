@@ -774,6 +774,10 @@ pub(crate) fn commit_with(
 }
 
 pub(crate) fn write_job(ctx: &Context, p: &OpenProject, job: &JobFile) -> CoreResult<()> {
+    if !p.dir.is_dir() {
+        // §11, R102: never recreate a moved folder's old path as a ghost `.pforge/`.
+        return Err(folder_moved());
+    }
     let path = p.path(&format!("{}/{JOB_FILE}", job.dir()));
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)

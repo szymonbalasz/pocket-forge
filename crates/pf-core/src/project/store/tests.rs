@@ -813,6 +813,42 @@ fn fr_prj_20_r102_a_job_folder_still_syncing_stops_the_orphan_sweep() {
 }
 
 #[test]
+fn fr_prj_21_r102_job_writes_after_a_folder_move_never_recreate_the_old_path() {
+    let mut s = setup();
+    let running = s.job("moss");
+    s.to(running.id, JobState::Submitted);
+    let succeeded = s.job("fern");
+    for st in [JobState::Submitted, JobState::Running, JobState::Succeeded] {
+        s.to(succeeded.id, st);
+    }
+    rename_dir(&s.dir, &s.dir.with_file_name("Elsewhere"));
+    let err = update_job(
+        &s.e.ctx,
+        &mut s.p,
+        running.id,
+        JobUpdate {
+            state: Some(JobState::Running),
+            provider: Some(serde_json::json!({"job_id": "handle"})),
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert!(crate::project::is_folder_moved(&err));
+    assert!(
+        crate::project::spool::spoolable(&err),
+        "spooled, replayed after reopen"
+    );
+    let cand = NewCandidate {
+        bytes: rgba_png(16, 14, [1, 0, 0, 255]),
+        ..Default::default()
+    };
+    let err =
+        add_candidates(&s.e.ctx, s.e.install(), &mut s.p, succeeded.id, vec![cand]).unwrap_err();
+    assert!(crate::project::is_folder_moved(&err));
+    assert!(!s.dir.exists(), "no ghost folder at the old path");
+}
+
+#[test]
 fn fr_prj_41_read_only_refuses_every_store_write() {
     let mut s = setup();
     let (job, c) = s.fetched("moss", 1);

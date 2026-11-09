@@ -87,11 +87,13 @@ struct Entry {
 }
 
 /// A store error the spool absorbs (FR-RGN-37): the write is retried after the cause is gone.
+/// A folder moved in Explorer counts (R102): the entry waits under the project id and replays
+/// when the project is reopened from its new place.
 pub fn spoolable(e: &CoreError) -> bool {
     matches!(
         e.code,
         ErrorCode::Conflict | ErrorCode::Locked | ErrorCode::ReadOnly | ErrorCode::Io
-    )
+    ) || crate::project::is_folder_moved(e)
 }
 
 fn dir(ctx: &Context, project_id: Ulid) -> PathBuf {

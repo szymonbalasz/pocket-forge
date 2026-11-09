@@ -455,6 +455,9 @@ pub fn update_job(
     if let Some(e) = blocked(p) {
         return Err(e);
     }
+    // R102: refused (and spooled by the runner) once the folder moved, never written to a
+    // recreated old path.
+    super::require_folder(p)?;
     write_job(ctx, p, &next)?;
     set_job(p, next.clone());
     Ok(next)
@@ -529,6 +532,7 @@ pub fn add_candidates(
     if let Some(e) = blocked(p) {
         return Err(e);
     }
+    super::require_folder(p)?;
     let mut job = job(p, job_id)?.clone();
     if job.state != JobState::Succeeded {
         return Err(CoreError::invalid(
