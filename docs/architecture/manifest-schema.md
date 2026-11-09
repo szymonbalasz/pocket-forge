@@ -172,6 +172,7 @@ stateDiagram-v2
   unknown --> canceled: reconnect
   succeeded --> fetched: candidates stored
   succeeded --> failed: all candidates invalid (a fetch error never fails a succeeded job, R102)
+  succeeded --> failed: user Dismiss after a failed fetch (R109)
   fetched --> closed: accept, dismiss or next submit
   failed --> [*]
   canceled --> [*]

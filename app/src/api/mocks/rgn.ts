@@ -578,6 +578,14 @@ export function installRgnMock(seed: RgnMockSeed): void {
     rgn_job_dismiss: (input: Rec) => {
       const j = s.jobs.find((x) => x.id === input.job_id);
       if (!j) return fail('not_found', 'no such job');
+      if (j.state === 'succeeded' && j.error) {
+        // R109 (as pf-core): after a failed fetch the job ends failed, its handle kept.
+        j.state = 'failed';
+        j.error = {
+          code: 'fetch_failed',
+          hint: `Dismissed after its results couldn’t be downloaded (${String(j.error.code)}). You may have paid for it.`,
+        };
+      }
       if (active() === j) return fail('job_active', 'The job is still running.');
       const trashed = resolve(j);
       jobEvent(j);

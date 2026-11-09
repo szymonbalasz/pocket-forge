@@ -650,7 +650,21 @@ impl Command for RgnJobDismiss {
         let install_id = state.settings.install_id;
         let p = open_project(&mut state, None)?;
         p.require_writable()?;
-        let job = store::job(p, input.job_id)?.clone();
+        let mut job = store::job(p, input.job_id)?.clone();
+        let project_id = p.manifest.project_id;
+        if job.state == JobState::Succeeded && job.error.is_some() {
+            // R109: its fetch failed at least once; the user gives up on the results.
+            if super::spool::has_pending(&core.ctx, project_id) {
+                // Its candidates may be in the spool, waiting to be saved (FR-RGN-37).
+                return Err(CoreError::new(
+                    ErrorCode::Conflict,
+                    "results are waiting to be saved; resolve the project first",
+                ));
+            }
+            job = give_up_fetch(core, p, &job)?;
+            state.rgn.runner.replace(job.clone());
+        }
+        let p = open_project(&mut state, None)?;
         if is_active(job.state) {
             return Err(CoreError::new(
                 ErrorCode::JobActive,
@@ -672,6 +686,27 @@ impl Command for RgnJobDismiss {
         }
         Ok(DismissOutput { trashed })
     }
+}
+
+/// R109: a `succeeded` job whose fetch failed ends `failed` with `fetch_failed`. Its handle
+/// stays in `provider{}`; it is never fetched or resubmitted (no automatic edge, R102).
+fn give_up_fetch(core: &Core, p: &mut OpenProject, job: &JobFile) -> CoreResult<JobFile> {
+    let last = job
+        .error
+        .as_ref()
+        .and_then(|e| e["code"].as_str())
+        .unwrap_or("fetch error");
+    let update = store::JobUpdate {
+        state: Some(JobState::Failed),
+        error: Some(json!({
+            "code": "fetch_failed",
+            "hint": format!(
+                "Dismissed after its results couldn't be downloaded ({last}). You may have paid for it."
+            ),
+        })),
+        ..Default::default()
+    };
+    store::update_job(&core.ctx, p, job.id, update)
 }
 
 /// Candidates of a job that are kept (not in the trash, not invalid).

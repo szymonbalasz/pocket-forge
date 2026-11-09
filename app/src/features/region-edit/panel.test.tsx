@@ -677,6 +677,26 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(fake.callsOf('rgn_job_submit')).toHaveLength(1);
   });
 
+  test('FR-RGN-28 R109 Dismiss after a failed fetch asks first, then ends the job (failed, fetch_failed in core)', async () => {
+    await submitted();
+    act(() => mockControls().fetchError('provider_failure', 'Download failed.'));
+    await waitFor(() => expect(screen.getByTestId('rgn-job-fetch-error')).toBeTruthy());
+    // Cancel keeps it as it was.
+    fireEvent.click(screen.getByTestId('rgn-job-dismiss'));
+    expect(screen.getByTestId('rgn-job-dismiss-ask').textContent).toMatch(
+      /You may have paid for this; its results can’t be downloaded/,
+    );
+    fireEvent.click(screen.getByTestId('rgn-job-dismiss-cancel'));
+    expect(screen.queryByTestId('rgn-job-dismiss-ask')).toBeNull();
+    expect(fake.callsOf('rgn_job_dismiss')).toHaveLength(0);
+    fireEvent.click(screen.getByTestId('rgn-job-dismiss'));
+    fireEvent.click(screen.getByTestId('rgn-job-dismiss-confirm'));
+    await waitFor(() => expect(fake.callsOf('rgn_job_dismiss')).toHaveLength(1));
+    // Resolved with no iteration: it leaves the tracker (as a dismissed failed submit).
+    await waitFor(() => expect(screen.queryByTestId('rgn-job-strip')).toBeNull());
+    expect(fake.callsOf('rgn_job_submit')).toHaveLength(1);
+  });
+
   test('FR-RGN-23 R108 a lost job without a handle says its result can’t be recovered, with the hint', async () => {
     await submitted();
     act(() =>

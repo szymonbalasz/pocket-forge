@@ -2303,3 +2303,59 @@ fn fr_prj_29_r109_a_submit_refused_as_locked_leaves_no_job_file() {
     assert!(!lost, "{snap}");
     assert!(lab.core.state().project.as_ref().unwrap().jobs.is_empty());
 }
+
+/// R109: a paid job whose fetch keeps failing can be dismissed after at least one failed fetch.
+/// It ends `failed` with `fetch_failed`, its handle kept, and is never fetched or resubmitted.
+#[test]
+fn fr_rgn_28_r109_dismiss_after_a_failed_fetch_fails_the_job_and_keeps_the_handle() {
+    let lab = Lab::new();
+    let id = lab.submit("kitchen");
+    for _ in 0..3 {
+        runner::tick(&lab.core, true);
+    }
+    assert_eq!(lab.job(id).state, JobState::Succeeded);
+    // No failed fetch yet: still being fetched.
+    assert_eq!(
+        code(lab.core.dispatch("rgn_job_dismiss", json!({"job_id": id}))),
+        ErrorCode::JobActive
+    );
+    let handle = lab.job(id).provider.clone();
+    lab.set_case("auth");
+    runner::tick(&lab.core, true);
+    assert_eq!(lab.job(id).error.as_ref().unwrap()["code"], "auth");
+    lab.core
+        .dispatch("rgn_job_dismiss", json!({"job_id": id}))
+        .unwrap();
+    let job = lab.job(id);
+    assert_eq!(job.state, JobState::Failed);
+    assert_eq!(job.error.as_ref().unwrap()["code"], "fetch_failed");
+    assert_eq!(job.provider, handle, "the handle is kept");
+    assert!(job.resolved_at.is_some());
+    assert!(!lab.core.state().rgn.runner.tracked().contains(&id));
+    let shown = lab.events_named(runner::EVENT_JOB_STATE).pop().unwrap();
+    assert_eq!(
+        (&shown["state"], &shown["error"]["code"]),
+        (&json!("failed"), &json!("fetch_failed"))
+    );
+    // Never fetched again, never resubmitted; the project takes a new submit.
+    lab.set_case("success");
+    let calls = lab.fake().call_count();
+    for _ in 0..3 {
+        runner::tick(&lab.core, true);
+    }
+    assert_eq!(lab.fake().call_count(), calls);
+    assert_eq!(
+        code(
+            lab.core
+                .dispatch("rgn_job_fetch_again", json!({"job_id": id}))
+        ),
+        ErrorCode::InvalidInput
+    );
+    let next = lab.run("pantry");
+    assert_eq!(lab.job(next).state, JobState::Fetched);
+    lab.close();
+    let lab = lab.restart();
+    lab.open();
+    assert_eq!(lab.job(id).state, JobState::Failed);
+    assert!(!lab.core.state().rgn.runner.tracked().contains(&id));
+}
