@@ -25,6 +25,9 @@ export interface ProjectState {
   /** Walk owner-UX L3: the one discard / restore notice, shown next to where the user acted
    *  (Results, the tracker or Storage); a newer one replaces it wherever it was. */
   trashNotice: TrashNotice | null;
+  /** Bumped per project folder when it may have changed (⟳, window focus, an Add), so every
+   *  list of it reloads: the project panel's and New image's sketches (walk-gen L2). */
+  folders: Record<string, number>;
 }
 
 export interface TrashNotice {
@@ -40,6 +43,7 @@ const initial: ProjectState = {
   opening: null,
   revision: 0,
   trashNotice: null,
+  folders: {},
 };
 
 let state: ProjectState = initial;
@@ -333,6 +337,11 @@ export const projectStore = {
   noteFolderMoved(): void {
     if (!state.project || folderMoved(state)) return;
     set({ save: { kind: 'failed', code: 'folder_moved', message: '', retrying: false } });
+  },
+
+  /** A project folder may have changed (⟳, focus, an Add, Explorer): its lists reload. */
+  folderChanged(folder: string): void {
+    set({ folders: { ...state.folders, [folder]: (state.folders[folder] ?? 0) + 1 } });
   },
 
   /** Shows the discard / restore notice where the user acted (replacing any other). */

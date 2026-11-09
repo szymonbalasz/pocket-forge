@@ -422,3 +422,17 @@ test('FR-GEN-34 read-only: the tab is shown, no estimate, Generate disabled with
   );
   expect(fake.callsOf('gen_job_estimate')).toHaveLength(0);
 });
+
+test('walk L2 FR-GEN-14 the sketch list follows structure/ changes (the project panel ⟳, focus, Add)', async () => {
+  await setup({ sketches: [sketch('a-room.png')] });
+  await waitFor(() => expect(screen.getAllByTestId('gen-sketch-item')).toHaveLength(1));
+  // Copied in with Explorer, then ⟳ on the project panel's Structure folder.
+  (fake.structure as unknown[]).push(sketch('b-hall.png'));
+  act(() => projectStore.folderChanged('structure'));
+  await waitFor(() => expect(screen.getAllByTestId('gen-sketch-item')).toHaveLength(2));
+  // Another folder changing doesn't reload the sketches.
+  const lists = fake.callsOf('project_folder_list').length;
+  act(() => projectStore.folderChanged('references'));
+  await act(() => new Promise((r) => setTimeout(r, 50)));
+  expect(fake.callsOf('project_folder_list').length).toBe(lists);
+});

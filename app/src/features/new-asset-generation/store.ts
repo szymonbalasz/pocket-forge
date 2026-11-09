@@ -499,9 +499,16 @@ function subscribe(): void {
     ),
   ];
   // The project closed or another one opened, maybe while this tab was hidden: let it go.
+  // `structure/` changed (⟳, focus, an Add in the project panel): the sketch list follows.
+  let structureSeq = projectStore.get().folders.structure ?? 0;
   const offProject = projectStore.subscribe(() => {
-    const p = projectStore.get().project;
-    if (state.projectId && p?.project_id !== state.projectId) gen.detach();
+    const ps = projectStore.get();
+    if (state.projectId && ps.project?.project_id !== state.projectId) return gen.detach();
+    const seq = ps.folders.structure ?? 0;
+    if (seq !== structureSeq) {
+      structureSeq = seq;
+      void loadSketches();
+    }
   });
   unsubscribe = () => {
     offProject();
@@ -652,6 +659,7 @@ export const gen = {
     try {
       await api.project.folderAdd('structure', paths);
       set({ sketchError: null });
+      projectStore.folderChanged('structure'); // the project panel's list too (walk-gen L2)
     } catch (e) {
       set({ sketchError: uiError(e) });
     }

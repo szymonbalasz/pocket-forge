@@ -265,6 +265,7 @@ function Folder({
   const [files, setFiles] = useState<FolderFile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const seq = useProjectState().folders[id] ?? 0;
   const load = useCallback(() => {
     api.project.folderList(id).then(
       (f) => {
@@ -278,13 +279,16 @@ function Folder({
       },
     );
   }, [id]);
-  useEffect(load, [load, revision]);
-  useOnFocus(load);
+  useEffect(load, [load, revision, seq]);
+  // Every list of this folder reloads (New image's sketches too, walk-gen L2).
+  const changed = useCallback(() => projectStore.folderChanged(id), [id]);
+  useOnFocus(changed);
 
   const add = async (paths: string[]) => {
     try {
       setFiles(await api.project.folderAdd(id, paths));
       setError(null);
+      changed();
     } catch (e) {
       setError(errorOf(e).message);
     }
@@ -304,7 +308,7 @@ function Folder({
             data-testid={`prj-panel-${id}-refresh`}
             title={`Refresh ${label}`}
             aria-label={`Refresh ${label}`}
-            onClick={load}
+            onClick={changed}
           >
             ⟳
           </button>
