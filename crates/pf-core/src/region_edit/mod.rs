@@ -57,6 +57,11 @@ pub struct RgnState {
     pub runner: runner::Runner,
     /// Test and fixture seam: replaces the open project's pixels.
     pub source_override: Option<Arc<dyn pixels::PixelSource>>,
+    /// The `edit_masked` capabilities by model id, as last fetched: the chat context fits the
+    /// region from them without a provider call (FR-PRM-24, FR-PRM-31).
+    pub caps: std::collections::BTreeMap<String, pf_provider::Capabilities>,
+    /// Display names of the `edit_masked` models (`provider_list_models`).
+    pub model_names: std::collections::BTreeMap<String, String>,
 }
 
 impl std::fmt::Debug for RgnState {

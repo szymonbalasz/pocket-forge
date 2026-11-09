@@ -3,7 +3,7 @@
 //! (FR-PRM-31). RGN implements it in `region_edit::chat` (FR-PRM-24), GEN in its slice 6
 //! (FR-PRM-42). The chat core (PRM slice 5) calls it at send time.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use ulid::Ulid;
 
@@ -13,7 +13,7 @@ use crate::error::CoreResult;
 use crate::manifest::Kind;
 
 /// The tab a turn is sent from (FR-PRM-43).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatHost {
     Rgn,
@@ -21,7 +21,7 @@ pub enum ChatHost {
 }
 
 /// What an image is to the chat (FR-PRM-41).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatImageRole {
     RegionOverlay,
@@ -123,14 +123,18 @@ pub const CHAT_MAX_BYTES: usize = 4 * 1024 * 1024;
 /// downscaled with Lanczos3 to a long side ≤ 1568 px, encoded as JPEG q85. Returns the JPEG and
 /// its size.
 pub fn chat_jpeg(bytes: &[u8]) -> CoreResult<(Vec<u8>, u32, u32)> {
-    use image::ImageEncoder;
     let img = image::load_from_memory(bytes).map_err(|e| {
         crate::error::CoreError::new(
             crate::error::ErrorCode::Corrupt,
             format!("the image won't decode: {e}"),
         )
     })?;
-    let rgb = pf_imaging::to_rgb8_flattened(img);
+    chat_jpeg_rgb(pf_imaging::to_rgb8_flattened(img))
+}
+
+/// [`chat_jpeg`] for pixels already in memory (RGN's overlay, FR-PRM-24).
+pub fn chat_jpeg_rgb(rgb: image::RgbImage) -> CoreResult<(Vec<u8>, u32, u32)> {
+    use image::ImageEncoder;
     let (w, h) = rgb.dimensions();
     let long = w.max(h);
     let rgb = if long > CHAT_IMAGE_MAX_SIDE {

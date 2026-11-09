@@ -124,6 +124,25 @@ pub enum ErrorCode {
     NoImage,
     /// A GEN command was given a region edit job, or the reverse (FR-GEN-32, GEN §9).
     WrongOperation,
+    /// The prompt chat's privacy notice isn't accepted (FR-PRM-20).
+    ConsentRequired,
+    /// The prompt chat is off in Settings (FR-PRM-20).
+    ChatDisabled,
+    /// No prompt block is attached for the project, or not the proposal's host (FR-PRM-27/29).
+    NoPromptBlock,
+    /// A chat turn is already running for the thread (FR-PRM-27).
+    TurnActive,
+    /// FR-PRM-37 / Appendix D: the chat backend's codes.
+    NotInstalled,
+    VersionUnsupported,
+    IsolationUnavailable,
+    NotLoggedIn,
+    UsageLimit,
+    Offline,
+    Timeout,
+    BackendCrashed,
+    StreamMalformed,
+    BackendError,
 }
 
 impl ErrorCode {
@@ -194,6 +213,20 @@ impl ErrorCode {
             ErrorCode::TooMany => "too_many",
             ErrorCode::NoImage => "no_image",
             ErrorCode::WrongOperation => "wrong_operation",
+            ErrorCode::ConsentRequired => "consent_required",
+            ErrorCode::ChatDisabled => "chat_disabled",
+            ErrorCode::NoPromptBlock => "no_prompt_block",
+            ErrorCode::TurnActive => "turn_active",
+            ErrorCode::NotInstalled => "not_installed",
+            ErrorCode::VersionUnsupported => "version_unsupported",
+            ErrorCode::IsolationUnavailable => "isolation_unavailable",
+            ErrorCode::NotLoggedIn => "not_logged_in",
+            ErrorCode::UsageLimit => "usage_limit",
+            ErrorCode::Offline => "offline",
+            ErrorCode::Timeout => "timeout",
+            ErrorCode::BackendCrashed => "backend_crashed",
+            ErrorCode::StreamMalformed => "stream_malformed",
+            ErrorCode::BackendError => "backend_error",
         }
     }
 }

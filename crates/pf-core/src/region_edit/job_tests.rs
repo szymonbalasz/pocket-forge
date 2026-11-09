@@ -96,10 +96,21 @@ impl Lab {
     }
 
     pub fn with_original(img: RgbImage) -> Lab {
+        Self::build(img, |_| {})
+    }
+
+    /// [`Lab::new`] with the context adjusted before the core starts (PRM: the chat seams).
+    pub fn with_context(tweak: impl FnOnce(&mut crate::context::Context)) -> Lab {
+        Self::build(original(), tweak)
+    }
+
+    fn build(img: RgbImage, tweak: impl FnOnce(&mut crate::context::Context)) -> Lab {
         let dir = tempfile::tempdir().unwrap();
         let events = Arc::new(RecordedEvents::default());
         let clock = Arc::new(ManualClock::new(Timestamp(T0)));
-        let core = Core::new(context(dir.path(), events.clone(), clock.clone(), 1)).unwrap();
+        let mut ctx = context(dir.path(), events.clone(), clock.clone(), 1);
+        tweak(&mut ctx);
+        let core = Core::new(ctx).unwrap();
         let src = dir.path().join("outside").join("rooms.png");
         std::fs::create_dir_all(src.parent().unwrap()).unwrap();
         img.save(&src).unwrap();

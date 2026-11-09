@@ -67,6 +67,38 @@ pub struct RegionEditSettings {
 }
 
 /// The whole settings file. Unknown sections and fields are kept (written after known ones).
+/// `prompt_chat.consent` (FR-PRM-20): when the privacy notice was accepted, and which version.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChatConsent {
+    pub accepted_at: crate::time::Timestamp,
+    pub notice_version: u32,
+}
+
+/// The chat window's size and position (FR-PRM-21), per machine.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ChatWindowRect {
+    pub x: i32,
+    pub y: i32,
+    pub w: u32,
+    pub h: u32,
+}
+
+/// `prompt_chat` (PRM §8): absent = off, not consented.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PromptChatSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consent: Option<ChatConsent>,
+    /// The Claude Code executable, overriding §10's search.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claude_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<ChatWindowRect>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     pub schema_version: u32,
@@ -83,8 +115,15 @@ pub struct Settings {
     /// falls back to the starter set with a warning instead of resetting the file (PRM §11).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_helpers: Option<Value>,
+    /// `prompt_chat` section (PRM §8, FR-PRM-20).
+    #[serde(default, skip_serializing_if = "is_default_chat")]
+    pub prompt_chat: PromptChatSettings,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
+}
+
+fn is_default_chat(c: &PromptChatSettings) -> bool {
+    *c == PromptChatSettings::default()
 }
 
 impl Settings {
@@ -97,6 +136,7 @@ impl Settings {
             provider: ProviderSettings::default(),
             region_edit: RegionEditSettings::default(),
             prompt_helpers: None,
+            prompt_chat: PromptChatSettings::default(),
             extra: BTreeMap::new(),
         }
     }
@@ -179,12 +219,13 @@ pub fn save(ctx: &Context, settings: &Settings) -> CoreResult<()> {
 }
 
 /// The sections other features read and write through PRJ (R4, R8).
-pub const SECTIONS: [&str; 5] = [
+pub const SECTIONS: [&str; 6] = [
     "library",
     "spend",
     "provider",
     "region_edit",
     "prompt_helpers",
+    "prompt_chat",
 ];
 
 fn unknown_section(name: &str) -> CoreError {
@@ -203,6 +244,7 @@ pub fn section_get(settings: &Settings, name: &str) -> CoreResult<Value> {
         "region_edit" => serde_json::to_value(&settings.region_edit),
         // Absent = `null` (the starter set, FR-PRM-02).
         "prompt_helpers" => Ok(settings.prompt_helpers.clone().unwrap_or(Value::Null)),
+        "prompt_chat" => serde_json::to_value(&settings.prompt_chat),
         other => return Err(unknown_section(other)),
     };
     v.map_err(|e| CoreError::internal(format!("serialising settings: {e}")))
@@ -230,6 +272,18 @@ pub fn section_put(
                 crate::prompt::helpers::parse_section(&value)?;
             }
             next.prompt_helpers = (!value.is_null()).then_some(value);
+        }
+        // FR-PRM-20: consent is given only through `prm_chat_consent`, never by a section put;
+        // the stored consent is kept whatever the input says.
+        "prompt_chat" => {
+            let mut chat: PromptChatSettings = serde_json::from_value(value).map_err(bad)?;
+            if let Some(p) = &chat.claude_path
+                && p.trim().is_empty()
+            {
+                chat.claude_path = None;
+            }
+            chat.consent = settings.prompt_chat.consent.clone();
+            next.prompt_chat = chat;
         }
         other => return Err(unknown_section(other)),
     }

@@ -285,6 +285,12 @@ impl Command for ProviderListModels {
             for m in &list.models {
                 names.insert(m.id.clone(), m.name.clone());
             }
+        } else if input.operation == Operation::EditMasked {
+            // RGN's chat context names the model the same way (FR-PRM-24).
+            let names = &mut core.state().rgn.model_names;
+            for m in &list.models {
+                names.insert(m.id.clone(), m.name.clone());
+            }
         }
         Ok(ListModelsOutput {
             models: list.models,

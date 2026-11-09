@@ -70,6 +70,8 @@ pub struct Core {
     /// REF's session memory: header probes and prepared references (FR-REF-23). Has its own
     /// locks; never needs the state lock.
     pub refs: crate::references::RefSession,
+    /// The prompt chat's memory (PRM slice 5): its own locks, never the state lock in a turn.
+    pub chat: crate::prompt::chat::ChatRuntime,
 }
 
 impl Core {
@@ -80,6 +82,7 @@ impl Core {
         crate::library::prepare_override(&ctx)?;
         crate::library::sweep_startup(&ctx, &settings);
         crate::references::sweep_startup(&ctx, &settings);
+        crate::prompt::chat::sweep_startup(&ctx);
         ctx.provider.set_account(settings.provider.account());
         Ok(Core {
             thumbs: Thumbnails::new(&ctx),
@@ -96,6 +99,7 @@ impl Core {
             create_cancel: AtomicBool::new(false),
             create_lock: Mutex::new(()),
             refs: Default::default(),
+            chat: Default::default(),
         })
     }
 

@@ -61,7 +61,13 @@ pub(crate) fn check_controls_map(field: &str, c: &BTreeMap<String, Value>) -> Co
 
 /// The model's capabilities through PRV; a model the provider doesn't know → `unknown_model`.
 pub fn capabilities(core: &Core, model_id: &str) -> CoreResult<Capabilities> {
-    capabilities_for(core, model_id, Operation::EditMasked)
+    let caps = capabilities_for(core, model_id, Operation::EditMasked)?;
+    // The chat context fits the region from these later without a provider call (FR-PRM-24).
+    core.state()
+        .rgn
+        .caps
+        .insert(model_id.trim().to_owned(), caps.clone());
+    Ok(caps)
 }
 
 /// [`capabilities`] for an operation (GEN passes `generate`, R76). A model with no row for

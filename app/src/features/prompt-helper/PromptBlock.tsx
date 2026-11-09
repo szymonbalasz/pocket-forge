@@ -7,7 +7,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Popover, Tooltip } from 'radix-ui';
 
-import { api, type ComposePreview, type ProjectKind, type PromptHelper } from '../../api';
+import { api, onEvent, type ComposePreview, type ProjectKind, type PromptHelper } from '../../api';
+import { projectStore } from '../../store/project';
 import {
   PLACEHOLDER,
   TIPS,
@@ -58,11 +59,39 @@ export interface PromptBlockProps {
 
 const CHAT_TIP = 'Prompt chat is coming in a later update';
 
+/** FR-PRM-29 (slice 5): Replace from the chat reaches only the turn host's attached block, for
+ *  the open project, and is applied as a normal edit (the host saves the draft; the preview
+ *  follows). A read-only block ignores it. */
+function useChatInsert(host: PromptHost, readOnly: boolean, apply: (text: string) => void): void {
+  const latest = useRef(apply);
+  latest.current = apply;
+  useEffect(() => {
+    if (readOnly) return;
+    let off: (() => void) | null = null;
+    let gone = false;
+    void onEvent('prm:insert', (p) => {
+      if (p.host === host && p.project_id === projectStore.get().project?.project_id)
+        latest.current(p.text);
+    }).then(
+      (u) => {
+        if (gone) u();
+        else off = u;
+      },
+      () => undefined,
+    );
+    return () => {
+      gone = true;
+      off?.();
+    };
+  }, [host, readOnly]);
+}
+
 export function PromptBlock(props: PromptBlockProps) {
   const { host, kind, prompt, helperIds, readOnly = false } = props;
   const blend = props.blendInstruction ?? null;
   const { helpers, error } = useHelpers();
   const preview = usePreview(kind, prompt, helperIds, blend, helpers, props.onPreview);
+  useChatInsert(host, readOnly, props.onPromptChange);
   const id = `prm-prompt-${host}`;
 
   return (

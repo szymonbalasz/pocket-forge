@@ -1295,3 +1295,100 @@ fn fr_gen_30_walk_l5_a_discarded_candidate_is_picked_after_storage_restore() {
     assert_eq!(out["file"], "working/001 crypt 02.png");
     assert!(g.lab.project_dir.join("results/001 crypt/02.png").is_file());
 }
+
+// ---------------------------------------------------------------- PRM slice 5: chat on both hosts
+
+/// FR-PRM-42/43/29/31: one thread across both tabs. A New image turn sends the sketch first and
+/// drops the last references (6-image limit); the host is recorded per turn; a proposal inserts
+/// only into its own host's attached block; nothing in the chat calls the provider.
+#[test]
+fn fr_prm_42_43_31_chat_on_both_hosts_without_a_provider_call() {
+    let g = G::new();
+    g.sketch("rooms.png", &layout());
+    for i in 0..8u8 {
+        g.reference(&format!("r{i}.png"), &png_bytes(32, 24, i * 9 + 1));
+    }
+    let mut d = g.draft("Flooded crypt");
+    d["structure"] = json!({"file": "rooms.png"});
+    g.warm(&d);
+    g.lab.core.state().generate.caps.get_mut(WH).unwrap().slots[0].max = 17;
+    g.dispatch("prm_chat_consent", json!({"accept": true}))
+        .unwrap();
+    let pid = g.project_id();
+    let calls = || g.lab.core.ctx.provider.as_fake().unwrap().call_count();
+    let before = calls();
+    let publish = |host: &str, input: Value| {
+        g.dispatch(
+            "prm_context_publish",
+            json!({"project_id": pid, "host": host, "input": input}),
+        )
+        .unwrap();
+    };
+    let clear = |host: &str| {
+        g.dispatch(
+            "prm_context_clear",
+            json!({"project_id": pid, "host": host}),
+        )
+        .unwrap();
+    };
+    let send = |text: &str| {
+        g.dispatch("prm_chat_send", json!({"project_id": pid, "text": text}))
+            .unwrap()
+    };
+
+    // Region edit first, then the tab switch to New image (FR-PRM-43).
+    publish("rgn", g.lab.draft("a kitchen"));
+    let a = send("make this a kitchen");
+    assert_eq!(a["host"], "rgn");
+    clear("rgn");
+    publish("gen", d.clone());
+    let b = send("a crypt");
+    assert_eq!(b["host"], "gen");
+    assert_eq!(b["fresh_session"], false, "a tab switch keeps the session");
+    assert_eq!(
+        b["dropped"],
+        json!(["r5.png (project)", "r6.png (project)", "r7.png (project)"])
+    );
+
+    let view = g
+        .dispatch("prm_chat_thread_get", json!({"project_id": pid}))
+        .unwrap();
+    let turns = view["thread"]["turns"].as_array().unwrap();
+    let hosts: Vec<&str> = turns.iter().map(|t| t["host"].as_str().unwrap()).collect();
+    assert_eq!(hosts, ["rgn", "rgn", "gen", "gen"]);
+    let images = turns[2]["context"]["images"].as_array().unwrap();
+    assert_eq!(images.len(), 6);
+    assert_eq!(images[0]["role"], "structure", "the sketch first");
+    assert!(images[1..].iter().all(|i| i["role"] == "reference"));
+    assert_eq!(turns[2]["context"]["dropped"].as_array().unwrap().len(), 3);
+    assert!(
+        turns[3]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Host: New image")
+    );
+
+    // Region edit's proposal while New image is visible → no_prompt_block (FR-PRM-29).
+    let rgn_proposal = turns[1]["proposals"][0]["id"].clone();
+    let e = g
+        .dispatch(
+            "prm_chat_insert",
+            json!({"project_id": pid, "proposal_id": rgn_proposal}),
+        )
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::NoPromptBlock);
+    let gen_proposal = turns[3]["proposals"][0]["id"].clone();
+    let out = g
+        .dispatch(
+            "prm_chat_insert",
+            json!({"project_id": pid, "proposal_id": gen_proposal}),
+        )
+        .unwrap();
+    assert_eq!(out["host"], "gen");
+
+    assert_eq!(
+        calls(),
+        before,
+        "the chat made no provider call (FR-PRM-31)"
+    );
+}

@@ -123,6 +123,7 @@ pub(super) fn on_open(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> C
     if p.read_only.is_none() {
         // FR-PRJ-34, OQ-PRJ-10 A: settle job.json copies before rolling jobs forward.
         super::conflict::settle_job_copies(ctx, p);
+        super::conflict::settle_chat_copies(ctx, p);
         let now = ctx.now();
         let ids: Vec<Ulid> = p.jobs.keys().copied().collect();
         for id in ids {

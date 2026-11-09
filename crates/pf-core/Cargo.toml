@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 image.workspace = true
+pf-chat.workspace = true
 pf-imaging.workspace = true
 pf-provider.workspace = true
 serde.workspace = true

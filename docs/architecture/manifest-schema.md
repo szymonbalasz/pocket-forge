@@ -33,6 +33,7 @@
       jobs/<job-id>/region.png           write-once, outer rect as sent (after fit)
       jobs/<job-id>/mask.png             write-once, padded + resampled, before polarity conversion
       trash/<item-id>/<project path>     trashed files, 30-day purge
+      chat/<thread-id>.json              mutable: the prompt chat thread (§4.14, PRM)
       thumb.jpg                          home-grid thumbnail, ≤ 512 px, rebuildable (FR-PRJ-50)
       project.v<N>.json                  pre-migration copy (§6)
   Maps/.Crypt.pf-tmp-<ulid>/             a project being created (FR-PRJ-09)
@@ -223,6 +224,21 @@ No `name`: the folder name is the pack name (OQ-REF-01).
 ### 4.13 References trash item
 `<library-root>/References/.pforge/trash/<item-id>/item.json` = `{schema_version, id, kind: pack|images, pack_id, from, files[], trashed_at, restored_at?}` (`from` = `References/<pack>` for a pack, the file names for images), plus the moved files under the same folder. `item.json` is written first; the move is rolled forward at startup. `restored_at` is set before a restore moves files back, so a restore interrupted by a crash is finished at startup (R50). Purged when `trashed_at` + 30 days < now (FR-REF-12).
 
+### 4.14 Chat thread (`.pforge/chat/<thread-id>.json`)
+Owner of the meaning: [prompt-helper](../specs/prompt-helper.md) (PRM, FR-PRM-22, §8). One per asset project, created at the first send, written temp → rename after the user's message and again after each reply (not through a manifest commit). Never holds image bytes, credentials, session ids, the email or other `auth status` fields.
+
+| Field | Type | Notes |
+|---|---|---|
+| `schema_version` | int | 1 |
+| `id` | ULID | the file name |
+| `created_at`, `updated_at` | time | `updated_at` decides a sync conflict copy |
+| `backend` | `fake\|claude-code` | |
+| `turns[]` | object | `{id, at, role: user\|assistant, host: rgn\|gen, text, state: pending\|done\|canceled\|failed\|interrupted, error?{code, message, fix?}, context?{summary, images[{id, role, w, h, hash}], dropped[], final_prompt, model_id, controls{}}, proposals[{id, text, inserted_at?}], usage?{input_tokens, output_tokens, cost_usd?, notional}, fresh_session?}`. User turns carry `context` (and `fresh_session` when they started a new backend session); replies carry the text, `error`, `proposals` and `usage`. A turn still `pending` when the file is read is `interrupted` |
+
+- A file that won't parse is renamed `<id>.corrupt-<UTC>.json` (kept, not swept) and a new thread starts (§11).
+- PRJ's orphan sweep never touches `.pforge/chat/` (FR-PRJ-20). Conflict copies (FR-PRJ-34): the later `updated_at` stays `<id>.json` (settled like `job.json` copies), the other file goes to the trash as `conflict_copy`, with the project warning `chat_conflict_copy`. Nothing is merged.
+- The turn images live outside the project, in `<data-dir>/chat/<thread-id>/` (this turn's only; emptied at startup).
+
 ## 5. `settings.json` (R8)
 | Section | Fields | Owner of the meaning |
 |---|---|---|
@@ -232,6 +248,7 @@ No `name`: the folder name is the pack name (OQ-REF-01).
 | `provider` | `team_id?`, `project_id?` (never credentials; those are in the OS store) | PRV |
 | `region_edit` | `blend_instruction?` (string ≤ 2000 chars; absent = the built-in default text, #55) | RGN |
 | `prompt_helpers` | `helpers[]` in settings order: a built-in is `{id, label?, text?, kinds?, default_on?, hidden?}` (overrides only; `{id}` = unmodified), a user-made one `{id (ULID), label, text, kinds[], default_on, hidden?}`. Absent = the starter set. Invalid → the starter set + a warning; the section is kept until the next save ([prompt-helper](../specs/prompt-helper.md) FR-PRM-01/02, §11) | PRM |
+| `prompt_chat` | `enabled` (bool), `consent?{accepted_at, notice_version}` (set only by `prm_chat_consent`), `claude_path?`, `window?{x, y, w, h}`. Absent = off, not consented ([prompt-helper](../specs/prompt-helper.md) FR-PRM-20/21, §8) | PRM |
 
 Corrupt or unreadable → defaults + a warning; the bad file is kept as `settings.corrupt-<UTC>.json`. Unknown sections are kept.
 
