@@ -197,12 +197,13 @@ pub fn parse_json(body: &[u8]) -> ProviderResult<Value> {
     })
 }
 
-/// `Retry-After` in seconds (the HTTP-date form is treated as absent).
+/// `Retry-After` in seconds, capped at [`RETRY_AFTER_CAP`] (FR-PRV-24) so a huge value can't
+/// panic or stall a caller (FR-PRV-23). The HTTP-date form is treated as absent.
 pub fn retry_after(resp: &HttpResponse) -> Option<Duration> {
     resp.header("retry-after")
         .and_then(|v| v.trim().parse::<f64>().ok())
         .filter(|s| s.is_finite() && *s >= 0.0)
-        .map(Duration::from_secs_f64)
+        .map(|s| Duration::from_secs_f64(s.min(RETRY_AFTER_CAP.as_secs_f64())))
 }
 
 /// The human part of a Scenario error body: `reason`, else gateway `message`, plus `hint`.
@@ -580,6 +581,27 @@ mod tests {
         assert_eq!(e.code(), "provider_failure");
         assert!(s.delays().is_empty());
         assert_eq!(t.remaining(), 0);
+    }
+
+    /// Review item 15: a finite but huge `Retry-After` used to panic in `from_secs_f64`.
+    #[test]
+    fn fr_prv_23_a_huge_retry_after_never_panics() {
+        let c = Credentials::new("k", "s");
+        for value in ["1e30", "1.8e19", "99999999999999999999", "inf", "-5"] {
+            let mut r = resp(429, json!({}));
+            r.headers.push(("retry-after".into(), value.into()));
+            let wait = retry_after(&r);
+            assert!(
+                wait.is_none_or(|w| w <= RETRY_AFTER_CAP),
+                "{value}: {wait:?}"
+            );
+            match map_error(&r, Some(&c), true) {
+                ProviderError::RateLimited { retry_after_ms } => {
+                    assert!(retry_after_ms <= 30_000, "{value}: {retry_after_ms}")
+                }
+                other => panic!("{value}: {other:?}"),
+            }
+        }
     }
 
     #[test]
