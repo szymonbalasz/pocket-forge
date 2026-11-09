@@ -1523,6 +1523,16 @@ fn fr_prm_42_43_31_chat_on_both_hosts_without_a_provider_call() {
         )
         .unwrap();
     assert_eq!(out["host"], "gen");
+    // Back to Region edit: its proposal inserts there.
+    clear("gen");
+    publish("rgn", g.lab.draft("a kitchen"));
+    let out = g
+        .dispatch(
+            "prm_chat_insert",
+            json!({"project_id": pid, "proposal_id": rgn_proposal}),
+        )
+        .unwrap();
+    assert_eq!(out["host"], "rgn");
 
     assert_eq!(
         calls(),
