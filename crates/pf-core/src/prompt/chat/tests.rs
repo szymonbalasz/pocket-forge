@@ -991,8 +991,9 @@ fn fr_prm_34_fr_prm_45_a_turn_over_the_adapter_and_the_projects_backstop() {
     assert!(!projects.exists());
 }
 
-#[test]
-fn fr_prm_27_stop_keeps_the_partial_reply() {
+/// A Claude Code turn (replay spawner, real threads) that streamed its first part and then
+/// waits 20 s: the lab and `prm_chat_send`'s answer.
+fn streaming_turn() -> (Lab, Value) {
     let clock = pf_chat::clock::SystemClock::new();
     let mut spawner = None;
     let lab = Lab::with_context(|ctx| {
@@ -1033,16 +1034,24 @@ fn fr_prm_27_stop_keeps_the_partial_reply() {
     });
     publish(&lab, "rgn", lab.draft("a kitchen"));
     let out = send(&lab, "go").unwrap();
-    let wait = |name: &str| {
-        for _ in 0..200 {
-            if !events(&lab, name).is_empty() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(25));
+    wait_for(&lab, super::EVENT_DELTA);
+    (lab, out)
+}
+
+fn wait_for(lab: &Lab, name: &str) {
+    for _ in 0..200 {
+        if !events(lab, name).is_empty() {
+            return;
         }
-        panic!("no {name}");
-    };
-    wait(super::EVENT_DELTA);
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("no {name}");
+}
+
+#[test]
+fn fr_prm_27_stop_keeps_the_partial_reply() {
+    let (lab, out) = streaming_turn();
+    let wait = |name: &str| wait_for(&lab, name);
     assert_eq!(
         lab.core.chat.running_turn(),
         out["turn_id"].as_str().unwrap().parse().ok()
@@ -1715,4 +1724,29 @@ fn lab_with_session() -> Lab {
     send(&lab, "hi").unwrap();
     assert!(lab.core.chat.has_session());
     lab
+}
+
+#[test]
+fn r109_fr_prm_21_a_quit_stops_the_turn_and_ends_the_session_before_exit() {
+    let (lab, out) = streaming_turn();
+    // The quit: the UI closes the project, then the app's teardown runs before the exit.
+    lab.close();
+    lab.core.chat.shutdown(Duration::from_secs(5));
+    assert!(lab.core.chat.running_turn().is_none(), "the turn ended");
+    assert!(!lab.core.chat.has_session(), "the session closed");
+    // On reopen the turn reads "Stopped." (canceled, R103), never `interrupted`.
+    lab.open();
+    let turns = thread_view(&lab)["thread"]["turns"].clone();
+    assert_eq!(turns[1]["id"], out["turn_id"]);
+    assert_eq!(turns[1]["state"], "canceled");
+    assert_eq!(turns[1]["text"], "first part");
+}
+
+#[test]
+fn r109_a_quit_with_no_turn_returns_at_once() {
+    let lab = lab_with_session();
+    let t = std::time::Instant::now();
+    lab.core.chat.shutdown(Duration::from_secs(5));
+    assert!(t.elapsed() < Duration::from_secs(1));
+    assert!(!lab.core.chat.has_session());
 }

@@ -281,6 +281,34 @@ describe('export store', () => {
     expect(h.prj.close).toHaveBeenLastCalledWith(false);
   });
 
+  test('R101 R109 FR-PRJ-21 a second close while the question is open joins the first', async () => {
+    const settled = (p: Promise<void>) => {
+      let done = false;
+      void p.then(() => (done = true));
+      return () => done;
+    };
+    for (const answer of ['confirm', 'keep', 'ended'] as const) {
+      exportStore.reset();
+      await bound();
+      await exportStore.start();
+      h.prj.close.mockReset();
+      // The window X (quit's close), then ← Home while the banner shows (it isn't modal).
+      const quitDone = settled(projectStore.close());
+      const homeDone = settled(projectStore.close());
+      expect(exportStore.get().closeAsk).toBe(true);
+      if (answer === 'confirm') await exportStore.confirmClose();
+      else if (answer === 'keep') exportStore.keepExporting();
+      else h.emit('export:done', doneEvent('e1'));
+      await new Promise((r) => setTimeout(r, 0));
+      expect(quitDone(), answer).toBe(true);
+      expect(homeDone(), answer).toBe(true);
+      expect(exportStore.get().closeAsk).toBe(false);
+      if (answer === 'keep') expect(h.prj.close).not.toHaveBeenCalled();
+      else expect(h.prj.close).toHaveBeenCalled();
+      if (answer === 'keep') h.emit('export:canceled', { export_id: 'e1' });
+    }
+  });
+
   test('OQ-EXP-09 an export that ends before the answer lets the held close go on', async () => {
     for (const end of ['done', 'failed', 'canceled'] as const) {
       exportStore.reset();

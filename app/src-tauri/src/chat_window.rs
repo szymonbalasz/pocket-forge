@@ -127,6 +127,19 @@ pub fn prm_chat_login(core: tauri::State<'_, Core>) -> Result<(), CoreError> {
     pf_core::prompt::chat::open_login_console(&core)
 }
 
+/// R109: how long a quit waits for a streaming turn to stop and the session to close.
+const QUIT_WITHIN: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// R109: a quit runs the windows' teardown first (`app.exit` skips their close events): the
+/// chat window's rect is saved (FR-PRM-21), a streaming turn ends as "Stopped." (R103) and the
+/// session closes (FR-PRM-35). Waits: never call it on the main thread.
+pub fn quit_teardown(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window(LABEL) {
+        save_rect(app, &w);
+    }
+    app.state::<Core>().chat.shutdown(QUIT_WITHIN);
+}
+
 /// The main window closed: the chat window goes too (the app then exits).
 pub fn close_with_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window(LABEL) {
