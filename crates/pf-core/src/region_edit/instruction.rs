@@ -19,14 +19,14 @@ consistent with the surrounding map: continue the existing walls, floor tiles, p
 scale and line style across the boundary so there is no visible seam. Place the new content \
 toward the centre of the edited area.";
 
-/// R94: the built-in instruction for Tokens and Items says "surrounding image".
+/// R94 / R95: the built-in instruction for Tokens and Items (R95's exact text).
 pub const DEFAULT_BLEND_INSTRUCTION_IMAGE: &str = "Keep everything near the edges of the edited \
-area consistent with the surrounding image: continue the existing walls, floor tiles, paths, \
-lighting, scale and line style across the boundary so there is no visible seam. Place the new \
-content toward the centre of the edited area.";
+area consistent with the surrounding image: continue the existing shapes, colours, lighting, \
+scale and line style across the boundary so there is no visible seam. Place the new content \
+toward the centre of the edited area.";
 
-/// The built-in text for an asset kind (R94): "surrounding map" for Maps, "surrounding image"
-/// for Tokens and Items.
+/// The built-in text for an asset kind (R94, R95): Maps keep #55's text; Tokens and Items get
+/// R95's "surrounding image" text.
 pub fn default_text(kind: Kind) -> &'static str {
     match kind {
         Kind::Map => DEFAULT_BLEND_INSTRUCTION,
@@ -266,15 +266,19 @@ mod tests {
         assert_eq!(instruction_for(&blank, Kind::Map), "");
     }
 
-    /// R94: the default says "surrounding map" for Maps and "surrounding image" for Tokens and
-    /// Items; a custom text is used as is for every kind.
+    /// R94 / R95: Maps keep #55's text; Tokens and Items get R95's text exactly; a custom text
+    /// is used as is for every kind.
     #[test]
-    fn owner_r94_default_blend_text_per_kind() {
+    fn owner_r95_default_blend_text_per_kind() {
         let s = RegionEditSettings::default();
-        assert!(instruction_for(&s, Kind::Map).contains("surrounding map"));
+        assert!(instruction_for(&s, Kind::Map).starts_with(DEFAULT_BLEND_INSTRUCTION));
+        assert!(DEFAULT_BLEND_INSTRUCTION.contains("surrounding map: continue the existing walls"));
+        let r95 = "Keep everything near the edges of the edited area consistent with the \
+surrounding image: continue the existing shapes, colours, lighting, scale and line style across \
+the boundary so there is no visible seam. Place the new content toward the centre of the edited \
+area.";
         for k in [Kind::Token, Kind::Item] {
-            let t = instruction_for(&s, k);
-            assert!(t.contains("surrounding image") && !t.contains("map"), "{t}");
+            assert_eq!(instruction_for(&s, k), r95);
         }
         assert!(is_a_default(DEFAULT_BLEND_INSTRUCTION_IMAGE));
         let custom = RegionEditSettings {
