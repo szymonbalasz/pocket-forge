@@ -564,6 +564,15 @@ export function installRgnMock(seed: RgnMockSeed): void {
         ...(prm.prompt_retry ? { prompt_retry: prm.prompt_retry } : {}),
       };
     },
+    /** R102: fetch a succeeded job's results again; never a submit. */
+    rgn_job_fetch_again: (input: Rec) => {
+      const j = s.jobs.find((x) => x.id === input.job_id);
+      if (!j) return fail('not_found', 'no such job');
+      if (j.state !== 'succeeded') return fail('invalid_input', 'nothing to fetch', 'job_id');
+      j.error = null;
+      jobEvent(j);
+      return { job_id: j.id };
+    },
     rgn_job_dismiss: (input: Rec) => {
       const j = s.jobs.find((x) => x.id === input.job_id);
       if (!j) return fail('not_found', 'no such job');
@@ -850,6 +859,16 @@ export function installRgnMock(seed: RgnMockSeed): void {
           candidate_id: cand.id,
           status: cand.status === 'invalid' ? 'invalid' : 'ready',
         });
+      jobEvent(j);
+    },
+    /** R102: → succeeded, but the results can't be downloaded (the error is shown; the job
+     *  never becomes failed). `finish()` then completes it, as a good fetch would. */
+    fetchError(code = 'provider_failure', hint = 'The results couldn’t be downloaded.') {
+      const j = active();
+      if (!j) return;
+      j.state = 'succeeded';
+      j.progress = 1;
+      j.error = { code, hint };
       jobEvent(j);
     },
     /** → failed with a normalised error. */

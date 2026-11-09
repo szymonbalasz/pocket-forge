@@ -419,6 +419,48 @@ impl Command for RgnJobCancel {
     }
 }
 
+// ---------------------------------------------------------------- rgn_job_fetch_again
+
+/// `rgn_job_fetch_again` (R102): a `succeeded` job whose candidates couldn't be downloaded
+/// fetches them now. Never submits; nothing is charged again.
+pub struct RgnJobFetchAgain;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct FetchAgainOutput {
+    pub job_id: Ulid,
+}
+
+impl Command for RgnJobFetchAgain {
+    const NAME: &'static str = "rgn_job_fetch_again";
+    type Input = JobIdInput;
+    type Output = FetchAgainOutput;
+
+    fn run(core: &Core, input: JobIdInput) -> CoreResult<FetchAgainOutput> {
+        let mut state = core.state();
+        let (project_id, dir, job) = find_job(&state, input.job_id)?;
+        if job.state != JobState::Succeeded {
+            return Err(CoreError::invalid(
+                "job_id",
+                format!("a {} job has nothing to fetch", job.state.as_str()),
+            ));
+        }
+        if super::spool::has_pending(&core.ctx, project_id) {
+            // Its candidates may already be in the spool, waiting to be saved (FR-RGN-37).
+            return Err(CoreError::new(
+                ErrorCode::Conflict,
+                "results are waiting to be saved; resolve the project first",
+            ));
+        }
+        let now = core.ctx.now();
+        state
+            .rgn
+            .runner
+            .fetch_now(project_id, dir, job.clone(), now);
+        emit_state(&core.ctx, &job, Some(1.0));
+        Ok(FetchAgainOutput { job_id: job.id })
+    }
+}
+
 // ---------------------------------------------------------------- rgn_job_retry_draft
 
 /// `rgn_job_retry_draft` (FR-RGN-21, 44): the job's draft, a new random seed unless pinned.

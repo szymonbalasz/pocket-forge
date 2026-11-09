@@ -75,6 +75,7 @@ export interface RgnMockControls {
   run(progress?: number, extra?: Record<string, unknown>): void;
   finish(count?: number, invalid?: number[]): void;
   fail(code?: string, hint?: string): void;
+  fetchError(code?: string, hint?: string): void;
   setCancel(c: 'canceled' | 'not_cancellable'): void;
   failNext(cmd: string, code: string, message?: string, field?: string): void;
   state(): { spend: number; estimates: number; cap: number | null; threshold: number | null };

@@ -900,6 +900,61 @@ fn fr_rgn_23_offline_mid_job_is_unknown_until_reconnect() {
     assert!(job.error.is_none(), "cleared on reconnect");
 }
 
+/// Review item 2 / R102: a paid `succeeded` job never becomes `failed` on a fetch error. It
+/// stays `succeeded` with the error shown, keeps retrying with backoff, and "Fetch again"
+/// fetches at once without a new submit.
+#[test]
+fn fr_rgn_24_a_fetch_error_keeps_the_job_succeeded_and_fetch_again_never_resubmits() {
+    let lab = Lab::new();
+    let id = lab.submit("kitchen");
+    for _ in 0..3 {
+        runner::tick(&lab.core, true);
+    }
+    assert_eq!(lab.job(id).state, JobState::Succeeded);
+    let calls_before = lab.fake().call_count();
+    lab.set_case("auth");
+    let t0 = lab.core.ctx.now();
+    let mut waits = vec![];
+    for _ in 0..4 {
+        runner::tick(&lab.core, true);
+        let job = lab.job(id);
+        assert_eq!(job.state, JobState::Succeeded, "never failed");
+        assert_eq!(job.error.as_ref().unwrap()["code"], "auth");
+        waits.push(runner::tick(&lab.core, false).unwrap());
+    }
+    assert!(
+        waits.windows(2).all(|w| w[1] >= w[0]) && waits[3] > waits[0],
+        "backs off: {waits:?}"
+    );
+    assert_eq!(lab.core.ctx.now(), t0);
+    let shown = lab.events_named(runner::EVENT_JOB_STATE).pop().unwrap();
+    assert_eq!(shown["state"], "succeeded");
+    assert_eq!(shown["error"]["code"], "auth");
+    // A failed job can't be fetched again; a succeeded one can, at once.
+    lab.set_case("success");
+    lab.core
+        .dispatch("rgn_job_fetch_again", json!({"job_id": id}))
+        .unwrap();
+    assert_eq!(runner::tick(&lab.core, false), None, "fetched at once");
+    let job = lab.job(id);
+    assert_eq!(job.state, JobState::Fetched);
+    assert!(job.error.is_none(), "the fetch error is cleared");
+    assert_eq!(lab.candidates(id).len(), 3);
+    assert_eq!(
+        lab.fake().call_count() - calls_before,
+        5,
+        "four failed fetches and one good one; no submit"
+    );
+    assert_eq!(
+        code(
+            lab.core
+                .dispatch("rgn_job_fetch_again", json!({"job_id": id}))
+        ),
+        ErrorCode::InvalidInput,
+        "only a succeeded job"
+    );
+}
+
 /// Review item 6 / R102: non-transient poll errors are counted; after 10 in a row the job goes
 /// `lost` with its handle kept (no endless loop that blocks the project). A good poll resets
 /// the count.

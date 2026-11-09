@@ -1309,6 +1309,17 @@ export const rgn = {
     void refreshIterations();
   },
 
+  /** R102: download a succeeded job's results again. Never a submit, never a new charge. */
+  async fetchAgain(jobId: string): Promise<void> {
+    try {
+      await api.region.fetchAgain(jobId);
+      set({ trackerNotice: null });
+    } catch (e) {
+      const err = uiError(e);
+      set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
+    }
+  },
+
   /** FR-RGN-21: pre-fill the panel from the job, then estimate → confirm again. A generate
    *  job's Retry goes to the New image tab (FR-GEN-32). */
   async retry(jobId: string): Promise<void> {

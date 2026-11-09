@@ -661,6 +661,22 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(fake.callsOf('rgn_job_submit')).toHaveLength(1);
   });
 
+  test('FR-RGN-24 R102 a fetch error keeps the job succeeded: error shown, Fetch again, no resubmit', async () => {
+    await submitted();
+    act(() => mockControls().fetchError('provider_failure', 'Download failed.'));
+    await waitFor(() =>
+      expect(screen.getByTestId('rgn-job-fetch-error').dataset.code).toBe('provider_failure'),
+    );
+    expect(screen.getByTestId('rgn-job-state').textContent).toBe('Fetching');
+    expect(screen.queryByTestId('rgn-job-retry')).toBeNull();
+    fireEvent.click(screen.getByTestId('rgn-job-fetch-again'));
+    await waitFor(() => expect(fake.callsOf('rgn_job_fetch_again')).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByTestId('rgn-job-fetch-again')).toBeNull());
+    act(() => mockControls().finish(2));
+    await waitFor(() => expect(screen.getByTestId('rgn-job-state').textContent).toBe('Ready'));
+    expect(fake.callsOf('rgn_job_submit')).toHaveLength(1);
+  });
+
   test('FR-RGN-21 retry pre-fills the panel from the job and requires a new estimate', async () => {
     await submitted({}, 'first prompt');
     act(() => mockControls().fail());

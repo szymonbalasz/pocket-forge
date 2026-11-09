@@ -43,6 +43,11 @@ pub const EVENT_CANDIDATE_READY: &str = "rgn:candidate-ready";
 /// How long the pump sleeps with nothing due (it also retries spool replays then).
 pub const IDLE: Duration = Duration::from_secs(30);
 
+/// The first wait after a fetch error that isn't transient; it doubles per error up to
+/// [`FETCH_BACKOFF_MAX`] (R102: a succeeded job keeps retrying, never `failed`).
+pub const FETCH_BACKOFF: Duration = Duration::from_secs(10);
+pub const FETCH_BACKOFF_MAX: Duration = Duration::from_secs(600);
+
 /// Non-transient poll errors in a row before a job goes `lost` with its handle kept (R102).
 pub const MAX_POLL_ERRORS: u32 = 10;
 
@@ -93,6 +98,8 @@ struct Tracked {
     progress: f64,
     /// Non-transient poll errors in a row (R102); a good answer resets it.
     poll_errors: u32,
+    /// Fetch errors in a row that weren't transient (R102): they set the backoff.
+    fetch_errors: u32,
 }
 
 /// The runner's state, in [`super::RgnState`]. Memory only (spec §8).
@@ -123,6 +130,7 @@ impl Runner {
                 busy: false,
                 progress: 0.0,
                 poll_errors: 0,
+                fetch_errors: 0,
             });
         self.wake.notify();
     }
@@ -153,6 +161,25 @@ impl Runner {
         } else if let Some(t) = self.jobs.get_mut(&job.id) {
             t.job = job;
             t.generation = generation;
+        }
+    }
+
+    /// "Fetch again" (R102): a `succeeded` job fetches at the next tick, its backoff reset.
+    /// Starts driving it if the runner had let go. Never submits.
+    pub fn fetch_now(
+        &mut self,
+        project_id: Ulid,
+        project_dir: PathBuf,
+        job: JobFile,
+        now: Timestamp,
+    ) {
+        match self.jobs.get_mut(&job.id) {
+            Some(t) => {
+                t.next_at = now;
+                t.fetch_errors = 0;
+                self.wake.notify();
+            }
+            None => self.track(project_id, project_dir, job, now),
         }
     }
 
@@ -298,6 +325,7 @@ pub(crate) fn commit_job_update(
         busy: false,
         progress: 0.0,
         poll_errors: 0,
+        fetch_errors: 0,
     };
     commit_update(ctx, state, &t, u)
 }
@@ -355,6 +383,9 @@ enum Outcome {
     /// A non-transient poll error (auth, a stale handle, a provider failure): counted, and the
     /// job goes `lost` after [`MAX_POLL_ERRORS`] in a row (R102).
     PollError(ProviderError),
+    /// A fetch error that isn't transient: the job stays `succeeded` with the error shown and
+    /// fetches again after a backoff (R102). Never `failed`: the candidates are paid for.
+    FetchError(ProviderError),
     /// Not a state the runner drives.
     Done,
 }
@@ -538,16 +569,25 @@ fn fetch(core: &Core, t: &Tracked) -> Outcome {
             | ProviderError::Timeout
             | ProviderError::RateLimited { .. }),
         ) => Outcome::Retry(e),
-        Err(e) => Outcome::Updates(
-            vec![SpoolUpdate {
-                state: Some(JobState::Failed),
-                error: Some(error_value(&e)),
-                ..Default::default()
-            }],
-            1.0,
-            None,
-        ),
+        Err(e) => Outcome::FetchError(e),
     }
+}
+
+/// The wait before the `n`th fetch retry (n >= 1): 10 s, doubling, at most 10 min.
+fn fetch_backoff(n: u32) -> Duration {
+    FETCH_BACKOFF
+        .saturating_mul(1u32 << n.saturating_sub(1).min(16))
+        .min(FETCH_BACKOFF_MAX)
+}
+
+/// The `error` a succeeded job shows while its candidates can't be downloaded (R102).
+fn fetch_error_value(e: &ProviderError) -> Value {
+    json!({
+        "code": e.code(),
+        "hint": format!(
+            "The results couldn't be downloaded ({e}). The job is paid for; it retries on its own, or use Fetch again."
+        ),
+    })
 }
 
 fn unreadable() -> SpoolUpdate {
@@ -574,9 +614,12 @@ fn store_candidates(
     let ctx = &core.ctx;
     let install_id = state.settings.install_id;
     let mut job = t.job.clone();
-    if seed_returned.is_some() {
+    // A fetch error shown meanwhile is cleared with the same commit (R102).
+    let clear_error = t.job.error.is_some();
+    if seed_returned.is_some() || clear_error {
         let u = SpoolUpdate {
             seed_returned,
+            error: clear_error.then_some(Value::Null),
             ..Default::default()
         };
         if let Ok(j) = commit_update(ctx, state, t, u) {
@@ -649,6 +692,7 @@ fn step(core: &Core, t: Tracked) {
     let now = ctx.now();
     let mut cur = t.clone();
     let mut delay_error = None;
+    let mut delay = None;
     match outcome {
         Outcome::Done => {
             state.rgn.runner.untrack(cur.job.id);
@@ -666,6 +710,25 @@ fn step(core: &Core, t: Tracked) {
                 emit_state(ctx, &cur.job, Some(cur.progress));
             }
             delay_error = Some(e);
+        }
+        Outcome::FetchError(e) => {
+            cur.fetch_errors += 1;
+            tracing::warn!(job = %cur.job.id, errors = cur.fetch_errors, error = %e, "fetch failed; the job stays succeeded");
+            let shown = fetch_error_value(&e);
+            if cur.job.error.as_ref() != Some(&shown) {
+                let u = SpoolUpdate {
+                    error: Some(shown),
+                    ..Default::default()
+                };
+                match commit_update(ctx, &mut state, &cur, u) {
+                    Ok(j) => cur.job = j,
+                    Err(e) => {
+                        tracing::warn!(job = %cur.job.id, error = %e, "fetch error not committed")
+                    }
+                }
+            }
+            emit_state(ctx, &cur.job, Some(1.0));
+            delay = Some(fetch_backoff(cur.fetch_errors));
         }
         Outcome::Updates(updates, progress, err) => {
             cur.poll_errors = 0;
@@ -716,7 +779,9 @@ fn step(core: &Core, t: Tracked) {
     }
     cur.busy = false;
     cur.last_error = delay_error;
-    cur.next_at = now.plus(poll_delay(elapsed(&cur.job, now), cur.last_error.as_ref()));
+    let delay =
+        delay.unwrap_or_else(|| poll_delay(elapsed(&cur.job, now), cur.last_error.as_ref()));
+    cur.next_at = now.plus(delay);
     state.rgn.runner.jobs.insert(cur.job.id, cur);
 }
 

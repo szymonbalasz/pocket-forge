@@ -45,6 +45,8 @@ export const canCancel = (s: JobState): boolean =>
   s === 'submitted' || s === 'queued' || s === 'running';
 /** FR-RGN-21: retry pre-fills the panel from any job that has ended or returned. */
 export const canRetry = (s: JobState): boolean => isTerminal(s) || s === 'fetched';
+/** R102: a succeeded job whose results couldn't be downloaded offers "Fetch again". */
+export const canFetchAgain = (s: JobState, error: unknown): boolean => s === 'succeeded' && !!error;
 /** FR-RGN-28: dismiss a returned or ended job that is not closed yet. */
 export const canDismiss = (s: JobState): boolean =>
   s === 'fetched' || s === 'failed' || s === 'canceled' || s === 'lost';
