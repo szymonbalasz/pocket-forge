@@ -266,4 +266,40 @@ describe('Prompt helper settings', () => {
       ).toBe('A helper text is 1 to 500 characters'),
     );
   });
+  test('FR-PRM-02 L5 an unreadable section warns in Settings in plain words; Save clears it', async () => {
+    fake = mockPrm();
+    const message =
+      "The prompt helper settings couldn't be read, so the starter helpers are used until you save them again.";
+    let warnings = [{ code: 'prompt_helpers_invalid', message }];
+    const w = window as unknown as { __pfMockHandlers: Record<string, () => unknown> };
+    w.__pfMockHandlers.app_info = () => ({
+      version: '0.0.0',
+      provider_mode: 'fake',
+      data_dir: '<data-dir>',
+      library_overridden: true,
+      warnings,
+    });
+    const save0 = w.__pfMockHandlers.prm_helpers_save as (i: never) => unknown;
+    w.__pfMockHandlers.prm_helpers_save = ((i: never) => {
+      warnings = [];
+      return save0(i);
+    }) as () => unknown;
+    await open();
+    await waitFor(() =>
+      expect(screen.getByTestId('prm-settings-load-warning').textContent).toBe(message),
+    );
+    expect(screen.getByTestId('prm-settings-load-warning').textContent).not.toMatch(
+      /invalid type|expected/,
+    );
+    fireEvent.change(field('builtin:no-people', 'label'), { target: { value: 'Empty rooms' } });
+    fireEvent.click(save());
+    await waitFor(() =>
+      expect(screen.getByTestId('prm-settings-result').textContent).toBe('Saved.'),
+    );
+    expect(screen.queryByTestId('prm-settings-load-warning')).toBeNull();
+    cleanup();
+    await open();
+    await act(async () => undefined);
+    expect(screen.queryByTestId('prm-settings-load-warning')).toBeNull();
+  });
 });

@@ -50,6 +50,9 @@ const rowDiffers = (r: Row, h: PromptHelper) => !same([r], [toRow(h)]);
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** The core's startup warning for an unreadable stored section (FR-PRJ-39); a Save drops it. */
+const LOAD_WARNING = 'prompt_helpers_invalid';
+
 export function HelperSettings() {
   const { helpers, error } = useHelpers();
   const [rows, setRows] = useState<Row[] | null>(null);
@@ -61,6 +64,22 @@ export function HelperSettings() {
   const [result, setResult] = useState<{ ok: boolean; text: string; key?: string } | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
   const base = useRef<PromptHelper[] | null>(null);
+  /** walk-p4r L5: the startup warning is shown here too, since Settings covers the app banner. */
+  const [loadWarning, setLoadWarning] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    api.appInfo().then(
+      (i) => {
+        const w = i.warnings.find((x) => x.code === LOAD_WARNING);
+        if (live && w) setLoadWarning(w.message);
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // Adopt the stored list (first load, or a change from elsewhere) unless there are local edits.
   useEffect(() => {
@@ -127,6 +146,7 @@ export function HelperSettings() {
       setRows(next);
       setShown(shown.map((k) => keyMap.get(k) ?? k));
       setHelpers(saved);
+      setLoadWarning(null);
       setResult({ ok: true, text: 'Saved.' });
     } catch (e) {
       if (e instanceof ApiError && e.code === 'too_many') setResult({ ok: false, text: TOO_MANY });
@@ -188,6 +208,11 @@ export function HelperSettings() {
         Ticked helpers add their text to the final prompt, after what you type. Helpers are kept on
         this computer.
       </p>
+      {loadWarning && (
+        <p className="prv-meta warning" role="status" data-testid="prm-settings-load-warning">
+          {loadWarning}
+        </p>
+      )}
       <div className="prm-settings-tabs" role="tablist">
         {KIND_TABS.map((t) => (
           <button
