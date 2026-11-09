@@ -300,9 +300,10 @@ fn fr_prm_33_detection_ok_and_its_environment() {
 
 #[test]
 fn fr_prm_45_missing_or_foreign_config_directory_fails_closed() {
+    let user_claude = PathBuf::from(home()).join(".claude");
     for stdout in [
         r#"{"loggedIn":true,"authMethod":"claude.ai"}"#.to_owned(),
-        logged_in(Path::new("C:/Users/alice/.claude")),
+        logged_in(&user_claude),
     ] {
         let r = rig_with("/bin/claude.exe", |s| {
             s.on_run(&["--version"], Some(0), "2.1.319").on_run(
@@ -317,12 +318,16 @@ fn fr_prm_45_missing_or_foreign_config_directory_fails_closed() {
         );
     }
     // Not logged in, but in a foreign folder: isolation first.
-    let foreign = r#"{"loggedIn":false,"configDirectory":"C:/Users/alice/.claude"}"#;
+    let foreign = serde_json::json!({
+        "loggedIn": false,
+        "configDirectory": user_claude.to_string_lossy(),
+    })
+    .to_string();
     let r = rig_with("/bin/claude.exe", |s| {
         s.on_run(&["--version"], Some(0), "2.1.319").on_run(
             &["auth", "status", "--json"],
             Some(1),
-            foreign,
+            &foreign,
         )
     });
     assert_eq!(
