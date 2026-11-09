@@ -828,7 +828,28 @@ pub fn restore_revision(
             .push(push_revision(ctx, m, RevisionReason::Restore, None));
         Ok(())
     })?;
+    rebase_pending_on_restore(p);
     head_entry(p)
+}
+
+/// A draft waiting after `locked` (FR-PRJ-21) when a restore commits: the restore replaced the
+/// region-edit draft, so the waiting one's region-edit fields are dropped and only what restore
+/// keeps survives: the New image draft (R98) and EXP's settings. Its retry can't undo the restore.
+fn rebase_pending_on_restore(p: &mut OpenProject) {
+    let Some(pending) = p.pending_draft.take() else {
+        return;
+    };
+    let generate = pending.draft.generate;
+    if generate.is_some() || pending.export.is_some() {
+        p.pending_draft = Some(PendingDraft {
+            draft: DraftInput {
+                generate,
+                keep_region_edit: true,
+                ..Default::default()
+            },
+            export: pending.export,
+        });
+    }
 }
 
 fn head_entry(p: &OpenProject) -> CoreResult<RevisionEntry> {

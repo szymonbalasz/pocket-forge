@@ -154,6 +154,35 @@ fn fr_prj_23_fr_prj_21_save_with_a_pending_draft_saves_it_or_says_why() {
 }
 
 #[test]
+fn fr_prj_23_r98_a_restore_is_never_overwritten_by_the_draft_waiting_behind_a_lock() {
+    let mut e = env();
+    let mut p = e.open(&e.project("Crypt"));
+    let r0 = p.manifest.head_revision;
+    draft(&e, &mut p, "later").unwrap();
+    save_revision(&e.ctx, e.install(), &mut p, None).unwrap();
+    // A region-edit draft and a New image draft hit the lock and wait in memory.
+    e.ctx.faults = Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap();
+    let waiting = DraftInput {
+        final_prompt: "waiting".into(),
+        ..Default::default()
+    };
+    put_draft(&e.ctx, e.install(), &mut p, waiting, None).unwrap_err();
+    let generate = serde_json::json!({"prompt": "a tavern"});
+    let gen_only = DraftInput::generate_only(Some(generate.clone()));
+    put_draft(&e.ctx, e.install(), &mut p, gen_only, None).unwrap_err();
+    assert!(has_unsaved(&p));
+    // The lock clears; undo restores r0 before the 10 s retry.
+    e.ctx.faults = Faults::none();
+    restore_revision(&e.ctx, e.install(), &mut p, r0).unwrap();
+    retry_pending(&e.ctx, e.install(), &mut p);
+    assert!(!has_unsaved(&p));
+    let d = p.manifest.draft.clone().unwrap();
+    // Restored: r0 had no region-edit draft. Kept: the current draft.generate (R98).
+    assert_eq!(d.final_prompt, "");
+    assert_eq!(d.generate, Some(generate));
+}
+
+#[test]
 fn fr_prj_43_restore_writes_a_new_restore_revision() {
     let e = env();
     let mut p = e.open(&e.project("Crypt"));
