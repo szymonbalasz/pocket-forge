@@ -622,6 +622,34 @@ fn fr_gen_13_the_sketch_slot_gives_up_one_place_only_when_chosen() {
     assert_eq!(g.estimate(&d).unwrap()["references"], 3);
 }
 
+#[test]
+fn fr_gen_18_the_seed_used_is_recorded_random_or_pinned() {
+    let g = G::empty("maps", "Crypt");
+    // Random: drawn at submit, sent and recorded.
+    let id = g.run(&g.two("random"));
+    let j = g.job_json(id);
+    let used = j["seed"]["requested"]
+        .as_u64()
+        .expect("a random seed is drawn");
+    assert_eq!(j["provider"]["request"]["seed"], json!(used));
+    assert!(j["seed"]["returned"].is_u64(), "the seed the provider used");
+    // Each candidate keeps its own seed.
+    assert!(g.lab.candidates(id).iter().all(|c| c.seed.is_some()));
+    // Two random submits draw different seeds.
+    let other = g.run(&g.two("random again"));
+    assert_ne!(g.job_json(other)["seed"]["requested"], json!(used));
+    // Pinned: sent as is.
+    let mut d = g.two("pinned");
+    d["seed"] = json!(1234);
+    let id = g.run(&d);
+    let j = g.job_json(id);
+    assert_eq!(j["seed"]["requested"], 1234);
+    assert_eq!(j["provider"]["request"]["seed"], 1234);
+    // Retry keeps a pinned seed and draws a new random one otherwise (FR-GEN-32).
+    assert_eq!(g.retry(id).unwrap()["seed"], 1234);
+    assert_eq!(g.retry(other).unwrap()["seed"], Value::Null);
+}
+
 // ---------------------------------------------------------------- retry (FR-GEN-32)
 
 #[test]
@@ -696,6 +724,113 @@ fn fr_gen_35_commands_need_an_open_project_and_valid_input() {
     let mut bad = d.clone();
     bad["region"] = json!({});
     assert_eq!(code(g.estimate(&bad)), ErrorCode::InvalidInput);
+}
+
+#[test]
+fn fr_gen_35_a_failed_command_leaves_the_project_unchanged() {
+    let g = G::empty("maps", "Crypt");
+    let job = g.run(&g.two("crypt"));
+    let cands = g.cands(job);
+    let before = g.lab.persisted();
+    let fails = |name: &str, input: Value| -> ErrorCode {
+        let e = g.dispatch(name, input).unwrap_err();
+        assert_eq!(
+            g.lab.persisted(),
+            before,
+            "{name} failed with {e:?} but changed state"
+        );
+        e.code
+    };
+    let d = g.two("again");
+    let est = g.estimate(&d).unwrap();
+    // Submit: a stale estimate, a missing confirmation, a missing sketch.
+    let mut changed = d.clone();
+    changed["size"]["long_side"] = json!(512);
+    assert_eq!(
+        fails(
+            "gen_job_submit",
+            json!({"draft": changed, "estimate_id": est["estimate_id"], "confirmations": []}),
+        ),
+        ErrorCode::EstimateStale
+    );
+    g.dispatch("rgn_spend_set", json!({"cap": 100, "threshold": 0.5}))
+        .unwrap();
+    let before = g.lab.persisted();
+    let fails = |name: &str, input: Value| -> ErrorCode {
+        let e = g.dispatch(name, input).unwrap_err();
+        assert_eq!(
+            g.lab.persisted(),
+            before,
+            "{name} failed with {e:?} but changed state"
+        );
+        e.code
+    };
+    let est = g.estimate(&d).unwrap();
+    assert_eq!(
+        fails(
+            "gen_job_submit",
+            json!({"draft": d, "estimate_id": est["estimate_id"], "confirmations": []}),
+        ),
+        ErrorCode::ConfirmationMissing
+    );
+    let mut sketch = d.clone();
+    sketch["model_id"] = json!(WH);
+    sketch["structure"] = json!({"file": "gone.png"});
+    assert_eq!(
+        fails(
+            "gen_job_submit",
+            json!({"draft": sketch, "estimate_id": est["estimate_id"], "confirmations": est["needs"]}),
+        ),
+        ErrorCode::ReferenceUnavailable
+    );
+    // Pick, preview and retry with bad ids.
+    let nil = Ulid::from_parts(1, 999);
+    assert_eq!(
+        fails(
+            "gen_candidate_pick",
+            json!({"job_id": job, "candidate_id": nil}),
+        ),
+        ErrorCode::NotFound
+    );
+    assert!(matches!(
+        fails(
+            "gen_candidate_pick",
+            json!({"job_id": nil, "candidate_id": cands[0]}),
+        ),
+        ErrorCode::NotFound | ErrorCode::InvalidCandidate
+    ));
+    assert_eq!(
+        fails("gen_job_retry_draft", json!({"job_id": nil})),
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        fails("gen_candidate_pick", json!({"job_id": job})),
+        ErrorCode::InvalidInput
+    );
+    // A new project with a bad section or name writes nothing to the library.
+    assert_eq!(
+        fails(
+            "gen_project_create",
+            json!({"section": "nowhere", "name": "Crypt"}),
+        ),
+        ErrorCode::InvalidInput
+    );
+    assert_eq!(
+        fails(
+            "gen_project_create",
+            json!({"section": "maps", "name": "  "})
+        ),
+        ErrorCode::InvalidName
+    );
+    // Read-only: the pick is refused, nothing written.
+    g.lab.core.state().project.as_mut().unwrap().read_only = Some(ReadOnlyReason::NewerVersion);
+    assert_eq!(
+        fails(
+            "gen_candidate_pick",
+            json!({"job_id": job, "candidate_id": cands[0]}),
+        ),
+        ErrorCode::ReadOnly
+    );
 }
 
 // ---------------------------------------------------------------- slice 4: preview, pick, undo
@@ -1388,10 +1523,193 @@ fn fr_prm_42_43_31_chat_on_both_hosts_without_a_provider_call() {
         )
         .unwrap();
     assert_eq!(out["host"], "gen");
+    // Back to Region edit: its proposal inserts there.
+    clear("gen");
+    publish("rgn", g.lab.draft("a kitchen"));
+    let out = g
+        .dispatch(
+            "prm_chat_insert",
+            json!({"project_id": pid, "proposal_id": rgn_proposal}),
+        )
+        .unwrap();
+    assert_eq!(out["host"], "rgn");
 
     assert_eq!(
         calls(),
         before,
         "the chat made no provider call (FR-PRM-31)"
     );
+}
+
+// ---------------------------------------------------------------- FR-RGN-04 on a picked base (#60)
+
+impl G {
+    /// A region-edit draft on the open project with a fresh full-strength mask on `inner`.
+    fn rgn_draft(&self, inner: crate::manifest::Rect, margin: u32) -> Value {
+        let mask = self
+            .lab
+            .put_mask(inner, &vec![255; (inner.w * inner.h) as usize]);
+        json!({
+            "region": {"inner": {"x": inner.x, "y": inner.y, "w": inner.w, "h": inner.h}, "margin": margin},
+            "mask_id": mask,
+            "model_id": "fake-white-edit",
+            "final_prompt": "a barrel",
+            "controls": {},
+            "seed": null,
+        })
+    }
+}
+
+#[test]
+fn fr_rgn_04_owner_60_region_pixels_come_from_the_picked_base_alpha_over_the_flatten_colour() {
+    let g = G::empty("tokens", "Goblin archer");
+    let mut d = g.draft("goblin archer");
+    d["controls"] = json!({"background": "transparent", "num_samples": 1});
+    d["size"] = json!({"mode": "ratio", "aspect": "1:1", "long_side": 256});
+    let job = g.run(&d);
+    let cand = g.cands(job)[0];
+    g.pick(job, cand).unwrap();
+    // A region over the transparent corner and the disc's edge.
+    let inner = crate::manifest::Rect {
+        x: 16,
+        y: 16,
+        w: 128,
+        h: 128,
+    };
+    let rd = g.rgn_draft(inner, 16);
+    let est = g
+        .dispatch("rgn_job_estimate", json!({"draft": rd}))
+        .unwrap();
+    let id: Ulid = g
+        .dispatch(
+            "rgn_job_submit",
+            json!({"draft": rd, "estimate_id": est["estimate_id"], "confirmations": est["needs"]}),
+        )
+        .unwrap()["job_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let rjob = g.lab.job(id);
+    let region_file = g.lab.project_dir.join(&rjob.input_files()[0]);
+    let sent = image::open(&region_file).unwrap();
+    assert!(!sent.color().has_alpha(), "the sent region is RGB");
+    let sent = sent.to_rgb8();
+    // The outer rect at its own resolution, from the decoded base (`layers[0]`).
+    let base = {
+        let st = g.lab.core.state();
+        crate::project::store::decoded_original(&g.lab.core.ctx, st.project.as_ref().unwrap())
+            .unwrap()
+    };
+    assert_eq!(
+        base.dimensions(),
+        (256, 256),
+        "the picked image, not an original"
+    );
+    let outer: crate::region_edit::fit::RectPx =
+        serde_json::from_value(rjob.region["outer"].clone()).unwrap();
+    assert_eq!((outer.x, outer.y), (0, 0));
+    let crop = image::imageops::crop_imm(&*base, outer.x, outer.y, outer.w, outer.h).to_image();
+    assert_eq!(sent.dimensions(), crop.dimensions(), "160 px, no resample");
+    assert_eq!(sent, crop, "bit-exact crop of the picked base");
+    assert_eq!(
+        sent.get_pixel(0, 0).0,
+        pf_imaging::FLATTEN_BG,
+        "alpha 0 → the flatten colour"
+    );
+    let (sw, sh) = sent.dimensions();
+    assert_ne!(
+        sent.get_pixel(sw - 1, sh - 1).0,
+        pf_imaging::FLATTEN_BG,
+        "the disc is opaque"
+    );
+}
+
+#[test]
+fn fr_rgn_04_owner_60_estimate_and_submit_with_no_image_are_no_image() {
+    let g = G::empty("maps", "Crypt");
+    let inner = crate::manifest::Rect {
+        x: 0,
+        y: 0,
+        w: 64,
+        h: 64,
+    };
+    let rd = json!({
+        "region": {"inner": {"x": inner.x, "y": inner.y, "w": inner.w, "h": inner.h}, "margin": 0},
+        "mask_id": Ulid::from_parts(1, 999),
+        "model_id": "fake-white-edit",
+        "final_prompt": "a barrel",
+        "controls": {},
+        "seed": null,
+    });
+    assert_eq!(
+        code(g.dispatch("rgn_job_estimate", json!({"draft": rd}))),
+        ErrorCode::NoImage
+    );
+    assert_eq!(
+        code(g.dispatch(
+            "rgn_job_submit",
+            json!({"draft": rd, "estimate_id": "e", "confirmations": []}),
+        )),
+        ErrorCode::NoImage
+    );
+    assert!(g.lab.manifest()["jobs"].as_array().unwrap().is_empty());
+}
+
+// ---------------------------------------------------------------- FR-GEN-23 / 34 sub-clauses
+
+#[test]
+fn fr_gen_23_cancel_and_a_submit_timeout_run_as_rgn_and_never_resubmit() {
+    let g = G::empty("maps", "Crypt");
+    // Cancel on the provider's ack.
+    let id = g.submit(&g.two("crypt")).unwrap();
+    let out = g.dispatch("rgn_job_cancel", json!({"job_id": id})).unwrap();
+    assert_eq!(out, json!({"result": "canceled"}));
+    assert_eq!(g.lab.job(id).state, JobState::Canceled);
+    g.lab.drive();
+    assert_eq!(g.lab.job(id).state, JobState::Canceled);
+    assert!(g.lab.candidates(id).is_empty());
+    // A submit that times out has no handle: `lost`, never resubmitted.
+    g.lab.set_case("submit_timeout");
+    let calls = g.lab.fake().call_count();
+    let e = g.submit(&g.two("again")).unwrap_err();
+    assert_eq!(e.code, ErrorCode::Provider);
+    assert_eq!(e.detail["provider"]["code"], "timeout");
+    assert_eq!(e.detail["possible_charge"], true);
+    let id: Ulid = e.detail["job_id"].as_str().unwrap().parse().unwrap();
+    assert_eq!(g.lab.job(id).state, JobState::Lost);
+    let after = g.lab.fake().call_count();
+    g.lab.set_case("success");
+    g.lab.drive();
+    assert_eq!(g.lab.job(id).state, JobState::Lost);
+    assert_eq!(g.lab.fake().call_count(), after, "never resubmitted");
+    assert!(after > calls);
+    assert!(g.lab.core.state().rgn.runner.tracked().is_empty());
+}
+
+#[test]
+fn fr_gen_34_read_only_star_and_discard_fail_fast() {
+    let g = G::empty("maps", "Crypt");
+    let job = g.run(&g.two("crypt"));
+    let c = g.cands(job);
+    let before = g.lab.persisted();
+    g.lab.core.state().project.as_mut().unwrap().read_only = Some(ReadOnlyReason::NewerVersion);
+    for (name, input) in [
+        (
+            "rgn_candidate_star",
+            json!({"job_id": job, "candidate_id": c[0], "starred": true}),
+        ),
+        (
+            "rgn_candidate_discard",
+            json!({"job_id": job, "candidate_id": c[1]}),
+        ),
+        ("rgn_job_discard_rest", json!({"job_id": job})),
+        (
+            "gen_candidate_pick",
+            json!({"job_id": job, "candidate_id": c[0]}),
+        ),
+    ] {
+        assert_eq!(code(g.dispatch(name, input)), ErrorCode::ReadOnly, "{name}");
+    }
+    assert_eq!(g.lab.persisted(), before, "nothing written");
 }
