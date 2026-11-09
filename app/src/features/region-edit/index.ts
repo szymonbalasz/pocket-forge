@@ -19,3 +19,26 @@ registerSettingsSection({
   title: 'Region edit',
   Component: BlendInstructionSettings,
 });
+
+// Shared with GEN's New image tab (new-asset-generation §6): the capability control renderer
+// (Appendix A), its pure helpers, the estimate debounce, the spend confirm and the job runner's
+// state (one active job per project, FR-GEN-22).
+export { ControlField } from './ControlField';
+export {
+  controlKind,
+  costSignature,
+  evaluateInput,
+  fromEvaluation,
+  isValueControl,
+  missingRequired,
+  sentValues,
+  stateOf,
+  withRemembered,
+  type Control,
+  type Values,
+} from './controls';
+export { EstimateDebouncer } from './estimate';
+export { SpendConfirm, type SpendConfirmProps } from './ConfirmDialog';
+export { withinConfirmed, type ConfirmPlan, type SpendEstimate } from './confirm';
+export { amountLabel, costLabel, errorText } from './format';
+export { useActiveJobId, refreshJobs, type UiError } from './store';
