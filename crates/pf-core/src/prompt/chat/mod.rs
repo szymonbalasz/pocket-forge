@@ -137,12 +137,25 @@ struct Rt {
     contexts: HashMap<(Ulid, ChatHost), (u64, Value)>,
     seq: u64,
     running: Option<Running>,
-    /// §7 / R94: a read-only project's thread lives here (nothing is written).
+    /// §7 / R94: a read-only project's thread lives here (nothing is written); so does a
+    /// writable project's while its thread file can't be written (locked, §11).
     memory: Option<MemoryThread>,
 }
 
-/// A read-only project's thread kept in memory: the file's turns (if any) plus the turns
-/// sent since, which are shown "not saved" (§7, R94). Dropped when the project closes.
+impl Rt {
+    /// The project's memory thread and its unsaved turn ids, if any.
+    fn memory_of(&self, project_id: Ulid) -> Option<(Thread, Vec<Ulid>)> {
+        self.memory
+            .as_ref()
+            .filter(|m| m.project_id == project_id)
+            .map(|m| (m.thread.clone(), m.unsaved.clone()))
+    }
+}
+
+/// A thread kept in memory: the file's turns (if any) plus the turns sent since, which are
+/// shown "not saved". A read-only project's (§7, R94), or a writable project's after its
+/// thread file couldn't be written (§11 "locked → the turn still runs, not saved"; the next
+/// successful save writes it all and drops it). Dropped when the project closes.
 struct MemoryThread {
     project_id: Ulid,
     thread: Thread,
@@ -791,16 +804,12 @@ impl Command for PrmChatThreadGet {
             let _io = lock(&core.chat.thread_io);
             thread::load(&core.ctx, &dir, !read_only, &live)
         };
-        // A read-only project shows the turns kept in memory (§7 / R94).
+        // The turns kept in memory: a read-only project's (§7 / R94), or while the thread file
+        // can't be written (§11).
         let mut unsaved_turn_ids = Vec::new();
-        if read_only
-            && let Some(m) = lock(&core.chat.rt)
-                .memory
-                .as_ref()
-                .filter(|m| m.project_id == input.project_id)
-        {
-            loaded.thread = Some(m.thread.clone());
-            unsaved_turn_ids = m.unsaved.clone();
+        if let Some((t, unsaved)) = lock(&core.chat.rt).memory_of(input.project_id) {
+            loaded.thread = Some(t);
+            unsaved_turn_ids = unsaved;
         }
         // Only this project's turn (code review 7): another project's turn doesn't disable Send.
         let running_turn_id = lock(&core.chat.rt)
@@ -1041,18 +1050,10 @@ impl Command for PrmChatSend {
         let backend = backend(core, &chat);
         let now = core.ctx.now();
 
-        // The thread (created at the first send).
-        // A read-only project continues its in-memory thread (§7 / R94).
-        let memory = if read_only {
-            lock(&core.chat.rt)
-                .memory
-                .as_ref()
-                .filter(|m| m.project_id == pid)
-                .map(|m| (m.thread.clone(), m.unsaved.clone()))
-        } else {
-            None
-        };
-        let (memory_thread, mut unsaved) = memory.unzip();
+        // The thread (created at the first send). A memory thread (read-only, §7 / R94, or a
+        // thread file that couldn't be written, §11) is continued.
+        let (memory_thread, unsaved) = lock(&core.chat.rt).memory_of(pid).unzip();
+        let unsaved = unsaved.unwrap_or_default();
         let mut thread = memory_thread
             .or_else(|| {
                 let _io = lock(&core.chat.thread_io);
@@ -1171,18 +1172,31 @@ impl Command for PrmChatSend {
                     .unwrap_or_else(|| CoreError::internal("the turn stopped")));
             }
             if read_only {
-                let mut ids = unsaved.take().unwrap_or_default();
-                ids.extend([user_turn_id, turn_id]);
                 rt.memory = Some(MemoryThread {
                     project_id: pid,
                     thread: thread.clone(),
-                    unsaved: ids,
+                    unsaved: with_turns(&unsaved, [user_turn_id, turn_id]),
                 });
             }
         }
         let saved = !read_only && {
             let _io = lock(&core.chat.thread_io);
-            thread::save(&core.ctx, &dir, &thread).is_ok()
+            let ok = thread::save(&core.ctx, &dir, &thread).is_ok();
+            // §11: the file stayed locked past the retry: the turn still runs, kept in memory
+            // and shown "not saved". A save that works writes the memory turns too.
+            let mut rt = lock(&core.chat.rt);
+            if ok {
+                if rt.memory.as_ref().is_some_and(|m| m.project_id == pid) {
+                    rt.memory = None;
+                }
+            } else if !rt.running.as_ref().is_some_and(|r| r.project_closed) {
+                rt.memory = Some(MemoryThread {
+                    project_id: pid,
+                    thread: thread.clone(),
+                    unsaved: with_turns(&unsaved, [user_turn_id, turn_id]),
+                });
+            }
+            ok
         };
         write_turn_images(&cwd, &sent);
 
@@ -1210,6 +1224,7 @@ impl Command for PrmChatSend {
             session: core.chat.session.clone(),
             thread_io: core.chat.thread_io.clone(),
             project_dir: dir,
+            project_id: pid,
             writable: !read_only,
             thread,
             user_turn_id,
@@ -1244,6 +1259,13 @@ impl Command for PrmChatSend {
             saved,
         })
     }
+}
+
+/// `ids` plus `more`, without duplicates.
+fn with_turns(ids: &[Ulid], more: [Ulid; 2]) -> Vec<Ulid> {
+    let mut out = ids.to_vec();
+    out.extend(more.into_iter().filter(|id| !ids.contains(id)));
+    out
 }
 
 /// A send's hold on the running slot (FR-PRM-27, R97): taken before the context is built;
@@ -1344,6 +1366,7 @@ struct TurnJob {
     session: Arc<Mutex<Option<SessionEntry>>>,
     thread_io: Arc<Mutex<()>>,
     project_dir: PathBuf,
+    project_id: Ulid,
     writable: bool,
     /// The thread as written at the send (used if the file can't be read back).
     thread: Thread,
@@ -1430,12 +1453,46 @@ impl TurnJob {
                 thread.updated_at = now;
             };
             if self.writable {
-                let mut thread = thread::load(&self.ctx, &self.project_dir, self.writable, &live)
-                    .thread
-                    .filter(|t| t.id == self.thread.id)
+                // The memory thread when the file couldn't be written (§11), else the file.
+                let memory = lock(&self.rt)
+                    .memory_of(self.project_id)
+                    .filter(|(t, _)| t.id == self.thread.id);
+                let (base, unsaved) = memory.unzip();
+                let mut thread = base
+                    .or_else(|| {
+                        thread::load(&self.ctx, &self.project_dir, self.writable, &live)
+                            .thread
+                            .filter(|t| t.id == self.thread.id)
+                    })
                     .unwrap_or_else(|| self.thread.clone());
                 finish(&mut thread);
-                thread::save(&self.ctx, &self.project_dir, &thread).is_ok()
+                let ok = thread::save(&self.ctx, &self.project_dir, &thread).is_ok();
+                let mut rt = lock(&self.rt);
+                let closed = rt
+                    .running
+                    .as_ref()
+                    .is_some_and(|r| r.turn_id == turn_id && r.project_closed);
+                if ok {
+                    if rt
+                        .memory
+                        .as_ref()
+                        .is_some_and(|m| m.thread.id == self.thread.id)
+                    {
+                        rt.memory = None;
+                    }
+                } else if !closed {
+                    // Kept until a save works or the project closes; a closed project's memory
+                    // isn't recreated (R94).
+                    rt.memory = Some(MemoryThread {
+                        project_id: self.project_id,
+                        thread,
+                        unsaved: with_turns(
+                            &unsaved.unwrap_or_default(),
+                            [self.user_turn_id, self.turn_id],
+                        ),
+                    });
+                }
+                ok
             } else {
                 // Read-only (§7 / R94): the reply goes to the in-memory thread only.
                 let mut rt = lock(&self.rt);
@@ -1533,9 +1590,14 @@ impl Command for PrmChatInsert {
         let now = core.ctx.now();
         let _io = lock(&core.chat.thread_io);
         let live = core.chat.live_turns();
-        let mut thread = thread::load(&core.ctx, &dir, true, &live)
-            .thread
-            .ok_or_else(|| CoreError::new(ErrorCode::NotFound, "no such proposal"))?;
+        // While the thread file can't be written its turns are in memory (§11).
+        let memory = lock(&core.chat.rt).memory_of(input.project_id);
+        let in_memory = memory.is_some();
+        let mut thread = match memory {
+            Some((t, _)) => Some(t),
+            None => thread::load(&core.ctx, &dir, true, &live).thread,
+        }
+        .ok_or_else(|| CoreError::new(ErrorCode::NotFound, "no such proposal"))?;
         let (host, text) = thread
             .turns
             .iter()
@@ -1560,7 +1622,28 @@ impl Command for PrmChatInsert {
             }
         }
         thread.updated_at = now;
-        thread::save(&core.ctx, &dir, &thread)?;
+        if in_memory {
+            // Saved with the memory turns once the file can be written again; else kept.
+            let ok = thread::save(&core.ctx, &dir, &thread).is_ok();
+            let mut rt = lock(&core.chat.rt);
+            if ok {
+                if rt
+                    .memory
+                    .as_ref()
+                    .is_some_and(|m| m.project_id == input.project_id)
+                {
+                    rt.memory = None;
+                }
+            } else if let Some(m) = rt
+                .memory
+                .as_mut()
+                .filter(|m| m.project_id == input.project_id)
+            {
+                m.thread = thread;
+            }
+        } else {
+            thread::save(&core.ctx, &dir, &thread)?;
+        }
         core.ctx.emit(
             EVENT_INSERT,
             json!({

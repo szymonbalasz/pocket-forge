@@ -75,6 +75,8 @@ export function ChatWindow() {
   const [offline, setOffline] = useState(false);
   /** FR-PRM-27 (code review 4): a send is on its way; Send, Retry and Resend wait. */
   const [sending, setSending] = useState(false);
+  /** §11 (code review 1): the last send or reply couldn't be written to the thread file. */
+  const [notSaved, setNotSaved] = useState(false);
   const sendingRef = useRef(false);
   const [includeImages, setIncludeImages] = useState(true);
   const [declined, setDeclined] = useState(false);
@@ -142,6 +144,7 @@ export function ChatWindow() {
   useEffect(() => {
     setLive(null);
     setProblem(null);
+    setNotSaved(false);
     void loadThread(pid);
   }, [pid, loadThread]);
 
@@ -178,6 +181,7 @@ export function ChatWindow() {
       }),
       onEvent('prm:chat-turn', (t) => {
         ended.current.add(t.turn_id);
+        setNotSaved(!t.saved);
         setLive((l) => (l && l.turnId === t.turn_id ? null : l));
         if (t.error?.code === 'offline') setOffline(true);
         const detail = t.error?.detail;
@@ -215,6 +219,7 @@ export function ChatWindow() {
     try {
       await flushMainWindow();
       const out = await api.chat.send(pid, text, includeImages);
+      setNotSaved(!out.saved);
       if (!ended.current.has(out.turn_id))
         setLive({ turnId: out.turn_id, text: deltas.current.get(out.turn_id) ?? '' });
       await loadThread(pid);
@@ -416,6 +421,11 @@ export function ChatWindow() {
           />
         ))}
       </ol>
+      {!readOnly && (notSaved || unsaved.size > 0) && (
+        <p className="prm-chat-warn" role="status" data-testid="prm-chat-not-saved">
+          Not saved: the chat file is locked. These turns are kept until the project closes.
+        </p>
+      )}
       {problem && (
         <p className="prm-chat-error" role="alert" data-testid="prm-chat-error">
           {problem.message}
@@ -567,7 +577,7 @@ function TurnView(props: {
   turn: ChatTurn;
   liveText: string | null;
   running: boolean;
-  /** Kept in memory only (read-only project, §7 / R94). */
+  /** Kept in memory only (read-only project, §7 / R94; a locked thread file, §11). */
   unsaved: boolean;
   /** M5: offline: Retry and Resend wait for Recheck, as Send does; and while a turn is sent or
    *  runs (FR-PRM-27). */

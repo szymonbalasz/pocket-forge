@@ -1136,3 +1136,64 @@ fn fr_prm_35_a_project_closed_while_a_send_builds_gets_no_session() {
     });
     assert_eq!(thread_view(&lab)["running_turn_id"], Value::Null);
 }
+
+/// FR-PRM-22 / §11 (code review 1): when the thread file can't be written (locked past the
+/// retry), the turn still runs, its turns and reply are kept in memory and shown "not saved",
+/// and `saved` says so; nothing is lost and the old file isn't written back.
+#[test]
+fn fr_prm_22_an_unwritable_thread_file_keeps_the_turn_in_memory() {
+    let id = Ulid::from(42u128);
+    let lab = Lab::with_context(|ctx| {
+        ctx.faults = crate::context::Faults::parse(
+            &format!("after_temp:{id}.json"),
+            crate::context::FaultAction::Error,
+        )
+        .unwrap();
+    });
+    consent(&lab);
+    let path = thread::thread_path(&lab.project_dir, id);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let old = Thread::new(id, crate::time::Timestamp(1), "fake");
+    std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+    let before = std::fs::read(&path).unwrap();
+
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    let out = send(&lab, "make this a kitchen").unwrap();
+    assert_eq!(out["saved"], false);
+    assert_eq!(out["thread_id"], json!(id));
+    assert_eq!(
+        events(&lab, super::EVENT_TURN).last().unwrap()["saved"],
+        false
+    );
+    let view = thread_view(&lab);
+    let turns = view["thread"]["turns"].as_array().unwrap().clone();
+    assert_eq!(turns.len(), 2, "the turn and its reply are kept");
+    assert_eq!(turns[0]["text"], "make this a kitchen");
+    assert_eq!(turns[1]["state"], "done");
+    assert_eq!(
+        view["unsaved_turn_ids"],
+        json!([turns[0]["id"], turns[1]["id"]])
+    );
+    // Replace works on the kept reply.
+    let proposal = turns[1]["proposals"][0]["id"].clone();
+    lab.core
+        .dispatch(
+            "prm_chat_insert",
+            json!({"project_id": pid(&lab), "proposal_id": proposal}),
+        )
+        .unwrap();
+    assert!(!thread_view(&lab)["thread"]["turns"][1]["proposals"][0]["inserted_at"].is_null());
+    // The next turn continues the kept thread.
+    send(&lab, "again").unwrap();
+    let view = thread_view(&lab);
+    assert_eq!(view["thread"]["turns"].as_array().unwrap().len(), 4);
+    assert_eq!(view["unsaved_turn_ids"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        before,
+        "the old file isn't written back"
+    );
+    // Closing the project drops the kept turns.
+    lab.core.chat.on_project_close(pid(&lab));
+    assert_eq!(thread_view(&lab)["thread"]["turns"], json!([]));
+}

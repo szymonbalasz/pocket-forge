@@ -258,6 +258,21 @@ test('§7 R94 read-only project: the turns show, marked "Not saved"; Replace is 
   ]);
 });
 
+test('FR-PRM-22 §11 a locked thread file: the turns show "Not saved" with the banner', async () => {
+  setup({ chat: { consent: true, locked: true } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  expect(screen.queryByTestId('prm-chat-not-saved')).toBeNull();
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
+  expect(id('prm-chat-not-saved').textContent).toContain('the chat file is locked');
+  expect(screen.getAllByTestId('prm-chat-unsaved')).toHaveLength(2);
+  // Not read-only: Replace still works.
+  expect((id('prm-chat-proposal-replace') as HTMLButtonElement).disabled).toBe(false);
+});
+
 test('FR-PRM-21 the Chat button opens the chat window', async () => {
   setup({});
   render(<TestHost host="rgn" prompt="x" />);
