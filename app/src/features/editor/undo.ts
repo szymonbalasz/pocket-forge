@@ -144,11 +144,15 @@ export class UndoStack {
       }
       return true;
     } catch (err) {
-      this.error = errorCode(err);
+      if (this.epoch === epoch) this.error = errorCode(err);
       return false;
     } finally {
-      this.busy = false;
-      this.emit();
+      // A step from before a clear (another project) leaves the new project's busy and error
+      // to its own step (night review 12c); clear() already reset them.
+      if (this.epoch === epoch) {
+        this.busy = false;
+        this.emit();
+      }
     }
   }
 

@@ -274,7 +274,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     seq: 0,
     contexts: new Map<string, { seq: number; input: unknown }>(),
     threads: new Map<string, { id: string; turns: Turn[]; updated_at: string }>(),
-    running: null as null | { turnId: string; cancel: () => void },
+    running: null as null | { turnId: string; projectId: string; cancel: () => void },
     session: null as null | string,
     /** §7 / R94: turns sent on a read-only project (kept in memory only). */
     unsaved: [] as string[],
@@ -462,7 +462,9 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
               turns: t.turns,
             }
           : null,
-        running_turn_id: chat.running?.turnId ?? null,
+        // As the core: only this project's turn (another project's turn still holds the slot).
+        running_turn_id:
+          chat.running?.projectId === String(input.project_id) ? chat.running.turnId : null,
         corrupt_set_aside: false,
         unsaved_turn_ids: chat.unsaved,
         fresh_session_next: chat.session !== String(input.project_id),
@@ -560,6 +562,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     };
     chat.running = {
       turnId,
+      projectId: pid,
       cancel: () => {
         canceled = true;
       },

@@ -62,6 +62,14 @@ async function flushMainWindow(): Promise<void> {
   }
 }
 
+/** Night review 9: a turn of another project still holds the one chat slot (it finishes after
+ *  a project switch, R103), so the core refuses a send with `turn_active`. A turn seen only
+ *  through that refusal is {@link SOME_TURN}. With no word from it for this long (a missed
+ *  end event), Send stops waiting. */
+export const ELSEWHERE_IDLE_MS = 10_000;
+const SOME_TURN = '?';
+export const ELSEWHERE_REASON = 'A reply in another project is still finishing. Send waits for it.';
+
 function problemOf(e: unknown): Problem {
   const x = e as { code?: string; message?: string };
   return { code: x.code ?? 'error', message: x.message ?? String(e) };
@@ -92,6 +100,32 @@ export function ChatWindow() {
   const stick = useRef(true);
   const deltas = useRef(new Map<string, string>());
   const ended = useRef(new Set<string>());
+  /** Night review 9: turns running for any project (ours are filtered out when shown). */
+  const [elsewhere, setElsewhere] = useState<ReadonlySet<string>>(new Set());
+  const elsewhereTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const runningRef = useRef<string | null>(null);
+  const noteElsewhere = useCallback((turnId: string | null, add: boolean) => {
+    setElsewhere((s) => {
+      if (add ? !turnId || s.has(turnId) : !s.has(SOME_TURN) && !(turnId && s.has(turnId)))
+        return s;
+      const next = new Set(s);
+      if (add) next.add(turnId!);
+      else {
+        // Any turn's end frees the slot a refused send saw.
+        next.delete(SOME_TURN);
+        if (turnId) next.delete(turnId);
+      }
+      return next;
+    });
+    if (elsewhereTimer.current) clearTimeout(elsewhereTimer.current);
+    elsewhereTimer.current = setTimeout(() => setElsewhere(new Set()), ELSEWHERE_IDLE_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (elsewhereTimer.current) clearTimeout(elsewhereTimer.current);
+    },
+    [],
+  );
   const pid = project?.project_id ?? null;
   const pidRef = useRef(pid);
   pidRef.current = pid;
@@ -143,11 +177,15 @@ export function ChatWindow() {
   }, [loadStatus, loadProject]);
 
   useEffect(() => {
+    // The previous project's running turn goes on after the switch and holds the slot.
+    const carried = runningRef.current;
+    if (carried && !ended.current.has(carried)) noteElsewhere(carried, true);
+    runningRef.current = null;
     setLive(null);
     setProblem(null);
     setNotSaved(false);
     void loadThread(pid);
-  }, [pid, loadThread]);
+  }, [pid, loadThread, noteElsewhere]);
 
   // FR-PRM-26 / BL-42: what the next turn would send, refreshed when the host, the thread or
   // Include images changes, when the main window publishes context (R103), and on focus.
@@ -178,10 +216,13 @@ export function ChatWindow() {
     const subs = [
       onEvent('prm:chat-delta', (d) => {
         deltas.current.set(d.turn_id, (deltas.current.get(d.turn_id) ?? '') + d.text);
+        // Our own send's first delta can come before its answer: not another project's.
+        if (!sendingRef.current) noteElsewhere(d.turn_id, true);
         setLive((l) => (l && l.turnId === d.turn_id ? { ...l, text: l.text + d.text } : l));
       }),
       onEvent('prm:chat-turn', (t) => {
         ended.current.add(t.turn_id);
+        noteElsewhere(t.turn_id, false);
         setNotSaved(!t.saved);
         setLive((l) => (l && l.turnId === t.turn_id ? null : l));
         if (t.error?.code === 'offline') setOffline(true);
@@ -213,7 +254,7 @@ export function ChatWindow() {
             () => undefined,
           ),
       );
-  }, [loadThread, loadProject]);
+  }, [loadThread, loadProject, noteElsewhere]);
 
   const send = async (text: string) => {
     // A second click before the first send answers is ignored (the ref is set at once).
@@ -231,7 +272,11 @@ export function ChatWindow() {
     } catch (e) {
       const p = problemOf(e);
       if (p.code === 'offline') setOffline(true);
-      setProblem(p);
+      if (p.code === 'turn_active') {
+        // Night review 9: not this project's turn (that one shows Stop): Send waits, saying why.
+        noteElsewhere(SOME_TURN, true);
+        await loadThread(pid);
+      } else setProblem(p);
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -384,13 +429,18 @@ export function ChatWindow() {
   const turns = view?.thread?.turns ?? [];
   const unsaved = new Set(view?.unsaved_turn_ids ?? []);
   const running = live?.turnId ?? view?.running_turn_id ?? null;
+  runningRef.current = running;
+  const ours = new Set(turns.map((t) => t.id));
+  const busyElsewhere = !running && [...elsewhere].some((id) => !ours.has(id));
   const readOnly = !!project.read_only;
   const usage = usageLabel(turns, fake);
   const blocked = !host
     ? 'Open the Generate panel to chat about this project.'
     : offline
       ? 'Offline: Recheck once the connection is back.'
-      : null;
+      : busyElsewhere
+        ? ELSEWHERE_REASON
+        : null;
 
   return (
     <main className="prm-chat" data-testid="prm-chat">
@@ -418,11 +468,11 @@ export function ChatWindow() {
             detail={details[t.id]}
             readOnly={readOnly}
             onReplace={replace}
-            retryBlocked={offline || sending || !!running}
+            retryBlocked={offline || sending || !!running || busyElsewhere}
             onRetry={() => {
               const q = questionOf(turns, t.id);
               // M5: Retry respects the offline lock, as Send does.
-              if (q && !offline && !running) void send(q.text);
+              if (q && !offline && !running && !busyElsewhere) void send(q.text);
             }}
           />
         ))}
@@ -552,7 +602,11 @@ function Composer(props: {
         }}
       />
       <div className="prm-chat-actions">
-        {props.disabledReason && <span className="muted small">{props.disabledReason}</span>}
+        {props.disabledReason && (
+          <span className="muted small" data-testid="prm-chat-blocked">
+            {props.disabledReason}
+          </span>
+        )}
         {props.onRecheck && (
           <button type="button" data-testid="prm-chat-recheck" onClick={props.onRecheck}>
             Recheck
