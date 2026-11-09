@@ -98,6 +98,8 @@ export function installRgnMock(seed: RgnMockSeed): void {
     nextId: 1,
     estimates: 0,
     cancel: seed.cancel ?? 'canceled',
+    /** FR-RGN-37: the project's spool holds entries (a conflict or read-only spell). */
+    spooled: false,
     failures: { ...(seed.failures ?? {}) },
     connectivity: 'ok',
     // #55 (pf-core `region_edit::instruction`).
@@ -571,7 +573,10 @@ export function installRgnMock(seed: RgnMockSeed): void {
       const j = s.jobs.find((x) => x.id === input.job_id);
       if (!j) return fail('not_found', 'no such job');
       if (j.state !== 'succeeded') return fail('invalid_input', 'nothing to fetch', 'job_id');
-      j.error = null;
+      // As pf-core: its candidates may be waiting in the spool (FR-RGN-37).
+      if (s.spooled)
+        return fail('conflict', 'results are waiting to be saved; resolve the project first');
+      // The error stays until the candidates are stored (R102); the event says "fetching".
       jobEvent(j);
       return { job_id: j.id };
     },
@@ -872,6 +877,10 @@ export function installRgnMock(seed: RgnMockSeed): void {
           status: cand.status === 'invalid' ? 'invalid' : 'ready',
         });
       jobEvent(j);
+    },
+    /** FR-RGN-37: the spool holds entries (`true`) or was replayed (`false`). */
+    spool(on = true) {
+      s.spooled = on;
     },
     /** R102: → succeeded, but the results can't be downloaded (the error is shown; the job
      *  never becomes failed). `finish()` then completes it, as a good fetch would. */

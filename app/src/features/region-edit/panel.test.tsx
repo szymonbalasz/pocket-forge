@@ -671,9 +671,23 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(screen.queryByTestId('rgn-job-retry')).toBeNull();
     fireEvent.click(screen.getByTestId('rgn-job-fetch-again'));
     await waitFor(() => expect(fake.callsOf('rgn_job_fetch_again')).toHaveLength(1));
-    await waitFor(() => expect(screen.queryByTestId('rgn-job-fetch-again')).toBeNull());
+    // As pf-core: the error stays until the candidates are stored.
+    expect(screen.getByTestId('rgn-job-fetch-error')).toBeTruthy();
     act(() => mockControls().finish(2));
     await waitFor(() => expect(screen.getByTestId('rgn-job-state').textContent).toBe('Ready'));
+    expect(fake.callsOf('rgn_job_submit')).toHaveLength(1);
+  });
+
+  test('FR-RGN-24 FR-RGN-37 Fetch again is refused while the spool holds entries', async () => {
+    await submitted();
+    act(() => mockControls().fetchError('provider_failure', 'Download failed.'));
+    await waitFor(() => expect(screen.getByTestId('rgn-job-fetch-again')).toBeTruthy());
+    act(() => mockControls().spool(true));
+    fireEvent.click(screen.getByTestId('rgn-job-fetch-again'));
+    await waitFor(() =>
+      expect(screen.getByTestId('rgn-tracker-notice').className).toMatch(/error/),
+    );
+    expect(screen.getByTestId('rgn-job-fetch-error')).toBeTruthy();
     expect(fake.callsOf('rgn_job_submit')).toHaveLength(1);
   });
 

@@ -76,6 +76,7 @@ export interface RgnMockControls {
   finish(count?: number, invalid?: number[]): void;
   fail(code?: string, hint?: string): void;
   fetchError(code?: string, hint?: string): void;
+  spool(on?: boolean): void;
   lose(handleKept?: boolean, code?: string, hint?: string): void;
   setCancel(c: 'canceled' | 'not_cancellable'): void;
   failNext(cmd: string, code: string, message?: string, field?: string): void;
