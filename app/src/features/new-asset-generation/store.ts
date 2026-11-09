@@ -321,12 +321,21 @@ function putDraft(): Promise<void> {
 /** FR-PRJ-19 "…and on close" (R97): a save still waiting is written before the project closes
  *  or another one opens (PRJ's close guard); a failed write still lets it close. */
 const flushOnClose: CloseGuard = (proceed) => {
-  if (!draftTimer) return true;
-  clearTimeout(draftTimer);
-  draftTimer = null;
-  void putDraft().then(proceed);
+  if (draftTimer) {
+    clearTimeout(draftTimer);
+    draftTimer = null;
+    const p = putDraft().finally(() => {
+      if (closeFlush === p) closeFlush = null;
+    });
+    closeFlush = p;
+  }
+  // R109: a second close while that write runs (← Home after the window X) waits for it too.
+  if (!closeFlush) return true;
+  void closeFlush.then(proceed);
   return false;
 };
+/** The write `flushOnClose` started, until it lands. */
+let closeFlush: Promise<void> | null = null;
 
 function saveDraftSoon(): void {
   if (draftTimer) clearTimeout(draftTimer);

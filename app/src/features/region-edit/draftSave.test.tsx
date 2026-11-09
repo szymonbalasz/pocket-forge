@@ -125,3 +125,28 @@ test('FR-GEN-19 R97 a late Retry answer is dropped when another project opened m
   expect(rgn.get().seed).not.toBe(7);
   expect(fake.callsOf('project_put_draft').slice(saves)).toEqual([]);
 });
+
+test('R109 FR-PRJ-19 a second close while the close-time save runs waits for it', async () => {
+  await openPanel();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  mockWindow().__pfMockHandlers.project_put_draft = async () => {
+    await gate;
+    return { seq: 9 };
+  };
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'moss' } });
+  let first!: Promise<void>;
+  let second!: Promise<void>;
+  act(() => {
+    // The window X, then ← Home at once.
+    first = projectStore.close();
+    second = projectStore.close();
+  });
+  await act(() => new Promise((r) => setTimeout(r, 0)));
+  expect(fake.callsOf('project_put_draft')).toHaveLength(1);
+  expect(fake.callsOf('project_close'), 'no close before the save lands').toHaveLength(0);
+  release();
+  await act(() => Promise.all([first, second]));
+  expect(fake.callsOf('project_close').length).toBeGreaterThan(0);
+  expect(projectStore.get().project).toBeNull();
+});
