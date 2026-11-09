@@ -289,8 +289,8 @@ export interface Capabilities {
   controls: {
     name: string;
     type: 'int' | 'float' | 'enum' | 'bool' | 'string' | 'seed' | 'image' | 'mask';
-    /** `background` (GEN, OQ-GEN-07) renders as an ordinary control; `output_size` inputs are
-     *  never shown as raw controls (FR-GEN-11). */
+    /** `background` (GEN, OQ-GEN-07) renders as an ordinary control. The inputs behind
+     *  `output_size` are never listed as controls (FR-GEN-11, R76). */
     role:
       | 'source'
       | 'mask'
@@ -299,7 +299,6 @@ export interface Capabilities {
       | 'seed'
       | 'reference'
       | 'background'
-      | 'output_size'
       | 'other';
     min: number | null;
     max: number | null;

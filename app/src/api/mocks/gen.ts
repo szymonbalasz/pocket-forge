@@ -103,7 +103,7 @@ export function installGenMock(seed: GenMockSeed): void {
     const unknown = Object.keys(values).filter((k) => !c.controls.some((x) => x.name === k));
     const required_missing: string[] = [];
     const controls = c.controls
-      .filter((x) => !['source', 'mask', 'reference', 'output_size'].includes(x.role))
+      .filter((x) => !['source', 'mask', 'reference'].includes(x.role))
       .filter((x) => x.type !== 'image' && x.type !== 'mask')
       .map((x) => {
         let value: unknown = values[x.name] ?? x.default ?? null;

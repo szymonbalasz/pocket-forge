@@ -139,8 +139,10 @@ test('FR-GEN-05 FR-GEN-06 FR-GEN-11 generate models and capabilities; output-siz
     model_id: 'fake-gen-wh',
     operation: 'generate',
   });
-  await waitFor(() => expect(controlIds()).toEqual(['num_images', 'background']));
+  await waitFor(() => expect(controlIds()).toEqual(['num_samples', 'background']));
+  // The size is the Size block's, never a raw control.
   expect(controlIds()).not.toContain('width');
+  expect(screen.getByTestId('gen-size').dataset.mode).toBe('grid');
   expect(screen.queryByTestId('gen-panel-count-single')).toBeNull();
   expect(fake.callsOf('gen_controls_evaluate').length).toBeGreaterThan(0);
 
@@ -218,7 +220,6 @@ test('FR-GEN-10 Tokens and Items: a ratio select (fixed list + long side on wh m
 
   await pickModel('Fake gen (aspect)');
   expect(screen.queryByTestId('gen-size-long-side')).toBeNull();
-  // `auto` is a keyword, not a ratio: never offered.
   expect(await openSelect(screen.getByTestId('gen-size-aspect'))).toEqual([
     '1:1',
     '3:4',
@@ -235,7 +236,7 @@ test('FR-GEN-12 OQ-GEN-11 Tokens default to a transparent background; Maps keep 
   cleanup();
   fake.uninstall();
   await setup({ kind: 'map' });
-  await waitFor(() => expect(control('background').textContent).toContain('auto'));
+  await waitFor(() => expect(control('background').textContent).toContain('opaque'));
 });
 
 test('FR-GEN-14 the sketch block: None by default, structure/ images by name, badges, Add…, hidden without a sketch input', async () => {

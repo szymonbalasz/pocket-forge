@@ -9,10 +9,11 @@ import { refMock, sampleRefSeed } from '../../api/mocks/ref';
 import { installRgnMock } from '../../api/mocks/rgn';
 import { baseSnapshot, installFakeTauri, type FakeTauri } from '../../api/mocks/tauri';
 
-/** `fixtures/gen/capabilities-generate.json` (§13): the fake generate models as §10 describes
- *  them. `fake-gen-wh`: wh 64–2048 step 16, count 1–4, a `background` enum with transparent, one
- *  cost-affecting slot ≤ 4 that also takes the sketch. `fake-gen-aspect`: ratios 1:1, 3:4, 4:3,
- *  2:3 (plus the keyword `auto`), no count, a style slot ≤ 2, no sketch. */
+/** `fixtures/gen/capabilities-generate.json` (§13): PRV's fake generate models (R76) as
+ *  `provider_get_capabilities{operation: generate}` returns them. `fake-gen-wh`: wh 64–2048 step
+ *  16, `num_samples` 1–4, `background` opaque | transparent, one cost-affecting `refs` slot ≤ 4
+ *  that also takes the sketch. `fake-gen-aspect`: ratios 1:1, 3:4, 4:3, 2:3, no count, a
+ *  `style_refs` slot ≤ 2, no sketch. */
 export const GEN_WH = generateCaps['fake-gen-wh'] as Capabilities;
 export const GEN_ASPECT = generateCaps['fake-gen-aspect'] as Capabilities;
 
@@ -82,10 +83,10 @@ export function mockGenCore(opts: GenSetup = {}): FakeTauri & { structure: Folde
       ...sampleRefSeed(),
       slots: {
         'fake-all-types': [],
-        'fake-gen-wh': [{ name: 'reference_images', role: null, min: 0, max: 4 }],
-        'fake-gen-aspect': [{ name: 'style_images', role: 'style', min: 0, max: 2 }],
+        'fake-gen-wh': [{ name: 'refs', role: null, min: 0, max: 4 }],
+        'fake-gen-aspect': [{ name: 'style_refs', role: 'style', min: 0, max: 2 }],
       },
-      structureSlots: { 'fake-gen-wh': 'reference_images' },
+      structureSlots: { 'fake-gen-wh': 'refs' },
       projectRefs: (opts.projectRefs ?? []).map((file) => ({ file })),
       readOnly: opts.readOnly,
     },

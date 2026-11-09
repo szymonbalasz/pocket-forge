@@ -55,10 +55,10 @@ export function clampGrid(g: { cols: number; rows: number; pps: number }) {
   };
 }
 
-/** A long side within the model's limits, snapped to its step (FR-GEN-10). */
+/** A long side within the model’s limits, rounded down to its step (FR-GEN-08/10). */
 export function clampLongSide(v: number, lim: { min: number; max: number; step: number }): number {
   const step = lim.step > 0 ? lim.step : 1;
-  const snapped = Math.round(clampInt(v, lim.min, lim.max) / step) * step;
+  const snapped = Math.floor(clampInt(v, lim.min, lim.max) / step) * step;
   return Math.min(Math.floor(lim.max / step) * step, Math.max(lim.min, snapped));
 }
 

@@ -149,8 +149,8 @@ function ModelSection({ s }: { s: GenState }) {
       {s.caps && (
         <div className="rgn-controls" data-testid="gen-panel-controls">
           {s.caps.controls
-            // FR-GEN-11: the inputs behind `output_size` are the Size block, never raw controls.
-            .filter((c) => c.role !== 'output_size' && isValueControl(c))
+            // FR-GEN-11: PRV never lists the inputs behind `output_size`; the Size block sets them.
+            .filter((c) => isValueControl(c))
             .filter((c) => stateOf(s.evaluation, c.name)?.visible ?? true)
             .map((c) => (
               <ControlField
