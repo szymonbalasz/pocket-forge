@@ -130,6 +130,15 @@ fn rig() -> Rig {
     let pidfile = tmp.path().join("pids.txt");
 
     let system = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
+    // review-sec 4 (R96): a planted `cmd.exe` first on PATH and in both working folders
+    // (detection runs in <data-dir>, a session in its thread folder) is never run: the
+    // shim goes through System32's `cmd.exe`. The decoy is `hostname.exe`, which would
+    // print no version and no stream-json.
+    let thread = data.join("chat").join("t1");
+    for dir in [&prefix, &data, &thread] {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::copy(system.join("hostname.exe"), dir.join("cmd.exe")).unwrap();
+    }
     let path = std::env::join_paths([prefix.clone(), node_dir(), system]).unwrap();
     let mut parent_env: Vec<(OsString, OsString)> = std::env::vars_os()
         .filter(|(k, _)| {
