@@ -54,6 +54,6 @@
 | Spec: prompt helper (PRM) | — | merged | complete (#60) | — |
 | GEN 1: PRV `generate` op, fake gen models | — | merged | done (R76) | owner: free dry-run-generate recordings |
 | GEN 2: image-less project, base layer, pick commit | `gen-2` | building | — | — |
-| GEN 5: + New menu, New image tab (mocked) | `gen-5` | building | — | — |
+| GEN 5: + New menu, New image tab (mocked) | — | merged | done (R77) | slice 4 picker routing, slice 6 prompt block |
 | PRM 0: `pf-chat` crate + probe | `prm-0` | building | — | owner runs the probe |
 | PRM 1: helpers core | `prm-1` | building | — | — |
