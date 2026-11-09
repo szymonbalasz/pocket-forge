@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","cwd":"{CWD}","session_id":"44444444-aaaa-4bbb-8ccc-000000000001","tools":[],"mcp_servers":[],"model":"claude-sonnet-5-5","slash_commands":[],"apiKeySource":"none","claude_code_version":"2.1.319","agents":[],"skills":[],"plugins":[],"uuid":"44444444-aaaa-4bbb-8ccc-0000000000a1"}
+{"type":"stream_event","event":{"type":"message_start","message":{"id":"msg_01HANDMADE0000000004"}},"session_id":"44444444-aaaa-4bbb-8ccc-000000000001","uuid":"44444444-aaaa-4bbb-8ccc-0000000000a2"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"1\n2\n"}},"session_id":"44444444-aaaa-4bbb-8ccc-000000000001","uuid":"44444444-aaaa-4bbb-8ccc-0000000000a3"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"3\n4\n"}},"session_id":"44444444-aaaa-4bbb-8ccc-000000000001","uuid":"44444444-aaaa-4bbb-8ccc-0000000000a4"}
