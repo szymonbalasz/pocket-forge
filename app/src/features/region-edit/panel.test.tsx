@@ -214,6 +214,29 @@ describe('Generate panel (RGN slice 6)', { timeout: 20_000 }, () => {
     await waitFor(() => expect(n()).toBe(3), { timeout: 3000 });
   });
 
+  test('FR-RGN-12 a failed estimate offers Retry, which estimates again with no input change', async () => {
+    await setup();
+    mockControls().failNext('rgn_job_estimate', 'rate_limited', 'Too many requests.');
+    await waitFor(() => expect(rgn.get().estimate.status).toBe('error'), { timeout: 4000 });
+    const n = fake.callsOf('rgn_job_estimate').length;
+    fireEvent.click(screen.getByTestId('rgn-panel-estimate-retry'));
+    await estimated();
+    expect(fake.callsOf('rgn_job_estimate').length).toBe(n + 1);
+    expect(screen.queryByTestId('rgn-panel-estimate-retry')).toBeNull();
+  });
+
+  test('FR-RGN-02 a cleared margin field puts the margin back on blur, never 0', async () => {
+    await setup();
+    const fits = fake.callsOf('rgn_region_fit').length;
+    const field = screen.getByTestId('rgn-panel-margin') as HTMLInputElement;
+    fireEvent.change(field, { target: { value: '' } });
+    fireEvent.blur(field);
+    expect(rgn.get().margin).toBe(128);
+    expect(field.value).toBe('128');
+    await wait(50);
+    expect(fake.callsOf('rgn_region_fit').length).toBe(fits);
+  });
+
   test('FR-RGN-05 fit label recomputed on region and margin change', async () => {
     await setup();
     // 512 + 2×128 = 768, a multiple of 8 and ≤ 2048: unresampled.
@@ -416,6 +439,28 @@ describe('confirm dialog (FR-RGN-14..16, §7)', { timeout: 20_000 }, () => {
     await waitFor(() => expect(fake.callsOf('rgn_job_submit')).toHaveLength(1));
     expect(fake.callsOf('rgn_job_submit')[0]!.confirmations).toEqual([]);
     await waitFor(() => expect(screen.queryByTestId('rgn-confirm')).toBeNull());
+  });
+
+  test('FR-RGN-14 the confirm closes when its estimate goes away and doesn’t come back by itself', async () => {
+    await ready({ spend: { cap: 100, threshold: 10 } });
+    const handlers = (
+      window as unknown as { __pfMockHandlers: Record<string, (i: unknown) => unknown> }
+    ).__pfMockHandlers;
+    const status = (connectivity: string) => () => ({
+      mode: 'fake',
+      configured: true,
+      connectivity,
+      store_unavailable: false,
+    });
+    handlers.provider_status = status('offline');
+    act(() => fake.emit('provider:status-changed', { connectivity: 'offline' }));
+    await waitFor(() => expect(screen.queryByTestId('rgn-confirm')).toBeNull());
+    handlers.provider_status = status('ok');
+    act(() => fake.emit('provider:status-changed', { connectivity: 'ok' }));
+    await estimated();
+    await wait(50);
+    expect(screen.queryByTestId('rgn-confirm')).toBeNull();
+    expect(rgn.get().confirmOpen).toBe(false);
   });
 
   test('FR-RGN-15 above the threshold: Enter never confirms; the second confirmation is explicit', async () => {
@@ -804,6 +849,39 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     );
   });
 
+  test('FR-RGN-30 a double accept is one accept; quick re-tunes each take the previous result', async () => {
+    await submitted();
+    act(() => mockControls().finish(2));
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(2));
+    fireEvent.click(screen.getAllByTestId('edt-picker-item')[0]!);
+    await waitFor(() => expect(fake.callsOf('rgn_candidate_preview')).toHaveLength(1));
+    fireEvent.click(screen.getByTestId('edt-picker-accept'));
+    fireEvent.click(screen.getByTestId('edt-picker-accept'));
+    await waitFor(() => expect(screen.getByTestId('rgn-blend-retune')).toBeTruthy());
+    await wait(300);
+    expect(fake.callsOf('rgn_candidate_accept')).toHaveLength(1);
+    expect(screen.getByTestId('rgn-tracker-notice').textContent).toBe('Patch accepted.×');
+
+    const retuneResults: string[] = [];
+    const handlers = (
+      window as unknown as { __pfMockHandlers: Record<string, (i: unknown) => unknown> }
+    ).__pfMockHandlers;
+    const retune = handlers.rgn_patch_retune!;
+    handlers.rgn_patch_retune = (i) => {
+      const r = retune(i) as { layer_id: string };
+      retuneResults.push(r.layer_id);
+      return r;
+    };
+    fireEvent.click(screen.getByTestId('rgn-blend-retune'));
+    fireEvent.click(screen.getByTestId('rgn-blend-retune'));
+    await waitFor(() => expect(fake.callsOf('rgn_patch_retune')).toHaveLength(2));
+    // The second re-tunes the first's layer (so its undo parent is the first's revision).
+    expect(fake.callsOf('rgn_patch_retune')[1]!.layer_id).toBe(retuneResults[0]);
+    await waitFor(() =>
+      expect(screen.getByTestId('rgn-tracker-notice').textContent).toBe('Patch re-tuned.×'),
+    );
+  });
+
   test('FR-RGN-26 a preview without enough context says colour match was skipped', async () => {
     await submitted();
     const handlers = (
@@ -903,4 +981,42 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(/2 candidates discarded/);
     expect(screen.queryByTestId('edt-picker-discard-rest')).toBeNull();
   });
+});
+
+test('FR-RGN-07 a late model list of the previous project never lands in the next one', async () => {
+  polyfillRadix();
+  fake = mockCore();
+  const w = window as unknown as {
+    __pfMockHandlers: Record<string, (i: unknown) => unknown>;
+    __pfMockSnapshot: Record<string, unknown>;
+  };
+  const list = w.__pfMockHandlers.provider_list_models!;
+  let release: () => void = () => undefined;
+  let first = true;
+  w.__pfMockHandlers.provider_list_models = (i) => {
+    if (!first) return list(i);
+    first = false;
+    // Project A's answer comes late.
+    return new Promise<void>((r) => (release = r)).then(() => list(i));
+  };
+  w.__pfMockSnapshot.draft = { model_id: 'fake-all-types', controls: { guidance: 15 } };
+  projectStore.reset();
+  await act(() => projectStore.open('C:/pf-test/library/Maps/map'));
+  render(
+    <Tooltip.Provider>
+      <GeneratePanel />
+    </Tooltip.Provider>,
+  );
+  await waitFor(() => expect(rgn.get().modelsLoading).toBe(true));
+  // Project B (no draft) opens and loads its own list.
+  w.__pfMockSnapshot.project_id = '01JPROJECTB000000000000000';
+  w.__pfMockSnapshot.draft = null;
+  await act(() => projectStore.open('C:/pf-test/library/Maps/other'));
+  await waitFor(() => expect(rgn.get().projectId).toBe('01JPROJECTB000000000000000'));
+  await waitFor(() => expect(rgn.get().evaluation).not.toBeNull());
+  expect(rgn.get().values.guidance).toBe(7.5);
+  await act(async () => release());
+  await wait(100);
+  expect(rgn.get().values.guidance).toBe(7.5);
+  expect(rgn.get().touched).not.toContain('guidance');
 });
