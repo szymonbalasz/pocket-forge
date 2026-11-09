@@ -275,7 +275,7 @@ fn fr_prj_31_owner_56_accept_is_one_commit_and_keeps_the_rest() {
     let mut s = setup();
     let (job, c) = s.fetched("moss", 3);
     set_star(&s.e.ctx, s.e.install(), &mut s.p, c[1].id, true).unwrap();
-    let before_hash = s.p.manifest.original.content_hash.clone();
+    let before_hash = s.p.manifest.original.as_ref().unwrap().content_hash.clone();
     let lc = s.accept(job.id, c[0].id).unwrap();
     let m = &s.p.manifest;
     let layer = m.layers.last().unwrap();
@@ -305,7 +305,7 @@ fn fr_prj_31_owner_56_accept_is_one_commit_and_keeps_the_rest() {
         s.dir.join(job.dir()).join("region.png").is_file(),
         "accepted jobs keep inputs (R9)"
     );
-    assert_eq!(m.original.content_hash, before_hash);
+    assert_eq!(m.original.as_ref().unwrap().content_hash, before_hash);
     s.reopen();
     assert_eq!(s.p.manifest.layers.len(), 2);
 }

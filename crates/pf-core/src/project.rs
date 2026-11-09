@@ -6,7 +6,7 @@
 //! mutating call commits before it returns (FR-PRJ-18): new write-once files, then
 //! `project.json`, each temp → flush → rename. The manifest rename is the commit point.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -68,6 +68,9 @@ impl Warning {
 pub(crate) struct RevisionRefs {
     pub layers: HashSet<Ulid>,
     pub masks: HashSet<Ulid>,
+    /// Bottom-image layers of revisions: id → `Some(file)` for a base image (FR-GEN-27), `None`
+    /// for the original (its file is the manifest's `original.file`).
+    pub base_images: HashMap<Ulid, Option<String>>,
 }
 
 impl RevisionRefs {
@@ -75,6 +78,15 @@ impl RevisionRefs {
         for l in &rev.layers {
             self.layers.insert(l.id);
             self.masks.extend(l.mask_id);
+            match l.kind {
+                LayerKind::Base => {
+                    self.base_images.insert(l.id, l.file.clone());
+                }
+                LayerKind::Original => {
+                    self.base_images.insert(l.id, None);
+                }
+                LayerKind::Patch => {}
+            }
         }
         self.masks
             .extend(rev.draft.as_ref().and_then(|d| d.mask_id));
@@ -166,15 +178,20 @@ pub struct ProjectSnapshot {
     pub kind: Kind,
     /// Absolute project folder.
     pub project_dir: PathBuf,
-    /// Absolute path of the original (`working/<file>`).
-    pub image_path: PathBuf,
-    /// The original's stable image id (= `layers[0].id`, #48 (3)).
-    pub original_image_id: Ulid,
+    /// Absolute path of `layers[0]`'s file (the original or the base image); `null` with no image.
+    pub image_path: Option<PathBuf>,
+    /// `layers[0].id`: the original's stable image id (#48 (3)) or the base image's layer id;
+    /// `null` with no image (FR-GEN-03).
+    pub original_image_id: Option<Ulid>,
+    /// False for a project made by Generate new until its first pick (FR-GEN-03).
+    pub has_image: bool,
     pub read_only: Option<ReadOnlyReason>,
     pub warnings: Vec<Warning>,
+    /// `layers[0]`'s size; 0 × 0 with no image.
     pub width: u32,
     pub height: u32,
-    pub format: String,
+    /// `layers[0]`'s format; `null` with no image.
+    pub format: Option<String>,
     pub layers: Vec<Layer>,
     pub draft: Option<Draft>,
     pub revisions: Vec<RevisionEntry>,
@@ -193,18 +210,20 @@ pub struct ProjectSnapshot {
 impl OpenProject {
     pub fn snapshot(&self) -> ProjectSnapshot {
         let m = &self.manifest;
+        let (width, height) = m.image_size().unwrap_or((0, 0));
         ProjectSnapshot {
             project_id: m.project_id,
             name: folder_name(&self.dir),
             kind: m.kind,
             project_dir: self.dir.clone(),
-            image_path: self.original_path(),
-            original_image_id: m.original_image_id().unwrap_or(m.project_id),
+            image_path: self.base_path(),
+            original_image_id: m.original_image_id(),
+            has_image: m.has_image(),
             read_only: self.read_only,
             warnings: self.warnings.clone(),
-            width: m.original.width,
-            height: m.original.height,
-            format: m.original.format.clone(),
+            width,
+            height,
+            format: m.image_format(),
             layers: m.layers.clone(),
             draft: m.draft.clone(),
             revisions: m.revisions.clone(),
@@ -222,9 +241,23 @@ impl OpenProject {
         self.dir.join(rel)
     }
 
-    /// Absolute path of the original.
-    pub fn original_path(&self) -> PathBuf {
-        self.path(&self.manifest.original.file)
+    /// Absolute path of the original; `None` for a project made by Generate new (FR-GEN-02).
+    pub fn original_path(&self) -> Option<PathBuf> {
+        self.manifest.original.as_ref().map(|o| self.path(&o.file))
+    }
+
+    /// Absolute path of `layers[0]`'s file: the original or the base image (FR-GEN-33).
+    pub fn base_path(&self) -> Option<PathBuf> {
+        self.manifest.base_file().map(|f| self.path(f))
+    }
+
+    /// Fails with `no_image` while the project has no image (FR-GEN-03).
+    pub fn require_image(&self) -> CoreResult<()> {
+        if self.manifest.has_image() {
+            Ok(())
+        } else {
+            Err(crate::decoded::no_image())
+        }
     }
 
     fn manifest_path(&self) -> PathBuf {
@@ -247,6 +280,14 @@ impl OpenProject {
         if let Some(t) = &self.thumbs {
             t.request(ThumbJob::new(ctx, &self.dir, &self.manifest));
         }
+    }
+}
+
+/// The decoded `layers[0]` handle for a manifest (FR-PRJ-42 amended, FR-GEN-33).
+pub(crate) fn decoded_for(dir: &Path, m: &Manifest) -> DecodedOriginal {
+    match m.base_file() {
+        Some(f) => DecodedOriginal::new(m.project_id, dir.join(f)),
+        None => DecodedOriginal::none(m.project_id),
     }
 }
 
@@ -355,7 +396,7 @@ pub fn open(
     }
 
     let mut p = OpenProject {
-        decoded: DecodedOriginal::new(manifest.project_id, dir.join(&manifest.original.file)),
+        decoded: decoded_for(&dir, &manifest),
         last_commit: (!recovered).then_some((manifest.commit.seq, manifest.commit.install_id)),
         dir,
         manifest,
@@ -392,15 +433,20 @@ pub fn open(
     if p.read_only != Some(ReadOnlyReason::NewerVersion)
         && p.read_only != Some(ReadOnlyReason::OriginalMissing)
         && thumb::needs_rebuild(&p.dir)
+        // With no image only a stale thumbnail needs work: it is removed (FR-GEN-03).
+        && (p.manifest.has_image() || p.dir.join(THUMB_FILE).is_file())
     {
         p.request_thumbnail(ctx);
     }
     Ok(p)
 }
 
-/// FR-PRJ-15/16/17: hydrate, then compare size and mtime, then the hash.
+/// FR-PRJ-15/16/17: hydrate, then compare size and mtime, then the hash. A project made by
+/// Generate new has no original to check (FR-GEN-02).
 fn check_original(ctx: &Context, p: &mut OpenProject) -> CoreResult<()> {
-    let path = p.original_path();
+    let Some(path) = p.original_path() else {
+        return Ok(());
+    };
     let meta = match std::fs::symlink_metadata(&path) {
         Err(_) => {
             p.read_only.get_or_insert(ReadOnlyReason::OriginalMissing);
@@ -416,7 +462,9 @@ fn check_original(ctx: &Context, p: &mut OpenProject) -> CoreResult<()> {
     // R33: refuse an original that fails the cheap end-of-file check.
     pf_imaging::probe_file_complete(&path).map_err(probe_error)?;
     let meta = std::fs::metadata(&path).unwrap_or(meta);
-    let o = &p.manifest.original;
+    let Some(o) = p.manifest.original.as_ref() else {
+        return Ok(());
+    };
     // R45: hashed on every open until the project's first commit after creation (seq 1), and
     // after that whenever the racily-clean window says size + mtime can't be trusted.
     let never_committed = p.manifest.commit.seq <= CREATION_SEQ;
@@ -553,7 +601,13 @@ pub(crate) fn commit_with(
 
     // Committed. Everything below is rolled forward on open if it fails.
     let layers_changed = next.layers != p.manifest.layers;
+    let base_changed = next.base_file() != p.manifest.base_file();
     p.manifest = next;
+    if base_changed {
+        // A pick, or a restore across one (FR-GEN-27, 29): the next decode reads the new file.
+        p.decoded.release();
+        p.decoded = decoded_for(&p.dir, &p.manifest);
+    }
     p.last_commit = Some((seq, install_id));
     for rev in &plan.revisions {
         p.refs.add(rev);
@@ -697,7 +751,11 @@ pub fn restore_revision(
     // with an absolute path (walkthrough D3).
     require_folder(p)?;
     let rev = read_revision(p, rev_id)?;
-    for layer in rev.layers.iter().filter(|l| l.kind == LayerKind::Patch) {
+    for layer in rev
+        .layers
+        .iter()
+        .filter(|l| matches!(l.kind, LayerKind::Patch | LayerKind::Base))
+    {
         let file = layer.file.as_deref().unwrap_or_default();
         if !p.path(file).is_file() {
             return Err(CoreError::new(
@@ -750,6 +808,52 @@ pub struct DraftInput {
     /// #55: the blend instruction setting; absent or `null` = on (the default).
     #[serde(default)]
     pub blend_instruction: Option<bool>,
+    /// The New image tab's `draft.generate` (FR-GEN-19). Absent = keep the saved one (so a region
+    /// edit draft save never touches it); `null` = clear it.
+    #[serde(default, deserialize_with = "present")]
+    pub generate: Option<Option<Value>>,
+    /// Set by `project_put_draft` when its input has no `draft` (a New image save): the region
+    /// edit fields keep their saved values (FR-GEN-19, "the region-edit draft is untouched").
+    #[serde(skip)]
+    pub keep_region_edit: bool,
+}
+
+impl DraftInput {
+    /// A save that sets only `draft.generate` (FR-GEN-19).
+    pub fn generate_only(generate: Option<Value>) -> Self {
+        DraftInput {
+            generate: Some(generate),
+            keep_region_edit: true,
+            ..Default::default()
+        }
+    }
+
+    /// This save layered over an earlier one still pending after `locked` (FR-PRJ-21): the parts
+    /// this save leaves alone (the region edit fields, `generate`) come from the earlier one, so
+    /// a New image save and a region edit save never drop each other.
+    fn over(self, older: &DraftInput) -> DraftInput {
+        let mut d = self;
+        if d.keep_region_edit {
+            let generate = d.generate.take();
+            d = DraftInput {
+                generate,
+                ..older.clone()
+            };
+        }
+        if d.generate.is_none() {
+            d.generate = older.generate.clone();
+        }
+        d
+    }
+}
+
+/// [`present`] for command inputs outside this module.
+pub(crate) fn present_field<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    present(d)
 }
 
 /// Tells an absent field (`None`, via `default`) from an explicit `null` (`Some(None)`).
@@ -772,6 +876,10 @@ pub fn put_draft(
     draft: DraftInput,
     export_settings: Option<serde_json::Map<String, Value>>,
 ) -> CoreResult<u64> {
+    let draft = match &p.pending_draft {
+        Some(older) => draft.over(&older.draft),
+        None => draft,
+    };
     let keep = PendingDraft {
         draft: draft.clone(),
         export: export_settings.clone(),
@@ -886,17 +994,29 @@ pub(crate) fn apply_draft(
         .map(|d| d.extra.clone())
         .unwrap_or_default();
     let kept_mask = m.draft.as_ref().and_then(|d| d.mask_id);
-    m.draft = Some(Draft {
-        final_prompt: draft.final_prompt,
-        model_id: draft.model_id,
-        controls: draft.controls,
-        seed: draft.seed,
-        region: draft.region,
-        mask_id: draft.mask_id.unwrap_or(kept_mask),
-        references: draft.references,
-        blend_instruction: draft.blend_instruction,
-        updated_at: ctx.now(),
-        extra,
+    let generate = match draft.generate {
+        Some(g) => g,
+        None => m.draft.as_ref().and_then(|d| d.generate.clone()),
+    };
+    m.draft = Some(if draft.keep_region_edit {
+        let mut d = m.draft.clone().unwrap_or_else(|| Draft::empty(ctx.now()));
+        d.generate = generate;
+        d.updated_at = ctx.now();
+        d
+    } else {
+        Draft {
+            final_prompt: draft.final_prompt,
+            model_id: draft.model_id,
+            controls: draft.controls,
+            seed: draft.seed,
+            region: draft.region,
+            mask_id: draft.mask_id.unwrap_or(kept_mask),
+            references: draft.references,
+            blend_instruction: draft.blend_instruction,
+            generate,
+            updated_at: ctx.now(),
+            extra,
+        }
     });
     if let Some(settings) = export_settings {
         store::merge_export(m, settings);
@@ -916,13 +1036,18 @@ pub fn relink_original(
     if p.read_only.is_some() && p.read_only != Some(ReadOnlyReason::OriginalMissing) {
         p.require_writable()?;
     }
-    let target = p.original_path();
+    let (Some(target), Some(original)) = (p.original_path(), p.manifest.original.clone()) else {
+        return Err(CoreError::invalid(
+            "path",
+            "this project has no original (it was made by Generate new)",
+        ));
+    };
     if target.exists() {
         return Err(CoreError::invalid("path", "the original isn't missing"));
     }
     library::hydrate_if_needed(ctx, source)?;
     let hash = fsx::hash_file(source).map_err(|e| CoreError::io("reading the file", &e))?;
-    if hash != p.manifest.original.content_hash {
+    if hash != original.content_hash {
         return Err(CoreError::new(
             ErrorCode::HashMismatch,
             "that file isn't this project's original (different content)",
@@ -936,8 +1061,10 @@ pub fn relink_original(
     let meta = std::fs::metadata(&target).map_err(|e| CoreError::io("reading the original", &e))?;
     let was = p.read_only.take();
     let result = commit(ctx, install_id, p, |_, _, m, _| {
-        m.original.size = meta.len();
-        m.original.mtime = mtime_of(&meta);
+        if let Some(o) = m.original.as_mut() {
+            o.size = meta.len();
+            o.mtime = mtime_of(&meta);
+        }
         Ok(())
     });
     if let Err(e) = result {
@@ -945,7 +1072,7 @@ pub fn relink_original(
         return Err(e);
     }
     p.warnings.retain(|w| w.code != "original_missing");
-    p.decoded = DecodedOriginal::new(p.manifest.project_id, target);
+    p.decoded = decoded_for(&p.dir, &p.manifest);
     Ok(())
 }
 
@@ -969,18 +1096,31 @@ pub struct ResolvedImage {
 }
 
 impl OpenProject {
-    /// `resolve_image(image_id)` (R4, #48 (3)): the original (its stable id = the original
-    /// layer's id, from creation), a layer of the current stack or of any revision, a candidate
-    /// (its trashed copy while it's in the trash), or a mask → its file. While a conflict is
-    /// open, also either version's original or patch layers (BL-22).
+    /// `resolve_image(image_id)` (R4, #48 (3)): the bottom image (the original by its stable id =
+    /// the original layer's id, from creation, or a base image by its layer id, FR-GEN-33), a
+    /// layer of the current stack or of any revision, a candidate (its trashed copy while it's in
+    /// the trash), or a mask → its file. While a conflict is open, also either version's original
+    /// or patch layers (BL-22).
     pub fn resolve_image(&self, image_id: Ulid) -> CoreResult<ResolvedImage> {
         let m = &self.manifest;
         let found = |rel: &str, kind| ResolvedImage {
             path: self.path(rel),
             kind,
         };
-        if m.original_image_id() == Some(image_id) {
-            return Ok(found(&m.original.file, ImageKind::Original));
+        if m.original_image_id() == Some(image_id)
+            && let Some(file) = m.base_file()
+        {
+            return Ok(found(file, ImageKind::Original));
+        }
+        if let Some(base) = self.refs.base_images.get(&image_id) {
+            // A bottom image of an earlier revision (undo across a pick, FR-GEN-29).
+            let file = match base {
+                Some(f) => Some(f.as_str()),
+                None => m.original.as_ref().map(|o| o.file.as_str()),
+            };
+            if let Some(file) = file {
+                return Ok(found(file, ImageKind::Original));
+            }
         }
         if let Some(l) = m.layers.iter().find(|l| l.id == image_id) {
             let file = l.file.as_deref().ok_or_else(|| {

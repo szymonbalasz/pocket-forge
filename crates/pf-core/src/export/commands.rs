@@ -70,15 +70,11 @@ impl Command for ExportPlan {
     fn run(core: &Core, input: SettingsInput) -> CoreResult<Plan> {
         let state = core.state();
         let p = state.project.as_ref().ok_or_else(no_project)?;
+        // FR-GEN-03: Export is disabled with `no_image` until the first pick.
+        p.require_image()?;
         settings::check_destination(&p.dir)?;
-        let m = &p.manifest;
-        settings::plan(
-            &input.settings,
-            &folder_name(&p.dir),
-            &p.dir,
-            m.original.width,
-            m.original.height,
-        )
+        let (w, h) = p.manifest.image_size().unwrap_or((0, 0));
+        settings::plan(&input.settings, &folder_name(&p.dir), &p.dir, w, h)
     }
 }
 
@@ -127,9 +123,11 @@ impl Command for ExportStart {
         if p.jobs.values().any(|j| j.state == JobState::Succeeded) {
             return Err(busy("a region job is fetching its candidates"));
         }
-        // FR-EXP-28, R11.
+        // FR-EXP-28, R11; `no_image` with no image yet (FR-GEN-03). `layers[0]`'s pixels, alpha
+        // over the flatten colour (FR-EXP-04 amended, FR-GEN-12, 33).
+        p.require_image()?;
         let original = p.decoded.get(ctx)?;
-        let (w, h) = (p.manifest.original.width, p.manifest.original.height);
+        let (w, h) = p.manifest.image_size().unwrap_or((0, 0));
         let s = input.settings;
         let sizing = s.sizing(w, h)?;
         if let Some(reason) = settings::unavailable(s.format, &sizing) {

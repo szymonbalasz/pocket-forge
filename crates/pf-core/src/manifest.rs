@@ -31,7 +31,8 @@ pub const JOBS_DIR: &str = ".pforge/jobs";
 pub const TRASH_DIR: &str = ".pforge/trash";
 /// Home-grid thumbnail (FR-PRJ-50), rebuildable.
 pub const THUMB_FILE: &str = ".pforge/thumb.jpg";
-/// The original lives here (FR-PRJ-04); written only at creation and relink (FR-PRJ-47).
+/// The original lives here (FR-PRJ-04); written at creation and relink, and once per picked
+/// generate candidate (a write-once base image, FR-GEN-27, FR-PRJ-47).
 pub const WORKING_DIR: &str = "working";
 pub const RESULTS_DIR: &str = "results";
 pub const EXPORTS_DIR: &str = "exports";
@@ -121,15 +122,19 @@ pub struct Rect {
 pub enum LayerKind {
     Original,
     Patch,
+    /// A picked generate candidate, copied write-once to `working/` (FR-GEN-27, schema §4.3).
+    Base,
 }
 
-/// §4.3 Layer. Patch-only fields are omitted for the original layer (R34).
+/// §4.3 Layer. Patch-only fields are omitted for the original layer (R34). `[0]` is the
+/// original or a base image; `layers[]` is empty in a project with no image (FR-GEN-02).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
     /// For the original layer this is the original's stable image id (#48 (3)).
     pub id: Ulid,
     pub kind: LayerKind,
-    /// `.pforge/layers/<id>.png`; `null` for the original (it uses §4.2).
+    /// `.pforge/layers/<id>.png`; `working/<file>` for a base image; `null` for the original
+    /// (it uses §4.2).
     pub file: Option<String>,
     pub cx: f64,
     pub cy: f64,
@@ -154,8 +159,27 @@ pub struct Layer {
     pub blend: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retune_of: Option<Ulid>,
+    /// **Base only** (FR-GEN-27): the base image's hash and size.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+/// What a base layer records (schema §4.3, FR-GEN-27).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BaseImage {
+    /// `working/NNN <slug> NN.<ext>`.
+    pub file: String,
+    pub content_hash: String,
+    pub width: u32,
+    pub height: u32,
+    pub job_id: Ulid,
+    pub candidate_id: Ulid,
 }
 
 impl Layer {
@@ -178,8 +202,29 @@ impl Layer {
             rect: None,
             blend: None,
             retune_of: None,
+            content_hash: None,
+            width: None,
+            height: None,
             extra: Extra::new(),
         }
+    }
+
+    /// A `base` layer `[0]`: a picked generate candidate, centred, untransformed (FR-GEN-27).
+    pub fn base(id: Ulid, b: BaseImage) -> Self {
+        let mut l = Layer::original(id, b.width, b.height);
+        l.kind = LayerKind::Base;
+        l.file = Some(b.file);
+        l.job_id = Some(b.job_id);
+        l.candidate_id = Some(b.candidate_id);
+        l.content_hash = Some(b.content_hash);
+        l.width = Some(b.width);
+        l.height = Some(b.height);
+        l
+    }
+
+    /// True for the bottom image layer: the original or a base image.
+    pub fn is_base_image(&self) -> bool {
+        matches!(self.kind, LayerKind::Original | LayerKind::Base)
     }
 }
 
@@ -213,9 +258,32 @@ pub struct Draft {
     /// #55: append the blend instruction at submit; absent = on (the default).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend_instruction: Option<bool>,
+    /// The New image tab's draft `draft.generate` (FR-GEN-19, schema §4.5); GEN owns the meaning.
+    /// Absent = none saved yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generate: Option<Value>,
     pub updated_at: Timestamp,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+impl Draft {
+    /// A draft with nothing set (the first mask or the first New image draft save).
+    pub fn empty(updated_at: Timestamp) -> Self {
+        Draft {
+            final_prompt: String::new(),
+            model_id: None,
+            controls: BTreeMap::new(),
+            seed: None,
+            region: None,
+            mask_id: None,
+            references: None,
+            blend_instruction: None,
+            generate: None,
+            updated_at,
+            extra: Extra::new(),
+        }
+    }
 }
 
 /// Manifest `jobs[]` index row, rebuilt from the job files on open (R2).
@@ -384,8 +452,10 @@ pub struct Manifest {
     pub kind: Kind,
     pub created_at: Timestamp,
     pub commit: Commit,
-    pub original: Original,
-    /// Current stack in draw order; `[0]` is the original (R6).
+    /// `null` for a project made by Generate new (FR-GEN-02, schema §4.1).
+    pub original: Option<Original>,
+    /// Current stack in draw order; `[0]` is the original or a base image (R6, FR-GEN-27);
+    /// empty in a project with no image (FR-GEN-03).
     pub layers: Vec<Layer>,
     #[serde(default)]
     pub masks: Vec<Mask>,
@@ -410,17 +480,62 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    /// The original layer's id: the original's stable image id (#48 (3)).
+    /// `layers[0]` when it is the original or a base image; `None` with no image (FR-GEN-03).
+    pub fn base_layer(&self) -> Option<&Layer> {
+        self.layers.first().filter(|l| l.is_base_image())
+    }
+
+    /// The bottom image's layer id: the original's stable image id (#48 (3)) or the base image's
+    /// layer id (FR-GEN-33). EDT opens tiles with it.
     pub fn original_image_id(&self) -> Option<Ulid> {
-        self.layers
-            .iter()
-            .find(|l| l.kind == LayerKind::Original)
-            .map(|l| l.id)
+        self.base_layer().map(|l| l.id)
+    }
+
+    /// True once the project has an image (an original or a picked base image, FR-GEN-03).
+    pub fn has_image(&self) -> bool {
+        self.base_layer().is_some()
+    }
+
+    /// The project path of `layers[0]`'s file: the original's, or the base image's (FR-GEN-33,
+    /// amended FR-PRJ-42).
+    pub fn base_file(&self) -> Option<&str> {
+        base_file_of(&self.layers, self.original.as_ref())
+    }
+
+    /// The size of `layers[0]` (the working image's size), or `None` with no image.
+    pub fn image_size(&self) -> Option<(u32, u32)> {
+        let l = self.base_layer()?;
+        match l.kind {
+            LayerKind::Base => Some((l.width?, l.height?)),
+            _ => self.original.as_ref().map(|o| (o.width, o.height)),
+        }
+    }
+
+    /// `layers[0]`'s format (`png|jpeg|webp`), from the original or the base file's extension.
+    pub fn image_format(&self) -> Option<String> {
+        let l = self.base_layer()?;
+        match l.kind {
+            LayerKind::Base => {
+                let ext = l.file.as_deref()?.rsplit_once('.')?.1.to_ascii_lowercase();
+                Some(if ext == "jpg" { "jpeg".into() } else { ext })
+            }
+            _ => self.original.as_ref().map(|o| o.format.clone()),
+        }
     }
 
     /// How many iterations (jobs with an iteration number) the project has.
     pub fn iteration_count(&self) -> usize {
         self.jobs.iter().filter(|j| j.iteration.is_some()).count()
+    }
+}
+
+/// The project path of a stack's bottom image file: a base layer's own file, or the original's.
+/// `None` with no image. Also used for revision stacks (restore, conflict, retention).
+pub fn base_file_of<'a>(layers: &'a [Layer], original: Option<&'a Original>) -> Option<&'a str> {
+    let l = layers.first().filter(|l| l.is_base_image())?;
+    match l.kind {
+        LayerKind::Base => l.file.as_deref(),
+        _ => original.map(|o| o.file.as_str()),
     }
 }
 
@@ -449,7 +564,7 @@ mod tests {
                 install_id: id(2),
                 at: Timestamp(0),
             },
-            original: Original {
+            original: Some(Original {
                 file: "working/crypt.png".into(),
                 content_hash: "sha256:00".into(),
                 size: 10,
@@ -458,7 +573,7 @@ mod tests {
                 height: 80,
                 format: "png".into(),
                 extra: Extra::new(),
-            },
+            }),
             layers: vec![Layer::original(id(3), 100, 80)],
             masks: vec![Mask {
                 id: id(5),
@@ -595,6 +710,82 @@ mod tests {
         assert_eq!(v["file"], Value::Null);
         assert_eq!(v["cx"], 5.0);
         assert!(v.get("job_id").is_none() && v.get("rect").is_none());
+    }
+
+    #[test]
+    fn fr_gen_02_project_with_no_image_round_trips_with_null_original() {
+        let mut m = sample();
+        m.original = None;
+        m.layers.clear();
+        let bytes = crate::fsx::to_json_bytes(&m).unwrap();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(text.contains(r#""original": null"#), "{text}");
+        assert!(text.contains(r#""layers": []"#));
+        let back: Manifest = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(back, m);
+        assert!(!back.has_image());
+        assert_eq!((back.base_file(), back.image_size()), (None, None));
+        assert_eq!(back.original_image_id(), None);
+    }
+
+    #[test]
+    fn fr_gen_27_base_layer_records_file_hash_size_job_and_candidate() {
+        let id = |n: u128| Ulid::from_parts(0, n);
+        let base = Layer::base(
+            id(9),
+            BaseImage {
+                file: "working/001 crypt 02.png".into(),
+                content_hash: "sha256:ab".into(),
+                width: 64,
+                height: 32,
+                job_id: id(6),
+                candidate_id: id(7),
+            },
+        );
+        let v = serde_json::to_value(&base).unwrap();
+        assert_eq!(v["kind"], "base");
+        assert_eq!(v["file"], "working/001 crypt 02.png");
+        assert_eq!(v["content_hash"], "sha256:ab");
+        assert_eq!(v["width"], 64);
+        assert_eq!(v["height"], 32);
+        assert_eq!(v["job_id"], id(6).to_string());
+        assert_eq!(v["candidate_id"], id(7).to_string());
+        assert_eq!(v["cx"], 32.0);
+        assert_eq!(v["cy"], 16.0);
+        let mut m = sample();
+        m.layers = vec![base];
+        assert_eq!(m.base_file(), Some("working/001 crypt 02.png"));
+        assert_eq!(m.image_size(), Some((64, 32)));
+        assert_eq!(m.image_format().as_deref(), Some("png"));
+        assert_eq!(m.original_image_id(), Some(id(9)));
+        // The original record is kept as it was (FR-GEN-27).
+        assert_eq!(m.original.as_ref().unwrap().file, "working/crypt.png");
+        let back: Layer = serde_json::from_value(v).unwrap();
+        assert_eq!(back, m.layers[0]);
+    }
+
+    #[test]
+    fn fr_gen_19_draft_generate_is_kept_raw_and_omitted_when_absent() {
+        let draft = |generate| Draft {
+            final_prompt: String::new(),
+            model_id: None,
+            controls: Default::default(),
+            seed: None,
+            region: None,
+            mask_id: None,
+            references: None,
+            blend_instruction: None,
+            generate,
+            updated_at: Timestamp(0),
+            extra: Extra::new(),
+        };
+        let none = serde_json::to_value(draft(None)).unwrap();
+        assert!(none.get("generate").is_none());
+        let g = serde_json::json!({"model_id": "fake-gen-wh", "size": {"mode": "grid"}});
+        let v = serde_json::to_value(draft(Some(g.clone()))).unwrap();
+        assert_eq!(v["generate"], g);
+        let back: Draft = serde_json::from_value(v).unwrap();
+        assert_eq!(back.generate, Some(g));
     }
 
     #[test]

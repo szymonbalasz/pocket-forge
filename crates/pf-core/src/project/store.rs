@@ -31,8 +31,10 @@ fn unknown(field: &str, what: &str) -> CoreError {
 pub struct ProjectView {
     pub project_id: Ulid,
     pub kind: Kind,
-    pub original: Original,
-    pub original_image_id: Ulid,
+    /// `null` for a project made by Generate new (FR-GEN-02).
+    pub original: Option<Original>,
+    /// `layers[0].id`; `null` with no image (FR-GEN-03).
+    pub original_image_id: Option<Ulid>,
     pub layers: Vec<Layer>,
     pub head_revision: Ulid,
     pub draft: Option<Draft>,
@@ -46,7 +48,7 @@ pub fn read_project(p: &OpenProject) -> ProjectView {
         project_id: m.project_id,
         kind: m.kind,
         original: m.original.clone(),
-        original_image_id: m.original_image_id().unwrap_or(m.project_id),
+        original_image_id: m.original_image_id(),
         layers: m.layers.clone(),
         head_revision: m.head_revision,
         draft: m.draft.clone(),
@@ -211,14 +213,15 @@ pub fn put_mask(
     grey: Vec<u8>,
 ) -> CoreResult<Mask> {
     p.require_writable()?;
+    p.require_image()?;
     let (w, h) = (rect.w, rect.h);
-    let o = &p.manifest.original;
+    let (iw, ih) = p.manifest.image_size().unwrap_or((0, 0));
     if w == 0
         || h == 0
         || rect.x < 0
         || rect.y < 0
-        || rect.x + i64::from(w) > i64::from(o.width)
-        || rect.y + i64::from(h) > i64::from(o.height)
+        || rect.x + i64::from(w) > i64::from(iw)
+        || rect.y + i64::from(h) > i64::from(ih)
     {
         return Err(CoreError::new(
             ErrorCode::InvalidRect,
@@ -249,18 +252,7 @@ pub fn put_mask(
     commit(ctx, install_id, p, |ctx, _, m, plan| {
         plan.files.push((record.file.clone(), png));
         m.masks.push(record);
-        let draft = m.draft.get_or_insert_with(|| Draft {
-            final_prompt: String::new(),
-            model_id: None,
-            controls: Default::default(),
-            seed: None,
-            region: None,
-            mask_id: None,
-            references: None,
-            blend_instruction: None,
-            updated_at: ctx.now(),
-            extra: Extra::new(),
-        });
+        let draft = m.draft.get_or_insert_with(|| Draft::empty(ctx.now()));
         draft.mask_id = Some(id);
         draft.updated_at = ctx.now();
         Ok(())

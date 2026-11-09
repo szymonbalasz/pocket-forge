@@ -118,6 +118,8 @@ pub enum ErrorCode {
     OutOfMemory,
     /// An encoder failed (EXP §9).
     EncodeFailed,
+    /// The project has no image yet (Generate new, FR-GEN-03): region edit and export wait.
+    NoImage,
 }
 
 impl ErrorCode {
@@ -185,6 +187,7 @@ impl ErrorCode {
             ErrorCode::DiskFull => "disk_full",
             ErrorCode::OutOfMemory => "out_of_memory",
             ErrorCode::EncodeFailed => "encode_failed",
+            ErrorCode::NoImage => "no_image",
         }
     }
 }

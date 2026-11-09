@@ -218,7 +218,7 @@ fn build_project(
                 install_id: settings.install_id,
                 at: now,
             },
-            original: Original {
+            original: Some(Original {
                 file: rel,
                 content_hash: hash,
                 size,
@@ -227,7 +227,7 @@ fn build_project(
                 height: info.height,
                 format: info.format.as_str().into(),
                 extra: Extra::new(),
-            },
+            }),
             layers: vec![original_layer],
             masks: vec![],
             draft: None,
@@ -295,11 +295,13 @@ impl<'a> Creator<'a> {
     }
 
     fn finish(&mut self, dir: &Path, m: &Manifest) {
-        self.known.push(Known {
-            size: m.original.size,
-            hash: m.original.content_hash.clone(),
-            dir: dir.to_path_buf(),
-        });
+        if let Some(o) = &m.original {
+            self.known.push(Known {
+                size: o.size,
+                hash: o.content_hash.clone(),
+                dir: dir.to_path_buf(),
+            });
+        }
         if let Some(t) = self.thumbs {
             t.request(ThumbJob::new(self.ctx, dir, m));
         }
