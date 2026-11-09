@@ -293,7 +293,8 @@ pub fn map_error(
     match resp.status {
         401 | 403 if api_route => ProviderError::Auth,
         402 => ProviderError::InsufficientBalance,
-        _ if mentions_credits(&text) && (400..500).contains(&resp.status) => {
+        // A 429 stays a rate limit whatever its text says (it is retried, not a top-up).
+        _ if mentions_credits(&text) && (400..500).contains(&resp.status) && resp.status != 429 => {
             ProviderError::InsufficientBalance
         }
         429 => ProviderError::RateLimited {
@@ -581,6 +582,20 @@ mod tests {
         assert_eq!(e.code(), "provider_failure");
         assert!(s.delays().is_empty());
         assert_eq!(t.remaining(), 0);
+    }
+
+    /// Review item 17: a 429 is a rate limit even when its text mentions credits.
+    #[test]
+    fn fr_prv_23_a_429_mentioning_credits_is_rate_limited() {
+        let c = Credentials::new("k", "s");
+        let mut r = resp(429, json!({"message": "Too many credit checks, slow down"}));
+        r.headers.push(("retry-after".into(), "3".into()));
+        assert_eq!(
+            map_error(&r, Some(&c), true),
+            ProviderError::RateLimited {
+                retry_after_ms: 3000
+            }
+        );
     }
 
     /// Review item 15: a finite but huge `Retry-After` used to panic in `from_secs_f64`.
