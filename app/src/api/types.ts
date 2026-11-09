@@ -869,8 +869,9 @@ export interface Events {
     error?: ChatBackendError;
     proposals?: ChatProposal[];
   };
-  /** A fresh detection changed the backend status. */
-  'prm:chat-status': { backend: ChatBackendStatus };
+  /** A fresh detection changed the backend status (`backend` only), or a settings, consent,
+   *  logout or fake-case change (the whole status, L2). */
+  'prm:chat-status': { backend: ChatBackendStatus } & Partial<ChatStatus>;
   /** BL-42 (window to window): the chat window asks the main window to publish its pending
    *  context now; the main window answers `prm:context-flushed` with the same id. */
   'prm:context-flush': { id: string };
@@ -1008,6 +1009,8 @@ export interface ChatThreadView {
   fresh_session_next: boolean;
   /** The host whose prompt block is attached (the visible tab), or null (FR-PRM-27/43). */
   current_host: ChatHostId | null;
+  /** Turns kept in memory only (a read-only project, §7 / R94): shown "Not saved". */
+  unsaved_turn_ids: string[];
 }
 
 /** `prm_chat_preview` (FR-PRM-26, BL-42): what the next turn would send. */
@@ -1319,11 +1322,13 @@ export interface ComposePreview {
   chars: number;
 }
 
-/** A job's `prompt_helpers[]` entry (FR-PRM-09). */
+/** A job's `prompt_helpers[]` entry (FR-PRM-09): every ticked helper (R94). */
 export interface SentHelper {
   id: string;
   label: string;
   text: string;
+  /** Ticked but not sent (FR-PRM-07); Retry still restores the tick. */
+  skipped?: HelperSkipReason;
 }
 
 /** FR-PRM-10: what a Retry badges in the prompt block (pf-core `PromptRetry`). */

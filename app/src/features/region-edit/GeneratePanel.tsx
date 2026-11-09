@@ -472,7 +472,7 @@ function useTabs(hasImage: boolean) {
   const pid = useProjectState().project?.project_id ?? null;
   // A project opened: its starting tab (Generate new… asks for New image, FR-GEN-01).
   useEffect(() => {
-    if (pid) generateTab.projectOpened();
+    if (pid) generateTab.projectOpened(pid);
   }, [pid]);
   const chosen = useGenerateTab();
   const extra = generateTabs().filter((t) => hasImage || t.withoutImage);

@@ -168,3 +168,10 @@ button.prm-danger {
 [aria-invalid='true'] {
   border-color: var(--pf-danger);
 }
+
+.prm-chip-tip-note {
+  display: block;
+  margin-top: var(--pf-space-1);
+  opacity: 0.8;
+  font-style: italic;
+}

@@ -487,12 +487,14 @@ fn fr_prm_06_order_separators_and_empty_parts() {
             SentHelper {
                 id: "builtin:no-people".into(),
                 label: "No people or tokens".into(),
-                text: "No people, creatures or tokens.".into()
+                text: "No people, creatures or tokens.".into(),
+                skipped: None,
             },
             SentHelper {
                 id: "builtin:no-grid-text".into(),
                 label: "No grid or text".into(),
-                text: "No grid lines, labels or text.".into()
+                text: "No grid lines, labels or text.".into(),
+                skipped: None,
             }
         ]
     );
@@ -597,6 +599,19 @@ fn fr_prm_07_a_helper_in_the_blend_instruction_is_skipped_maps_included() {
         format!("a kitchen\n\nNo people, creatures or tokens.\n\n{blend}")
     );
     assert_eq!(f.text.matches("Top-down battlemap view.").count(), 1);
+    // FR-PRM-09 (R94): the job record lists every tick, the skipped one flagged.
+    let rec: Vec<_> = f
+        .ticked
+        .iter()
+        .map(|h| (h.id.as_str(), h.skipped))
+        .collect();
+    assert_eq!(
+        rec,
+        [
+            ("builtin:top-down-map", Some(SkipReason::InBlendInstruction)),
+            ("builtin:no-people", None)
+        ]
+    );
 
     // Without the blend instruction (off, or GEN) the same helper is sent.
     let f = compose(Kind::Map, "a kitchen", Some(&t), &list, None);
@@ -727,6 +742,7 @@ fn fr_prm_10_retry_ticks_flags_changed_and_missing() {
         id: id.into(),
         label: "L".into(),
         text: text.into(),
+        skipped: None,
     };
     let recorded = [
         sent("builtin:no-people", "No people, creatures or tokens."),

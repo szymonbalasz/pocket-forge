@@ -346,9 +346,9 @@ const fn fake_generate(model_id: &'static str, wh: bool) -> OverlayRow {
     }
 }
 
-/// The fake provider's rows: one edit model per mask convention (FR-PRV-03), then the two
+/// The fake provider's rows: one edit model per mask convention (FR-PRV-03), then the three
 /// generate models (GEN §10).
-pub static FAKE_ROWS: [OverlayRow; 5] = [
+pub static FAKE_ROWS: [OverlayRow; 6] = [
     fake(
         "fake-white-edit",
         MaskConvention::WhiteEdit,
@@ -366,6 +366,7 @@ pub static FAKE_ROWS: [OverlayRow; 5] = [
     ),
     fake_generate("fake-gen-wh", true),
     fake_generate("fake-gen-aspect", false),
+    fake_generate("fake-gen-refs", true),
 ];
 
 /// The masked-edit row for a model, from a table.

@@ -269,6 +269,8 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     threads: new Map<string, { id: string; turns: Turn[]; updated_at: string }>(),
     running: null as null | { turnId: string; cancel: () => void },
     session: null as null | string,
+    /** §7 / R94: turns sent on a read-only project (kept in memory only). */
+    unsaved: [] as string[],
     ids: 0,
   };
   const chatId = () => `01CHAT${String(++chat.ids).padStart(20, '0')}`;
@@ -300,7 +302,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
             message: e[0],
             fix: e[1],
           }
-        : { state: 'ok', version: '2.1.319', auth_method: 'fake', plan: null, notional: false };
+        : { state: 'ok', version: '2.1.319', auth_method: 'fake', plan: null, notional: true };
     return {
       enabled: chat.enabled,
       consent: chat.consent,
@@ -314,21 +316,30 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
   };
   const hostLabel = (h: Host) => (h === 'rgn' ? 'Region edit' : 'New image');
   handlers.prm_chat_status = () => statusOf();
+  // L2: a change announces the whole status, as the core does.
+  const announced = () => {
+    const s = statusOf();
+    emit('prm:chat-status', s);
+    return s;
+  };
   handlers.prm_chat_consent = (input) => {
-    if (input.accept) {
-      chat.consent = true;
-      chat.enabled = true;
-    }
-    return statusOf();
+    if (!input.accept) return statusOf();
+    chat.consent = true;
+    chat.enabled = true;
+    return announced();
   };
   handlers.prm_chat_settings_put = (input) => {
     if (typeof input.enabled === 'boolean') chat.enabled = input.enabled;
     if ('claude_path' in input) chat.claudePath = (input.claude_path as string | null) ?? null;
     if (!chat.enabled) chat.session = null;
-    return statusOf();
+    return announced();
   };
-  handlers.prm_chat_logout = () =>
-    chat.consent ? statusOf() : fail('consent_required', 'accept the privacy notice first');
+  // The fake logs out, and a not-logged-in fake logs in at once (no console).
+  handlers.prm_chat_logout = () => {
+    if (!chat.consent) return fail('consent_required', 'accept the privacy notice first');
+    chat.fakeCase = 'not_logged_in';
+    return announced();
+  };
   handlers.prm_chat_session_end = () => {
     chat.running?.cancel();
     chat.session = null;
@@ -339,10 +350,14 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     chat.windowOpens += 1;
     return null;
   };
-  handlers.prm_chat_login = () =>
-    chat.consent ? null : fail('consent_required', 'accept the privacy notice first');
+  handlers.prm_chat_login = () => {
+    if (!chat.consent) return fail('consent_required', 'accept the privacy notice first');
+    if (chat.fakeCase === 'not_logged_in') chat.fakeCase = 'success';
+    return null;
+  };
   handlers.prm_chat_fake_set_case = (input) => {
     chat.fakeCase = String(input.case);
+    announced();
     return {};
   };
   const currentHost = (pid: string): Host | null => {
@@ -380,7 +395,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
         : withImages
           ? host === 'rgn'
             ? 'crop 556×456 + mask · prompt · fake model'
-            : '7 images · prompt · fake model'
+            : '6 images · prompt · fake model'
           : 'text only · prompt · fake model',
       images:
         host === 'rgn' && withImages
@@ -422,6 +437,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
           : null,
         running_turn_id: chat.running?.turnId ?? null,
         corrupt_set_aside: false,
+        unsaved_turn_ids: chat.unsaved,
         fresh_session_next: chat.session !== String(input.project_id),
         current_host: (() => {
           let host: Host | null = null;
@@ -464,10 +480,13 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     chat.threads.set(pid, t);
     const userId = chatId();
     const turnId = chatId();
+    const readOnly = !!(handlers.project_get?.({}) as Rec | null)?.read_only;
+    if (readOnly) chat.unsaved.push(userId, turnId);
     const summary =
       host === 'rgn'
         ? 'crop 556×456 + mask · prompt · fake model'
-        : '7 images · prompt · fake model';
+        : '6 images · prompt · fake model';
+    const dropped = host === 'gen' ? ['teal.png', 'yellow.png', 'red.png'] : [];
     t.turns.push({
       id: userId,
       at: now(),
@@ -478,7 +497,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       context: {
         summary,
         images: [],
-        dropped: [],
+        dropped,
         final_prompt: text,
         model_id: 'fake',
         controls: {},
@@ -509,7 +528,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       t.updated_at = now();
       chat.running = null;
       if (state !== 'done') chat.session = null;
-      emit('prm:chat-turn', { turn_id: turnId, state, saved: true, ...extra });
+      emit('prm:chat-turn', { turn_id: turnId, state, saved: !readOnly, ...extra });
     };
     chat.running = {
       turnId,
@@ -528,6 +547,25 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
             fix: "You've hit your limit · resets 3pm",
           },
         });
+      if (chat.fakeCase === 'crash')
+        return finish('failed', {
+          error: {
+            code: 'backend_crashed',
+            message: 'Claude Code stopped unexpectedly (exit 1).',
+            fix: 'Retry; details show the stderr tail.',
+            detail: 'fake chat: simulated crash',
+            exit_code: 1,
+          },
+        });
+      if (chat.fakeCase === 'offline')
+        return finish('failed', {
+          error: {
+            code: 'offline',
+            message: "Can't reach Anthropic.",
+            fix: 'Check the connection, then Recheck.',
+            detail: 'API Error: Connection error.',
+          },
+        });
       if (i < pieces.length) {
         const piece = pieces[i++]!;
         reply.text += piece;
@@ -537,7 +575,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       }
       const proposals = props.map((p) => ({ id: chatId(), text: p }));
       reply.proposals = proposals;
-      reply.usage = { input_tokens: 100, output_tokens: 40, cost_usd: 0.0009, notional: false };
+      reply.usage = { input_tokens: 100, output_tokens: 40, cost_usd: 0.0009, notional: true };
       finish('done', { usage: reply.usage, ...(proposals.length ? { proposals } : {}) });
     };
     setTimeout(step, 0);
@@ -547,9 +585,9 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       thread_id: t.id,
       host,
       context_summary: summary,
-      dropped: [],
+      dropped,
       fresh_session: fresh,
-      saved: true,
+      saved: !readOnly,
     };
   };
   handlers.prm_chat_cancel = (input) => {

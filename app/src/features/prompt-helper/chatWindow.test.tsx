@@ -56,10 +56,32 @@ test('FR-PRM-33 FR-PRM-37 a backend error shows its message and fix; Recheck re-
   render(<ChatWindow />);
   await waitFor(() => expect(screen.getByRole('alert').textContent).toContain("isn't logged in"));
   expect(screen.getByText('Log in…')).toBeTruthy();
+  // L6: the header chip is short; the message shows once, in the body.
+  expect(id('prm-chat-status').textContent).toBe('Not logged in');
   await api.chat.fakeSetCase('success');
   fireEvent.click(id('prm-chat-recheck'));
   await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
   expect(fake.callsOf('prm_chat_status').some((c) => c.refresh === true)).toBe(true);
+});
+
+test('FR-PRM-45 L2 the window Log in… says what happened; the fake logs in, Recheck continues', async () => {
+  setup({ chat: { consent: true, case: 'not_logged_in' } });
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-login')).toBeTruthy());
+  fireEvent.click(id('prm-chat-login'));
+  await waitFor(() =>
+    expect(id('prm-chat-login-note').textContent).toContain('logged in without a console'),
+  );
+  fireEvent.click(id('prm-chat-recheck'));
+  await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
+});
+
+test('FR-PRM-20 L6 the window follows Settings → off without a refocus', async () => {
+  setup({ chat: { consent: true } });
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
+  await act(() => api.chat.settingsPut({ enabled: false }));
+  await waitFor(() => expect(screen.getByText('Prompt chat is off.')).toBeTruthy());
 });
 
 test('FR-PRM-21 no project open: "Open a project to chat about it"', async () => {
@@ -88,8 +110,11 @@ test('FR-PRM-27 FR-PRM-28 FR-PRM-29 send streams the reply; Replace and Copy on 
   fireEvent.keyDown(input(), { key: 'Enter', ctrlKey: true });
   await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
   expect(screen.getByText(/You wrote: "make this a kitchen"/)).toBeTruthy();
+  // L6: the proposal shows once, as its card, not also as a fence in the reply.
+  expect(document.querySelectorAll('.prm-chat-code')).toHaveLength(1);
   expect(input().value).toBe('');
-  expect(id('prm-chat-usage').textContent).toBe('≈ $0.00 billed');
+  // FR-PRM-38 (L4): the fake's cost is notional.
+  expect(id('prm-chat-usage').textContent).toBe('≈ $0.00 notional (fake chat, nothing billed)');
 
   fireEvent.click(id('prm-chat-proposal-copy'));
   await waitFor(() => expect(id('prm-chat-proposal-copy').textContent).toBe('Copied'));
@@ -98,6 +123,34 @@ test('FR-PRM-27 FR-PRM-28 FR-PRM-29 send streams the reply; Replace and Copy on 
   fireEvent.click(id('prm-chat-proposal-replace'));
   await waitFor(() => expect(screen.getByText(/^Inserted /)).toBeTruthy());
   expect(fake.callsOf('prm_chat_insert')).toHaveLength(1);
+});
+
+test('FR-PRM-22 M3 the transcript shows the newest turn on open and after a send', async () => {
+  setup({ chat: { consent: true } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  const set: number[] = [];
+  let height = 300;
+  const proto = HTMLOListElement.prototype;
+  Object.defineProperty(proto, 'scrollHeight', { configurable: true, get: () => height });
+  Object.defineProperty(proto, 'clientHeight', { configurable: true, get: () => 100 });
+  Object.defineProperty(proto, 'scrollTop', {
+    configurable: true,
+    get: () => set.at(-1) ?? 0,
+    set: (v: number) => void set.push(v),
+  });
+  try {
+    render(<ChatWindow />);
+    await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+    expect(set.at(-1)).toBe(300);
+    height = 900;
+    await type('ideas');
+    fireEvent.click(id('prm-chat-send'));
+    await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
+    expect(set.at(-1)).toBe(900);
+  } finally {
+    for (const k of ['scrollHeight', 'clientHeight', 'scrollTop'])
+      delete (proto as unknown as Record<string, unknown>)[k];
+  }
 });
 
 test('FR-PRM-27 Stop keeps the partial reply', async () => {
@@ -110,6 +163,10 @@ test('FR-PRM-27 Stop keeps the partial reply', async () => {
   await waitFor(() => expect(id('prm-chat-stop')).toBeTruthy());
   fireEvent.click(id('prm-chat-stop'));
   await waitFor(() => expect(screen.getByText('Stopped.')).toBeTruthy());
+  // FR-PRM-25/26 (M4): the turn names the images the turn limit dropped.
+  expect(id('prm-chat-dropped').textContent).toBe(
+    'Not sent (turn limit): teal.png, yellow.png, red.png',
+  );
   expect(screen.queryAllByTestId('prm-chat-proposal')).toHaveLength(0);
   expect(id('prm-chat-send')).toBeTruthy();
 });
@@ -130,7 +187,40 @@ test('FR-PRM-37 a failed turn shows its error with Retry, which resends the same
   expect(sends.map((s) => s.text)).toEqual(['ideas', 'ideas']);
 });
 
-test('§7 read-only project: the chat works, nothing is saved, Replace is disabled', async () => {
+test('FR-PRM-37 L3 a crashed turn shows the stderr tail under Details', async () => {
+  setup({ chat: { consent: true, case: 'crash' } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(screen.getByText(/stopped unexpectedly/)).toBeTruthy());
+  expect(id('prm-chat-error-detail').textContent).toContain('fake chat: simulated crash');
+});
+
+test('§7 §11 M5 an offline turn locks Send and Retry until Recheck succeeds', async () => {
+  setup({ chat: { consent: true, case: 'offline' } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(screen.getByText("Can't reach Anthropic.")).toBeTruthy());
+  expect(screen.getByText(/Offline: Recheck once the connection is back/)).toBeTruthy();
+  expect((id('prm-chat-send') as HTMLButtonElement).disabled).toBe(true);
+  expect((id('prm-chat-retry') as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(id('prm-chat-retry'));
+  expect(fake.callsOf('prm_chat_send')).toHaveLength(1);
+  // The connection is back: Recheck lifts the lock, then Retry resends.
+  await api.chat.fakeSetCase('success');
+  fireEvent.click(id('prm-chat-recheck'));
+  await waitFor(() => expect((id('prm-chat-retry') as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.queryByTestId('prm-chat-recheck')).toBeNull();
+  fireEvent.click(id('prm-chat-retry'));
+  await waitFor(() => expect(fake.callsOf('prm_chat_send')).toHaveLength(2));
+});
+
+test('§7 R94 read-only project: the turns show, marked "Not saved"; Replace is disabled', async () => {
   setup({ chat: { consent: true } }, {
     ...baseSnapshot(),
     read_only: 'original_changed',
@@ -142,6 +232,11 @@ test('§7 read-only project: the chat works, nothing is saved, Replace is disabl
   fireEvent.click(id('prm-chat-send'));
   await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
   expect((id('prm-chat-proposal-replace') as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getAllByText('ideas').length).toBeGreaterThan(0);
+  expect(screen.getAllByTestId('prm-chat-unsaved').map((e) => e.textContent)).toEqual([
+    'Not saved',
+    'Not saved',
+  ]);
 });
 
 test('FR-PRM-21 the Chat button opens the chat window', async () => {
@@ -156,7 +251,6 @@ test('FR-PRM-20 FR-PRM-45 Settings → Prompt chat: on/off, the status, the path
   render(<ChatSettings />);
   await waitFor(() => expect(id('prm-settings-chat-status').textContent).toContain('Fake backend'));
   expect((id('prm-settings-chat-toggle') as HTMLInputElement).checked).toBe(true);
-  expect(screen.queryByTestId('prm-settings-chat-login')).toBeNull();
   fireEvent.click(id('prm-settings-chat-toggle'));
   await waitFor(() => expect(id('prm-settings-chat-status').textContent).toContain('Off.'));
   expect(fake.callsOf('prm_chat_settings_put')).toEqual([{ enabled: false }]);
@@ -169,6 +263,24 @@ test('FR-PRM-20 FR-PRM-45 Settings → Prompt chat: on/off, the status, the path
   );
   fireEvent.click(screen.getByText('Show privacy notice'));
   expect(screen.getByText(/Prompt chat sends data to Anthropic/)).toBeTruthy();
+});
+
+test('FR-PRM-45 L2 Settings Log in… / Log out / Recheck work on the fake and the status follows', async () => {
+  setup({ chat: { consent: true } });
+  render(<ChatSettings />);
+  await waitFor(() => expect(id('prm-settings-chat-status').textContent).toContain('Fake backend'));
+  fireEvent.click(id('prm-settings-chat-logout'));
+  await waitFor(() =>
+    expect(id('prm-settings-chat-status').textContent).toContain("isn't logged in"),
+  );
+  fireEvent.click(id('prm-settings-chat-login'));
+  await waitFor(() => expect(screen.getByText(/logged in without a console/)).toBeTruthy());
+  fireEvent.click(id('prm-settings-chat-recheck'));
+  await waitFor(() => expect(id('prm-settings-chat-status').textContent).toContain('Fake backend'));
+  // A change made elsewhere (the chat window, a case switch) shows without a reload.
+  await act(() => api.chat.fakeSetCase('offline'));
+  await act(() => api.chat.settingsPut({ enabled: false }));
+  await waitFor(() => expect(id('prm-settings-chat-status').textContent).toContain('Off.'));
 });
 
 test('FR-PRM-20 Settings before consent says so and offers no login', async () => {

@@ -3,8 +3,8 @@
 // privacy notice. Consent is only ever given in the notice (Accept).
 import { useEffect, useState } from 'react';
 
-import { api, type ChatStatus } from '../../api';
-import { backendChip, PRIVACY_NOTICE } from './chatLogic';
+import { api, onEvent, type ChatStatus } from '../../api';
+import { backendChip, loginNote, PRIVACY_NOTICE } from './chatLogic';
 
 export function ChatSettings() {
   const [status, setStatus] = useState<ChatStatus | null>(null);
@@ -20,6 +20,16 @@ export function ChatSettings() {
       },
       () => undefined,
     );
+    // L2: the status follows changes made elsewhere (the chat window, a Recheck, detection).
+    const sub = onEvent('prm:chat-status', (p) => setStatus((s) => (s ? { ...s, ...p } : s)));
+    return () =>
+      void sub.then(
+        (off) =>
+          void Promise.resolve()
+            .then(off)
+            .catch(() => undefined),
+        () => undefined,
+      );
   }, []);
 
   const run = (p: Promise<ChatStatus | null>, ok?: string) =>
@@ -34,6 +44,9 @@ export function ChatSettings() {
   if (!status) return <p className="prv-meta">Loading…</p>;
   const loggedIn = status.backend.state === 'ok';
   const fake = status.mode === 'fake';
+  // L6: "Found on PATH" only once a check found it (never on the fake).
+  const pathHint =
+    status.backend.state === 'ok' && !fake ? 'Found on PATH' : 'Empty: look for claude on PATH';
 
   return (
     <div className="rgn-settings prm-chat-settings">
@@ -44,7 +57,7 @@ export function ChatSettings() {
           checked={status.enabled}
           onChange={(e) => run(api.chat.settingsPut({ enabled: e.target.checked }))}
         />
-        Prompt chat
+        On
       </label>
       <p className="prv-meta" data-testid="prm-settings-chat-status">
         {!status.consent
@@ -57,7 +70,7 @@ export function ChatSettings() {
       {status.consent && status.backend.state === 'error' && (
         <p className="prv-meta">{status.backend.fix}</p>
       )}
-      {status.consent && !fake && (
+      {status.consent && (
         <div className="prv-actions">
           <button
             type="button"
@@ -66,7 +79,7 @@ export function ChatSettings() {
             onClick={() =>
               run(
                 api.chat.login().then(() => null),
-                'A console opened: log in there, then Recheck.',
+                loginNote(status),
               )
             }
           >
@@ -80,7 +93,11 @@ export function ChatSettings() {
           >
             Log out
           </button>
-          <button type="button" onClick={() => run(api.chat.status(true))}>
+          <button
+            type="button"
+            data-testid="prm-settings-chat-recheck"
+            onClick={() => run(api.chat.status(true))}
+          >
             Recheck
           </button>
         </div>
@@ -96,7 +113,7 @@ export function ChatSettings() {
       <input
         id="prm-chat-path"
         data-testid="prm-settings-chat-path"
-        placeholder="Found on PATH"
+        placeholder={pathHint}
         value={path}
         onChange={(e) => setPath(e.target.value)}
         onBlur={() => run(api.chat.settingsPut({ claude_path: path.trim() || null }))}

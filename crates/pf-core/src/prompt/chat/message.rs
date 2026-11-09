@@ -137,8 +137,15 @@ pub fn compose(note: Option<String>, block: &str, user_text: &str) -> String {
     out
 }
 
-/// FR-PRM-26: "crop 1024×768 + mask · prompt · Ideogram 4.5 · 4 controls".
-pub fn summary(ctx: &ChatContext, sent: &[ChatImage], include_images: bool) -> String {
+/// FR-PRM-26: "crop 1024×768 + mask · prompt · Ideogram 4.5 · 4 controls". The image count is
+/// what the turn sends (or sent earlier in the session); images the turn limit drops are named
+/// on their own (FR-PRM-25), not counted (M4).
+pub fn summary(
+    ctx: &ChatContext,
+    sent: &[ChatImage],
+    dropped: &[ChatImage],
+    include_images: bool,
+) -> String {
     let mut parts: Vec<String> = Vec::new();
     if !include_images {
         parts.push("text only".into());
@@ -146,15 +153,12 @@ pub fn summary(ctx: &ChatContext, sent: &[ChatImage], include_images: bool) -> S
         parts.push("no image".into());
     } else {
         let first = &ctx.images[0];
+        let n = ctx.images.len().saturating_sub(dropped.len());
         let what = match first.role {
             crate::prompt::context::ChatImageRole::RegionOverlay => {
                 format!("crop {}×{} + mask", first.w, first.h)
             }
-            _ => format!(
-                "{} image{}",
-                ctx.images.len(),
-                if ctx.images.len() == 1 { "" } else { "s" }
-            ),
+            _ => format!("{n} image{}", if n == 1 { "" } else { "s" }),
         };
         parts.push(if sent.is_empty() {
             format!("{what} (already sent)")

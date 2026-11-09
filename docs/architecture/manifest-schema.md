@@ -125,7 +125,7 @@
 | `typed_prompt`, `blend_instruction` | string, bool; optional | #55, R73: the prompt as typed and whether the instruction was appended. `typed_prompt` drives Retry, the iteration slug and the accept label. Absent on jobs from before #55 (typed = `final_prompt`). Always `false` on a `generate` job |
 | `output` | `{mode: wh\|aspect, w?, h?, aspect?, grid?{cols, rows, pps}}`; `generate` only | FR-GEN-22: the size as sent (`pps` after a model-limit lowering). A candidate more than 1 % off it is badged, never resized (FR-GEN-24) |
 | `size` | `{mode: grid, cols, rows, pps}` \| `{mode: ratio, aspect, long_side}`; `generate` only | the size as asked (`draft.generate.size`); Retry restores it |
-| `prompt_helpers[]` | `{id, label, text}` | [prompt-helper](../specs/prompt-helper.md) FR-PRM-09: each helper actually sent, in order (skipped ones excluded). Written with `requested`, never changed. Absent on jobs from before PRM (reads as `[]`) |
+| `prompt_helpers[]` | `{id, label, text, skipped?}` | [prompt-helper](../specs/prompt-helper.md) FR-PRM-09: each ticked helper, in order; `skipped` (`duplicate` \| `in_blend_instruction`) marks one the dedupe didn't send (R94, add-only; jobs from before R94 list only the helpers sent). Written with `requested`, never changed. Absent on jobs from before PRM (reads as `[]`) |
 | `seed` | `{requested, returned}` | int \| null each |
 | `region` | `{inner, outer, margin}` \| null | null for `generate` (FR-GEN-22) |
 | `fit` | `{sent_w, sent_h, scale}` \| null | null for `generate` |

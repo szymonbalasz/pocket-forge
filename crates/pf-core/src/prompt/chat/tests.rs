@@ -218,8 +218,8 @@ fn fr_prm_27_send_streams_and_records_the_turns() {
     assert_eq!(ends[0]["state"], "done");
     assert_eq!(ends[0]["proposals"].as_array().unwrap().len(), 1);
     assert_eq!(
-        ends[0]["usage"]["notional"], false,
-        "the fake isn't a plan login"
+        ends[0]["usage"]["notional"], true,
+        "the fake bills nothing (L4)"
     );
 
     let view = thread_view(&lab);
@@ -265,6 +265,86 @@ fn fr_prm_27_send_streams_and_records_the_turns() {
     assert_eq!(std::fs::read_dir(&cwd).unwrap().count(), 1);
 }
 
+/// FR-PRM-20 (L2, L6): a settings, consent, logout or case change emits the whole status, so
+/// Settings and the window follow it without a refocus.
+#[test]
+fn fr_prm_20_status_changes_are_announced() {
+    let lab = lab();
+    let last = |lab: &Lab| events(lab, super::EVENT_STATUS).last().cloned().unwrap();
+    assert_eq!(last(&lab)["enabled"], true, "consent turns the chat on");
+    lab.core
+        .dispatch("prm_chat_settings_put", json!({"enabled": false}))
+        .unwrap();
+    assert_eq!(last(&lab)["enabled"], false);
+    assert_eq!(last(&lab)["backend"]["state"], "not_checked");
+    lab.core
+        .dispatch("prm_chat_settings_put", json!({"enabled": true}))
+        .unwrap();
+    lab.core.dispatch("prm_chat_logout", json!({})).unwrap();
+    assert_eq!(
+        last(&lab)["backend"]["code"],
+        "not_logged_in",
+        "the fake logs out"
+    );
+    super::open_login_console(&lab.core).unwrap();
+    lab.core
+        .dispatch("prm_chat_fake_set_case", json!({"case": "offline"}))
+        .unwrap();
+    assert_eq!(last(&lab)["fake_case"], "offline");
+}
+
+/// §7 / R94: on a read-only project the chat works with the turns kept in memory, shown as
+/// "not saved"; nothing is written, and the memory goes with the project.
+#[test]
+fn fr_prm_22_read_only_project_keeps_turns_in_memory() {
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "first, saved").unwrap();
+    let saved_view = thread_view(&lab);
+    let id: Ulid = saved_view["thread"]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let path = thread::thread_path(&lab.project_dir, id);
+    let before = std::fs::read(&path).unwrap();
+    lab.core.state().project.as_mut().unwrap().read_only =
+        Some(crate::project::ReadOnlyReason::NewerVersion);
+
+    let out = send(&lab, "second, in memory").unwrap();
+    assert_eq!(out["saved"], false);
+    assert_eq!(
+        events(&lab, super::EVENT_TURN).last().unwrap()["saved"],
+        false
+    );
+    let view = thread_view(&lab);
+    let turns = view["thread"]["turns"].as_array().unwrap();
+    assert_eq!(turns.len(), 4, "the saved turns, then the new ones");
+    assert_eq!(turns[2]["text"], "second, in memory");
+    assert_eq!(turns[3]["state"], "done");
+    assert_eq!(turns[3]["proposals"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        view["unsaved_turn_ids"],
+        json!([turns[2]["id"], turns[3]["id"]])
+    );
+    // A second turn continues the same memory thread.
+    send(&lab, "third").unwrap();
+    assert_eq!(
+        thread_view(&lab)["unsaved_turn_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before, "nothing is written");
+
+    // Closing the project drops the memory.
+    lab.core.chat.on_project_close(pid(&lab));
+    let view = thread_view(&lab);
+    assert_eq!(view["thread"]["turns"].as_array().unwrap().len(), 2);
+    assert_eq!(view["unsaved_turn_ids"], json!([]));
+}
+
 #[test]
 fn fr_prm_27_send_needs_a_block_and_one_turn_at_a_time() {
     let lab = lab();
@@ -280,6 +360,7 @@ fn fr_prm_27_send_needs_a_block_and_one_turn_at_a_time() {
     publish(&lab, "rgn", lab.draft("a kitchen"));
     super::lock(&lab.core.chat.rt).running = Some(super::Running {
         turn_id: Ulid::nil(),
+        user_turn_id: Ulid::nil(),
         project_id: pid(&lab),
         cancel: Default::default(),
     });
@@ -478,9 +559,10 @@ fn fr_prm_37_backend_errors_reach_send_and_the_thread() {
     assert_eq!(st["backend"]["code"], "not_installed");
 
     // Turn errors end the reply as failed, with the partial text.
-    for (case, err, fresh_after) in [
-        ("usage_limit", "usage_limit", false),
-        ("crash", "backend_crashed", true),
+    for (case, err, fresh_after, detail) in [
+        ("usage_limit", "usage_limit", false, None),
+        ("malformed", "stream_malformed", true, Some("weren't JSON")),
+        ("crash", "backend_crashed", true, Some("simulated crash")),
     ] {
         lab.core
             .dispatch("prm_chat_fake_set_case", json!({"case": case}))
@@ -489,6 +571,11 @@ fn fr_prm_37_backend_errors_reach_send_and_the_thread() {
         let end = events(&lab, super::EVENT_TURN).last().cloned().unwrap();
         assert_eq!(end["state"], "failed", "{case}");
         assert_eq!(end["error"]["code"], err, "{case}");
+        // L3: the event carries the detail (stderr tail / message) for the window only.
+        if let Some(d) = detail {
+            let got = end["error"]["detail"].as_str().unwrap_or_default();
+            assert!(got.contains(d), "{case}: {got}");
+        }
         let turns = thread_view(&lab)["thread"]["turns"]
             .as_array()
             .unwrap()
@@ -812,6 +899,11 @@ fn fr_prm_27_stop_keeps_the_partial_reply() {
         lab.core.chat.running_turn(),
         out["turn_id"].as_str().unwrap().parse().ok()
     );
+    // M2 (§11): the running turn reads back `pending`, never `interrupted`, and an insert
+    // meanwhile doesn't write it as interrupted.
+    let mid = thread_view(&lab)["thread"]["turns"].clone();
+    assert_eq!(mid[0]["state"], "pending");
+    assert_eq!(mid[1]["state"], "pending");
     lab.core
         .dispatch("prm_chat_cancel", json!({"turn_id": out["turn_id"]}))
         .unwrap();

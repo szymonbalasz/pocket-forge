@@ -180,11 +180,18 @@ impl ChatBackend for FakeBackend {
         Ok(None)
     }
 
+    /// No console: a `not_logged_in` fake logs in at once, so Log in… → Recheck can be walked
+    /// on the fake (L2).
     fn open_login_console(&self) -> Result<(), ChatError> {
+        if self.case() == FakeCase::NotLoggedIn {
+            self.set_case(FakeCase::Success);
+        }
         Ok(())
     }
 
+    /// No process: the fake is `not_logged_in` afterwards (L2).
     fn logout(&self) -> Result<(), ChatError> {
+        self.set_case(FakeCase::NotLoggedIn);
         Ok(())
     }
 
@@ -397,6 +404,24 @@ pub fn script(case: FakeCase, input: &TurnInput) -> Script {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// FR-PRM-39/45 (L2): fake Log in… and Log out start nothing and flip the login state.
+    #[test]
+    fn fr_prm_45_fake_login_and_logout_flip_the_login_state() {
+        let f = FakeBackend::new(
+            FakeCase::NotLoggedIn,
+            Arc::new(crate::clock::SystemClock::new()),
+        );
+        assert_eq!(f.detect().unwrap_err().kind, ChatErrorKind::NotLoggedIn);
+        f.open_login_console().unwrap();
+        assert!(f.detect().is_ok());
+        f.logout().unwrap();
+        assert_eq!(f.case(), FakeCase::NotLoggedIn);
+        // Another case stays as it is on Log in….
+        f.set_case(FakeCase::UsageLimit);
+        f.open_login_console().unwrap();
+        assert_eq!(f.case(), FakeCase::UsageLimit);
+    }
 
     #[test]
     fn fr_prm_39_cases_parse_and_print() {

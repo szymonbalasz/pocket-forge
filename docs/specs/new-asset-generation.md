@@ -145,7 +145,7 @@ PRJ owns storage and commits; fields go into [manifest-schema](../architecture/m
 
 - No recorded model has a role-tagged structure input. Until a paid check confirms one, `structure` is null on every real row, so the sketch block shows only on the fake model (OQ-GEN-05).
 - Character and 4.5 Precise Edit list only `img2img` and are not offered. Ideogram's `magicPrompt` may rewrite the prompt on the provider side; it is an ordinary control and the job records the prompt as sent.
-- **Fake models:** `fake-gen-wh` (wh 64–2048 step 16, count 1–4, a `background` enum with transparent, one slot ≤ 4 that also takes the sketch, cost-affecting +1 CU per image) and `fake-gen-aspect` (ratios 1:1, 3:4, 4:3, 2:3; no count; a style slot ≤ 2). Candidates are a deterministic pattern from seed, final prompt, reference and sketch hashes, at the sent size; transparent → an alpha disc. Every Appendix D case applies.
+- **Fake models:** `fake-gen-wh` (wh 64–2048 step 16, count 1–4, a `background` enum with transparent, one slot ≤ 4 that also takes the sketch, cost-affecting +1 CU per image) and `fake-gen-aspect` (ratios 1:1, 3:4, 4:3, 2:3; no count; a style slot ≤ 2), plus `fake-gen-refs` (as `fake-gen-wh` with the slot ≤ 12, for PRM §13 step 7). Candidates are a deterministic pattern from seed, final prompt, reference and sketch hashes, at the sent size; transparent → an alpha disc. Every Appendix D case applies.
 - **Owner recordings needed** (FR-PRV-28 runbook): a free `dry-run-generate` per row; one paid generate with a sketch on GPT 2.5 (confirms the sketch slot and transparency) and one on Ideogram 3 Turbo (≈ 4 CU).
 
 ## 11. Edge cases

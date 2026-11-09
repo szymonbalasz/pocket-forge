@@ -59,7 +59,7 @@ fn run_job(p: &FakeProvider, req: &JobRequest) -> Candidates {
 }
 
 #[test]
-fn fr_gen_05_generate_lists_the_two_fake_generate_models_and_edit_is_unchanged() {
+fn fr_gen_05_generate_lists_the_fake_generate_models_and_edit_is_unchanged() {
     let p = FakeProvider::default();
     let list = |op| {
         run(p.list_models(&ModelFilter {
@@ -70,10 +70,14 @@ fn fr_gen_05_generate_lists_the_two_fake_generate_models_and_edit_is_unchanged()
         .map(|m| m.id)
         .collect::<Vec<_>>()
     };
-    assert_eq!(list(Operation::Generate), [WH, ASPECT]);
+    assert_eq!(list(Operation::Generate), [WH, ASPECT, "fake-gen-refs"]);
     assert_eq!(list(Operation::EditMasked), FAKE_MODEL_IDS);
     let all = run(p.list_models(&ModelFilter::default())).unwrap();
-    assert_eq!(all.len(), 5);
+    assert_eq!(all.len(), 6);
+    // PRM §13 step 7: a sketch + 8 references fit on fake-gen-refs.
+    let refs = run(p.get_capabilities("fake-gen-refs", Operation::Generate)).unwrap();
+    assert_eq!(refs.slots[0].name, "refs");
+    assert_eq!(refs.slots[0].max, 12);
     assert_eq!(all[3].operations, [Operation::Generate]);
 }
 

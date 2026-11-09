@@ -64,7 +64,7 @@ test('FR-PRM-20 FR-PRM-27 the chat API on the mock: consent, send, stream, threa
   expect((await api.chat.status()).backend.state).toBe('not_checked');
   await expect(api.chat.send(PID, 'hi')).rejects.toMatchObject({ code: 'consent_required' });
   const st = await api.chat.consent(true);
-  expect(st.backend).toMatchObject({ state: 'ok', notional: false });
+  expect(st.backend).toMatchObject({ state: 'ok', notional: true });
   await expect(api.chat.send(PID, 'hi')).rejects.toMatchObject({ code: 'no_prompt_block' });
 
   await api.chat.contextPublish(PID, 'rgn', { final_prompt: 'a kitchen' });

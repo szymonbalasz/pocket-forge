@@ -408,7 +408,7 @@ impl Command for GenJobSubmit {
         // FR-GEN-22: the prompt as typed (slug, pick label, Retry); never the blend instruction.
         extra.insert("typed_prompt".into(), json!(draft.typed_prompt));
         extra.insert("blend_instruction".into(), json!(false));
-        prompt::record_on_job(&mut extra, &prepared.prompt.sent);
+        prompt::record_on_job(&mut extra, &prepared.prompt.ticked);
         extra.insert("output".into(), to_value(&prepared.output)?);
         // The size as asked (Retry restores it; `output` is what was sent).
         extra.insert("size".into(), to_value(&draft.size)?);

@@ -22,9 +22,11 @@ import {
   backendChip,
   billsApiKey,
   HOST_LABEL,
+  loginNote,
+  fixWorthShowing,
   PRIVACY_NOTICE,
   questionOf,
-  segments,
+  replySegments,
   usageLabel,
 } from './chatLogic';
 import './chat.css';
@@ -73,8 +75,15 @@ export function ChatWindow() {
   const [offline, setOffline] = useState(false);
   const [includeImages, setIncludeImages] = useState(true);
   const [declined, setDeclined] = useState(false);
+  /** L2: what Log in… did ("A console opened…"). */
+  const [loginSaid, setLoginSaid] = useState<string | null>(null);
+  /** L3: a failed turn's detail (stderr tail / message), from its event; never stored. */
+  const [details, setDetails] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<ChatPreview | null>(null);
   const [focusTick, setFocusTick] = useState(0);
+  const [list, setList] = useState<HTMLOListElement | null>(null);
+  /** M3: the transcript follows the newest turn unless the user scrolled up. */
+  const stick = useRef(true);
   const deltas = useRef(new Map<string, string>());
   const ended = useRef(new Set<string>());
   const pid = project?.project_id ?? null;
@@ -149,6 +158,15 @@ export function ChatWindow() {
     };
   }, [pid, host, includeImages, turnCount, focusTick]);
 
+  // M3: the newest turn is in view on open, after a send and after a restart; a streaming reply
+  // is followed while the transcript is at the bottom.
+  useEffect(() => {
+    stick.current = true;
+  }, [pid, turnCount]);
+  useEffect(() => {
+    if (list && stick.current) list.scrollTop = list.scrollHeight;
+  }, [list, pid, turnCount, view, live?.text]);
+
   useEffect(() => {
     const subs = [
       onEvent('prm:chat-delta', (d) => {
@@ -159,9 +177,12 @@ export function ChatWindow() {
         ended.current.add(t.turn_id);
         setLive((l) => (l && l.turnId === t.turn_id ? null : l));
         if (t.error?.code === 'offline') setOffline(true);
+        const detail = t.error?.detail;
+        if (detail) setDetails((d) => ({ ...d, [t.turn_id]: detail }));
         void loadThread(pidRef.current);
       }),
-      onEvent('prm:chat-status', (p) => setStatus((s) => (s ? { ...s, backend: p.backend } : s))),
+      // L2 / L6: detection, settings and consent changes are followed without a refocus.
+      onEvent('prm:chat-status', (p) => setStatus((s) => (s ? { ...s, ...p } : s))),
       // BL-41: the main window opened, closed or switched project, or its visible tab changed.
       onEvent('prm:chat-context', (c) => {
         if (c.project_id !== pidRef.current) void loadProject();
@@ -225,7 +246,7 @@ export function ChatWindow() {
         className={`prm-chat-chip${status.backend.state === 'error' ? ' is-error' : ''}`}
         data-testid="prm-chat-status"
       >
-        {backendChip(status)}
+        {backendChip(status, true)}
       </span>
       {fake && (
         <span className="prm-chat-chip is-fake" data-testid="prm-chat-fake">
@@ -301,8 +322,12 @@ export function ChatWindow() {
               <button
                 type="button"
                 className="primary"
+                data-testid="prm-chat-login"
                 onClick={() =>
-                  void api.chat.login().catch((e: unknown) => setProblem(problemOf(e)))
+                  void api.chat.login().then(
+                    () => setLoginSaid(loginNote(status)),
+                    (e: unknown) => setProblem(problemOf(e)),
+                  )
                 }
               >
                 Log in…
@@ -316,6 +341,11 @@ export function ChatWindow() {
               Recheck
             </button>
           </div>
+          {loginSaid && (
+            <p className="muted small" role="status" data-testid="prm-chat-login-note">
+              {loginSaid}
+            </p>
+          )}
           {problem && <p className="prm-chat-error">{problem.message}</p>}
         </section>
       </main>
@@ -332,9 +362,10 @@ export function ChatWindow() {
     );
 
   const turns = view?.thread?.turns ?? [];
+  const unsaved = new Set(view?.unsaved_turn_ids ?? []);
   const running = live?.turnId ?? view?.running_turn_id ?? null;
   const readOnly = !!project.read_only;
-  const usage = usageLabel(turns);
+  const usage = usageLabel(turns, fake);
   const blocked = !host
     ? 'Open the Generate panel to chat about this project.'
     : offline
@@ -344,7 +375,16 @@ export function ChatWindow() {
   return (
     <main className="prm-chat" data-testid="prm-chat">
       {header}
-      <ol className="prm-chat-transcript" aria-label="Chat">
+      <ol
+        className="prm-chat-transcript"
+        aria-label="Chat"
+        data-testid="prm-chat-transcript"
+        ref={setList}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+        }}
+      >
         {turns.length === 0 && (
           <li className="prm-chat-empty">Ask for ideas about the prompt of the visible tab.</li>
         )}
@@ -354,11 +394,15 @@ export function ChatWindow() {
             turn={t}
             liveText={t.id === live?.turnId ? live.text : null}
             running={t.id === running}
+            unsaved={unsaved.has(t.id)}
+            detail={details[t.id]}
             readOnly={readOnly}
             onReplace={replace}
+            retryBlocked={offline}
             onRetry={() => {
               const q = questionOf(turns, t.id);
-              if (q) void send(q.text);
+              // M5: Retry respects the offline lock, as Send does.
+              if (q && !offline) void send(q.text);
             }}
           />
         ))}
@@ -366,15 +410,6 @@ export function ChatWindow() {
       {problem && (
         <p className="prm-chat-error" role="alert" data-testid="prm-chat-error">
           {problem.message}
-          {problem.code === 'offline' && (
-            <button
-              type="button"
-              data-testid="prm-chat-recheck"
-              onClick={() => void loadStatus(true)}
-            >
-              Recheck
-            </button>
-          )}
         </p>
       )}
       <Strip
@@ -388,6 +423,7 @@ export function ChatWindow() {
       />
       <Composer
         disabledReason={blocked}
+        onRecheck={offline ? () => void loadStatus(true) : undefined}
         running={running}
         onSend={send}
         onStop={() => {
@@ -455,6 +491,8 @@ function Strip(props: {
 
 function Composer(props: {
   disabledReason: string | null;
+  /** M5: offline after a turn: Recheck lifts the lock once detection succeeds. */
+  onRecheck?: () => void;
   running: string | null;
   onSend(text: string): Promise<void>;
   onStop(): void;
@@ -486,6 +524,11 @@ function Composer(props: {
       />
       <div className="prm-chat-actions">
         {props.disabledReason && <span className="muted small">{props.disabledReason}</span>}
+        {props.onRecheck && (
+          <button type="button" data-testid="prm-chat-recheck" onClick={props.onRecheck}>
+            Recheck
+          </button>
+        )}
         {props.running ? (
           <button type="button" data-testid="prm-chat-stop" onClick={props.onStop}>
             Stop
@@ -511,24 +554,42 @@ function TurnView(props: {
   turn: ChatTurn;
   liveText: string | null;
   running: boolean;
+  /** Kept in memory only (read-only project, §7 / R94). */
+  unsaved: boolean;
+  /** M5: offline: Retry and Resend wait for Recheck, as Send does. */
+  retryBlocked: boolean;
+  /** L3: the error's detail while the window is open (FR-PRM-37: never written). */
+  detail?: string;
   readOnly: boolean;
   onReplace(p: ChatProposal): Promise<void>;
   onRetry(): void;
 }) {
   const t = props.turn;
+  const notSaved = props.unsaved && (
+    <span className="prm-chat-tag is-unsaved" data-testid="prm-chat-unsaved">
+      Not saved
+    </span>
+  );
   if (t.role === 'user')
     return (
       <li className="prm-chat-turn is-user" data-record-id={t.id}>
         {t.fresh_session && <p className="prm-chat-session muted small">New session</p>}
         <span className="prm-chat-tag">{HOST_LABEL[t.host]}</span>
+        {notSaved}
         <p className="prm-chat-text">{t.text}</p>
         {t.context && <span className="prm-chat-summary small muted">{t.context.summary}</span>}
+        {(t.context?.dropped.length ?? 0) > 0 && (
+          <span className="prm-chat-warn small" data-testid="prm-chat-dropped">
+            Not sent (turn limit): {t.context!.dropped.join(', ')}
+          </span>
+        )}
       </li>
     );
   const text = props.liveText ?? t.text;
   return (
     <li className="prm-chat-turn is-reply" data-record-id={t.id} aria-busy={props.running}>
-      {segments(text).map((s, i) =>
+      {notSaved}
+      {replySegments(text, props.running ? 0 : (t.proposals ?? []).length).map((s, i) =>
         s.kind === 'code' ? (
           <pre key={i} className="prm-chat-code" data-lang={s.lang || undefined}>
             <code>{s.text}</code>
@@ -552,7 +613,12 @@ function TurnView(props: {
       {t.state === 'interrupted' && (
         <p className="muted small">
           Interrupted.{' '}
-          <button type="button" className="link" onClick={props.onRetry}>
+          <button
+            type="button"
+            className="link"
+            disabled={props.retryBlocked}
+            onClick={props.onRetry}
+          >
             Resend
           </button>
         </p>
@@ -560,8 +626,19 @@ function TurnView(props: {
       {t.state === 'failed' && t.error && (
         <div className="prm-chat-error" role="alert">
           <p>{t.error.message}</p>
-          {t.error.fix && <p className="muted small">{t.error.fix}</p>}
-          <button type="button" onClick={props.onRetry}>
+          {fixWorthShowing(t.error.fix) && <p className="muted small">{t.error.fix}</p>}
+          {props.detail && (
+            <details className="small" data-testid="prm-chat-error-detail">
+              <summary>Details</summary>
+              <pre className="prm-chat-detail">{props.detail}</pre>
+            </details>
+          )}
+          <button
+            type="button"
+            data-testid="prm-chat-retry"
+            disabled={props.retryBlocked}
+            onClick={props.onRetry}
+          >
             Retry
           </button>
         </div>

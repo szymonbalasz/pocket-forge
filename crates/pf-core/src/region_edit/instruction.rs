@@ -13,11 +13,30 @@ use crate::manifest::Kind;
 use crate::prompt;
 use crate::settings::{self, RegionEditSettings};
 
-/// The built-in instruction (owner, #55). The kind sentence is added per asset kind.
+/// The built-in instruction (owner, #55) for Maps. The kind sentence is added per asset kind.
 pub const DEFAULT_BLEND_INSTRUCTION: &str = "Keep everything near the edges of the edited area \
 consistent with the surrounding map: continue the existing walls, floor tiles, paths, lighting, \
 scale and line style across the boundary so there is no visible seam. Place the new content \
 toward the centre of the edited area.";
+
+/// R94: the built-in instruction for Tokens and Items says "surrounding image".
+pub const DEFAULT_BLEND_INSTRUCTION_IMAGE: &str = "Keep everything near the edges of the edited \
+area consistent with the surrounding image: continue the existing walls, floor tiles, paths, \
+lighting, scale and line style across the boundary so there is no visible seam. Place the new \
+content toward the centre of the edited area.";
+
+/// The built-in text for an asset kind (R94): "surrounding map" for Maps, "surrounding image"
+/// for Tokens and Items.
+pub fn default_text(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Map => DEFAULT_BLEND_INSTRUCTION,
+        Kind::Token | Kind::Item => DEFAULT_BLEND_INSTRUCTION_IMAGE,
+    }
+}
+
+fn is_a_default(text: &str) -> bool {
+    text == DEFAULT_BLEND_INSTRUCTION || text == DEFAULT_BLEND_INSTRUCTION_IMAGE
+}
 
 /// Longest instruction text accepted (characters).
 pub const MAX_INSTRUCTION_CHARS: usize = 2000;
@@ -30,17 +49,17 @@ pub fn kind_sentence(kind: Kind) -> Option<&'static str> {
     }
 }
 
-/// The instruction text (the setting, or the default when unset).
-pub fn base_text(s: &RegionEditSettings) -> &str {
+/// The instruction text (the setting, or the kind's default when unset, R94).
+pub fn base_text(s: &RegionEditSettings, kind: Kind) -> &str {
     s.blend_instruction
         .as_deref()
-        .unwrap_or(DEFAULT_BLEND_INSTRUCTION)
+        .unwrap_or_else(|| default_text(kind))
 }
 
 /// The instruction appended for this kind: the text plus the kind sentence. Empty when the text
 /// is blank (nothing is appended then).
 pub fn instruction_for(s: &RegionEditSettings, kind: Kind) -> String {
-    let text = base_text(s).trim();
+    let text = base_text(s, kind).trim();
     if text.is_empty() {
         return String::new();
     }
@@ -88,7 +107,11 @@ pub fn final_prompt(
             prompt::helpers::effective(&state.settings),
             instruction_for(s, p.manifest.kind),
         ),
-        None => (Kind::Map, Vec::new(), base_text(s).trim().to_owned()),
+        None => (
+            Kind::Map,
+            Vec::new(),
+            base_text(s, Kind::Map).trim().to_owned(),
+        ),
     };
     drop(state);
     let blend = (on && !instruction.is_empty()).then_some(instruction.as_str());
@@ -105,9 +128,10 @@ pub fn final_prompt(
 /// `rgn_blend_instruction_get` / `_set` output.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct BlendInstructionOutput {
-    /// The instruction text in use (the setting, or the default).
+    /// The instruction text in use (the setting, or the open project kind's default).
     pub text: String,
-    /// The built-in default text (for "Reset to default").
+    /// The built-in default text for the open project's kind (Maps without one), for "Reset to
+    /// default" (R94).
     pub default_text: String,
     /// True while the text is the default (no custom text stored).
     pub is_default: bool,
@@ -118,9 +142,13 @@ pub struct BlendInstructionOutput {
 fn output(core: &Core) -> BlendInstructionOutput {
     let state = core.state();
     let s = &state.settings.region_edit;
+    let kind = state
+        .project
+        .as_ref()
+        .map_or(Kind::Map, |p| p.manifest.kind);
     BlendInstructionOutput {
-        text: base_text(s).to_owned(),
-        default_text: DEFAULT_BLEND_INSTRUCTION.to_owned(),
+        text: base_text(s, kind).to_owned(),
+        default_text: default_text(kind).to_owned(),
         is_default: s.blend_instruction.is_none(),
         for_project: state
             .project
@@ -177,9 +205,9 @@ impl Command for RgnBlendInstructionSet {
         {
             let mut state = core.state();
             let mut next = state.settings.clone();
-            // The default text itself is stored as "default", so a later default change applies.
-            next.region_edit.blend_instruction =
-                input.text.filter(|t| t != DEFAULT_BLEND_INSTRUCTION);
+            // A default text itself is stored as "default", so a later default change (and the
+            // per-kind default, R94) applies.
+            next.region_edit.blend_instruction = input.text.filter(|t| !is_a_default(t));
             settings::save(&core.ctx, &next)?;
             state.settings = next;
         }
@@ -215,8 +243,14 @@ mod tests {
         let map = instruction_for(&s, Kind::Map);
         assert!(map.starts_with(DEFAULT_BLEND_INSTRUCTION));
         assert!(map.ends_with(" Top-down battlemap view."));
-        assert_eq!(instruction_for(&s, Kind::Token), DEFAULT_BLEND_INSTRUCTION);
-        assert_eq!(instruction_for(&s, Kind::Item), DEFAULT_BLEND_INSTRUCTION);
+        assert_eq!(
+            instruction_for(&s, Kind::Token),
+            DEFAULT_BLEND_INSTRUCTION_IMAGE
+        );
+        assert_eq!(
+            instruction_for(&s, Kind::Item),
+            DEFAULT_BLEND_INSTRUCTION_IMAGE
+        );
         let custom = RegionEditSettings {
             blend_instruction: Some("  Match the ink.  ".into()),
             ..Default::default()
@@ -230,5 +264,23 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(instruction_for(&blank, Kind::Map), "");
+    }
+
+    /// R94: the default says "surrounding map" for Maps and "surrounding image" for Tokens and
+    /// Items; a custom text is used as is for every kind.
+    #[test]
+    fn owner_r94_default_blend_text_per_kind() {
+        let s = RegionEditSettings::default();
+        assert!(instruction_for(&s, Kind::Map).contains("surrounding map"));
+        for k in [Kind::Token, Kind::Item] {
+            let t = instruction_for(&s, k);
+            assert!(t.contains("surrounding image") && !t.contains("map"), "{t}");
+        }
+        assert!(is_a_default(DEFAULT_BLEND_INSTRUCTION_IMAGE));
+        let custom = RegionEditSettings {
+            blend_instruction: Some("Match the ink.".into()),
+            ..Default::default()
+        };
+        assert_eq!(instruction_for(&custom, Kind::Token), "Match the ink.");
     }
 }

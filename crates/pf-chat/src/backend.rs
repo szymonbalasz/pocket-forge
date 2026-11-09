@@ -64,9 +64,10 @@ pub struct BackendOk {
 }
 
 impl BackendOk {
-    /// FR-PRM-38: plan usage (`claude.ai`) is notional, not billed per call.
+    /// FR-PRM-38: plan usage (`claude.ai`) is notional, not billed per call. The fake bills
+    /// nothing either (L4).
     pub fn notional(&self) -> bool {
-        self.auth_method.as_deref() == Some("claude.ai")
+        matches!(self.auth_method.as_deref(), Some("claude.ai" | "fake"))
     }
 }
 

@@ -166,7 +166,7 @@ impl Command for RgnJobSubmit {
         extra.insert("blend_instruction".into(), json!(draft.blend_instruction));
         extra.insert("typed_prompt".into(), json!(draft.final_prompt));
         // FR-PRM-09: the helpers actually sent, in this `requested` commit (write-once).
-        prompt::record_on_job(&mut extra, &prepared.prompt.sent);
+        prompt::record_on_job(&mut extra, &prepared.prompt.ticked);
         let new = NewJob {
             operation: crate::job::OPERATION_EDIT.into(),
             model_id: draft.model_id.trim().to_owned(),

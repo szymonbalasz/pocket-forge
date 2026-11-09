@@ -635,7 +635,7 @@ mod tests {
             .iter()
             .map(|m| m["id"].as_str().unwrap().to_owned())
             .collect();
-        assert_eq!(ids, ["fake-gen-wh", "fake-gen-aspect"]);
+        assert_eq!(ids, ["fake-gen-wh", "fake-gen-aspect", "fake-gen-refs"]);
         let caps = core
             .dispatch(
                 "provider_get_capabilities",

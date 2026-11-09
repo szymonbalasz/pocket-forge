@@ -186,7 +186,8 @@ impl JobFile {
             .unwrap_or(&self.final_prompt)
     }
 
-    /// The helpers sent (FR-PRM-09), in order; a job from before PRM has none (`[]`).
+    /// The ticked helpers (FR-PRM-09, R94), in order, the ones not sent with `skipped`; a job
+    /// from before PRM has none (`[]`), one from before R94 lists only those sent.
     pub fn prompt_helpers(&self) -> Vec<crate::prompt::SentHelper> {
         self.extra
             .get(crate::prompt::JOB_FIELD)
