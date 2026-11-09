@@ -200,3 +200,39 @@ test('walk L1 FR-GEN-29 FR-EDT-23 keyboard undo and redo across pick → patch �
   await expect.poll(async () => (await undo()).redo).toBe(0);
   expect((await undo()).depth).toBe(top.depth);
 });
+
+test('BL-40 GEN §12 home → confirmed job in ≤ 4 clicks plus the name and the prompt', async ({
+  page,
+}) => {
+  let clicks = 0;
+  const click = async (testId: string) => {
+    clicks++;
+    await page.getByTestId(testId).click();
+  };
+  await click('prj-home-new');
+  await click('prj-home-new-generate');
+  // The suggested name is kept: Create (or Enter) confirms it.
+  await expect(page.getByTestId('gen-new-name')).toHaveValue('New map');
+  await click('gen-new-ok');
+  // The tab opens focused on the next step: the required prompt, typed at once.
+  await expect(page.getByTestId('prm-block-prompt')).toBeFocused();
+  await page.keyboard.type('flooded crypt');
+  await expect(page.getByTestId('gen-panel-estimate')).toHaveAttribute('data-status', 'ready');
+  await click('gen-panel-submit');
+  // The dialog's Submit has the focus: Enter confirms.
+  await expect(page.getByTestId('rgn-confirm-ok')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('rgn-confirm')).toBeHidden();
+  expect(await inputsOf(page, 'gen_job_submit')).toHaveLength(1);
+  expect(clicks).toBeLessThanOrEqual(4);
+
+  // Or keyboard only after the menu: Ctrl+Enter in the prompt is Generate.
+  await drive(page, 'finish', 1);
+  await page.getByTestId('prm-block-prompt').fill('dry crypt');
+  await expect(page.getByTestId('gen-panel-estimate')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('gen-panel-submit')).toBeEnabled();
+  await page.getByTestId('prm-block-prompt').press('Control+Enter');
+  await expect(page.getByTestId('rgn-confirm-ok')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await inputsOf(page, 'gen_job_submit')).length).toBe(2);
+});

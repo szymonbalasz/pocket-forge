@@ -3,7 +3,7 @@
 // block) · Prompt (PRM's block, FR-GEN-16) · Seed · Cost · Generate. Rendered by RGN's Generate
 // section as the "New image" tab (OQ-GEN-09); only mounted while it is the visible tab, so it is
 // the prompt chat's host then (FR-GEN-36): it publishes its draft and clears it when unmounted.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RadioGroup, Select, Switch } from 'radix-ui';
 
 import { pickPaths } from '../../api';
@@ -637,14 +637,51 @@ function SubmitSection({ s }: { s: GenState }) {
   );
 }
 
+/** BL-40 (GEN §12: home → confirmed job in ≤ 4 clicks plus the name and the prompt): a project
+ *  just made by Generate new… opens focused on the next step: Generate, or, while Generate waits
+ *  for the model's required prompt, the prompt (a disabled button can't take the focus). */
+function useFocusOnCreate(s: GenState, root: React.RefObject<HTMLDivElement | null>): void {
+  const activeJob = useActiveJobId();
+  const blocker = s.projectId ? submitBlocker(s, activeJob) : 'no project';
+  const needsPrompt = !!s.caps?.prompt_required && !s.prompt.trim();
+  useEffect(() => {
+    if (!s.caps || !gen.focusRequested()) return;
+    const el = root.current;
+    if (needsPrompt) {
+      const prompt = el?.querySelector<HTMLTextAreaElement>('[data-testid="prm-block-prompt"]');
+      if (prompt && gen.takeFocusRequest()) prompt.focus();
+    } else if (!blocker) {
+      const submit = el?.querySelector<HTMLButtonElement>('[data-testid="gen-panel-submit"]');
+      if (submit && gen.takeFocusRequest()) submit.focus();
+    }
+  }, [s.caps, needsPrompt, blocker, root]);
+}
+
 export function NewImageTab() {
   useGenSession();
   const s = useGen((x) => x);
   const { project } = useProjectState();
+  const root = useRef<HTMLDivElement>(null);
+  const activeJob = useActiveJobId();
+  useFocusOnCreate(s, root);
   if (!s.projectId) return null;
   const est = s.estimate.result;
+  // BL-40: Ctrl+Enter in the prompt is Generate (then Enter confirms in the dialog).
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+    if (!(e.target instanceof HTMLTextAreaElement)) return;
+    if (submitBlocker(gen.get(), activeJob)) return;
+    e.preventDefault();
+    void gen.openConfirm(activeJob);
+  };
   return (
-    <div className="gen-tab" data-testid="gen-panel" data-kind={s.kind}>
+    <div
+      className="gen-tab"
+      data-testid="gen-panel"
+      data-kind={s.kind}
+      ref={root}
+      onKeyDown={onKeyDown}
+    >
       {s.readOnly && (
         <p className="rgn-warning small" data-testid="gen-panel-readonly">
           Read-only project: you can look at the settings, but not generate or pick.

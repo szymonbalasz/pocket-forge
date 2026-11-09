@@ -525,8 +525,26 @@ function subscribe(): void {
 
 // ── Actions ──────────────────────────────────────────────────────────────────────────────────
 
+/** BL-40: the project just made by Generate new… opens with the focus on the next step. */
+let focusOnOpen = false;
+
 export const gen = {
   get: (): GenState => state,
+
+  /** BL-40 (GEN §12 click budget): the next attach puts the focus where the DM acts next. */
+  focusOnOpen(): void {
+    focusOnOpen = true;
+  },
+
+  /** True once per request (the tab takes it when it can place the focus). */
+  takeFocusRequest(): boolean {
+    const want = focusOnOpen;
+    focusOnOpen = false;
+    return want;
+  },
+
+  /** Whether a focus request is waiting (read without taking it). */
+  focusRequested: (): boolean => focusOnOpen,
   subscribe(l: () => void): () => void {
     listeners.add(l);
     return () => listeners.delete(l);

@@ -7,6 +7,7 @@ import { Dialog } from 'radix-ui';
 
 import { api, ApiError, type Section } from '../../api';
 import { generateTab, NEW_IMAGE_TAB } from '../../shared/generateTabs';
+import { gen } from './store';
 import './gen.css';
 
 const DEFAULT_NAME: Record<Section, string> = {
@@ -66,6 +67,8 @@ function Body({ section, taken, onOpenChange, onCreated }: NewProjectDialogProps
       const { path } = await api.gen.projectCreate(section, wanted);
       // FR-GEN-01: the project opens with the New image tab active.
       generateTab.openNextWith(NEW_IMAGE_TAB);
+      // BL-40: ≤ 4 clicks to a confirmed job (GEN §12): the tab opens focused on the next step.
+      gen.focusOnOpen();
       onOpenChange(false);
       onCreated(path);
     } catch (err) {
