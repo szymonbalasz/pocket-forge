@@ -414,6 +414,51 @@ pub struct Context {
     /// Runs PRJ background work (thumbnails, the decoded original) on the calling thread, so
     /// tests are deterministic. False in the app.
     pub inline_background: bool,
+    /// The prompt chat's seams (FR-PRM-32): backend mode, process spawner, clock, the fake.
+    pub chat: ChatSeams,
+}
+
+// ---------------------------------------------------------------- prompt chat (PRM)
+
+/// The prompt chat's injected seams (FR-PRM-32). The core builds the backend per use from
+/// these and the `prompt_chat` settings (its `claude_path`).
+pub struct ChatSeams {
+    pub mode: pf_chat::backend::BackendMode,
+    /// Starts Claude Code processes; tests use a replay spawner or one that panics (FR-PRM-20).
+    pub spawner: Arc<dyn pf_chat::process::Spawner>,
+    /// FR-PRM-36's budgets run on it.
+    pub clock: Arc<dyn pf_chat::clock::Clock>,
+    /// The fake backend (FR-PRM-39), shared so its case survives across uses.
+    pub fake: Arc<pf_chat::fake::FakeBackend>,
+    /// The environment chat children start from (they drop `PF_*` themselves, FR-PRM-34).
+    pub parent_env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    pub budget: pf_chat::clock::TurnBudget,
+}
+
+impl ChatSeams {
+    /// The fake backend on `clock`, with the real spawner (never used in fake mode).
+    pub fn fake(clock: Arc<dyn pf_chat::clock::Clock>) -> Self {
+        ChatSeams {
+            mode: pf_chat::backend::BackendMode::Fake,
+            spawner: Arc::new(pf_chat::process::OsSpawner),
+            fake: Arc::new(pf_chat::fake::FakeBackend::new(
+                pf_chat::fake::FakeCase::Success,
+                clock.clone(),
+            )),
+            clock,
+            parent_env: std::env::vars_os().collect(),
+            budget: pf_chat::clock::TurnBudget::default(),
+        }
+    }
+}
+
+impl std::fmt::Debug for ChatSeams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChatSeams")
+            .field("mode", &self.mode)
+            .field("fake_case", &self.fake.case())
+            .finish_non_exhaustive()
+    }
 }
 
 impl std::fmt::Debug for Context {
@@ -451,6 +496,7 @@ impl Context {
             library_override: None,
             tiles_base_url: default_tiles_base_url(),
             inline_background: false,
+            chat: ChatSeams::fake(Arc::new(pf_chat::clock::SystemClock::new())),
         }
     }
 
@@ -464,6 +510,10 @@ impl Context {
             fs: Box::new(FakeFsAttributes::default()),
             credentials: std::sync::Arc::new(MemoryStore::default()),
             inline_background: true,
+            chat: ChatSeams {
+                parent_env: Vec::new(),
+                ..ChatSeams::fake(Arc::new(pf_chat::clock::FakeClock::new()))
+            },
             ..Context::new(data_dir)
         }
     }
@@ -484,6 +534,15 @@ impl Context {
             ctx.credentials.clone(),
             Some(ctx.data_dir.join("cache").join("provider")),
         );
+        // PRM §13: the real chat backend only in release builds, or with both
+        // `PF_CHAT_BACKEND=claude-code` and `PF_CHAT_REAL=1`; never under CI.
+        ctx.chat.mode = pf_chat::backend::backend_mode(&var, !cfg!(debug_assertions))?;
+        if let Some(case) = var(pf_chat::backend::ENV_FAKE_CASE) {
+            ctx.chat.fake.set_case(
+                case.parse()
+                    .map_err(|e| format!("{}: {e}", pf_chat::backend::ENV_FAKE_CASE))?,
+            );
+        }
         if let (Some(case), Some(fake)) = (var("PF_FAKE_CASE"), ctx.provider.as_fake()) {
             fake.set_case(
                 pf_provider::fake::FakeCase::parse(&case)

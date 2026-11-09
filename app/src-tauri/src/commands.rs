@@ -117,6 +117,18 @@ tauri_commands! {
     gen_job_retry_draft => c::GenJobRetryDraft,
     gen_candidate_preview => c::GenCandidatePreview,
     gen_candidate_pick => c::GenCandidatePick,
+    prm_chat_status => c::PrmChatStatus,
+    prm_chat_consent => c::PrmChatConsent,
+    prm_chat_settings_put => c::PrmChatSettingsPut,
+    prm_chat_logout => c::PrmChatLogout,
+    prm_chat_session_end => c::PrmChatSessionEnd,
+    prm_context_publish => c::PrmContextPublish,
+    prm_context_clear => c::PrmContextClear,
+    prm_chat_thread_get => c::PrmChatThreadGet,
+    prm_chat_send => c::PrmChatSend,
+    prm_chat_cancel => c::PrmChatCancel,
+    prm_chat_insert => c::PrmChatInsert,
+    prm_chat_fake_set_case => c::PrmChatFakeSetCase,
 }
 
 #[cfg(test)]

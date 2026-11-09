@@ -159,8 +159,26 @@ pub(crate) fn settle_job_copies(ctx: &Context, p: &mut OpenProject) {
     }
 }
 
-/// `job.json` and thumbnail conflict copies not in the trash yet (FR-PRJ-34): the next commit
-/// sends them there.
+/// PRM amendment to FR-PRJ-34: chat thread conflict copies (`.pforge/chat/`). The later
+/// `updated_at` stays the thread (settled like `job.json` copies); the other file goes to the
+/// trash with the next commit, and a notice says so. Nothing is merged.
+pub(crate) fn settle_chat_copies(ctx: &Context, p: &mut OpenProject) {
+    if p.read_only.is_some() {
+        return;
+    }
+    crate::prompt::chat::thread::settle_copies(ctx, &p.dir);
+    if !crate::prompt::chat::thread::stray_files(&p.dir).is_empty()
+        && !p.warnings.iter().any(|w| w.code == "chat_conflict_copy")
+    {
+        p.warnings.push(Warning::new(
+            "chat_conflict_copy",
+            "A copy of the chat from another machine was moved to the project trash.",
+        ));
+    }
+}
+
+/// `job.json`, thumbnail and chat thread conflict copies not in the trash yet (FR-PRJ-34): the
+/// next commit sends them there.
 pub(crate) fn side_copies(p: &OpenProject) -> Vec<String> {
     let in_trash: HashSet<&str> = p
         .manifest
@@ -183,6 +201,7 @@ pub(crate) fn side_copies(p: &OpenProject) -> Vec<String> {
             out.push(format!("{PFORGE_DIR}/{name}"));
         }
     }
+    out.extend(crate::prompt::chat::thread::stray_files(&p.dir));
     out.retain(|f| !in_trash.contains(f.as_str()));
     out
 }

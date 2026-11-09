@@ -493,6 +493,8 @@ impl Command for ProjectOpen {
         let snap = p.snapshot();
         crate::export::on_project_close(&core.ctx, &mut state);
         if let Some(old) = state.project.take() {
+            // PRM FR-PRM-35: the old project's chat session ends.
+            core.chat.on_project_close(old.manifest.project_id);
             old.decoded.release();
         }
         core.served().reset(Some(snap.project_id));
@@ -562,6 +564,7 @@ impl Command for ProjectClose {
         }
         crate::export::on_project_close(&core.ctx, &mut state);
         if let Some(p) = state.project.take() {
+            core.chat.on_project_close(p.manifest.project_id);
             p.decoded.release();
         }
         core.served().reset(None);
@@ -1126,6 +1129,13 @@ pub use crate::prompt::commands::{
     PrmComposePreview, PrmHelpersList, PrmHelpersReset, PrmHelpersSave,
 };
 
+/// Prompt chat commands (prompt-helper §9, PRM slice 5).
+pub use crate::prompt::chat::{
+    PrmChatCancel, PrmChatConsent, PrmChatFakeSetCase, PrmChatInsert, PrmChatLogout, PrmChatSend,
+    PrmChatSessionEnd, PrmChatSettingsPut, PrmChatStatus, PrmChatThreadGet, PrmContextClear,
+    PrmContextPublish,
+};
+
 // ---------------------------------------------------------------- new-asset generation
 
 /// GEN slice 3 commands live in their own module (new-asset-generation §9).
@@ -1234,6 +1244,18 @@ registry![
     GenJobRetryDraft,
     GenCandidatePreview,
     GenCandidatePick,
+    PrmChatStatus,
+    PrmChatConsent,
+    PrmChatSettingsPut,
+    PrmChatLogout,
+    PrmChatSessionEnd,
+    PrmContextPublish,
+    PrmContextClear,
+    PrmChatThreadGet,
+    PrmChatSend,
+    PrmChatCancel,
+    PrmChatInsert,
+    PrmChatFakeSetCase,
 ];
 
 #[cfg(test)]

@@ -591,6 +591,7 @@ pub(crate) fn commit_with(
     // FR-PRJ-34, OQ-PRJ-10 A: job.json copies settle (the later state wins); they and thumbnail
     // copies go to the trash with this commit.
     conflict::settle_job_copies(ctx, p);
+    conflict::settle_chat_copies(ctx, p);
     let copies = conflict::side_copies(p);
     let mut next = p.manifest.clone();
     let mut plan = CommitPlan::default();

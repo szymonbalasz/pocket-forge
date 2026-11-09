@@ -215,6 +215,8 @@ pub struct FakeProvider {
     pub connectivity: ConnectivityCell,
     /// Where submitted jobs are copied so they survive a restart (R48); none in unit tests.
     jobs_dir: Option<PathBuf>,
+    /// Every `Provider` call so far (PRM FR-PRM-31: a chat makes none).
+    calls: std::sync::atomic::AtomicU64,
 }
 
 /// `job.json` of a job copy (R48). The rest comes from the job record.
@@ -388,6 +390,16 @@ impl FakeProvider {
     fn done<T>(&self, out: ProviderResult<T>) -> std::future::Ready<ProviderResult<T>> {
         self.connectivity.note(&out);
         std::future::ready(out)
+    }
+
+    fn note_call(&self) {
+        self.calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// How many `Provider` calls this fake has served (FR-PRM-31 tests: a chat makes none).
+    pub fn call_count(&self) -> u64 {
+        self.calls.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The case's standing error, or the one-shot 429.
@@ -820,6 +832,7 @@ impl Provider for FakeProvider {
         &self,
         filter: &ModelFilter,
     ) -> impl Future<Output = ProviderResult<Vec<ModelSummary>>> + Send {
+        self.note_call();
         let out = self.gate().map(|()| {
             FAKE_MODEL_IDS
                 .iter()
@@ -855,6 +868,7 @@ impl Provider for FakeProvider {
         model_id: &str,
         operation: Operation,
     ) -> impl Future<Output = ProviderResult<Capabilities>> + Send {
+        self.note_call();
         let out = self.gate().and_then(|()| {
             Self::capabilities_for(model_id, operation)
                 .map(|(_, c)| c)
@@ -868,6 +882,7 @@ impl Provider for FakeProvider {
         bytes: &[u8],
         _purpose: UploadPurpose,
     ) -> impl Future<Output = ProviderResult<AssetRef>> + Send {
+        self.note_call();
         let out = self.gate().map(|()| self.upload_once(bytes, false).0);
         self.done(out)
     }
@@ -876,6 +891,7 @@ impl Provider for FakeProvider {
         &self,
         request: &JobRequest,
     ) -> impl Future<Output = ProviderResult<Estimate>> + Send {
+        self.note_call();
         let out = self
             .gate()
             .and_then(|()| Self::validate(request))
@@ -902,6 +918,7 @@ impl Provider for FakeProvider {
         &self,
         request: &JobRequest,
     ) -> impl Future<Output = ProviderResult<ProviderRecord>> + Send {
+        self.note_call();
         let out = self.do_submit(request);
         self.done(out)
     }
@@ -910,6 +927,7 @@ impl Provider for FakeProvider {
         &self,
         job: &ProviderRecord,
     ) -> impl Future<Output = ProviderResult<JobStatus>> + Send {
+        self.note_call();
         let out = self.do_status(job);
         if self.case() != FakeCase::Offline {
             self.connectivity.note(&out);
@@ -921,6 +939,7 @@ impl Provider for FakeProvider {
         &self,
         job: &ProviderRecord,
     ) -> impl Future<Output = ProviderResult<CancelAck>> + Send {
+        self.note_call();
         let out = self.gate().and_then(|()| handle_of(job)).map(|handle| {
             self.job_for(&handle, job);
             let mut s = self.lock();
@@ -947,11 +966,13 @@ impl Provider for FakeProvider {
         &self,
         job: &ProviderRecord,
     ) -> impl Future<Output = ProviderResult<Candidates>> + Send {
+        self.note_call();
         let out = self.do_fetch(job);
         self.done(out)
     }
 
     fn balance(&self) -> impl Future<Output = ProviderResult<Balance>> + Send {
+        self.note_call();
         let out = self.gate().map(|()| Balance::Known {
             remaining: 1000.0,
             unit: FAKE_UNIT.into(),

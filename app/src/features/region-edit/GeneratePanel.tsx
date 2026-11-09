@@ -15,6 +15,7 @@ import { useSlotIdle } from '../../shared/slot';
 import { useProjectState } from '../../store/project';
 import { useEditorMaskPainted, useEditorRegion, useEditorRegionRestored } from '../editor';
 import { openProviderSettings } from '../provider';
+import { chatContext } from '../../shared/chatContext';
 import { PromptBlock } from '../prompt-helper';
 import { ReferencesBlock } from '../references';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -23,6 +24,7 @@ import { controlKind, isValueControl, stateOf } from './controls';
 import { amountLabel, costLabel, errorText, fitLabel } from './format';
 import {
   blendForPreview,
+  chatInput,
   costUnit,
   isOffline,
   MASK_HINT,
@@ -550,9 +552,24 @@ export function GeneratePanel() {
   );
 }
 
+/** FR-PRM-23/43 (PRM slice 5): while mounted (= the visible tab) Region edit is the chat's host:
+ *  it publishes the draft its estimate takes (debounced by the seam) and clears it when it is
+ *  hidden or unmounted, as GEN's New image tab does. */
+function useRgnChatHost(): void {
+  const input = useRgn((x) => {
+    const i = chatInput(x);
+    return i ? JSON.stringify(i) : null;
+  });
+  useEffect(() => {
+    if (input) chatContext.publish('rgn', JSON.parse(input));
+  }, [input]);
+  useEffect(() => () => chatContext.clear('rgn'), []);
+}
+
 /** RGN's own tab: the region-edit sections (§7). */
 function RegionEditTab({ s }: { s: RgnState }) {
   const { project } = useProjectState();
+  useRgnChatHost();
   if (!s.projectId) return null;
   return (
     <>

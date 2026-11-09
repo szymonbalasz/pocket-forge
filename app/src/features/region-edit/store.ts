@@ -310,6 +310,22 @@ export function submitBlocker(s: RgnState): string | null {
   return null;
 }
 
+/** FR-PRM-23/24: what the Region edit tab publishes for the prompt chat: the estimate's draft,
+ *  with the region, mask and model `null` until they are chosen (the turn then says "no region
+ *  yet"). */
+export function chatInput(s: RgnState): Record<string, unknown> | null {
+  if (!s.projectId) return null;
+  return {
+    region: s.fit ? { inner: s.fit.inner, margin: s.margin } : null,
+    mask_id: s.maskId,
+    model_id: s.modelId,
+    final_prompt: s.prompt,
+    controls: s.caps ? sentValues(s.caps, s.evaluation, s.values, s.touched) : {},
+    blend_instruction: s.blendInstruction,
+    prompt_helpers: s.promptHelpers,
+  };
+}
+
 export function currentDraft(s: RgnState): JobDraft | null {
   if (!s.fit || !s.caps || !s.modelId || !s.maskId) return null;
   return {

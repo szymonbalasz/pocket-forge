@@ -7,6 +7,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
 import type {
+  ChatHostId,
   CommandName,
   Commands,
   CoreErrorShape,
@@ -327,5 +328,25 @@ export const api = {
     resetAllHelpers: () => call('prm_helpers_reset', { all: true }),
     composePreview: (input: Commands['prm_compose_preview'][0]) =>
       call('prm_compose_preview', input),
+  },
+  /** prompt-helper §9 (PRM part B): the prompt chat core (slice 5). The window is slice 6. */
+  chat: {
+    status: (refresh = false) => call('prm_chat_status', refresh ? { refresh } : {}),
+    consent: (accept: boolean) => call('prm_chat_consent', { accept }),
+    settingsPut: (input: Commands['prm_chat_settings_put'][0]) =>
+      call('prm_chat_settings_put', input),
+    logout: () => call('prm_chat_logout', {}),
+    sessionEnd: () => call('prm_chat_session_end', {}),
+    contextPublish: (projectId: string, host: ChatHostId, input: unknown) =>
+      call('prm_context_publish', { project_id: projectId, host, input }),
+    contextClear: (projectId: string, host: ChatHostId) =>
+      call('prm_context_clear', { project_id: projectId, host }),
+    thread: (projectId: string) => call('prm_chat_thread_get', { project_id: projectId }),
+    send: (projectId: string, text: string, includeImages = true) =>
+      call('prm_chat_send', { project_id: projectId, text, include_images: includeImages }),
+    cancel: (turnId: string) => call('prm_chat_cancel', { turn_id: turnId }),
+    insert: (projectId: string, proposalId: string) =>
+      call('prm_chat_insert', { project_id: projectId, proposal_id: proposalId }),
+    fakeSetCase: (c: string) => call('prm_chat_fake_set_case', { case: c }),
   },
 };

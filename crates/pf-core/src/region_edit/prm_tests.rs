@@ -262,7 +262,9 @@ fn fr_prm_24_41_rgn_chat_context_stub_reports_the_text_side_of_the_job() {
     assert_eq!(RgnChatContext.host(), ChatHost::Rgn);
     assert_eq!(ctx.host, ChatHost::Rgn);
     assert_eq!(ctx.kind, Kind::Map);
-    assert!(ctx.images.is_empty(), "the overlay comes with PRM slice 5");
+    // PRM slice 5: the overlay (FR-PRM-24).
+    assert_eq!(ctx.images.len(), 1);
+    assert_eq!(ctx.images[0].id, "rgn:overlay");
     assert_eq!(ctx.typed_prompt, "a well");
     assert_eq!(ctx.helpers.len(), 1);
     assert_eq!(ctx.helpers[0].id, NO_PEOPLE);

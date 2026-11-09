@@ -5,6 +5,7 @@
 //! instruction, FR-PRM-06/07) for RGN and GEN, the job record entry (FR-PRM-09) and the helper
 //! commands ([`commands`]). Plain text only: nothing here calls the provider (FR-PRM-31).
 
+pub mod chat;
 pub mod commands;
 pub mod context;
 pub mod helpers;

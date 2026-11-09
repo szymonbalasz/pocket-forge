@@ -771,6 +771,30 @@ export interface Commands {
   prm_helpers_save: [{ helpers: PromptHelperInput[] }, PromptHelper[]];
   prm_helpers_reset: [{ id: string } | { all: true }, PromptHelper[]];
   prm_compose_preview: [ComposePreviewInput, ComposePreview];
+  /** PRM slice 5 (§9): the prompt chat core. `refresh` re-detects (window focus, Recheck). */
+  prm_chat_status: [{ refresh?: boolean }, ChatStatus];
+  prm_chat_consent: [{ accept: boolean }, ChatStatus];
+  /** Settings → Prompt chat (on/off, the Claude Code path) and the window rect. `null` clears. */
+  prm_chat_settings_put: [
+    { enabled?: boolean; claude_path?: string | null; window?: ChatWindowRect | null },
+    ChatStatus,
+  ];
+  prm_chat_logout: [Record<string, never>, ChatStatus];
+  /** The chat window closed (FR-PRM-35): the next turn starts a fresh session. */
+  prm_chat_session_end: [Record<string, never>, Record<string, never>];
+  prm_context_publish: [
+    { project_id: string; host: ChatHostId; input: unknown },
+    Record<string, never>,
+  ];
+  prm_context_clear: [{ project_id: string; host: ChatHostId }, Record<string, never>];
+  prm_chat_thread_get: [{ project_id: string }, ChatThreadView];
+  prm_chat_send: [{ project_id: string; text: string; include_images?: boolean }, ChatSendResult];
+  prm_chat_cancel: [{ turn_id: string }, Record<string, never>];
+  prm_chat_insert: [
+    { project_id: string; proposal_id: string },
+    { proposal_id: string; host: ChatHostId; inserted_at: string },
+  ];
+  prm_chat_fake_set_case: [{ case: string }, Record<string, never>];
 }
 
 export type CommandName = keyof Commands;
@@ -829,6 +853,158 @@ export interface Events {
   'ref:trash-purged': { count: number; bytes: number };
   /** The helper definitions changed (save or reset): the full list (PRM §9). */
   'prm:helpers-changed': PromptHelper[];
+  /** More reply text for a running chat turn (the reply = the deltas joined). */
+  'prm:chat-delta': { turn_id: string; text: string };
+  /** A chat turn ended. */
+  'prm:chat-turn': {
+    turn_id: string;
+    state: ChatTurnState;
+    saved: boolean;
+    usage?: ChatUsage;
+    error?: ChatBackendError;
+    proposals?: ChatProposal[];
+  };
+  /** A fresh detection changed the backend status. */
+  'prm:chat-status': { backend: ChatBackendStatus };
+  /** Replace (FR-PRM-29): applied only by that host's attached prompt block. */
+  'prm:insert': { project_id: string; host: ChatHostId; proposal_id: string; text: string };
+}
+
+// ── Prompt chat (PRM part B, slice 5; pf-core `prompt/chat/`) ─────────────────────────────
+
+/** The tab a turn is sent from (FR-PRM-43). */
+export type ChatHostId = 'rgn' | 'gen';
+
+/** An FR-PRM-37 backend error with Appendix D's message and fix. */
+export interface ChatBackendError {
+  code:
+    | 'not_installed'
+    | 'version_unsupported'
+    | 'isolation_unavailable'
+    | 'not_logged_in'
+    | 'usage_limit'
+    | 'offline'
+    | 'timeout'
+    | 'backend_crashed'
+    | 'stream_malformed'
+    | 'backend_error';
+  message: string;
+  fix: string;
+  /** The CLI's message or the stderr tail (home path as `<home>`); never stored. */
+  detail?: string;
+  found?: string;
+  min?: string;
+  exit_code?: number | null;
+}
+
+export type ChatBackendStatus =
+  | { state: 'not_checked' }
+  | {
+      state: 'ok';
+      version: string;
+      auth_method: string | null;
+      plan: string | null;
+      /** FR-PRM-38: plan usage, not billed per call. */
+      notional: boolean;
+    }
+  | ({ state: 'error' } & ChatBackendError);
+
+export interface ChatStatus {
+  enabled: boolean;
+  /** The current privacy notice is accepted (FR-PRM-20). */
+  consent: boolean;
+  notice_version: number;
+  mode: 'fake' | 'claude-code';
+  backend: ChatBackendStatus;
+  /** Fake mode only (FR-PRM-39). */
+  fake_case?: string;
+}
+
+export interface ChatWindowRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export type ChatTurnState = 'pending' | 'done' | 'canceled' | 'failed' | 'interrupted';
+
+export interface ChatUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd?: number;
+  notional: boolean;
+}
+
+export interface ChatProposal {
+  id: string;
+  text: string;
+  /** Set by Replace ("Inserted", with the time). */
+  inserted_at?: string;
+}
+
+export interface ChatSentImage {
+  id: string;
+  role: 'region_overlay' | 'structure' | 'reference';
+  w: number;
+  h: number;
+  hash: string;
+}
+
+/** One turn of the thread file (§8). User turns carry `context`; replies carry the rest. */
+export interface ChatTurn {
+  id: string;
+  at: string;
+  role: 'user' | 'assistant';
+  host: ChatHostId;
+  text: string;
+  state: ChatTurnState;
+  error?: { code: string; message: string; fix?: string };
+  context?: {
+    summary: string;
+    images: ChatSentImage[];
+    dropped: string[];
+    final_prompt: string;
+    model_id: string;
+    controls: Record<string, unknown>;
+  };
+  proposals?: ChatProposal[];
+  usage?: ChatUsage;
+  /** The user turn started a fresh session ("New session: earlier messages are not sent"). */
+  fresh_session?: boolean;
+}
+
+export interface ChatThread {
+  schema_version: number;
+  id: string;
+  created_at: string;
+  updated_at: string;
+  backend: 'fake' | 'claude-code';
+  turns: ChatTurn[];
+}
+
+export interface ChatThreadView {
+  /** `null` before the first send. */
+  thread: ChatThread | null;
+  running_turn_id: string | null;
+  /** A corrupt thread file was set aside and a new thread starts (§11). */
+  corrupt_set_aside: boolean;
+  /** The next turn starts a fresh session (FR-PRM-35). */
+  fresh_session_next: boolean;
+}
+
+export interface ChatSendResult {
+  /** The reply's turn id (events, cancel). */
+  turn_id: string;
+  user_turn_id: string;
+  thread_id: string;
+  host: ChatHostId;
+  context_summary: string;
+  /** Labels of the images the turn limit dropped (FR-PRM-25). */
+  dropped: string[];
+  fresh_session: boolean;
+  /** False: the thread could not be written (read-only project, a locked file). */
+  saved: boolean;
 }
 
 // ── Reference packs (REF §9, #51, #54; shapes final per R50, pf-core `references/`) ──────────
