@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest';
 import { prjMock, samplePrjSeed, type PrjMockProject } from '../api/mocks/prj';
 import { installTestCore } from '../api/mocks/testCore';
 import { projectStore } from '../store/project';
-import { installAppClose } from './appClose';
+import { installAppClose, quit } from './appClose';
 
 const core = installTestCore();
 const LIB = 'C:/pf-mock/library';
@@ -101,4 +101,29 @@ test('R101 OQ-EXP-09 FR-EDT-28 a held guard holds the exit; cancelling keeps the
   answer.proceed();
   await flush();
   expect(names()).toEqual(['project_close', 'app_exit']);
+});
+
+test('R101 R109 FR-PRJ-21 several close requests share one pending close', async () => {
+  await start({});
+  let answer!: { proceed: () => void };
+  offs.push(
+    projectStore.addCloseGuard((proceed) => {
+      answer = { proceed };
+      return false;
+    }),
+  );
+  let settled = 0;
+  const first = quit();
+  const second = quit();
+  void first.then(() => settled++);
+  void second.then(() => settled++);
+  await flush();
+  // Neither request settles before the held close is answered: the second waits with the first.
+  expect(settled).toBe(0);
+  answer.proceed();
+  await Promise.all([first, second]);
+  expect(settled).toBe(2);
+  expect(names()).toEqual(['project_close', 'app_exit']);
+  // Settled: the next request is a new quit.
+  expect(quit()).not.toBe(first);
 });

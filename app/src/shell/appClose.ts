@@ -5,31 +5,34 @@
 import { appCloseGuard, appExit, onEvent } from '../api';
 import { projectStore } from '../store/project';
 
-let quitting = false;
+/** The quit under way: a later close request shares it (R109), so it settles with the first. */
+let pending: Promise<void> | null = null;
 /** The close was refused with `unsaved`: "Close anyway" still ends in an exit, Dismiss doesn't. */
 let awaitingForce = false;
 
-/** One close request: closes the open project through its guards, then exits. */
-export async function quit(): Promise<void> {
-  if (quitting) return;
-  quitting = true;
+/** One close request: closes the open project through its guards, then exits. A request while
+ *  one runs gets the same promise. */
+export function quit(): Promise<void> {
+  pending ??= quitNow().finally(() => {
+    pending = null;
+  });
+  return pending;
+}
+
+async function quitNow(): Promise<void> {
   awaitingForce = false;
-  try {
-    if (projectStore.get().project) await projectStore.close();
-    const s = projectStore.get();
-    if (s.project) {
-      awaitingForce = s.error?.code === 'unsaved';
-      return;
-    }
-    await appExit();
-  } finally {
-    quitting = false;
+  if (projectStore.get().project) await projectStore.close();
+  const s = projectStore.get();
+  if (s.project) {
+    awaitingForce = s.error?.code === 'unsaved';
+    return;
   }
+  await appExit();
 }
 
 /** Follows the project after an `unsaved` refusal: closed → exit; the question gone → stay. */
 function follow(): void {
-  if (!awaitingForce || quitting) return;
+  if (!awaitingForce || pending) return;
   const s = projectStore.get();
   if (!s.project) {
     awaitingForce = false;

@@ -79,8 +79,9 @@ const listeners = new Set<() => void>();
 let syncSeq = 0;
 let prefetched: string | null = null;
 let listening: Promise<void> | null = null;
-let proceedClose: (() => void) | null = null;
-let cancelClose: (() => void) | null = null;
+/** The closes the export question holds (R109): a second close while it's asked (← Home after
+ *  the window X) joins the first instead of replacing it, so no close is ever left waiting. */
+let held: { proceed: () => void; cancel: () => void }[] = [];
 let guarding = false;
 /** Bumped per Start and whenever a run is abandoned (project change), so a late `export_start`
  *  answer never names the wrong run. */
@@ -92,22 +93,26 @@ const retired = new Set<string>();
 /** PRJ close guard: hold the close while an export runs and ask first (OQ-EXP-09). */
 function closeGuard(proceed: () => void, cancel: () => void): boolean {
   if (!state.run) return true;
-  proceedClose = proceed;
-  cancelClose = cancel;
+  held.push({ proceed, cancel });
   set({ closeAsk: true, expanded: true });
   return false;
+}
+
+/** Takes every held close out (each is answered once). */
+function takeHeld(): { proceed: () => void; cancel: () => void }[] {
+  const all = held;
+  held = [];
+  return all;
 }
 
 /** The export ended (done, failed, canceled): a close it was holding no longer needs the
  *  question, so the banner goes and the close goes on (OQ-EXP-09). True if it let a close go
  *  on: the project is closing, so nothing re-plans (walk-night L4: no late `export_plan`). */
 function runEnded(patch: Partial<ExportState>): boolean {
-  const proceed = proceedClose;
-  proceedClose = null;
-  cancelClose = null;
+  const waiting = takeHeld();
   set({ ...patch, run: null, closeAsk: false });
-  proceed?.();
-  return !!proceed;
+  for (const w of waiting) w.proceed();
+  return waiting.length > 0;
 }
 
 function set(patch: Partial<ExportState>): void {
@@ -160,8 +165,7 @@ export const exportStore = {
     runSeq++;
     retired.clear();
     prefetched = null;
-    proceedClose = null;
-    cancelClose = null;
+    held = [];
     set(initial);
   },
 
@@ -386,21 +390,17 @@ export const exportStore = {
   /** "Cancel the export and close": cancels, then lets the held close go on (the core's
    *  close hook cancels too, so this never waits for `export:canceled`). */
   async confirmClose(): Promise<void> {
-    const proceed = proceedClose;
-    proceedClose = null;
-    cancelClose = null;
+    const waiting = takeHeld();
     set({ closeAsk: false });
     await exportStore.cancel();
-    proceed?.();
+    for (const w of waiting) w.proceed();
   },
 
   /** "Keep exporting": the close is dropped. */
   keepExporting(): void {
-    const cancel = cancelClose;
-    proceedClose = null;
-    cancelClose = null;
+    const waiting = takeHeld();
     set({ closeAsk: false });
-    cancel?.();
+    for (const w of waiting) w.cancel();
   },
 };
 
