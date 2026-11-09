@@ -6,6 +6,8 @@
 // `--real` (`corepack pnpm dev:real`) runs against Scenario: PF_PROVIDER=scenario with the key
 // from the OS credential store (entered in the app's provider settings). Real credits may be
 // spent; the session spend cap (FR-RGN-14) still applies. Never in CI (FR-PRV-28).
+// It also selects the real prompt chat backend (Claude Code headless, PRM §13): turns use the
+// owner's Claude plan once the chat is switched on and consented to in Settings.
 import { spawn } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,6 +31,8 @@ const childEnv = { ...process.env, ...env };
 if (real) {
   childEnv.PF_PROVIDER = 'scenario';
   delete childEnv.PF_FAKE_CASE;
+  childEnv.PF_CHAT_BACKEND = 'claude-code';
+  childEnv.PF_CHAT_REAL = '1';
   const line = '!'.repeat(72);
   console.warn(
     [
@@ -36,6 +40,7 @@ if (real) {
       '  REAL PROVIDER: Scenario. Jobs you submit spend REAL credits (CU).',
       '  Key: the OS credential store (enter it in Settings > Provider).',
       '  The session spend cap and per-job threshold apply; the first submit asks for them.',
+      '  REAL PROMPT CHAT: Claude Code headless on your plan (Settings > Prompt chat).',
       `  Data: ${env.PF_DATA_DIR}`,
       `  Library: ${env.PF_LIBRARY_DIR}`,
       line,
