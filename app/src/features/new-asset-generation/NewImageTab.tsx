@@ -684,6 +684,7 @@ export function NewImageTab() {
             </p>
           )
         }
+        withSketch={takesSketch(s) && !!s.sketch}
         onClose={() => gen.closeConfirm()}
         onConfirm={(plan) => void gen.confirm(plan)}
       />

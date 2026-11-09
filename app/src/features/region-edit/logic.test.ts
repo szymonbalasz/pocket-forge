@@ -20,6 +20,7 @@ import {
 } from './controls';
 import { EstimateDebouncer, ESTIMATE_DEBOUNCE_MS } from './estimate';
 import { costLabel, errorText, fitLabel, jobErrorText } from './format';
+import { sentWith } from './ConfirmDialog';
 import { PATCHES_KEPT } from './store';
 import { ALL_TYPES } from './testUtils';
 import {
@@ -486,4 +487,10 @@ describe('iteration tracker logic', () => {
 test('walk-gen L4 FR-GEN-28 the patches-kept notice agrees with its count', () => {
   expect(PATCHES_KEPT(1)).toBe('1 patch layer kept in history (undo restores it).');
   expect(PATCHES_KEPT(3)).toBe('3 patch layers kept in history (undo restores them).');
+});
+
+test('R84 FR-RGN-45 FR-GEN-21 the confirm names what is sent besides the prompt', () => {
+  expect(sentWith(2, false)).toBe('with 2 references');
+  expect(sentWith(1, true)).toBe('with a sketch and 1 reference');
+  expect(sentWith(0, true)).toBe('with a sketch');
 });

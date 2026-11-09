@@ -466,3 +466,15 @@ test('walk L7 Radix tips (no native title) and a sketch hint that fits the kind'
   if (screen.queryByTestId('gen-sketch-hint'))
     expect(screen.getByTestId('gen-sketch-hint').textContent).not.toContain('map');
 });
+
+test('R84 FR-GEN-21 the confirm dialog names the sketch: "with a sketch and N references"', async () => {
+  await setup({ sketches: [sketch('a-room.png')], projectRefs: ['look.png'] });
+  fireEvent.click(await screen.findByTestId('gen-sketch-item'));
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'crypt' } });
+  await estimated();
+  await act(async () => fireEvent.click(screen.getByTestId('gen-panel-submit')));
+  const dialog = await screen.findByTestId('rgn-confirm');
+  expect(within(dialog).getByTestId('rgn-confirm-references').textContent?.trim()).toBe(
+    'with a sketch and 1 reference',
+  );
+});
