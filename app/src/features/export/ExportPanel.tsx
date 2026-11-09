@@ -6,6 +6,7 @@ import { Collapsible, RadioGroup, Toast, ToggleGroup, Tooltip } from 'radix-ui';
 
 import type { ExportFormat } from '../../api';
 import { useSlotIdle } from '../../shared/slot';
+import { projectHasImage } from '../../shared/generateTabs';
 import { useProjectState } from '../../store/project';
 import { exportStore, useExportState } from './store';
 import {
@@ -133,7 +134,9 @@ export function ExportPanel() {
   const { project } = useProjectState();
   const s = useExportState();
   const body = useRef<HTMLDivElement>(null);
-  const projectId = project?.project_id ?? null;
+  // FR-GEN-03: Export is disabled with `no_image` until the first pick; nothing is prefetched.
+  const noImage = !!project && !projectHasImage(project);
+  const projectId = project && !noImage ? project.project_id : null;
   useSlotIdle(!project);
 
   useEffect(() => {
@@ -169,6 +172,7 @@ export function ExportPanel() {
   const err = (f: FieldName) => (s.fieldError?.field === f ? s.fieldError.message : null);
   const start = startState({
     hasProject: !!project,
+    noImage,
     readOnly: project?.read_only ?? null,
     original: s.original,
     plan,
@@ -179,15 +183,17 @@ export function ExportPanel() {
   const note = plan ? replaceNote(plan, Date.now()) : null;
   const panelState = !project
     ? 'empty'
-    : project.read_only
-      ? 'read-only'
-      : run
-        ? 'running'
-        : s.error
-          ? 'error'
-          : s.original.kind === 'loading'
-            ? 'loading'
-            : 'ready';
+    : noImage
+      ? 'no-image'
+      : project.read_only
+        ? 'read-only'
+        : run
+          ? 'running'
+          : s.error
+            ? 'error'
+            : s.original.kind === 'loading'
+              ? 'loading'
+              : 'ready';
 
   return (
     <Toast.Provider swipeDirection="right">
@@ -217,7 +223,12 @@ export function ExportPanel() {
               Open a project to export.
             </p>
           )}
-          <fieldset className="exp-fieldset" disabled={!project}>
+          {noImage && (
+            <p className="small muted" data-testid="exp-panel-no-image" data-reason="no_image">
+              No image yet. Generate one in New image.
+            </p>
+          )}
+          <fieldset className="exp-fieldset" disabled={!project || noImage}>
             <div className="exp-row">
               <span className="small muted">Grid</span>
               <ToggleGroup.Root

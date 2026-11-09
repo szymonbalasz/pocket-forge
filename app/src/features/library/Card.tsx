@@ -102,8 +102,14 @@ function Thumb({
   onFail: () => void;
 }) {
   if (!card.thumb_url || failed) {
+    // FR-GEN-03: a project with no image yet gets the placeholder (and its badge).
+    const noImage = card.badges.includes('no_image');
     return (
-      <span className="prj-card-thumb prj-card-thumb-empty" data-testid="prj-home-card-thumb">
+      <span
+        className="prj-card-thumb prj-card-thumb-empty"
+        data-testid="prj-home-card-thumb"
+        data-placeholder={noImage ? 'no_image' : undefined}
+      >
         {card.name.slice(0, 1).toUpperCase()}
       </span>
     );

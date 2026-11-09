@@ -186,7 +186,12 @@ export function prjMock(
     iterations: Number(p.iterations),
     last_edited: p.unreadable ? null : String(p.last_edited),
     thumb_url: p.thumb ? `http://pf-tiles.localhost/i/lib-${String(p.id)}.jpg` : null,
-    badges: p.unreadable ? [...(p.badges as CardBadge[]), 'unreadable'] : (p.badges as CardBadge[]),
+    badges: [
+      ...(p.badges as CardBadge[]),
+      ...(p.unreadable ? (['unreadable'] as const) : []),
+      // FR-GEN-03: no image yet → placeholder + badge (pf-core `library_list_projects`).
+      ...(p.noImage ? (['no_image'] as const) : []),
+    ],
   });
 
   const open = (): Rec | null =>
@@ -199,13 +204,15 @@ export function prjMock(
       kind: KIND[String(p.section)],
       name: p.name,
       image_path: p.noImage ? null : `${String(p.path)}/working/${String(p.original)}`,
+      has_image: !p.noImage,
+      original_image_id: p.noImage ? null : '01JLAYER00000000000000000',
       project_dir: p.path,
       saved: true,
       read_only: p.read_only,
       warnings: [...(p.warnings as Rec[])],
       width: p.noImage ? 0 : seed.image.w,
       height: p.noImage ? 0 : seed.image.h,
-      format: 'png',
+      format: p.noImage ? null : 'png',
       layers: p.noImage
         ? []
         : [

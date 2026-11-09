@@ -70,7 +70,7 @@ fn fr_prj_14_open_takes_a_project_folder_only() {
     assert_eq!(open_err(&outside), ErrorCode::OutsideLibrary);
     let p = e.open(&dir);
     assert_eq!(p.snapshot().name, "Crypt");
-    assert_eq!(p.snapshot().image_path, dir.join("working/Crypt.png"));
+    assert_eq!(p.snapshot().image_path, Some(dir.join("working/Crypt.png")));
 }
 
 #[test]
@@ -524,7 +524,7 @@ fn r48_3_resolve_image_gives_the_original_by_its_stable_id() {
     let e = env();
     let dir = e.project("Crypt");
     let p = e.open(&dir);
-    let id = p.snapshot().original_image_id;
+    let id = p.snapshot().original_image_id.unwrap();
     assert_eq!(id, p.manifest.layers[0].id);
     assert_eq!(
         p.resolve_image(id).unwrap(),
@@ -535,7 +535,7 @@ fn r48_3_resolve_image_gives_the_original_by_its_stable_id() {
     );
     assert_eq!(
         e.open(&dir).snapshot().original_image_id,
-        id,
+        Some(id),
         "stable across reopen"
     );
     assert_eq!(

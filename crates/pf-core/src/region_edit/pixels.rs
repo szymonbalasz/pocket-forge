@@ -104,7 +104,9 @@ impl OpenProjectSource {
         };
         OpenProjectSource {
             project_id: p.manifest.project_id,
-            size: (p.manifest.original.width, p.manifest.original.height),
+            // `layers[0]`'s size (FR-RGN-04 amended, FR-GEN-33); 0 × 0 with no image, whose
+            // decode fails with `no_image` (FR-GEN-03).
+            size: p.manifest.image_size().unwrap_or((0, 0)),
             read_only: p.read_only.is_some(),
             original: store::decoded_original(ctx, p),
             project_dir: p.dir.clone(),

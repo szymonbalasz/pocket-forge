@@ -124,7 +124,11 @@ function Pane({
           <ol className="prj-conflict-layers" data-testid={`prj-conflict-${side.side}-layers`}>
             {side.layers.map((l, i) => (
               <li key={l.id} data-record-id={l.id}>
-                {l.kind === 'original' ? 'Original' : `Patch ${i}`}
+                {l.kind === 'original'
+                  ? 'Original'
+                  : l.kind === 'base'
+                    ? 'Base image'
+                    : `Patch ${i}`}
                 {l.visible ? '' : ' (hidden)'}
               </li>
             ))}

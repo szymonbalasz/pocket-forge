@@ -306,7 +306,7 @@ fn fr_exp_11_webp_unavailable_over_16383_and_start_refuses_it() {
     {
         let mut s = t.core.state();
         let m = &mut s.project.as_mut().unwrap().manifest;
-        m.original.width = 16384;
+        m.original.as_mut().unwrap().width = 16384;
     }
     let plan = t
         .core
@@ -372,7 +372,8 @@ fn fr_exp_24_peak_over_2_gib_warns() {
     {
         let mut s = t.core.state();
         let m = &mut s.project.as_mut().unwrap().manifest;
-        (m.original.width, m.original.height) = (16384, 16384);
+        let o = m.original.as_mut().unwrap();
+        (o.width, o.height) = (16384, 16384);
     }
     let plan = t
         .core

@@ -287,7 +287,9 @@ fn protected_files(p: &OpenProject) -> HashSet<String> {
         .collect();
     keep.extend(m.layers.iter().filter_map(|l| l.file.clone()));
     keep.extend(p.refs.layers.iter().map(|id| layer_file(*id)));
-    keep.insert(m.original.file.clone());
+    keep.extend(m.original.iter().map(|o| o.file.clone()));
+    // Base images of earlier revisions (FR-GEN-27): write-once, never deleted.
+    keep.extend(p.refs.base_images.values().flatten().cloned());
     keep
 }
 

@@ -134,6 +134,14 @@ describe('export panel view', () => {
     expect(planLine(300, 300, plan({ width: 100, height: 100, scale: 1 / 3 }))).toContain('0.333×');
   });
 
+  test('FR-GEN-03 Start is disabled with no image yet', () => {
+    expect(startState({ ...ready, noImage: true })).toEqual({
+      enabled: false,
+      label: 'Export',
+      reason: 'No image yet',
+    });
+  });
+
   test('FR-EXP-15 Replace wording when the destination exists', () => {
     const now = Date.parse('2026-11-08T12:00:00Z');
     const p = plan({
