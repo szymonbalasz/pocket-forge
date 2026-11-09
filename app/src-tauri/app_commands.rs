@@ -113,4 +113,6 @@ pub const APP_COMMANDS: &[&str] = &[
     "prm_chat_login",
     "app_close_guard",
     "app_exit",
+    "app_close_unguard",
+    "app_close_ack",
 ];

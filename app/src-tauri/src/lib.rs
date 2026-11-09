@@ -88,40 +88,115 @@ fn app_ready(app: AppHandle, ok: bool, detail: String) -> Option<String> {
 /// R101: the main window's X (or quitting the app) is a project close. Once the UI said it runs
 /// the close guards (`app_close_guard`), a close request is held and handed to it as
 /// `app:close-requested`; the UI closes the project through its guards and then calls
-/// `app_exit`. Before that (the UI never loaded), X closes as it always did.
+/// `app_exit`. Before that (the UI never loaded), X closes as it always did. R109: the UI acks
+/// each request (`app_close_ack`); one not acked within `ACK_WITHIN` (a crashed or unmounted UI)
+/// closes the app anyway, and the UI un-guards when its listener goes (`app_close_unguard`).
 mod quit {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+    use std::time::Duration;
 
-    static GUARDED: AtomicBool = AtomicBool::new(false);
-    static EXITING: AtomicBool = AtomicBool::new(false);
+    /// R109: how long a held close waits for the UI to say it got it.
+    pub const ACK_WITHIN: Duration = Duration::from_secs(3);
 
-    pub fn guard() {
-        GUARDED.store(true, Ordering::SeqCst);
+    pub struct Quit {
+        /// Guards installed minus removed. Signed: a removal that arrives before its install
+        /// (React's dev double mount) still nets out.
+        guards: AtomicI64,
+        exiting: AtomicBool,
+        /// Close requests sent to the UI, and the latest one it acked.
+        asked: AtomicU64,
+        acked: AtomicU64,
     }
 
-    pub fn exiting() {
-        EXITING.store(true, Ordering::SeqCst);
-    }
+    pub static QUIT: Quit = Quit::new();
 
-    /// True if a close request must wait for the UI.
-    pub fn hold() -> bool {
-        held(
-            GUARDED.load(Ordering::SeqCst),
-            EXITING.load(Ordering::SeqCst),
-        )
-    }
+    impl Quit {
+        pub const fn new() -> Self {
+            Self {
+                guards: AtomicI64::new(0),
+                exiting: AtomicBool::new(false),
+                asked: AtomicU64::new(0),
+                acked: AtomicU64::new(0),
+            }
+        }
 
-    pub(crate) fn held(guarded: bool, exiting: bool) -> bool {
-        guarded && !exiting
+        pub fn guard(&self) {
+            self.guards.fetch_add(1, Ordering::SeqCst);
+        }
+
+        pub fn unguard(&self) {
+            self.guards.fetch_sub(1, Ordering::SeqCst);
+        }
+
+        /// The app is exiting from here on: a close is never held again.
+        pub fn exiting(&self) {
+            self.exiting.store(true, Ordering::SeqCst);
+        }
+
+        /// True if a close request must wait for the UI.
+        pub fn hold(&self) -> bool {
+            self.guards.load(Ordering::SeqCst) > 0 && !self.exiting.load(Ordering::SeqCst)
+        }
+
+        /// A close request goes to the UI: its number.
+        pub fn ask(&self) -> u64 {
+            self.asked.fetch_add(1, Ordering::SeqCst) + 1
+        }
+
+        /// The UI got the close requests sent so far.
+        pub fn ack(&self) {
+            let asked = self.asked.load(Ordering::SeqCst);
+            self.acked.fetch_max(asked, Ordering::SeqCst);
+        }
+
+        /// True if request `seq` is still unacked (and nothing else is exiting the app).
+        pub fn unanswered(&self, seq: u64) -> bool {
+            self.acked.load(Ordering::SeqCst) < seq && !self.exiting.load(Ordering::SeqCst)
+        }
     }
 
     #[cfg(test)]
     mod tests {
+        use super::Quit;
+
         #[test]
         fn r101_a_close_waits_for_the_ui_only_while_it_guards_and_not_once_it_exits() {
-            assert!(!super::held(false, false), "no UI yet: X closes");
-            assert!(super::held(true, false), "the UI runs the close guards");
-            assert!(!super::held(true, true), "the UI said exit");
+            let q = Quit::new();
+            assert!(!q.hold(), "no UI yet: X closes");
+            q.guard();
+            assert!(q.hold(), "the UI runs the close guards");
+            q.exiting();
+            assert!(!q.hold(), "the UI said exit");
+        }
+
+        #[test]
+        fn r109_fr_prj_21_the_ui_unguards_when_its_listener_goes() {
+            let q = Quit::new();
+            q.guard();
+            q.unguard();
+            assert!(!q.hold(), "the UI unmounted (a crash): X closes");
+            // React's dev double mount, the removal arriving first: still one guard.
+            q.unguard();
+            q.guard();
+            q.guard();
+            assert!(q.hold());
+        }
+
+        #[test]
+        fn r109_fr_prj_21_a_close_the_ui_doesnt_ack_is_unanswered() {
+            let q = Quit::new();
+            q.guard();
+            let first = q.ask();
+            assert!(q.unanswered(first), "no ack yet: closes after ACK_WITHIN");
+            q.ack();
+            assert!(!q.unanswered(first), "acked: the UI's guards decide");
+            let second = q.ask();
+            assert!(q.unanswered(second), "every request needs its own ack");
+            q.ack();
+            assert!(!q.unanswered(second));
+            let third = q.ask();
+            q.exiting();
+            assert!(!q.unanswered(third), "already exiting");
         }
     }
 }
@@ -129,14 +204,47 @@ mod quit {
 /// The UI's close guards are listening for `app:close-requested` (R101).
 #[tauri::command]
 fn app_close_guard() {
-    quit::guard();
+    quit::QUIT.guard();
+}
+
+/// The UI's close guards stopped listening (R109): X no longer waits for them.
+#[tauri::command]
+fn app_close_unguard() {
+    quit::QUIT.unguard();
+}
+
+/// The UI got `app:close-requested` (R109): the held close is its guards' to decide.
+#[tauri::command]
+fn app_close_ack() {
+    quit::QUIT.ack();
 }
 
 /// The UI closed the project (or none was open): the app exits (R101).
 #[tauri::command]
 fn app_exit(app: AppHandle) {
-    quit::exiting();
+    exit_app(&app);
+}
+
+/// Ends the app.
+fn exit_app(app: &AppHandle) {
+    quit::QUIT.exiting();
     app.exit(0);
+}
+
+/// R109: a held close the UI didn't ack within `ACK_WITHIN` closes the app anyway.
+fn close_unless_acked(app: AppHandle, seq: u64) {
+    let spawned = std::thread::Builder::new()
+        .name("pf-close-ack".into())
+        .spawn(move || {
+            std::thread::sleep(quit::ACK_WITHIN);
+            if quit::QUIT.unanswered(seq) {
+                tracing::warn!("the UI didn't answer the close request: closing anyway");
+                exit_app(&app);
+            }
+        });
+    if let Err(e) = spawned {
+        tracing::warn!(error = %e, "no close timeout");
+    }
 }
 
 fn scheme_response(core: &Core, path: &str) -> Response<Vec<u8>> {
@@ -199,11 +307,13 @@ pub fn run() {
             if let Some(main) = app.get_webview_window("main") {
                 let handle = app.handle().clone();
                 main.on_window_event(move |ev| match ev {
-                    tauri::WindowEvent::CloseRequested { api, .. } if quit::hold() => {
+                    tauri::WindowEvent::CloseRequested { api, .. } if quit::QUIT.hold() => {
                         api.prevent_close();
+                        let seq = quit::QUIT.ask();
                         if let Err(e) = handle.emit_to("main", "app:close-requested", ()) {
                             tracing::warn!(error = %e, "close request not delivered");
                         }
+                        close_unless_acked(handle.clone(), seq);
                     }
                     tauri::WindowEvent::Destroyed => chat_window::close_with_main(&handle),
                     _ => {}
