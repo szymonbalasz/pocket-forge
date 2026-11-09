@@ -110,4 +110,6 @@ pub const APP_COMMANDS: &[&str] = &[
     "app_ready",
     "prm_window_open",
     "prm_chat_login",
+    "app_close_guard",
+    "app_exit",
 ];

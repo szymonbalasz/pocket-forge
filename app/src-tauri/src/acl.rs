@@ -11,7 +11,13 @@ use serde_json::Value;
 include!("../app_commands.rs");
 
 /// The Tauri-layer commands next to the core ones (`commands::handler`).
-const APP_LEVEL: [&str; 3] = ["app_ready", "prm_window_open", "prm_chat_login"];
+const APP_LEVEL: [&str; 5] = [
+    "app_ready",
+    "prm_window_open",
+    "prm_chat_login",
+    "app_close_guard",
+    "app_exit",
+];
 
 /// What `ChatWindow.tsx` calls (R96). Settings, logout, provider, library and export are not
 /// among them; turning the chat on from the chat window goes through the main window.
