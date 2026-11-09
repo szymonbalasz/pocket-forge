@@ -62,7 +62,7 @@
 | PRM 0: `pf-chat` crate + probe | — | merged | done; owner probe passed (R87, R88; min 2.1.319) | — |
 | PRM 4: pf-chat adapter | — | merged | done (R89) | — |
 | PRM 5: chat core | — | merged | done (R90) | — |
-| PRM 6: chat window + Settings login | `prm-0` | building | — | needs the window capability (orchestrator) |
+| PRM 6: chat window + Settings login | — | merged | done (R92) | walkthrough; BL-41, BL-42 |
 | PRM 1: helpers core | — | merged | done (R78) | — |
 | PRM 2: prompt block + Settings UI (mocked) | — | merged | done | — |
 | PRM 3: prompt block in Region edit | — | merged | done (R81) | PRM 4 waits on the owner's probe |

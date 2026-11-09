@@ -53,3 +53,4 @@
 - Focus ring is always visible (`--pf-accent`). Every dialog has Esc to close and a default focus.
 - Long operations show progress in the status bar, never a blocking modal, except the spend confirm dialog.
 - `data-testid` per AGENTS §9.
+- **Prompt chat window** (R92): its own window (`prompt-chat`, created from Rust), same tokens and components as the main window, no slots or rail; it follows the main window's project and visible tab.
