@@ -217,8 +217,13 @@ pub struct Purged {
 /// starred candidates and files any layer or revision references are never deleted (#18), even
 /// if an item names them. Nothing else is ever deleted. A candidate whose file is purged keeps
 /// its record and `trash_id`, and gets `purged_at` (BL-23).
+///
+/// R102: an item keeps the files that weren't deleted (kept, or `remove_file` failed), so they
+/// stay indexed and the delete is retried at the next open; only a candidate whose file is gone
+/// gets `purged_at`. Nothing is purged while a revision or job file is unreadable (the kept set
+/// may be missing layers).
 pub fn purge_expired(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> CoreResult<Purged> {
-    if p.read_only.is_some() {
+    if p.read_only.is_some() || p.refs.incomplete {
         return Ok(Purged::default());
     }
     let now = ctx.now();
@@ -235,13 +240,16 @@ pub fn purge_expired(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> Co
     let protected = protected_files(p);
     let mut out = Purged::default();
     let mut purged: HashSet<(Ulid, &str)> = HashSet::new();
+    // Item id → the files it still holds after this purge.
+    let mut left: std::collections::HashMap<Ulid, Vec<String>> = Default::default();
     for item in &expired {
+        let mut stays = vec![];
         for from in &item.files {
             if protected.contains(from.as_str()) {
                 tracing::warn!(file = %from, "a kept file was in the trash; not purged");
+                stays.push(from.clone());
                 continue;
             }
-            purged.insert((item.id, from.as_str()));
             let path = p.path(&item.trashed_path(from));
             let bytes = file_bytes(&path);
             match std::fs::remove_file(&path) {
@@ -249,15 +257,30 @@ pub fn purge_expired(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> Co
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => {
                     tracing::warn!(error = %e, file = %path.display(), "purge failed; retried at the next open");
+                    stays.push(from.clone());
+                    continue;
                 }
             }
+            purged.insert((item.id, from.as_str()));
         }
         remove_empty_tree(&p.path(&format!("{TRASH_DIR}/{}", item.id)));
-        out.count += 1;
+        if stays.is_empty() {
+            out.count += 1;
+        }
+        left.insert(item.id, stays);
     }
-    let ids: HashSet<Ulid> = expired.iter().map(|t| t.id).collect();
+    if purged.is_empty() && out.count == 0 {
+        // Nothing could be deleted (kept files, locks): the manifest stays as it is.
+        return Ok(out);
+    }
     commit(ctx, install_id, p, |_, _, m, _| {
-        m.trash.retain(|t| !ids.contains(&t.id));
+        for t in m.trash.iter_mut() {
+            if let Some(stays) = left.get(&t.id) {
+                t.files.clone_from(stays);
+            }
+        }
+        m.trash
+            .retain(|t| !left.contains_key(&t.id) || !t.files.is_empty());
         for c in m.candidates.iter_mut() {
             if let Some(tid) = c.trash_id
                 && c.purged_at.is_none()

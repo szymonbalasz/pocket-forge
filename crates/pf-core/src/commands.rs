@@ -480,6 +480,8 @@ impl Command for ProjectOpen {
 
     fn run(core: &Core, input: Self::Input) -> CoreResult<ProjectSnapshot> {
         let mut state = core.state();
+        // The open project's waiting save is never dropped by opening another (FR-PRJ-21).
+        refuse_unsaved(core, &mut state)?;
         let settings = state.settings.clone();
         let mut p = project::open(
             &core.ctx,
@@ -502,6 +504,46 @@ impl Command for ProjectOpen {
         state.project = Some(p);
         Ok(snap)
     }
+}
+
+/// FR-PRJ-21: closing the open project (to close or to open another) must not lose what only
+/// lives in memory. One last try at the waiting draft and EXP's pending settings, then
+/// `unsaved` with the reason if something still waits.
+fn refuse_unsaved(core: &Core, state: &mut crate::core::State) -> CoreResult<()> {
+    let install_id = state.settings.install_id;
+    if let Some(p) = state.project.as_mut() {
+        // One last try. Spooled writes are on disk already (FR-PRJ-40); only an in-memory
+        // draft makes closing ask.
+        project::retry_pending(&core.ctx, install_id, p);
+    }
+    let export_unsaved = crate::export::unsaved_on_close(&core.ctx, state);
+    if let Some(p) = state
+        .project
+        .as_ref()
+        .filter(|p| export_unsaved || project::has_unsaved(p))
+    {
+        // Says why, without paths (walkthrough D3).
+        let moved = p.warnings.iter().any(|w| w.code == project::FOLDER_MOVED);
+        let (reason, message) = if moved {
+            (
+                project::FOLDER_MOVED,
+                "Your latest changes aren't saved: the project folder was moved or renamed. Close anyway?",
+            )
+        } else if p.conflict.is_some() {
+            (
+                "conflict",
+                "Your latest changes aren't saved: this project was also changed on another machine. Close anyway?",
+            )
+        } else {
+            (
+                "locked",
+                "Your latest changes aren't saved yet: the file is locked. Close anyway?",
+            )
+        };
+        return Err(CoreError::new(ErrorCode::Unsaved, message)
+            .with_detail(serde_json::json!({ "reason": reason })));
+    }
+    Ok(())
 }
 
 pub struct ProjectClose;
@@ -527,41 +569,10 @@ impl Command for ProjectClose {
     /// running export is canceled once the close goes ahead (OQ-EXP-09: the UI asked).
     fn run(core: &Core, input: ProjectCloseInput) -> CoreResult<Ok_> {
         let mut state = core.state();
-        let install_id = state.settings.install_id;
-        if !input.force
-            && let Some(p) = state.project.as_mut()
-        {
-            // One last try. Spooled writes are on disk already (FR-PRJ-40); only an in-memory
-            // draft makes closing ask.
-            project::retry_pending(&core.ctx, install_id, p);
-        }
-        let export_unsaved = crate::export::unsaved_on_close(&core.ctx, &mut state);
-        if !input.force
-            && let Some(p) = state
-                .project
-                .as_ref()
-                .filter(|p| export_unsaved || project::has_unsaved(p))
-        {
-            // Says why, without paths (walkthrough D3).
-            let moved = p.warnings.iter().any(|w| w.code == project::FOLDER_MOVED);
-            let (reason, message) = if moved {
-                (
-                    project::FOLDER_MOVED,
-                    "Your latest changes aren't saved: the project folder was moved or renamed. Close anyway?",
-                )
-            } else if p.conflict.is_some() {
-                (
-                    "conflict",
-                    "Your latest changes aren't saved: this project was also changed on another machine. Close anyway?",
-                )
-            } else {
-                (
-                    "locked",
-                    "Your latest changes aren't saved yet: the file is locked. Close anyway?",
-                )
-            };
-            return Err(CoreError::new(ErrorCode::Unsaved, message)
-                .with_detail(serde_json::json!({ "reason": reason })));
+        if input.force {
+            crate::export::unsaved_on_close(&core.ctx, &mut state);
+        } else {
+            refuse_unsaved(core, &mut state)?;
         }
         crate::export::on_project_close(&core.ctx, &mut state);
         if let Some(p) = state.project.take() {

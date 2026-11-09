@@ -178,6 +178,10 @@ pub(crate) fn trash_superseded_masks(
     m: &mut Manifest,
     plan: &CommitPlan,
 ) {
+    if p.refs.incomplete {
+        // R102: a mask only an unreadable revision or job uses would look superseded.
+        return;
+    }
     let mut used: HashSet<Ulid> = p.refs.masks.clone();
     used.extend(m.draft.as_ref().and_then(|d| d.mask_id));
     used.extend(m.layers.iter().filter_map(|l| l.mask_id));
@@ -451,6 +455,9 @@ pub fn update_job(
     if let Some(e) = blocked(p) {
         return Err(e);
     }
+    // R102: refused (and spooled by the runner) once the folder moved, never written to a
+    // recreated old path.
+    super::require_folder(p)?;
     write_job(ctx, p, &next)?;
     set_job(p, next.clone());
     Ok(next)
@@ -505,6 +512,10 @@ fn next_iteration(p: &OpenProject, prompt: &str, empty_slug: &str) -> Iteration 
     }
 }
 
+/// `detail.reason` of `add_candidates`' `conflict` when a candidate file already belongs to a
+/// candidate record: retrying never helps (R102), unlike a sync conflict.
+pub const FILE_TAKEN: &str = "file_taken";
+
 /// `add_candidates` (FR-PRJ-30, schema §3): `job.json` with `iteration` set → the candidate files
 /// in `results/NNN <slug>/NN.<ext>` → the manifest → `job.json` `fetched`. A re-fetch after a
 /// crash reuses the job's folder and replaces only files no candidate record references.
@@ -521,6 +532,7 @@ pub fn add_candidates(
     if let Some(e) = blocked(p) {
         return Err(e);
     }
+    super::require_folder(p)?;
     let mut job = job(p, job_id)?.clone();
     if job.state != JobState::Succeeded {
         return Err(CoreError::invalid(
@@ -564,7 +576,8 @@ pub fn add_candidates(
             return Err(CoreError::new(
                 ErrorCode::Conflict,
                 format!("{file} already belongs to a candidate"),
-            ));
+            )
+            .with_detail(serde_json::json!({ "reason": FILE_TAKEN })));
         }
         records.push(Candidate {
             id: ctx.new_id(),

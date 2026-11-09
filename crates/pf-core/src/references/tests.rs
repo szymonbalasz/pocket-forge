@@ -455,6 +455,70 @@ fn fr_ref_12_purge_after_30_days_under_the_fake_clock() {
 }
 
 #[test]
+fn fr_ref_12_r102_a_failed_trash_move_is_rolled_back_not_forward() {
+    let e = env();
+    let out = create(&e, "Swords", &[("a.png", swatch(1)), ("b.png", swatch(2))]);
+    let l = loc(&e, out.pack.pack_id);
+    // b.png's move fails (gone, locked): a.png already moved.
+    std::fs::remove_file(refs(&e).join("Swords/b.png")).unwrap();
+    let files = ["a.png".to_owned(), "b.png".to_owned()];
+    let err = trash::trash_files(
+        &e.ctx,
+        &e.lib(),
+        Some(l.json.pack_id),
+        "Swords",
+        &l.dir,
+        &files,
+    );
+    assert!(err.is_err());
+    assert!(refs(&e).join("Swords/a.png").is_file(), "moved back");
+    assert!(
+        trash::list(&e.ctx, &e.settings).is_empty(),
+        "no item claims it"
+    );
+    super::sweep_startup(&e.ctx, &e.settings);
+    assert!(
+        refs(&e).join("Swords/a.png").is_file(),
+        "never rolled forward"
+    );
+
+    // A whole pack whose move fails leaves no item either.
+    std::fs::remove_dir_all(&l.dir).unwrap();
+    assert!(trash::delete_pack(&e.ctx, &l).is_err());
+    assert!(trash::list(&e.ctx, &e.settings).is_empty());
+}
+
+#[test]
+fn fr_ref_12_r102_a_failed_restore_shows_the_item_again() {
+    let mut e = env();
+    let out = create(&e, "Swords", &[("a.png", swatch(1))]);
+    let l = loc(&e, out.pack.pack_id);
+    let id = trash::remove_images(&e.ctx, &l, &["a.png".into()]).unwrap();
+    // The pack folder can't be made again (a file has its name).
+    std::fs::remove_dir_all(&l.dir).unwrap();
+    std::fs::write(&l.dir, b"x").unwrap();
+    assert!(trash::restore(&e.ctx, &e.settings, id).is_err());
+    let listed = trash::list(&e.ctx, &e.settings);
+    assert_eq!(listed.len(), 1, "still in Recently deleted");
+    assert_eq!(listed[0].files, ["a.png"]);
+    // A restore left unfinished is never purged.
+    e.ctx.clock = Box::new(ManualClock::new(
+        crate::time::Timestamp(T0).plus(Duration::from_secs(31 * 86_400)),
+    ));
+    let item_dir = trash::trash_dir(&e.lib()).join(id.to_string());
+    let mut item: trash::TrashItem =
+        serde_json::from_slice(&std::fs::read(item_dir.join("item.json")).unwrap()).unwrap();
+    item.restored_at = Some(e.ctx.now());
+    std::fs::write(
+        item_dir.join("item.json"),
+        serde_json::to_vec(&item).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(trash::purge(&e.ctx, &e.settings).0, 0);
+    assert!(item_dir.join("a.png").is_file());
+}
+
+#[test]
 fn fr_ref_12_interrupted_trash_move_rolls_forward() {
     let e = env();
     let out = create(&e, "Swords", &[("a.png", swatch(1)), ("b.png", swatch(2))]);

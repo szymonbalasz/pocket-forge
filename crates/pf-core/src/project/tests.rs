@@ -154,6 +154,35 @@ fn fr_prj_23_fr_prj_21_save_with_a_pending_draft_saves_it_or_says_why() {
 }
 
 #[test]
+fn fr_prj_23_r98_a_restore_is_never_overwritten_by_the_draft_waiting_behind_a_lock() {
+    let mut e = env();
+    let mut p = e.open(&e.project("Crypt"));
+    let r0 = p.manifest.head_revision;
+    draft(&e, &mut p, "later").unwrap();
+    save_revision(&e.ctx, e.install(), &mut p, None).unwrap();
+    // A region-edit draft and a New image draft hit the lock and wait in memory.
+    e.ctx.faults = Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap();
+    let waiting = DraftInput {
+        final_prompt: "waiting".into(),
+        ..Default::default()
+    };
+    put_draft(&e.ctx, e.install(), &mut p, waiting, None).unwrap_err();
+    let generate = serde_json::json!({"prompt": "a tavern"});
+    let gen_only = DraftInput::generate_only(Some(generate.clone()));
+    put_draft(&e.ctx, e.install(), &mut p, gen_only, None).unwrap_err();
+    assert!(has_unsaved(&p));
+    // The lock clears; undo restores r0 before the 10 s retry.
+    e.ctx.faults = Faults::none();
+    restore_revision(&e.ctx, e.install(), &mut p, r0).unwrap();
+    retry_pending(&e.ctx, e.install(), &mut p);
+    assert!(!has_unsaved(&p));
+    let d = p.manifest.draft.clone().unwrap();
+    // Restored: r0 had no region-edit draft. Kept: the current draft.generate (R98).
+    assert_eq!(d.final_prompt, "");
+    assert_eq!(d.generate, Some(generate));
+}
+
+#[test]
 fn fr_prj_43_restore_writes_a_new_restore_revision() {
     let e = env();
     let mut p = e.open(&e.project("Crypt"));
@@ -486,6 +515,58 @@ fn fr_prj_24_corrupt_manifest_is_rebuilt_too() {
     std::fs::write(dir.join("project.json"), b"{ broken").unwrap();
     let q = e.open(&dir);
     assert!(q.warnings.iter().any(|w| w.code == "recovered"));
+}
+
+#[test]
+fn fr_prj_24_r102_a_broken_manifest_is_backed_up_and_keeps_its_project_id() {
+    let e = env();
+    let dir = e.project("Crypt");
+    let p = e.open(&dir);
+    let id = p.manifest.project_id;
+    drop(p);
+    // Truncated by a sync: not JSON any more.
+    let full = std::fs::read(dir.join("project.json")).unwrap();
+    let cut = full[..full.len() / 2].to_vec();
+    std::fs::write(dir.join("project.json"), &cut).unwrap();
+    let q = e.open(&dir);
+    assert!(q.warnings.iter().any(|w| w.code == "recovered"));
+    assert_eq!(q.manifest.project_id, id, "the old project_id is kept");
+    let backups: Vec<_> = std::fs::read_dir(dir.join(BROKEN_DIR))
+        .unwrap()
+        .map(|e| std::fs::read(e.unwrap().path()).unwrap())
+        .collect();
+    assert_eq!(backups, [cut], "the broken file is copied aside first");
+}
+
+#[test]
+fn fr_prj_26_r102_an_unknown_enum_value_opens_read_only_as_newer() {
+    let e = env();
+    let dir = e.project("Crypt");
+    let mut p = e.open(&dir);
+    draft(&e, &mut p, "keep me").unwrap();
+    let mut v: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("project.json")).unwrap()).unwrap();
+    v["trash"] = serde_json::json!([{
+        "id": Ulid::from_parts(5, 5).to_string(),
+        "kind": "kind_from_the_future",
+        "files": [],
+        "trashed_at": "2026-01-01T00:00:00.000Z",
+        "reason": "x"
+    }]);
+    let bytes = serde_json::to_vec_pretty(&v).unwrap();
+    std::fs::write(dir.join("project.json"), &bytes).unwrap();
+    let q = e.open(&dir);
+    assert_eq!(q.read_only, Some(ReadOnlyReason::NewerVersion));
+    assert!(q.warnings.iter().any(|w| w.code == "newer_version"));
+    assert!(!q.warnings.iter().any(|w| w.code == "recovered"));
+    assert_eq!(q.manifest.project_id, p.manifest.project_id);
+    assert_eq!(q.manifest.draft.unwrap().final_prompt, "keep me");
+    assert_eq!(
+        std::fs::read(dir.join("project.json")).unwrap(),
+        bytes,
+        "never written"
+    );
+    assert!(!dir.join(BROKEN_DIR).exists());
 }
 
 #[test]

@@ -110,7 +110,7 @@ Full tree and field tables: [manifest-schema](../architecture/manifest-schema.md
 | `project_create` / `project_create_cancel` | section, `paths[]` → per item `created{path}` \| `already_in_library{path}` \| `skipped(reason)` | `library_unavailable`, `canceled` (partial results) |
 | `project_create_from_clipboard` | section, image bytes → project path | `unsupported`, `too_large` |
 | `project_rename` | path, name → new path | `name_taken`, `invalid_name`, `project_open`, `locked` |
-| `project_open` / `project_close` | project folder → snapshot (`kind`, name, layers, draft, revisions) + `warnings[]` (read-only reason, conflict, recovered, resumable, lost) / — → ok | `not_found`, `not_a_project`, `outside_library`, `not_available_offline`, `corrupt` / `unsaved` |
+| `project_open` / `project_close` | project folder → snapshot (`kind`, name, layers, draft, revisions) + `warnings[]` (read-only reason, conflict, recovered, resumable, lost) / — → ok | `not_found`, `not_a_project`, `outside_library`, `not_available_offline`, `corrupt`, `unsaved` (another open project still has waiting changes, R101) / `unsaved` |
 | `project_folder_list` / `project_folder_add` | folder (`working\|references\|structure\|parts\|exports`) / folder, `paths[]` → files `[{name, bytes, mtime, image}]` | `unknown_folder`, `read_only` (add), `not_found` (`detail.reason = folder_moved`, BL-30) |
 | `project_put_draft` | draft (+ EXP's unsaved export settings, R30) → `seq` | `read_only`, `locked`, `conflict` |
 | `project_list_revisions` / `project_save_revision` / `project_restore_revision` | — / label? / `rev_id` → `[{id, seq, created_at, reason, label}]` / revision | `unchanged`, `unknown_id`, `read_only` |

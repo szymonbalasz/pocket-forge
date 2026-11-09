@@ -39,8 +39,11 @@ fn read_dir_names(dir: &Path) -> Vec<String> {
     names
 }
 
-fn load_jobs(dir: &Path) -> BTreeMap<Ulid, JobFile> {
+/// The job files that could be read, and whether any could not (cloud-only while offline, a
+/// sync still writing it): then what the jobs reference isn't fully known (R102).
+fn load_jobs(dir: &Path) -> (BTreeMap<Ulid, JobFile>, bool) {
     let mut jobs = BTreeMap::new();
+    let mut unreadable = false;
     for name in read_dir_names(&dir.join(JOBS_DIR)) {
         let path = dir.join(JOBS_DIR).join(&name).join(JOB_FILE);
         if !path.is_file() {
@@ -50,31 +53,40 @@ fn load_jobs(dir: &Path) -> BTreeMap<Ulid, JobFile> {
             Ok(job) => {
                 jobs.insert(job.id, job);
             }
-            Err(e) => tracing::warn!(error = %e, "job file unreadable; skipped"),
+            Err(e) => {
+                unreadable = true;
+                tracing::warn!(error = %e, "job file unreadable; skipped");
+            }
         }
     }
-    jobs
+    (jobs, unreadable)
 }
 
-fn load_revisions(dir: &Path) -> Vec<RevisionFile> {
+/// The revision files that could be read, and whether any could not (R102, as [`load_jobs`]).
+fn load_revisions(dir: &Path) -> (Vec<RevisionFile>, bool) {
     let mut revs = vec![];
+    let mut unreadable = false;
     for name in read_dir_names(&dir.join(REVISIONS_DIR)) {
         if !name.ends_with(".json") || name.contains(fsx::TEMP_MARKER) {
             continue;
         }
         match read_json::<RevisionFile>(&dir.join(REVISIONS_DIR).join(&name)) {
             Ok(rev) => revs.push(rev),
-            Err(e) => tracing::warn!(error = %e, "revision file unreadable; skipped"),
+            Err(e) => {
+                unreadable = true;
+                tracing::warn!(error = %e, "revision file unreadable; skipped");
+            }
         }
     }
     revs.sort_by_key(|r| (r.seq, r.created_at, r.id));
-    revs
+    (revs, unreadable)
 }
 
 /// Loads the job files (authoritative, R2) and the revision files, and rebuilds the manifest's
 /// `jobs[]` and `revisions[]` indexes from them in memory (written at the next commit).
 pub(super) fn load_history(p: &mut OpenProject) -> CoreResult<()> {
-    p.jobs = load_jobs(&p.dir);
+    let (jobs, jobs_unreadable) = load_jobs(&p.dir);
+    p.jobs = jobs;
     let old_rows: BTreeMap<Ulid, Extra> = p
         .manifest
         .jobs
@@ -99,8 +111,11 @@ pub(super) fn load_history(p: &mut OpenProject) -> CoreResult<()> {
     }
     p.manifest.jobs = rows;
 
-    let revs = load_revisions(&p.dir);
-    let mut refs = RevisionRefs::default();
+    let (revs, revs_unreadable) = load_revisions(&p.dir);
+    let mut refs = RevisionRefs {
+        incomplete: jobs_unreadable || revs_unreadable,
+        ..RevisionRefs::default()
+    };
     let mut entries: Vec<RevisionEntry> = revs.iter().map(|r| r.entry()).collect();
     for r in &revs {
         refs.add(r);
@@ -177,7 +192,8 @@ pub(super) fn on_open(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> C
         apply_file_moves(p);
         // Nothing is committed while a conflict waits for the user's pick (FR-PRJ-36).
         if p.conflict.is_none() {
-            let orphans = find_orphans(p);
+            // R102: with a revision or job file unreadable, nothing is called an orphan.
+            let orphans = find_orphans(p).unwrap_or_default();
             if !orphans.is_empty() || !super::conflict::side_copies(p).is_empty() {
                 commit(ctx, install_id, p, |ctx, _, m, _| {
                     if !orphans.is_empty() {
@@ -268,8 +284,34 @@ fn remove_empty_result_dir(p: &OpenProject, rel: &str) {
     }
 }
 
+/// How old a job folder without a `job.json` must be before its files count as orphans: a
+/// younger one may still be syncing (its `job.json` arrives later), and the mask it uses isn't
+/// known yet. An older one is left over from a crash between the input PNGs and `job.json`.
+const JOBLESS_FOLDER_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 86_400);
+
+/// True if every file in `dir` was last modified more than [`JOBLESS_FOLDER_AGE`] ago.
+fn all_files_old(dir: &Path) -> bool {
+    let now = std::time::SystemTime::now();
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .all(|e| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| now.duration_since(t).ok())
+                .is_some_and(|age| age > JOBLESS_FOLDER_AGE)
+        })
+}
+
 /// Files in `.pforge/` that no manifest field, revision or job file references (FR-PRJ-20).
-fn find_orphans(p: &OpenProject) -> Vec<String> {
+/// `None` when that can't be known this open (R102): a revision or job file is unreadable, or a
+/// job folder's `job.json` hasn't arrived yet. Then nothing is swept.
+fn find_orphans(p: &OpenProject) -> Option<Vec<String>> {
+    if p.refs.incomplete {
+        return None;
+    }
     let m = &p.manifest;
     let mut layers: HashSet<Ulid> = p.refs.layers.clone();
     layers.extend(m.layers.iter().map(|l| l.id));
@@ -303,6 +345,9 @@ fn find_orphans(p: &OpenProject) -> Vec<String> {
             // A known job folder, or one whose file is still syncing: never swept.
             continue;
         }
+        if !all_files_old(&p.path(&job_dir)) {
+            return None;
+        }
         for file in read_dir_names(&p.path(&job_dir)) {
             let rel = format!("{job_dir}/{file}");
             if p.path(&rel).is_file() {
@@ -320,7 +365,7 @@ fn find_orphans(p: &OpenProject) -> Vec<String> {
         }
     }
     orphans.retain(|o| !in_trash.contains(o.as_str()));
-    orphans
+    Some(orphans)
 }
 
 /// FR-PRJ-24: a manifest rebuilt from the newest revision, the revision files and the job files.
@@ -330,12 +375,12 @@ pub(super) fn rebuild_manifest(
     settings: &Settings,
     dir: &Path,
 ) -> CoreResult<Option<Manifest>> {
-    let revs = load_revisions(dir);
+    let (revs, _) = load_revisions(dir);
     let Some(newest) = revs.last() else {
         return Ok(None);
     };
     let original = rebuild_original(ctx, dir, &revs)?;
-    let jobs = load_jobs(dir);
+    let (jobs, _) = load_jobs(dir);
     let accepted: HashSet<Ulid> = newest
         .layers
         .iter()
