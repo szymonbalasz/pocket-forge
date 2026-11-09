@@ -41,6 +41,8 @@ export class UndoStack {
   private pushes = 0;
   private epoch = 0;
   private readonly listeners = new Set<(s: UndoSnapshot) => void>();
+  /** While any says true, undo and redo do nothing (a stroke in progress, FR-EDT-21). */
+  private readonly holds = new Set<() => boolean>();
 
   constructor(readonly budget = UNDO_BYTES) {}
 
@@ -59,6 +61,12 @@ export class UndoStack {
       error: this.error,
       bytes: this.total,
     };
+  }
+
+  /** Registers a hold; returns its removal. */
+  hold(held: () => boolean): () => void {
+    this.holds.add(held);
+    return () => this.holds.delete(held);
   }
 
   /** A new action: clears redo; drops the oldest entries over budget but keeps the newest. */
@@ -108,7 +116,7 @@ export class UndoStack {
 
   private async step(from: UndoEntry[], to: UndoEntry[], op: 'undo' | 'redo'): Promise<boolean> {
     const e = from.at(-1);
-    if (!e || this.busy) return false;
+    if (!e || this.busy || [...this.holds].some((h) => h())) return false;
     this.busy = true;
     this.error = null;
     this.emit();

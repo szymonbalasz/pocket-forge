@@ -353,6 +353,28 @@ describe('mask controller', () => {
     expect(c.version).toBe(before);
   });
 
+  test('FR-EDT-21 Ctrl+Z mid-stroke does nothing: the stroke entry stays byte-exact', async () => {
+    const { c, undo } = setup();
+    c.changeRegion(region(0, 0, 64, 64));
+    const empty = maskHash(c.buffer!.data);
+    c.beginStroke({ x: 10, y: 10 }, 'paint', 8, 1);
+    c.endStroke();
+    const first = maskHash(c.buffer!.data);
+    c.beginStroke({ x: 12, y: 10 }, 'paint', 8, 1);
+    expect(await undo.undo()).toBe(false); // pointer still down
+    c.moveStroke({ x: 40, y: 10 });
+    c.endStroke();
+    expect(undo.snapshot()).toMatchObject({ depth: 3, redo: 0 });
+    await undo.undo();
+    expect(maskHash(c.buffer!.data)).toBe(first);
+    await undo.undo();
+    expect(maskHash(c.buffer!.data)).toBe(empty);
+    // A disposed controller no longer holds the stack.
+    c.beginStroke({ x: 10, y: 10 }, 'paint', 8, 1);
+    c.dispose();
+    expect(await undo.undo()).toBe(true);
+  });
+
   test('FR-EDT-16 fill and clear set every pixel and are one undo step each', async () => {
     const { c, undo } = setup();
     c.changeRegion(region(0, 0, 8, 8));

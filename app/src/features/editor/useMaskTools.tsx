@@ -170,6 +170,7 @@ export function useMaskTools({
 
   useEffect(
     () => () => {
+      ctl.current?.dispose();
       ctl.current = null;
       sync.current?.dispose();
       sync.current = null;

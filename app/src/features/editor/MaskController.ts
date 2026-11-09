@@ -61,7 +61,20 @@ export class MaskController {
   /** Bumped on every content change; slice 5 compares it with the last submitted version. */
   version = 0;
 
-  constructor(private readonly deps: MaskControllerDeps) {}
+  /** FR-EDT-21: one stroke is one entry, so undo and redo wait for the pointer up. An undo
+   *  mid-stroke would change rows the stroke already saved as its "before" (or swap the buffer
+   *  under it, for a region entry). */
+  private readonly release: () => void;
+
+  constructor(private readonly deps: MaskControllerDeps) {
+    this.release = deps.undo.hold(() => this.stroke !== null);
+  }
+
+  /** The canvas unmounted: the stack is no longer held by this controller's strokes. */
+  dispose(): void {
+    this.stroke = null;
+    this.release();
+  }
 
   /** Draws the current mask on a new view: the Stage remounted with a new mask layer (D1). */
   setView(view: MaskView): void {
