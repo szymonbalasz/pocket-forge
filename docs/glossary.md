@@ -47,7 +47,8 @@
 | **Reference pack** | A named, reusable set of reference images kept as a folder in `<library-root>/References/<pack>/`, optionally attached to a request (#51). |
 | **Structural sketch** | A drawn or imported image that fixes layout or pose (the *structure* role). |
 | **Art recipe** | Reusable production guidance: style text, approved references, composition constraints, output requirements and tested settings. |
-| **Final prompt** | The exact prompt text submitted to the provider. It is always visible and editable. |
+| **Final prompt** | The exact prompt text submitted to the provider: the user's typed prompt, plus the **blend instruction** when it is on (#55). It is always visible; the typed part is editable. |
+| **Blend instruction** | A fixed, editable instruction appended to a region edit's typed prompt (on by default) that tells the model to continue the surrounding map across the mask edge (#55). Not an alpha fade; see **feather**. |
 | **Provider** | The generation service. Currently Scenario. |
 | **Fake provider** | A deterministic stand-in provider used in dev and tests. It never spends credits. |
 | **Mask convention** | How a given model reads a mask (e.g. white = edit, black = edit, transparent = edit). The app converts from its canonical mask. |
