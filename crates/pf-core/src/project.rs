@@ -1264,4 +1264,6 @@ pub fn folder_add(
 }
 
 #[cfg(test)]
+mod gen_tests;
+#[cfg(test)]
 mod tests;

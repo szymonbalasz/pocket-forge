@@ -104,6 +104,8 @@ tauri_commands! {
     rgn_job_discard_rest => c::RgnJobDiscardRest,
     rgn_blend_instruction_get => c::RgnBlendInstructionGet,
     rgn_blend_instruction_set => c::RgnBlendInstructionSet,
+    gen_project_create => c::GenProjectCreate,
+    gen_project_suggest_name => c::GenProjectSuggestName,
 }
 
 #[cfg(test)]

@@ -112,6 +112,11 @@ impl Env {
         }
     }
 
+    /// A Generate new project with no image (FR-GEN-02); returns its folder.
+    pub fn empty_project(&self, kind: Kind, name: &str) -> PathBuf {
+        crate::create::create_empty_project(&self.ctx, &self.settings, kind, name, None).unwrap()
+    }
+
     pub fn open(&self, dir: &Path) -> OpenProject {
         project::open(&self.ctx, &self.settings, dir, None).unwrap()
     }

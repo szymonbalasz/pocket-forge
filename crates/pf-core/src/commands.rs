@@ -363,6 +363,99 @@ impl Command for ProjectRename {
     }
 }
 
+// ---------------------------------------------------------------- Generate new (GEN)
+
+pub struct GenProjectCreate;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenProjectCreateInput {
+    pub section: SectionInput,
+    pub name: String,
+}
+
+impl Validate for GenProjectCreateInput {
+    fn validate(&self) -> CoreResult<()> {
+        if self.name.chars().count() > 4 * naming::MAX_NAME_CHARS {
+            return Err(
+                CoreError::new(ErrorCode::InvalidName, "the name is too long").with_field("name"),
+            );
+        }
+        Ok(())
+    }
+}
+
+impl Command for GenProjectCreate {
+    const NAME: &'static str = "gen_project_create";
+    type Input = GenProjectCreateInput;
+    type Output = PathOutput;
+
+    /// FR-GEN-02: a project with no image (`original: null`, `layers: []`, `r0`). The UI then
+    /// opens it with `project_open` (FR-GEN-01).
+    fn run(core: &Core, input: Self::Input) -> CoreResult<PathOutput> {
+        let _one_at_a_time = core.create_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let settings = core.state().settings.clone();
+        let path = create::create_empty_project(
+            &core.ctx,
+            &settings,
+            input.section.into(),
+            &input.name,
+            Some(&core.thumbs),
+        )?;
+        Ok(PathOutput { path })
+    }
+}
+
+pub struct GenProjectSuggestName;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GenProjectSuggestNameInput {
+    pub section: SectionInput,
+    /// Default: the section's prefill (`New map` / `New token` / `New item`).
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+impl Validate for GenProjectSuggestNameInput {
+    fn validate(&self) -> CoreResult<()> {
+        if self
+            .name
+            .as_ref()
+            .is_some_and(|n| n.chars().count() > 4 * naming::MAX_NAME_CHARS)
+        {
+            return Err(
+                CoreError::new(ErrorCode::InvalidName, "the name is too long").with_field("name"),
+            );
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct NameOutput {
+    pub name: String,
+}
+
+impl Command for GenProjectSuggestName {
+    const NAME: &'static str = "gen_project_suggest_name";
+    type Input = GenProjectSuggestNameInput;
+    type Output = NameOutput;
+
+    /// FR-GEN-01: the name dialog's prefill under FR-PRJ-44, with ` (2)` on collision.
+    fn run(core: &Core, input: Self::Input) -> CoreResult<NameOutput> {
+        let settings = core.state().settings.clone();
+        Ok(NameOutput {
+            name: create::suggest_name(
+                &core.ctx,
+                &settings,
+                input.section.into(),
+                input.name.as_deref(),
+            ),
+        })
+    }
+}
+
 // ---------------------------------------------------------------- project
 
 pub struct ProjectOpen;
@@ -1082,6 +1175,8 @@ registry![
     RgnJobDiscardRest,
     RgnBlendInstructionGet,
     RgnBlendInstructionSet,
+    GenProjectCreate,
+    GenProjectSuggestName,
 ];
 
 #[cfg(test)]
