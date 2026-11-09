@@ -61,6 +61,11 @@ export function installFakeTauri(base: ProjectSnapshot = baseSnapshot()): FakeTa
       listeners.delete(Number(input.eventId));
       return null;
     },
+    // A frontend `emit` reaches every listener (BL-42's window-to-window flush).
+    'plugin:event|emit': (input) => {
+      emit(String(input.event), input.payload);
+      return null;
+    },
   };
 
   const emit = (event: string, payload: unknown) => {

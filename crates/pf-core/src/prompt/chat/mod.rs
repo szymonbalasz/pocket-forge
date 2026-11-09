@@ -51,6 +51,9 @@ pub const EVENT_DELTA: &str = "prm:chat-delta";
 pub const EVENT_TURN: &str = "prm:chat-turn";
 pub const EVENT_STATUS: &str = "prm:chat-status";
 pub const EVENT_INSERT: &str = "prm:insert";
+/// BL-41: the open project or its attached host changed: `{project_id | null, host | null}`.
+/// The chat window follows the main window with it.
+pub const EVENT_CONTEXT: &str = "prm:chat-context";
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -109,6 +112,17 @@ struct Running {
     turn_id: Ulid,
     project_id: Ulid,
     cancel: CancelHandle,
+}
+
+impl Rt {
+    /// The host whose prompt block is attached for `project_id`: the latest published.
+    fn current_host(&self, project_id: Ulid) -> Option<ChatHost> {
+        self.contexts
+            .iter()
+            .filter(|((p, _), _)| *p == project_id)
+            .max_by_key(|(_, (seq, _))| *seq)
+            .map(|((_, h), _)| *h)
+    }
 }
 
 #[derive(Default)]
@@ -182,6 +196,12 @@ impl ChatRuntime {
         }
     }
 
+    /// BL-41: tells the chat window which project is open (`None`: none) and its host.
+    pub fn notify_project(&self, ctx: &Context, project_id: Option<Ulid>) {
+        let host = project_id.and_then(|p| lock(&self.rt).current_host(p));
+        emit_context(ctx, project_id, host);
+    }
+
     fn clear_status(&self) {
         lock(&self.rt).status = None;
     }
@@ -195,6 +215,13 @@ impl ChatRuntime {
     pub fn running_turn(&self) -> Option<Ulid> {
         lock(&self.rt).running.as_ref().map(|r| r.turn_id)
     }
+}
+
+fn emit_context(ctx: &Context, project_id: Option<Ulid>, host: Option<ChatHost>) {
+    ctx.emit(
+        EVENT_CONTEXT,
+        json!({ "project_id": project_id, "host": host }),
+    );
 }
 
 /// At startup (§11): turn image folders and Claude Code's `projects/` are emptied.
@@ -602,11 +629,18 @@ impl Command for PrmContextPublish {
 
     fn run(core: &Core, input: PublishInput) -> CoreResult<Empty> {
         open_project(core, input.project_id)?;
-        let mut rt = lock(&core.chat.rt);
-        rt.seq += 1;
-        let seq = rt.seq;
-        rt.contexts
-            .insert((input.project_id, input.host), (seq, input.input));
+        let (before, after) = {
+            let mut rt = lock(&core.chat.rt);
+            let before = rt.current_host(input.project_id);
+            rt.seq += 1;
+            let seq = rt.seq;
+            rt.contexts
+                .insert((input.project_id, input.host), (seq, input.input));
+            (before, rt.current_host(input.project_id))
+        };
+        if before != after {
+            emit_context(&core.ctx, Some(input.project_id), after);
+        }
         Ok(Empty {})
     }
 }
@@ -629,9 +663,15 @@ impl Command for PrmContextClear {
     type Output = Empty;
 
     fn run(core: &Core, input: ClearInput) -> CoreResult<Empty> {
-        lock(&core.chat.rt)
-            .contexts
-            .remove(&(input.project_id, input.host));
+        let (before, after) = {
+            let mut rt = lock(&core.chat.rt);
+            let before = rt.current_host(input.project_id);
+            rt.contexts.remove(&(input.project_id, input.host));
+            (before, rt.current_host(input.project_id))
+        };
+        if before != after {
+            emit_context(&core.ctx, Some(input.project_id), after);
+        }
         Ok(Empty {})
     }
 }
@@ -682,12 +722,7 @@ impl Command for PrmChatThreadGet {
                 .try_lock()
                 .map(|s| s.as_ref().is_some_and(|e| e.project_id == input.project_id))
                 .unwrap_or(true);
-        let current_host = lock(&core.chat.rt)
-            .contexts
-            .iter()
-            .filter(|((p, _), _)| *p == input.project_id)
-            .max_by_key(|(_, (seq, _))| *seq)
-            .map(|((_, h), _)| *h);
+        let current_host = lock(&core.chat.rt).current_host(input.project_id);
         Ok(ThreadView {
             thread: loaded.thread,
             running_turn_id,
@@ -721,6 +756,144 @@ impl Validate for SendInput {
             ));
         }
         Ok(())
+    }
+}
+
+/// FR-PRM-25: the images a turn sends (not yet received by the session, then the turn limit),
+/// the ones it skips as already received, and the ones the limit drops (the tail).
+fn select_images(
+    images: &[ChatImage],
+    received: &HashSet<(String, String)>,
+    include: bool,
+) -> (Vec<ChatImage>, Vec<ChatImage>, Vec<ChatImage>) {
+    if !include {
+        return (Vec::new(), Vec::new(), Vec::new());
+    }
+    let (mut sent, already): (Vec<ChatImage>, Vec<ChatImage>) = images
+        .iter()
+        .cloned()
+        .partition(|i| !received.contains(&(i.id.clone(), i.content_hash.clone())));
+    let dropped = limit_images(&mut sent);
+    (sent, already, dropped)
+}
+
+/// The long side of a preview thumbnail (BL-42).
+pub const PREVIEW_THUMB_PX: u32 = 96;
+
+/// One image of the preview: a small JPEG data URL, never the sent bytes.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PreviewImage {
+    pub id: String,
+    pub label: String,
+    pub w: u32,
+    pub h: u32,
+    pub thumb: String,
+    /// Already received by the current session: not attached again (FR-PRM-25).
+    pub already_sent: bool,
+}
+
+/// `prm_chat_preview`'s output: what the next turn would send (FR-PRM-26).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PreviewOutput {
+    /// `null` when no prompt block is attached.
+    pub host: Option<ChatHost>,
+    pub summary: String,
+    pub images: Vec<PreviewImage>,
+    /// Labels of the images the turn limit would drop.
+    pub dropped: Vec<String>,
+}
+
+fn thumb_url(jpeg: &[u8]) -> String {
+    use image::ImageEncoder;
+    let small = image::load_from_memory(jpeg)
+        .ok()
+        .map(|img| img.thumbnail(PREVIEW_THUMB_PX, PREVIEW_THUMB_PX).to_rgb8());
+    let mut out = Vec::new();
+    let ok = small.is_some_and(|rgb| {
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 70)
+            .write_image(
+                rgb.as_raw(),
+                rgb.width(),
+                rgb.height(),
+                image::ExtendedColorType::Rgb8,
+            )
+            .is_ok()
+    });
+    if ok {
+        format!("data:image/jpeg;base64,{}", crate::b64::encode(&out))
+    } else {
+        String::new()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewInput {
+    pub project_id: Ulid,
+    #[serde(default = "include_on")]
+    pub include_images: bool,
+}
+
+impl Validate for PreviewInput {}
+
+/// `prm_chat_preview` (FR-PRM-26, BL-42): the context strip before a send. Builds the
+/// attached host's context as a send would (no provider call, nothing sent or written).
+pub struct PrmChatPreview;
+
+impl Command for PrmChatPreview {
+    const NAME: &'static str = "prm_chat_preview";
+    type Input = PreviewInput;
+    type Output = PreviewOutput;
+
+    fn run(core: &Core, input: PreviewInput) -> CoreResult<PreviewOutput> {
+        let pid = input.project_id;
+        open_project(core, pid)?;
+        let published = {
+            let rt = lock(&core.chat.rt);
+            rt.current_host(pid)
+                .and_then(|h| rt.contexts.get(&(pid, h)).map(|(_, v)| (h, v.clone())))
+        };
+        let Some((host, published)) = published else {
+            return Ok(PreviewOutput {
+                host: None,
+                summary: String::new(),
+                images: Vec::new(),
+                dropped: Vec::new(),
+            });
+        };
+        let ctx = source(host).build(core, pid, &published)?;
+        // A running turn holds the session: then nothing counts as received yet.
+        let received = core
+            .chat
+            .session
+            .try_lock()
+            .ok()
+            .and_then(|s| {
+                s.as_ref()
+                    .filter(|e| e.project_id == pid && e.session.is_alive())
+                    .map(|e| e.received.clone())
+            })
+            .unwrap_or_default();
+        let (sent, already, dropped) = select_images(&ctx.images, &received, input.include_images);
+        let images = sent
+            .iter()
+            .map(|i| (i, false))
+            .chain(already.iter().map(|i| (i, true)))
+            .map(|(i, already_sent)| PreviewImage {
+                id: i.id.clone(),
+                label: i.label.clone(),
+                w: i.w,
+                h: i.h,
+                thumb: thumb_url(&i.jpeg),
+                already_sent,
+            })
+            .collect();
+        Ok(PreviewOutput {
+            host: Some(host),
+            summary: message::summary(&ctx, &sent, input.include_images),
+            images,
+            dropped: dropped.iter().map(|i| i.label.clone()).collect(),
+        })
     }
 }
 
@@ -811,17 +984,8 @@ impl Command for PrmChatSend {
             .as_mut()
             .ok_or_else(|| CoreError::internal("no chat session"))?;
 
-        // FR-PRM-25: unsent images only, then the turn limit (the tail is dropped).
-        let (mut sent, already): (Vec<ChatImage>, Vec<ChatImage>) = if input.include_images {
-            ctx.images.iter().cloned().partition(|i| {
-                !entry
-                    .received
-                    .contains(&(i.id.clone(), i.content_hash.clone()))
-            })
-        } else {
-            (Vec::new(), Vec::new())
-        };
-        let dropped = limit_images(&mut sent);
+        let (sent, already, dropped) =
+            select_images(&ctx.images, &entry.received, input.include_images);
         for i in &sent {
             entry
                 .received

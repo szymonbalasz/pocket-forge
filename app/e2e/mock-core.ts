@@ -166,6 +166,14 @@ export async function mockCore(page: Page, seed: MockSeed = defaultSeed): Promis
         listeners.delete(Number(input.eventId));
         return null;
       },
+      // A frontend `emit` reaches every listener (BL-42's window-to-window flush).
+      'plugin:event|emit': (input) => {
+        (w.__pfMock as { emit(e: string, p: unknown): void }).emit(
+          String(input.event),
+          input.payload,
+        );
+        return null;
+      },
     };
     const listeners = new Map<number, { event: string; handler: number }>();
     /** PRJ (src/api/mocks/prj.ts) and feature mocks (e2e/<feature>-mock.ts) add or override

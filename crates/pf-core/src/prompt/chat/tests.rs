@@ -884,3 +884,84 @@ fn fr_prm_24_the_overlay_golden() {
 /// FR-PRM-24's golden: the overlay JPEG of the lab region (deterministic: no resampling).
 const GOLDEN_OVERLAY: &str =
     "sha256:0a0694704726789ce4a2827d59a6786434cbee4094edc3e97b1b3c36ed07565e";
+
+#[test]
+fn bl_41_the_window_hears_when_the_project_or_its_host_changes() {
+    let lab = lab();
+    let ctx_events = |lab: &Lab| events(lab, super::EVENT_CONTEXT);
+    let opened = ctx_events(&lab);
+    assert_eq!(
+        opened.last().unwrap(),
+        &json!({"project_id": pid(&lab), "host": null})
+    );
+    let n = opened.len();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    publish(&lab, "rgn", lab.draft("a kitchen, edited"));
+    let e = ctx_events(&lab);
+    assert_eq!(
+        e.len(),
+        n + 1,
+        "only a host change is announced, not every edit"
+    );
+    assert_eq!(e[n], json!({"project_id": pid(&lab), "host": "rgn"}));
+    publish(&lab, "gen", json!({}));
+    assert_eq!(ctx_events(&lab).last().unwrap()["host"], "gen");
+    lab.core
+        .dispatch(
+            "prm_context_clear",
+            json!({"project_id": pid(&lab), "host": "gen"}),
+        )
+        .unwrap();
+    assert_eq!(ctx_events(&lab).last().unwrap()["host"], "rgn");
+    lab.core.dispatch("project_close", json!({})).unwrap();
+    assert_eq!(
+        ctx_events(&lab).last().unwrap(),
+        &json!({"project_id": null, "host": null})
+    );
+}
+
+#[test]
+fn bl_42_fr_prm_26_the_preview_shows_what_the_next_turn_sends() {
+    let lab = lab();
+    let preview = |include: bool| {
+        lab.core
+            .dispatch(
+                "prm_chat_preview",
+                json!({"project_id": pid(&lab), "include_images": include}),
+            )
+            .unwrap()
+    };
+    assert!(preview(true)["host"].is_null(), "no prompt block yet");
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    let p = preview(true);
+    assert_eq!(p["host"], "rgn");
+    assert!(p["summary"].as_str().unwrap().starts_with("crop "));
+    let img = &p["images"][0];
+    assert_eq!(img["id"], "rgn:overlay");
+    assert_eq!(img["already_sent"], false);
+    assert!(
+        img["thumb"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/jpeg;base64,")
+    );
+    assert!(
+        img["thumb"].as_str().unwrap().len() < 20_000,
+        "a small thumbnail"
+    );
+    assert_eq!(
+        preview(false)["summary"]
+            .as_str()
+            .unwrap()
+            .split(" · ")
+            .next(),
+        Some("text only")
+    );
+    // After a send the same overlay counts as already received; nothing was written by preview.
+    let before = thread_view(&lab)["thread"].clone();
+    assert!(before.is_null());
+    send(&lab, "hi").unwrap();
+    let p = preview(true);
+    assert_eq!(p["images"][0]["already_sent"], true);
+    assert!(p["summary"].as_str().unwrap().contains("(already sent)"));
+}

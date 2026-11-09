@@ -498,6 +498,7 @@ impl Command for ProjectOpen {
             old.decoded.release();
         }
         core.served().reset(Some(snap.project_id));
+        core.chat.notify_project(&core.ctx, Some(snap.project_id));
         state.project = Some(p);
         Ok(snap)
     }
@@ -565,6 +566,7 @@ impl Command for ProjectClose {
         crate::export::on_project_close(&core.ctx, &mut state);
         if let Some(p) = state.project.take() {
             core.chat.on_project_close(p.manifest.project_id);
+            core.chat.notify_project(&core.ctx, None);
             p.decoded.release();
         }
         core.served().reset(None);
@@ -1131,9 +1133,9 @@ pub use crate::prompt::commands::{
 
 /// Prompt chat commands (prompt-helper §9, PRM slice 5).
 pub use crate::prompt::chat::{
-    PrmChatCancel, PrmChatConsent, PrmChatFakeSetCase, PrmChatInsert, PrmChatLogout, PrmChatSend,
-    PrmChatSessionEnd, PrmChatSettingsPut, PrmChatStatus, PrmChatThreadGet, PrmContextClear,
-    PrmContextPublish,
+    PrmChatCancel, PrmChatConsent, PrmChatFakeSetCase, PrmChatInsert, PrmChatLogout,
+    PrmChatPreview, PrmChatSend, PrmChatSessionEnd, PrmChatSettingsPut, PrmChatStatus,
+    PrmChatThreadGet, PrmContextClear, PrmContextPublish,
 };
 
 // ---------------------------------------------------------------- new-asset generation
@@ -1256,6 +1258,7 @@ registry![
     PrmChatCancel,
     PrmChatInsert,
     PrmChatFakeSetCase,
+    PrmChatPreview,
 ];
 
 #[cfg(test)]

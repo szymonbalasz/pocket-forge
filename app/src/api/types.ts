@@ -795,6 +795,7 @@ export interface Commands {
     { proposal_id: string; host: ChatHostId; inserted_at: string },
   ];
   prm_chat_fake_set_case: [{ case: string }, Record<string, never>];
+  prm_chat_preview: [{ project_id: string; include_images?: boolean }, ChatPreview];
   /** Tauri layer (FR-PRM-40, R91): opens or focuses the `prompt-chat` window. */
   prm_window_open: [Record<string, never>, null];
   /** Tauri layer (FR-PRM-45): a console running `claude auth login` for the chat's folder. */
@@ -870,6 +871,12 @@ export interface Events {
   };
   /** A fresh detection changed the backend status. */
   'prm:chat-status': { backend: ChatBackendStatus };
+  /** BL-42 (window to window): the chat window asks the main window to publish its pending
+   *  context now; the main window answers `prm:context-flushed` with the same id. */
+  'prm:context-flush': { id: string };
+  'prm:context-flushed': { id: string };
+  /** BL-41: the open project or its attached host changed (the chat window follows it). */
+  'prm:chat-context': { project_id: string | null; host: ChatHostId | null };
   /** Replace (FR-PRM-29): applied only by that host's attached prompt block. */
   'prm:insert': { project_id: string; host: ChatHostId; proposal_id: string; text: string };
 }
@@ -1001,6 +1008,24 @@ export interface ChatThreadView {
   fresh_session_next: boolean;
   /** The host whose prompt block is attached (the visible tab), or null (FR-PRM-27/43). */
   current_host: ChatHostId | null;
+}
+
+/** `prm_chat_preview` (FR-PRM-26, BL-42): what the next turn would send. */
+export interface ChatPreview {
+  host: ChatHostId | null;
+  summary: string;
+  images: {
+    id: string;
+    label: string;
+    w: number;
+    h: number;
+    /** A small JPEG data URL. */
+    thumb: string;
+    /** Already received by the current session: not attached again. */
+    already_sent: boolean;
+  }[];
+  /** Labels the turn limit would drop. */
+  dropped: string[];
 }
 
 export interface ChatSendResult {
