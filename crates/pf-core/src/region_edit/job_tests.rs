@@ -293,6 +293,41 @@ impl Lab {
             .collect()
     }
 
+    /// What a failed command must leave alone (FR-GEN-35, FR-PRM-40): every file in the library
+    /// (the project, its chat thread, new projects) with its bytes, `settings.json`, and the
+    /// settings and manifest in memory.
+    pub fn persisted(&self) -> Value {
+        fn files(dir: &Path, out: &mut std::collections::BTreeMap<String, String>) {
+            for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    files(&p, out);
+                } else {
+                    let bytes = std::fs::read(&p).unwrap_or_default();
+                    use sha2::Digest;
+                    let hash: String = sha2::Sha256::digest(&bytes)
+                        .iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect();
+                    out.insert(p.to_string_lossy().replace('\\', "/"), hash);
+                }
+            }
+        }
+        let mut lib = std::collections::BTreeMap::new();
+        files(&self.dir.path().join("lib"), &mut lib);
+        let settings_file = std::fs::read_to_string(crate::settings::settings_path(
+            &self.dir.path().join("data"),
+        ))
+        .ok();
+        let state = self.core.state();
+        json!({
+            "library": lib,
+            "settings_file": settings_file,
+            "settings": serde_json::to_value(&state.settings).unwrap(),
+            "manifest": state.project.as_ref().map(|p| serde_json::to_value(&p.manifest).unwrap()),
+        })
+    }
+
     pub fn states_emitted(&self, job: Ulid) -> Vec<String> {
         let mut out: Vec<String> = self
             .events_named(runner::EVENT_JOB_STATE)

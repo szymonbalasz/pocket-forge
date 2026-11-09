@@ -1057,3 +1057,129 @@ fn bl_42_fr_prm_26_the_preview_shows_what_the_next_turn_sends() {
     assert_eq!(p["images"][0]["already_sent"], true);
     assert!(p["summary"].as_str().unwrap().contains("(already sent)"));
 }
+
+#[test]
+fn fr_prm_40_a_failed_command_leaves_the_project_and_settings_unchanged() {
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "make this a kitchen").unwrap();
+    let proposal = events(&lab, super::EVENT_TURN)[0]["proposals"][0]["id"].clone();
+    let before = lab.persisted();
+    let fails = |name: &str, input: Value| -> ErrorCode {
+        let e = lab.core.dispatch(name, input).unwrap_err();
+        assert_eq!(
+            lab.persisted(),
+            before,
+            "{name} failed with {e:?} but changed state"
+        );
+        e.code
+    };
+    let p = pid(&lab);
+    let other = Ulid::from_parts(1, 999);
+    let mut rows = lab
+        .core
+        .dispatch("prm_helpers_list", json!({}))
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .clone();
+    rows[0]["label"] = json!("x".repeat(41));
+    let cases: Vec<(&str, Value, ErrorCode)> = vec![
+        // Settings: helpers and the chat section.
+        (
+            "prm_helpers_save",
+            json!({"helpers": rows}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_helpers_reset",
+            json!({"id": "builtin:nope"}),
+            ErrorCode::NotFound,
+        ),
+        (
+            "prm_helpers_reset",
+            json!({"id": "builtin:top-down", "all": true}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_compose_preview",
+            json!({"kind": "map", "typed_prompt": "a", "nope": 1}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_chat_consent",
+            json!({"accept": false, "nope": 1}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_chat_settings_put",
+            json!({"enabled": false, "window": {"x": 0, "y": 0, "w": 200, "h": 200}}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_chat_settings_put",
+            json!({"enabled": false, "claude_path": "c".repeat(1025)}),
+            ErrorCode::InvalidInput,
+        ),
+        // The project: its thread and the attached blocks.
+        (
+            "prm_chat_send",
+            json!({"project_id": p, "text": "   "}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_chat_send",
+            json!({"project_id": other, "text": "hi"}),
+            ErrorCode::NoProject,
+        ),
+        (
+            "prm_chat_insert",
+            json!({"project_id": p, "proposal_id": other}),
+            ErrorCode::NotFound,
+        ),
+        (
+            "prm_chat_cancel",
+            json!({"turn_id": other}),
+            ErrorCode::NotFound,
+        ),
+        (
+            "prm_context_publish",
+            json!({"project_id": p, "host": "rgn", "input": 3}),
+            ErrorCode::InvalidInput,
+        ),
+        (
+            "prm_chat_thread_get",
+            json!({"project_id": other}),
+            ErrorCode::NoProject,
+        ),
+    ];
+    for (name, input, want) in cases {
+        assert_eq!(fails(name, input.clone()), want, "{name} {input}");
+    }
+    // No block attached: send and insert fail, nothing written.
+    lab.core
+        .dispatch("prm_context_clear", json!({"project_id": p, "host": "rgn"}))
+        .unwrap();
+    assert_eq!(
+        fails("prm_chat_send", json!({"project_id": p, "text": "hi"})),
+        ErrorCode::NoPromptBlock
+    );
+    assert_eq!(
+        fails(
+            "prm_chat_insert",
+            json!({"project_id": p, "proposal_id": proposal}),
+        ),
+        ErrorCode::NoPromptBlock
+    );
+    // Read-only: insert is refused.
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    lab.core.state().project.as_mut().unwrap().read_only =
+        Some(crate::project::ReadOnlyReason::NewerVersion);
+    assert_eq!(
+        fails(
+            "prm_chat_insert",
+            json!({"project_id": p, "proposal_id": proposal}),
+        ),
+        ErrorCode::ReadOnly
+    );
+}

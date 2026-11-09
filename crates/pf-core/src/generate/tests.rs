@@ -698,6 +698,113 @@ fn fr_gen_35_commands_need_an_open_project_and_valid_input() {
     assert_eq!(code(g.estimate(&bad)), ErrorCode::InvalidInput);
 }
 
+#[test]
+fn fr_gen_35_a_failed_command_leaves_the_project_unchanged() {
+    let g = G::empty("maps", "Crypt");
+    let job = g.run(&g.two("crypt"));
+    let cands = g.cands(job);
+    let before = g.lab.persisted();
+    let fails = |name: &str, input: Value| -> ErrorCode {
+        let e = g.dispatch(name, input).unwrap_err();
+        assert_eq!(
+            g.lab.persisted(),
+            before,
+            "{name} failed with {e:?} but changed state"
+        );
+        e.code
+    };
+    let d = g.two("again");
+    let est = g.estimate(&d).unwrap();
+    // Submit: a stale estimate, a missing confirmation, a missing sketch.
+    let mut changed = d.clone();
+    changed["size"]["long_side"] = json!(512);
+    assert_eq!(
+        fails(
+            "gen_job_submit",
+            json!({"draft": changed, "estimate_id": est["estimate_id"], "confirmations": []}),
+        ),
+        ErrorCode::EstimateStale
+    );
+    g.dispatch("rgn_spend_set", json!({"cap": 100, "threshold": 0.5}))
+        .unwrap();
+    let before = g.lab.persisted();
+    let fails = |name: &str, input: Value| -> ErrorCode {
+        let e = g.dispatch(name, input).unwrap_err();
+        assert_eq!(
+            g.lab.persisted(),
+            before,
+            "{name} failed with {e:?} but changed state"
+        );
+        e.code
+    };
+    let est = g.estimate(&d).unwrap();
+    assert_eq!(
+        fails(
+            "gen_job_submit",
+            json!({"draft": d, "estimate_id": est["estimate_id"], "confirmations": []}),
+        ),
+        ErrorCode::ConfirmationMissing
+    );
+    let mut sketch = d.clone();
+    sketch["model_id"] = json!(WH);
+    sketch["structure"] = json!({"file": "gone.png"});
+    assert_eq!(
+        fails(
+            "gen_job_submit",
+            json!({"draft": sketch, "estimate_id": est["estimate_id"], "confirmations": est["needs"]}),
+        ),
+        ErrorCode::ReferenceUnavailable
+    );
+    // Pick, preview and retry with bad ids.
+    let nil = Ulid::from_parts(1, 999);
+    assert_eq!(
+        fails(
+            "gen_candidate_pick",
+            json!({"job_id": job, "candidate_id": nil}),
+        ),
+        ErrorCode::NotFound
+    );
+    assert!(matches!(
+        fails(
+            "gen_candidate_pick",
+            json!({"job_id": nil, "candidate_id": cands[0]}),
+        ),
+        ErrorCode::NotFound | ErrorCode::InvalidCandidate
+    ));
+    assert_eq!(
+        fails("gen_job_retry_draft", json!({"job_id": nil})),
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        fails("gen_candidate_pick", json!({"job_id": job})),
+        ErrorCode::InvalidInput
+    );
+    // A new project with a bad section or name writes nothing to the library.
+    assert_eq!(
+        fails(
+            "gen_project_create",
+            json!({"section": "nowhere", "name": "Crypt"}),
+        ),
+        ErrorCode::InvalidInput
+    );
+    assert_eq!(
+        fails(
+            "gen_project_create",
+            json!({"section": "maps", "name": "  "})
+        ),
+        ErrorCode::InvalidName
+    );
+    // Read-only: the pick is refused, nothing written.
+    g.lab.core.state().project.as_mut().unwrap().read_only = Some(ReadOnlyReason::NewerVersion);
+    assert_eq!(
+        fails(
+            "gen_candidate_pick",
+            json!({"job_id": job, "candidate_id": cands[0]}),
+        ),
+        ErrorCode::ReadOnly
+    );
+}
+
 // ---------------------------------------------------------------- slice 4: preview, pick, undo
 
 impl G {
