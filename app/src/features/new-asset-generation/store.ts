@@ -18,6 +18,7 @@ import {
   type GenSizeFit,
   type ModelSummary,
   type ProjectKind,
+  type CandidateRecord,
   type ProjectSnapshot,
   type PromptRetryBadges,
   type Spend,
@@ -46,7 +47,7 @@ import {
   type UiError,
   type Values,
 } from '../region-edit';
-import { clampGrid, clampLongSide, longSideLimits, sizeFor, sizeKey } from './size';
+import { clampGrid, clampLongSide, longSideLimits, sizeFor, sizeKey, type GenResult } from './size';
 
 export type EstimateStatus = 'idle' | 'waiting' | 'loading' | 'ready' | 'error';
 
@@ -100,6 +101,8 @@ export interface GenState {
   submitError: UiError | null;
   /** One line under the tab's head (Retry filled it, a submit went through). */
   info: string | null;
+  /** FR-GEN-09: the newest generate result on an aspect model (its ratio and real size). */
+  lastResult: GenResult | null;
 }
 
 /** FR-PRJ-19: the draft is saved ≥ 2 s after the last change. */
@@ -142,6 +145,7 @@ const initial: GenState = {
   submitting: false,
   submitError: null,
   info: null,
+  lastResult: null,
 };
 
 let state: GenState = initial;
@@ -458,9 +462,35 @@ async function onEventSafe<E extends Parameters<typeof onEvent>[0]>(
   }
 }
 
+/** FR-GEN-09: the newest aspect-model generate iteration and its first valid candidate's size. */
+async function loadLastResult(): Promise<void> {
+  const pid = state.projectId;
+  if (!pid) return;
+  try {
+    const rows = await api.region.iterations();
+    const row = rows
+      .filter((r) => r.operation === 'generate' && r.n !== null && r.output?.mode === 'aspect')
+      .sort((a, b) => (b.n ?? 0) - (a.n ?? 0))[0];
+    let result: GenResult | null = null;
+    if (row?.output?.aspect) {
+      const p = (await api.project.get()) as
+        (ProjectSnapshot & { candidates?: CandidateRecord[] }) | null;
+      const c = p?.candidates?.find(
+        (x) => x.job_id === row.job_id && x.status !== 'invalid' && (x.width ?? 0) > 0,
+      );
+      if (c?.width && c.height) result = { aspect: row.output.aspect, w: c.width, h: c.height };
+    }
+    if (state.projectId === pid) set({ lastResult: result });
+  } catch {
+    // Keep the last one; the next commit retries.
+  }
+}
+
 function subscribe(): void {
   if (unsubscribe) return;
   const subs = [
+    // Candidates are stored by a commit (FR-RGN-24): the result size may be in.
+    onEventSafe('project:committed', () => void loadLastResult()),
     onEventSafe('provider:status-changed', () => void refreshProvider()),
     onEventSafe('rgn:spend', (p) =>
       set((cur) => ({
@@ -518,6 +548,7 @@ export const gen = {
       loadSpend(),
       loadSketches(),
       loadModels(d?.controls ?? null),
+      loadLastResult(),
     ]);
   },
 

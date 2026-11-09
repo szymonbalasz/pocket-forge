@@ -192,6 +192,17 @@ test('FR-GEN-09 aspect models: the nearest ratio, with "cells won’t be square"
     expect(screen.getByTestId('gen-size-result').textContent).toBe('sent ratio 2:3'),
   );
   expect(screen.getByTestId('gen-size-notices').textContent).toContain('won’t be square');
+  // px per square isn't an input on an aspect model; it follows the result (walk M3).
+  expect(screen.queryByTestId('gen-size-pps')).toBeNull();
+  expect(screen.getByTestId('gen-size-pps-note').textContent).toContain('shown once a result');
+  await generate('swamp');
+  act(() => rgnControls().finish(1));
+  await waitFor(() =>
+    expect(screen.getByTestId('gen-size-result').textContent).toBe(
+      'sent ratio 2:3 · result 683 × 1024 · 27.3 × 25.6 px per square',
+    ),
+  );
+  expect(screen.getByTestId('gen-tracker-badge').textContent).toBe('new image · 683 × 1024');
   setInt('gen-size-cols', 30);
   setInt('gen-size-rows', 40);
   await waitFor(() =>

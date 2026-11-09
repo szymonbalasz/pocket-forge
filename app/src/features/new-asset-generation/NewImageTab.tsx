@@ -239,25 +239,32 @@ function SizeSection({ s }: { s: GenState }) {
               onCommit={(rows) => gen.setGrid({ rows })}
             />
           </label>
-          <label className="gen-field">
-            <span className="muted small">px per square</span>
-            <IntField
-              id="gen-size-pps"
-              testId="gen-size-pps"
-              label="Pixels per square"
-              value={size.pps}
-              min={PPS.min}
-              max={PPS.max}
-              onCommit={(pps) => gen.setGrid({ pps })}
-            />
-          </label>
+          {s.caps?.output_size?.mode === 'aspect' ? (
+            // FR-GEN-09: an aspect model sets the size by ratio; px per square follows the result.
+            <span className="muted small gen-field-note" data-testid="gen-size-pps-note">
+              px per square: set by the model’s ratio, shown once a result is in
+            </span>
+          ) : (
+            <label className="gen-field">
+              <span className="muted small">px per square</span>
+              <IntField
+                id="gen-size-pps"
+                testId="gen-size-pps"
+                label="Pixels per square"
+                value={size.pps}
+                min={PPS.min}
+                max={PPS.max}
+                onCommit={(pps) => gen.setGrid({ pps })}
+              />
+            </label>
+          )}
         </div>
       ) : (
         <RatioFields s={s} aspect={size.aspect} longSide={size.long_side} />
       )}
       {s.fit && (
         <div className="muted small tabular" data-testid="gen-size-result">
-          sent {resultLabel(size, s.fit)}
+          sent {resultLabel(size, s.fit, s.lastResult)}
         </div>
       )}
       {s.fitError && (
