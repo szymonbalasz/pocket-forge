@@ -382,7 +382,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
         : withImages
           ? host === 'rgn'
             ? 'crop 556×456 + mask · prompt · fake model'
-            : '7 images · prompt · fake model'
+            : '6 images · prompt · fake model'
           : 'text only · prompt · fake model',
       images:
         host === 'rgn' && withImages
@@ -472,7 +472,8 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     const summary =
       host === 'rgn'
         ? 'crop 556×456 + mask · prompt · fake model'
-        : '7 images · prompt · fake model';
+        : '6 images · prompt · fake model';
+    const dropped = host === 'gen' ? ['teal.png', 'yellow.png', 'red.png'] : [];
     t.turns.push({
       id: userId,
       at: now(),
@@ -483,7 +484,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       context: {
         summary,
         images: [],
-        dropped: [],
+        dropped,
         final_prompt: text,
         model_id: 'fake',
         controls: {},
@@ -552,7 +553,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       thread_id: t.id,
       host,
       context_summary: summary,
-      dropped: [],
+      dropped,
       fresh_session: fresh,
       saved: !readOnly,
     };

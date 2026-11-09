@@ -554,6 +554,11 @@ function TurnView(props: {
         {notSaved}
         <p className="prm-chat-text">{t.text}</p>
         {t.context && <span className="prm-chat-summary small muted">{t.context.summary}</span>}
+        {(t.context?.dropped.length ?? 0) > 0 && (
+          <span className="prm-chat-warn small" data-testid="prm-chat-dropped">
+            Not sent (turn limit): {t.context!.dropped.join(', ')}
+          </span>
+        )}
       </li>
     );
   const text = props.liveText ?? t.text;

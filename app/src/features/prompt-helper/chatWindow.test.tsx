@@ -138,6 +138,10 @@ test('FR-PRM-27 Stop keeps the partial reply', async () => {
   await waitFor(() => expect(id('prm-chat-stop')).toBeTruthy());
   fireEvent.click(id('prm-chat-stop'));
   await waitFor(() => expect(screen.getByText('Stopped.')).toBeTruthy());
+  // FR-PRM-25/26 (M4): the turn names the images the turn limit dropped.
+  expect(id('prm-chat-dropped').textContent).toBe(
+    'Not sent (turn limit): teal.png, yellow.png, red.png',
+  );
   expect(screen.queryAllByTestId('prm-chat-proposal')).toHaveLength(0);
   expect(id('prm-chat-send')).toBeTruthy();
 });

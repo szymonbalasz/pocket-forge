@@ -934,7 +934,7 @@ impl Command for PrmChatPreview {
             .collect();
         Ok(PreviewOutput {
             host: Some(host),
-            summary: message::summary(&ctx, &sent, input.include_images),
+            summary: message::summary(&ctx, &sent, &dropped, input.include_images),
             images,
             dropped: dropped.iter().map(|i| i.label.clone()).collect(),
         })
@@ -1054,7 +1054,7 @@ impl Command for PrmChatSend {
         drop(slot);
 
         let block = message::context_block(&ctx, &sent, &dropped, &already);
-        let summary = message::summary(&ctx, &sent, input.include_images);
+        let summary = message::summary(&ctx, &sent, &dropped, input.include_images);
         let dropped_labels: Vec<String> = dropped.iter().map(|i| i.label.clone()).collect();
         let user_turn_id = core.ctx.new_id();
         let turn_id = core.ctx.new_id();

@@ -1361,6 +1361,9 @@ fn fr_prm_42_43_31_chat_on_both_hosts_without_a_provider_call() {
     assert_eq!(images[0]["role"], "structure", "the sketch first");
     assert!(images[1..].iter().all(|i| i["role"] == "reference"));
     assert_eq!(turns[2]["context"]["dropped"].as_array().unwrap().len(), 3);
+    // M4: the summary counts the images sent, not the dropped ones.
+    let summary = turns[2]["context"]["summary"].as_str().unwrap();
+    assert!(summary.starts_with("6 images · "), "{summary}");
     assert!(
         turns[3]["text"]
             .as_str()
