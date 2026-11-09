@@ -22,6 +22,10 @@ use crate::stream::MAX_LINE;
 /// The last bytes of stderr kept for an error's detail (FR-PRM-37).
 pub const STDERR_TAIL: usize = 2048;
 
+/// How long a one-shot command's stdout may still drain after the child ended, even at
+/// the deadline ([`OsSpawner::run`]).
+const READ_GRACE: Duration = Duration::from_secs(2);
+
 /// Stdout lines buffered between the reader thread and the turn (backpressure: a child
 /// that floods stdout waits instead of filling memory; review-sec 7).
 const LINE_QUEUE: usize = 16;
@@ -221,46 +225,58 @@ fn wait_child(child: &Mutex<Child>, timeout: Duration) -> Option<Exited> {
 }
 
 impl Spawner for OsSpawner {
+    /// Everything is bounded by `timeout` (plus [`READ_GRACE`] to drain stdout): the Job
+    /// Object is required (R75), and once the child exits or times out the whole tree is
+    /// ended, so a grandchild still holding stdout (the npm shim's `node`, a daemon) can't
+    /// hang detection (review-code 6, FR-PRM-33). Stdout keeps at most [`MAX_LINE`] bytes.
     fn run(&self, spec: &CommandSpec, timeout: Duration) -> io::Result<Captured> {
+        let deadline = Instant::now() + timeout;
         let mut cmd = os_command(spec, hidden_flags(spec));
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = cmd.spawn()?;
         #[cfg(windows)]
-        let job = crate::job::JobObject::new()
-            .and_then(|j| j.assign(&child).map(|()| j))
-            .ok();
-        let mut out = child.stdout.take();
-        let mut err = child.stderr.take();
-        let out_t = thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(o) = out.as_mut() {
-                let _ = o.read_to_end(&mut buf);
+        let job = match crate::job::JobObject::new().and_then(|j| j.assign(&child).map(|()| j)) {
+            Ok(j) => j,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(e);
             }
-            buf
+        };
+        let out = child.stdout.take();
+        let err = child.stderr.take();
+        let (out_tx, out_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(o) = out {
+                let _ = o.take(MAX_LINE as u64).read_to_end(&mut buf);
+            }
+            let _ = out_tx.send(buf);
         });
-        // Stderr may hold account details: read and dropped (FR-PRM-33).
-        let err_t = thread::spawn(move || {
-            if let Some(e) = err.as_mut() {
-                let _ = io::copy(e, &mut io::sink());
+        // Stderr may hold account details: read and dropped (FR-PRM-33). Never joined.
+        thread::spawn(move || {
+            if let Some(mut e) = err {
+                let _ = io::copy(&mut e, &mut io::sink());
             }
         });
         let child = Mutex::new(child);
         let status = wait_child(&child, timeout);
-        let timed_out = status.is_none();
-        if timed_out {
-            #[cfg(windows)]
-            if let Some(j) = &job {
-                j.terminate();
-            }
-            if let Ok(mut c) = child.lock() {
-                let _ = c.kill();
-                let _ = c.wait();
-            }
+        let mut timed_out = status.is_none();
+        #[cfg(windows)]
+        job.terminate();
+        if timed_out && let Ok(mut c) = child.lock() {
+            let _ = c.kill();
+            let _ = c.wait();
         }
-        let stdout = out_t.join().unwrap_or_default();
-        let _ = err_t.join();
+        let wait = deadline
+            .saturating_duration_since(Instant::now())
+            .max(READ_GRACE);
+        let stdout = out_rx.recv_timeout(wait).unwrap_or_else(|_| {
+            timed_out = true;
+            Vec::new()
+        });
         Ok(Captured {
             code: status.and_then(|s| s.code),
             stdout: String::from_utf8_lossy(&stdout).into_owned(),
@@ -564,6 +580,63 @@ mod tests {
         assert!(start.elapsed() < Duration::from_secs(5));
         child.killer().kill();
         assert!(child.wait(Duration::from_secs(5)).is_some());
+    }
+
+    fn cmd_spec(script: &str) -> CommandSpec {
+        let exe = Executable {
+            path: PathBuf::from("cmd.exe"),
+            kind: ExeKind::Native,
+            source: crate::invocation::ExeSource::Override,
+        };
+        let env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+        CommandSpec::new(
+            &exe,
+            vec!["/d".into(), "/c".into(), script.into()],
+            env,
+            &std::env::temp_dir(),
+            true,
+        )
+    }
+
+    /// review-code 6 (FR-PRM-33, R75): a one-shot command whose grandchild keeps stdout open
+    /// (like the npm shim's `node`) returns once the child exits; the tree is ended.
+    #[cfg(windows)]
+    #[test]
+    fn prm_s10_run_is_not_held_by_a_grandchild() {
+        let start = Instant::now();
+        let out = OsSpawner
+            .run(
+                &cmd_spec("echo 2.1.319 & start /b ping -n 60 127.0.0.1"),
+                Duration::from_secs(30),
+            )
+            .unwrap_or_else(|e| panic!("run: {e}"));
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            start.elapsed()
+        );
+        assert!(!out.timed_out);
+        assert_eq!(out.code, Some(0));
+        assert!(out.stdout.contains("2.1.319"), "{}", out.stdout);
+    }
+
+    /// review-code 6: a hanging one-shot command is killed, tree included, at its timeout.
+    #[cfg(windows)]
+    #[test]
+    fn prm_s10_run_times_out_and_ends_the_tree() {
+        let start = Instant::now();
+        let out = OsSpawner
+            .run(
+                &cmd_spec("echo partial & ping -n 60 127.0.0.1 >nul"),
+                Duration::from_secs(1),
+            )
+            .unwrap_or_else(|e| panic!("run: {e}"));
+        assert!(out.timed_out);
+        assert!(
+            start.elapsed() < Duration::from_secs(6),
+            "{:?}",
+            start.elapsed()
+        );
     }
 
     /// The real spawner and the job object, on a harmless system command (never the CLI).
