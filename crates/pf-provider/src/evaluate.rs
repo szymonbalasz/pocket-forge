@@ -262,6 +262,8 @@ mod tests {
             prompt_required: false,
             slots: vec![],
             warnings: vec![],
+            output_size: None,
+            structure: None,
         }
     }
 

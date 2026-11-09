@@ -50,10 +50,12 @@ pub trait Provider {
         filter: &ModelFilter,
     ) -> impl Future<Output = ProviderResult<Vec<ModelSummary>>> + Send;
 
-    /// Normalised model capabilities.
+    /// Normalised model capabilities for one operation: roles, fixed inputs and slots may
+    /// differ per operation (GEN OQ-GEN-01).
     fn get_capabilities(
         &self,
         model_id: &str,
+        operation: Operation,
     ) -> impl Future<Output = ProviderResult<Capabilities>> + Send;
 
     /// Uploads image bytes and returns the provider asset ref (a disposable cache, #20).
@@ -284,8 +286,12 @@ impl Provider for AnyProvider {
         dispatch!(self, p => p.list_models(filter))
     }
 
-    async fn get_capabilities(&self, model_id: &str) -> ProviderResult<Capabilities> {
-        dispatch!(self, p => p.get_capabilities(model_id))
+    async fn get_capabilities(
+        &self,
+        model_id: &str,
+        operation: Operation,
+    ) -> ProviderResult<Capabilities> {
+        dispatch!(self, p => p.get_capabilities(model_id, operation))
     }
 
     async fn upload(&self, bytes: &[u8], purpose: UploadPurpose) -> ProviderResult<AssetRef> {

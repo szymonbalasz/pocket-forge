@@ -20,7 +20,8 @@ use std::time::Duration;
 use pf_provider::real_call::{self, Polarity};
 use pf_provider::transport::RuntimeSleeper;
 use pf_provider::{
-    KeyringStore, ProviderAccount, ProviderJobState, ScenarioConfig, ScenarioProvider, block_on,
+    KeyringStore, Operation, ProviderAccount, ProviderJobState, ScenarioConfig, ScenarioProvider,
+    block_on,
 };
 
 /// The gate. `None` = skip (printed); panics when CI sets the feature or `PF_REAL_CALL`.
@@ -54,6 +55,24 @@ fn fr_prv_28_real_test_connection() {
         .unwrap_or_else(|e| panic!("test connection: {}", real_call::error_text(&e)));
 }
 
+/// Free (GEN §10): every generate row is found, offers generate (`txt2img`), and its
+/// `generate` dry run returns a cost. Prints one line per model.
+#[test]
+fn fr_gen_05_real_generate_rows_and_dry_runs() {
+    let Some(p) = provider("fr_gen_05_real_generate_rows_and_dry_runs") else {
+        return;
+    };
+    let mut bad = vec![];
+    for model in pf_provider::scenario::scenario_model_ids_for(Operation::Generate) {
+        let c = block_on(real_call::check_model(&p, model, Operation::Generate, true));
+        println!("{}", c.summary());
+        if !(c.found && c.offered() && matches!(c.estimate, Some(Ok(_)))) {
+            bad.push(model);
+        }
+    }
+    assert!(bad.is_empty(), "generate rows to fix: {bad:?}");
+}
+
 /// Free: every overlay row is found, offers masked edit, and its dry run returns a cost.
 /// Prints one line per model; fails listing the rows to fix.
 #[test]
@@ -63,7 +82,12 @@ fn fr_prv_28_real_overlay_rows_and_dry_runs() {
     };
     let mut bad = vec![];
     for model in pf_provider::scenario::scenario_model_ids() {
-        let c = block_on(real_call::check_model(&p, model, true));
+        let c = block_on(real_call::check_model(
+            &p,
+            model,
+            Operation::EditMasked,
+            true,
+        ));
         println!("{}", c.summary());
         let ok = c.found && c.offered() && matches!(c.estimate, Some(Ok(_)));
         if !ok {

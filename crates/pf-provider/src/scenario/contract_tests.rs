@@ -34,6 +34,7 @@ fn request(model: &str) -> JobRequest {
         mask_png: disc_mask_png(256),
         candidate_count: 2,
         seed: Some(7),
+        output: None,
     }
 }
 
@@ -50,7 +51,7 @@ fn contract_suite<P: Provider>(p: &P, model: &str) -> crate::Candidates {
             .all(|m| m.operations.contains(&Operation::EditMasked))
     );
 
-    let caps = block_on(p.get_capabilities(model)).unwrap();
+    let caps = block_on(p.get_capabilities(model, Operation::EditMasked)).unwrap();
     assert_eq!(caps.operations, [Operation::EditMasked]);
     assert!(caps.mask.is_some());
     let roles: Vec<_> = caps.controls.iter().map(|c| c.role).collect();
@@ -370,8 +371,8 @@ fn fr_prv_15_a_second_missing_asset_is_invalid_request() {
 fn fr_prv_16_dry_run_with_assets_uploads_first_and_never_sets_ip_detection() {
     // The contract recording: two uploads, then `?dryRun=true` (query checked exactly).
     let r = scenario("contract");
-    block_on(r.p.get_capabilities(V3)).unwrap();
-    block_on(r.p.get_capabilities(V3)).unwrap();
+    block_on(r.p.get_capabilities(V3, Operation::EditMasked)).unwrap();
+    block_on(r.p.get_capabilities(V3, Operation::EditMasked)).unwrap();
     let est = block_on(r.p.estimate(&request(V3))).unwrap();
     assert_eq!(est.cost.amount, CostAmount::Known(6.0));
     assert_eq!(est.cost.unit, "CU");
@@ -489,8 +490,8 @@ fn fr_prv_17_submit_is_never_retried_and_insufficient_balance_is_distinct() {
 #[test]
 fn fr_prv_17_the_body_maps_controls_by_role_and_name() {
     let r = scenario("contract");
-    block_on(r.p.get_capabilities(V3)).unwrap();
-    block_on(r.p.get_capabilities(V3)).unwrap();
+    block_on(r.p.get_capabilities(V3, Operation::EditMasked)).unwrap();
+    block_on(r.p.get_capabilities(V3, Operation::EditMasked)).unwrap();
     let mut req = request(V3);
     req.controls.insert("styleType".into(), json!("DESIGN"));
     // styleType = DESIGN makes colorPalette required (the fixture's conditional rule).
@@ -709,7 +710,7 @@ fn fr_prv_26_the_record_has_the_appendix_b_shape() {
         project_id: None,
     });
     block_on(r.p.list_models(&ModelFilter::default())).unwrap();
-    block_on(r.p.get_capabilities(V3)).unwrap();
+    block_on(r.p.get_capabilities(V3, Operation::EditMasked)).unwrap();
     block_on(r.p.estimate(&request(V3))).unwrap();
     let rec = block_on(r.p.submit(&request(V3))).unwrap();
     let keys: Vec<_> = rec.0.as_object().unwrap().keys().cloned().collect();
@@ -734,7 +735,7 @@ fn fr_prv_26_the_record_has_the_appendix_b_shape() {
     );
     assert_eq!(rec.0["request"]["prompt"], "a mossy flagstone floor");
     // The capability snapshot is the serialised generic capabilities.
-    let caps = block_on(r.p.job_capabilities(V3)).unwrap();
+    let caps = block_on(r.p.job_capabilities(V3, Operation::EditMasked)).unwrap();
     let back: Capabilities = serde_json::from_value(serde_json::to_value(&caps).unwrap()).unwrap();
     assert_eq!(back, caps);
 }

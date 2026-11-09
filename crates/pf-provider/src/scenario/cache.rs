@@ -7,10 +7,27 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Capabilities, ModelSummary};
+use crate::{Capabilities, ModelSummary, Operation};
 
-/// 2: `slots[]` carry `min/max/cost_affecting` (FR-PRV-31). An older file is dropped and refetched.
-const CACHE_VERSION: u32 = 2;
+/// 2: `slots[]` carry `min/max/cost_affecting` (FR-PRV-31). 3: capabilities per operation
+/// (keys from [`key`]) and `models[].operations` lists every offered operation (GEN). An older
+/// file is dropped and refetched.
+const CACHE_VERSION: u32 = 3;
+
+/// The `capabilities` key of a model and operation: the model id for `edit_masked`,
+/// `<model>@<operation>` otherwise.
+pub fn key(model_id: &str, operation: Operation) -> String {
+    match operation {
+        Operation::EditMasked => model_id.to_owned(),
+        op => {
+            let name = serde_json::to_value(op)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_default();
+            format!("{model_id}@{name}")
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CacheFile {
@@ -80,13 +97,13 @@ impl ModelCache {
         }
     }
 
-    /// Updates one model's capabilities.
-    pub fn put_capabilities(&self, caps: &Capabilities) {
+    /// Updates one model's capabilities for one operation ([`key`]).
+    pub fn put_capabilities(&self, key: &str, caps: &Capabilities) {
         if self.path.is_none() {
             return;
         }
         let mut f = self.load().unwrap_or_default();
-        f.capabilities.insert(caps.model_id.clone(), caps.clone());
+        f.capabilities.insert(key.to_owned(), caps.clone());
         self.store(&f);
     }
 }
