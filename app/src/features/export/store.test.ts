@@ -285,6 +285,23 @@ describe('export store', () => {
     expect(exportStore.get().error?.message).toBe('The project is read-only');
   });
 
+  test('FR-PRJ-42 R104 original-failed shows the readable error instead of loading', async () => {
+    await bound();
+    exportStore.setExpanded(true);
+    h.emit('project:original-failed', { project_id: 'other', code: 'corrupt' });
+    expect(exportStore.get().original.kind).toBe('loading');
+    h.emit('project:original-failed', { project_id: 'p1', code: 'corrupt' });
+    expect(exportStore.get().original).toEqual({
+      kind: 'failed',
+      message: "The original can't be decoded (the file may be damaged)",
+    });
+    h.emit('project:original-failed', { project_id: 'p1', code: 'internal' });
+    expect(exportStore.get().original).toEqual({
+      kind: 'failed',
+      message: "The original can't be read",
+    });
+  });
+
   test('FR-EXP-28 original_unavailable from start puts Start back to loading', async () => {
     await bound();
     exportStore.setExpanded(true);

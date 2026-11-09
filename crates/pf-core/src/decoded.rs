@@ -159,7 +159,14 @@ impl DecodedOriginal {
                     ),
                 };
                 tracing::warn!(error = %err, "decoding the original failed");
+                let code = err.code;
                 *s = State::Failed(err);
+                drop(s);
+                // R104: callers waiting for `project:original-ready` learn it won't come.
+                events.emit(
+                    "project:original-failed",
+                    json!({ "project_id": self.project_id, "code": code }),
+                );
             }
         }
     }
@@ -254,8 +261,9 @@ mod tests {
         );
     }
 
-    /// Review #10: on the production background thread, a failed decode stays `Failed`: the
-    /// next `get()` reports `corrupt` and doesn't start the decode again.
+    /// Review #10, R104: on the production background thread, a failed decode emits
+    /// `project:original-failed` and stays `Failed`: the next `get()` reports `corrupt` and
+    /// doesn't start the decode again.
     #[test]
     fn fr_prj_42_background_decode_failure_is_reported_and_not_rerun() {
         let dir = tempfile::tempdir().unwrap();
@@ -263,12 +271,15 @@ mod tests {
         std::fs::write(&path, truncated_png()).unwrap();
         let mut ctx = Context::deterministic(dir.path().into(), Timestamp(0));
         ctx.inline_background = false;
+        let events = Arc::new(RecordedEvents::default());
+        ctx.events = events.clone();
         let d = DecodedOriginal::new(Ulid::from_parts(0, 1), path);
         let first = d.get(&ctx);
         assert!(first.is_err(), "{first:?}");
         let mut settled = false;
         for _ in 0..500 {
-            if matches!(*d.lock(), State::Failed(_)) {
+            // The event follows the state change: wait for it.
+            if !events.names().is_empty() {
                 settled = true;
                 break;
             }
@@ -282,6 +293,12 @@ mod tests {
                 "get() must not start the decode again"
             );
         }
+        // R104: one `project:original-failed {project_id, code}`, not re-sent by later gets.
+        assert_eq!(events.names(), ["project:original-failed"]);
+        assert_eq!(
+            events.0.lock().unwrap()[0].1,
+            json!({ "project_id": Ulid::from_parts(0, 1), "code": "corrupt" })
+        );
         // A close releases the handle; the next use decodes again.
         d.release();
         assert!(matches!(*d.lock(), State::Idle));

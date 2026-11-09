@@ -910,6 +910,11 @@ function subscribe(): void {
       if (p.state === 'fetched' || p.state === 'closed') void refreshProject();
     }),
     onEventSafe('rgn:candidate-ready', () => void refreshProject()),
+    // R104: the original can't be decoded, so Generate can't run; say why instead of "loading".
+    onEventSafe('project:original-failed', (p) => {
+      if (p.project_id === state.projectId)
+        set({ submitError: { code: p.code, message: 'The original can’t be read.' } });
+    }),
     onEventSafe('rgn:spend', (p) =>
       set((cur) => ({
         spend: { spend: p.spend, cap: p.cap, threshold: cur.spend?.threshold ?? null },
