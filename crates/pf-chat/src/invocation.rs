@@ -164,7 +164,8 @@ where
 pub enum ExeKind {
     /// A native binary (`claude.exe`, or `claude` off Windows).
     Native,
-    /// The npm shim `claude.cmd`, run through `cmd /d /c` with fixed arguments only.
+    /// The npm shim `claude.cmd`, run through `cmd` (std's batch-file handling) with fixed
+    /// arguments only.
     CmdShim,
 }
 
@@ -190,15 +191,11 @@ pub struct Executable {
 }
 
 impl Executable {
-    /// The program to spawn and the arguments that go before the CLI's own.
+    /// The program to spawn and the arguments that go before the CLI's own. A shim is
+    /// spawned as itself: std's batch-file handling starts `cmd.exe` and escapes the
+    /// arguments (a hand-built `cmd /c` line lets `cmd` expand `%VAR%`).
     pub fn program_and_prefix(&self) -> (OsString, Vec<OsString>) {
-        match self.kind {
-            ExeKind::Native => (self.path.as_os_str().to_owned(), Vec::new()),
-            ExeKind::CmdShim => (
-                "cmd".into(),
-                vec!["/d".into(), "/c".into(), self.path.as_os_str().to_owned()],
-            ),
-        }
+        (self.path.as_os_str().to_owned(), Vec::new())
     }
 }
 
@@ -395,8 +392,8 @@ mod tests {
             Some((ExeKind::CmdShim, ExeSource::NpmShim))
         );
         let (prog, prefix) = r.map(|e| e.program_and_prefix()).unwrap_or_default();
-        assert_eq!(prog, "cmd");
-        assert_eq!(prefix.len(), 3);
+        assert_eq!(PathBuf::from(prog), Path::new("/b").join("claude.cmd"));
+        assert!(prefix.is_empty());
 
         // Off Windows: plain `claude`, no shim step.
         assert_eq!(resolve_executable(None, path, home, false, &npm), None);

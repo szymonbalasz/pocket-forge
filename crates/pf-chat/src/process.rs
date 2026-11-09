@@ -21,8 +21,8 @@ use crate::invocation::{ExeKind, Executable};
 /// The last bytes of stderr kept for an error's detail (FR-PRM-37).
 pub const STDERR_TAIL: usize = 2048;
 
-/// One process to start. `args` are the CLI's own arguments; how an npm shim is started
-/// (`cmd /d /s /c`) is the spawner's business ([`ExeKind::CmdShim`]).
+/// One process to start. `args` are the CLI's own arguments; an npm shim
+/// ([`ExeKind::CmdShim`]) is started through std's batch-file handling (see `os_command`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandSpec {
     pub program: PathBuf,
@@ -126,63 +126,14 @@ pub struct OsSpawner;
 /// Windows `CREATE_NEW_CONSOLE`: the login runs in its own visible console.
 pub const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
 
-/// MSVC-style quoting of one argument, always in double quotes (inside quotes `cmd` leaves
-/// `& | < > ^` alone).
-pub fn quote_arg(arg: &str) -> String {
-    let mut out = String::with_capacity(arg.len() + 2);
-    out.push('"');
-    let mut backslashes = 0usize;
-    for c in arg.chars() {
-        match c {
-            '\\' => backslashes += 1,
-            '"' => {
-                out.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
-                out.push('"');
-                backslashes = 0;
-            }
-            _ => {
-                out.extend(std::iter::repeat_n('\\', backslashes));
-                out.push(c);
-                backslashes = 0;
-            }
-        }
-    }
-    out.extend(std::iter::repeat_n('\\', backslashes * 2));
-    out.push('"');
-    out
-}
-
-/// The `cmd` arguments for an npm shim: `/d /s /c "<"shim"> <"arg">…"`. With `/s`, `cmd`
-/// strips exactly the outer pair of quotes and keeps the rest verbatim, so the quoted shim
-/// path and arguments reach the shim as written. Only fixed arguments ever go here (§10).
-pub fn shim_command_line(shim: &Path, args: &[String]) -> String {
-    let mut inner = quote_arg(&shim.to_string_lossy());
-    for a in args {
-        inner.push(' ');
-        inner.push_str(&quote_arg(a));
-    }
-    format!("/d /s /c \"{inner}\"")
-}
-
 fn os_command(spec: &CommandSpec, creation_flags: u32) -> Command {
-    let mut c = match spec.kind {
-        ExeKind::Native => {
-            let mut c = Command::new(&spec.program);
-            c.args(&spec.args);
-            c
-        }
-        ExeKind::CmdShim => {
-            let mut c = Command::new("cmd");
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                c.raw_arg(shim_command_line(&spec.program, &spec.args));
-            }
-            #[cfg(not(windows))]
-            c.arg(shim_command_line(&spec.program, &spec.args));
-            c
-        }
-    };
+    // An npm shim (`.cmd`) goes through std's batch-file handling: it runs the system
+    // `cmd.exe /e:ON /v:OFF /d /c` and escapes `%`, `!`, `^`, `&` and quotes so `cmd`
+    // can't expand or split an argument (CVE-2024-24576). A hand-built `cmd /s /c` line
+    // let `cmd` expand `%VAR%` inside a data-dir path. Only fixed arguments ever go
+    // here; std refuses arguments with line breaks (§10).
+    let mut c = Command::new(&spec.program);
+    c.args(&spec.args);
     c.env_clear()
         .envs(spec.env.iter().map(|(k, v)| (k, v)))
         .current_dir(&spec.cwd);
@@ -449,29 +400,6 @@ impl Drop for OsChild {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn prm_s10_quote_arg_msvc_rules() {
-        assert_eq!(quote_arg(""), "\"\"");
-        assert_eq!(quote_arg("-p"), "\"-p\"");
-        assert_eq!(quote_arg("a b"), "\"a b\"");
-        assert_eq!(quote_arg(r"C:\x y\"), r#""C:\x y\\""#);
-        assert_eq!(quote_arg(r#"say "hi""#), r#""say \"hi\"""#);
-        assert_eq!(quote_arg("a&b|c"), "\"a&b|c\"");
-    }
-
-    #[test]
-    fn prm_s10_npm_shim_command_line() {
-        let line = shim_command_line(
-            Path::new(r"C:\npm dir\claude.cmd"),
-            &["-p".into(), "--tools".into(), String::new()],
-        );
-        assert_eq!(
-            line,
-            r#"/d /s /c ""C:\npm dir\claude.cmd" "-p" "--tools" """"#
-        );
-        assert!(!line.contains('\n'));
-    }
 
     /// The real spawner and the job object, on a harmless system command (never the CLI).
     #[cfg(windows)]
