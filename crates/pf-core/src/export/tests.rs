@@ -1216,6 +1216,7 @@ fn fake_candidate(base: &RgbImage, x: u32, y: u32, size: u32, seed: u64) -> RgbI
         mask_png,
         candidate_count: 1,
         seed: Some(seed),
+        output: None,
     };
     let p = FakeProvider::default();
     let mut rec = block_on(p.submit(&req)).unwrap();

@@ -9,14 +9,48 @@
 //!
 //! Reference inputs (`role: reference`) also become `slots[]` (FR-PRV-31, R31). A required
 //! slot no longer blocks the model; meeting its `min` is the caller's job (FR-PRV-32).
+//!
+//! The overlay row's operation picks the mode (GEN OQ-GEN-01). `edit_masked` never reads
+//! Scenario's `capabilities[]`. `generate` is offered when it lists `txt2img`; source and mask
+//! inputs are dropped (never controls, never sent), and the row's size inputs become
+//! `output_size` (`wh` from the width input's min/max/step, `aspect` from the ratio input's
+//! `w:h` values) and its sketch slot `structure`.
 
 use serde_json::{Map, Value};
 
 use crate::scenario::overlay::OverlayRow;
 use crate::{
-    Capabilities, Control, ControlRole, ControlType, MaskSupport, Operation, ProviderError,
-    ProviderResult, Rule, RuleCondition, RuleEffect, RuleOp, Slot,
+    Capabilities, Control, ControlRole, ControlType, MaskSupport, Operation, OutputSize,
+    ProviderError, ProviderResult, Rule, RuleCondition, RuleEffect, RuleOp, Slot, StructureSlot,
 };
+
+/// Is this an `a:b` ratio (`16:9`), not `auto` / `source` / `None`?
+pub fn is_ratio(v: &str) -> bool {
+    let mut parts = v.split(':');
+    let ok = |p: Option<&str>| {
+        p.is_some_and(|p| {
+            !p.is_empty()
+                && p.bytes().all(|b| b.is_ascii_digit())
+                && p != "0"
+                && !p.starts_with('0')
+        })
+    };
+    ok(parts.next()) && ok(parts.next()) && parts.next().is_none()
+}
+
+/// The input names a `required.ifDefined` / `ifNotDefined` value refers to.
+fn referenced_inputs(v: &Value) -> Vec<String> {
+    match v {
+        Value::String(s) => vec![s.clone()],
+        Value::Object(m) => m.keys().cloned().collect(),
+        Value::Array(a) => a
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect(),
+        _ => vec![],
+    }
+}
 
 /// A normalised model.
 #[derive(Debug, Clone, PartialEq)]
@@ -211,6 +245,26 @@ pub fn normalise(
         .unwrap_or(model_id)
         .to_owned();
 
+    let operation = row.map_or(Operation::EditMasked, |r| r.operation);
+    let generate = operation == Operation::Generate;
+    // Every named input's role, for conditions that refer to other inputs.
+    let roles: std::collections::HashMap<&str, ControlRole> = inputs
+        .iter()
+        .filter_map(Value::as_object)
+        .filter_map(|i| {
+            let name = i.get("name").and_then(Value::as_str)?;
+            let ty = i.get("type").and_then(Value::as_str).unwrap_or("");
+            Some((name, role_of(name, i, ty, row)))
+        })
+        .collect();
+    // Source and mask: always sent together when editing, never sent when generating.
+    let unsent = |name: &str| {
+        generate
+            && roles
+                .get(name)
+                .is_some_and(|r| matches!(r, ControlRole::Source | ControlRole::Mask))
+    };
+
     let mut warnings = vec![];
     let mut blocked = false;
     let mut controls: Vec<Control> = vec![];
@@ -249,13 +303,17 @@ pub fn normalise(
         if array {
             array_inputs.push(name.to_owned());
         }
+        let role = role_of(name, input, ty, row);
+        // A generate job sends no source and no mask: never controls (FR-GEN-06).
+        if generate && matches!(role, ControlRole::Source | ControlRole::Mask) {
+            continue;
+        }
         let required_v = input.get("required");
         let always = match required_v {
             Some(Value::Bool(b)) => *b,
             Some(Value::Object(m)) => m.get("always").and_then(Value::as_bool).unwrap_or(false),
             _ => false,
         };
-        let role = role_of(name, input, ty, row);
         let Some(kind) = control_type(ty, role, input) else {
             warnings.push(format!(
                 "unknown input type {ty:?} for {name:?}; control omitted"
@@ -283,9 +341,16 @@ pub fn normalise(
             }
             // The adapter always sends the source and the mask together, so "required if the
             // other is defined" on either of them always holds (real V3, Character, GPT bodies).
-            let sent_together = matches!(role, ControlRole::Source | ControlRole::Mask);
+            let sent_together =
+                !generate && matches!(role, ControlRole::Source | ControlRole::Mask);
             for key in ["ifDefined", "ifNotDefined"] {
-                if !sent_together && req.get(key).is_some_and(|v| !v.is_null()) {
+                let Some(v) = req.get(key).filter(|v| !v.is_null()) else {
+                    continue;
+                };
+                // "Required if the mask is defined" never applies to a generate job (GPT).
+                let refs = referenced_inputs(v);
+                let never = !refs.is_empty() && refs.iter().all(|r| unsent(r));
+                if !sent_together && !never {
                     warnings.push(format!(
                         "{name:?}: required.{key} is not mapped; the control is optional"
                     ));
@@ -361,6 +426,7 @@ pub fn normalise(
 
     let has = |role| controls.iter().any(|c| c.role == role);
     let mask = match row {
+        _ if generate => None,
         None => {
             warnings.push(
                 "no model overlay row (mask convention unknown); masked edit not offered".into(),
@@ -380,7 +446,34 @@ pub fn normalise(
             soft: r.soft,
         }),
     };
-    let operations = if mask.is_some() && !blocked {
+    let mut output_size = None;
+    let mut structure = None;
+    let operations = if generate {
+        let lists_txt2img = model
+            .get("capabilities")
+            .and_then(Value::as_array)
+            .is_some_and(|c| c.iter().any(|x| x.as_str() == Some("txt2img")));
+        if !lists_txt2img {
+            warnings.push("the model doesn't list txt2img; generate not offered".into());
+        }
+        if let Some(r) = row {
+            output_size = output_size_of(r, inputs, &mut warnings);
+            structure = r.structure_slot.and_then(|s| {
+                let found = slots.iter().any(|x| x.name == s);
+                if !found {
+                    warnings.push(format!("sketch slot {s:?} is not an input of the model"));
+                }
+                found.then(|| StructureSlot { slot: s.to_owned() })
+            });
+        } else {
+            warnings.push("no generate overlay row; generate not offered".into());
+        }
+        if lists_txt2img && output_size.is_some() && !blocked {
+            vec![Operation::Generate]
+        } else {
+            vec![]
+        }
+    } else if mask.is_some() && !blocked {
         vec![Operation::EditMasked]
     } else {
         vec![]
@@ -404,9 +497,66 @@ pub fn normalise(
             max_bytes,
             slots,
             warnings,
+            output_size,
+            structure,
         },
         array_inputs,
     })
+}
+
+/// A generate row's output size: `wh` from the width input's `min`/`max`/`step` (the row's
+/// `input_px` where the model lists none), `aspect` from the ratio input's `w:h` values. A
+/// row's size input the model doesn't list → a warning and no output size (not offered).
+fn output_size_of(
+    row: &OverlayRow,
+    inputs: &[Value],
+    warnings: &mut Vec<String>,
+) -> Option<OutputSize> {
+    let input = |name: &str| {
+        inputs
+            .iter()
+            .filter_map(Value::as_object)
+            .find(|i| i.get("name").and_then(Value::as_str) == Some(name))
+    };
+    if let Some((w, h)) = row.size_inputs {
+        let (Some(wi), Some(_)) = (input(w), input(h)) else {
+            warnings.push(format!(
+                "size inputs {w:?}/{h:?} not listed; generate not offered"
+            ));
+            return None;
+        };
+        let get = |k: &str, d: u32| num(wi.get(k)).filter(|v| *v > 0.0).map_or(d, |v| v as u32);
+        let px = row.input_px;
+        let (min, max) = (get("min", px.min), get("max", px.max));
+        let step = get("step", px.multiple_of.max(1));
+        if min > max {
+            warnings.push("the output size limits leave no valid size".into());
+            return None;
+        }
+        return Some(OutputSize::Wh { min, max, step });
+    }
+    if let Some(a) = row.aspect_input {
+        let allowed: Vec<String> = input(a)
+            .and_then(|i| i.get("allowedValues"))
+            .and_then(Value::as_array)
+            .map(|v| {
+                v.iter()
+                    .filter_map(Value::as_str)
+                    .filter(|s| is_ratio(s))
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        if allowed.is_empty() {
+            warnings.push(format!(
+                "ratio input {a:?} lists no ratio; generate not offered"
+            ));
+            return None;
+        }
+        return Some(OutputSize::Aspect { allowed });
+    }
+    warnings.push("the generate row names no size input; generate not offered".into());
+    None
 }
 
 #[cfg(test)]
@@ -650,7 +800,11 @@ mod tests {
             ),
             ("fake-alpha-edit", &[]),
         ];
-        let rows: Vec<_> = SCENARIO_ROWS.iter().chain(FAKE_ROWS.iter()).collect();
+        let rows: Vec<_> = SCENARIO_ROWS
+            .iter()
+            .chain(FAKE_ROWS.iter())
+            .filter(|r| r.operation == Operation::EditMasked)
+            .collect();
         assert_eq!(rows.len(), table.len(), "every overlay row is in the table");
         for (model, want) in table {
             let row = rows.iter().find(|r| r.model_id == model).unwrap();
@@ -722,7 +876,11 @@ mod tests {
     /// through the normaliser, offers masked edit in the row's convention.
     #[test]
     fn fr_prv_11_every_overlay_row_against_its_fixture() {
-        for row in SCENARIO_ROWS.iter().chain(FAKE_ROWS.iter()) {
+        for row in SCENARIO_ROWS
+            .iter()
+            .chain(FAKE_ROWS.iter())
+            .filter(|r| r.operation == Operation::EditMasked)
+        {
             let rec = crate::scenario::fixture_recording(row.model_id, "get-model")
                 .unwrap_or_else(|| panic!("no get-model fixture for {}", row.model_id));
             let body = &rec.exchanges[0].response.body;
@@ -770,7 +928,10 @@ mod tests {
     /// GPT's mask says `backgroundBehavior: transparent`, matching the alpha convention.
     #[test]
     fn fr_prv_11_real_models_offer_masked_edit_only_with_a_mask_input() {
-        for row in SCENARIO_ROWS.iter() {
+        for row in SCENARIO_ROWS
+            .iter()
+            .filter(|r| r.operation == Operation::EditMasked)
+        {
             let rec = crate::scenario::fixture_recording(row.model_id, "get-model").unwrap();
             let body = &rec.exchanges[0].response.body;
             let inputs = body["model"]["inputs"].as_array().unwrap();
@@ -807,7 +968,10 @@ mod tests {
             "model_ideogram-v3-turbo",
             "model_ideogram-character",
         ];
-        for row in SCENARIO_ROWS.iter() {
+        for row in SCENARIO_ROWS
+            .iter()
+            .filter(|r| r.operation == Operation::EditMasked)
+        {
             let rec = crate::scenario::fixture_recording(row.model_id, "get-model").unwrap();
             let c = normalise(row.model_id, &rec.exchanges[0].response.body, Some(row))
                 .unwrap()

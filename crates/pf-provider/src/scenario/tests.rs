@@ -172,14 +172,14 @@ fn fr_prv_10_get_capabilities_normalises_and_falls_back_to_the_cache_offline() {
         vec![get_model(GPT), offline(), offline(), offline()],
         &[GPT],
     );
-    let caps = block_on(r.p.get_capabilities(GPT)).unwrap();
+    let caps = block_on(r.p.get_capabilities(GPT, Operation::EditMasked)).unwrap();
     assert_eq!(
         caps.mask.unwrap().convention,
         crate::MaskConvention::AlphaTransparentEdit
     );
     assert!(!caps.seed, "GPT Image lists no seed");
     assert_eq!(caps.input_px.max, 3840);
-    let again = block_on(r.p.get_capabilities(GPT)).unwrap();
+    let again = block_on(r.p.get_capabilities(GPT, Operation::EditMasked)).unwrap();
     assert_eq!(again, caps);
 }
 
@@ -187,7 +187,7 @@ fn fr_prv_10_get_capabilities_normalises_and_falls_back_to_the_cache_offline() {
 fn get_capabilities_of_an_unknown_model_is_invalid_model_id() {
     let r = rig_with(vec![ex(Method::Get, "/models/nope", 404, json!({}))], &[]);
     assert_eq!(
-        block_on(r.p.get_capabilities("nope")).unwrap_err(),
+        block_on(r.p.get_capabilities("nope", Operation::EditMasked)).unwrap_err(),
         ProviderError::InvalidRequest {
             field: "model_id".into()
         }
@@ -288,6 +288,7 @@ fn dry_run_body(model: &str) -> serde_json::Map<String, Value> {
         mask_png: crate::fixtures::disc_mask_png(256),
         candidate_count: 1,
         seed: Some(7),
+        output: None,
     };
     let est = block_on(r.p.estimate(&request)).unwrap();
     assert_eq!(r.t.remaining(), 0);

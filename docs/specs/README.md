@@ -11,4 +11,4 @@ Specs use [_template.md](_template.md) and are written just in time (see [proces
 | [export](export.md) | EXP | 1b (milestone loop) | complete |
 | [reference-packs](reference-packs.md) | REF | 3 (MVP addition, #51) | complete |
 | [new-asset-generation](new-asset-generation.md) | GEN | 4 (#52, #59) | complete (#60) |
-| [prompt-helper](prompt-helper.md) | PRM | 4 (#58) | claimed |
+| [prompt-helper](prompt-helper.md) | PRM | 4 (#58) | complete (#60) |

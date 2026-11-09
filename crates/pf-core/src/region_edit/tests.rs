@@ -107,7 +107,10 @@ fn fake(core: &Core) -> &FakeProvider {
 }
 
 fn fake_caps(model: &str) -> Capabilities {
-    pf_provider::block_on(FakeProvider::default().get_capabilities(model)).unwrap()
+    pf_provider::block_on(
+        FakeProvider::default().get_capabilities(model, pf_provider::Operation::EditMasked),
+    )
+    .unwrap()
 }
 
 fn draft(prompt: &str) -> Value {

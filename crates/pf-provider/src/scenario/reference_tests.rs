@@ -64,6 +64,7 @@ fn request(model: &str, references: Vec<ReferenceImage>) -> JobRequest {
         mask_png: disc_mask_png(256),
         candidate_count: 2,
         seed: Some(7),
+        output: None,
     }
 }
 
@@ -178,7 +179,7 @@ fn fr_prv_33_bad_references_are_refused_with_zero_network_calls() {
     ];
     // Only the capabilities call is recorded; any other request would panic the replay.
     let r = rig_with(vec![two_slot_model()], &[CHAR]);
-    block_on(r.p.get_capabilities(CHAR)).unwrap();
+    block_on(r.p.get_capabilities(CHAR, Operation::EditMasked)).unwrap();
     let reference_error = ProviderError::InvalidRequest {
         field: "reference".into(),
     };
@@ -367,7 +368,7 @@ fn fr_prv_33_real_character_sends_one_identity_ref_as_a_file() {
         ],
         &[CHAR],
     );
-    let caps = block_on(r.p.get_capabilities(CHAR)).unwrap();
+    let caps = block_on(r.p.get_capabilities(CHAR, Operation::EditMasked)).unwrap();
     let slots: Vec<_> = caps
         .slots
         .iter()
