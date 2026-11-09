@@ -15,6 +15,7 @@ cargo run -p pf-provider --features real-call --bin pf-record
 ```
 - This fetches `GET /models/{id}` for every overlay model, then runs one dry run each (`?dryRun=true`, never `ipDetection`). Each dry run uploads the generated 512 px room and disc mask as hidden assets (no credits). It prints one line per model: `offered`, `NOT FOUND` or `NOT OFFERED`, the dry-run cost and any warnings.
 - It writes `fixtures/provider/<model>/get-model.json` and `dry-run.json`. A failed call is saved as `<case>.failed.json` instead, so the committed fixtures stay as they are.
+- It also runs one `generate` dry run (`dry-run-generate.json`) for every model with a generate row (GEN): the prompt, 1024 × 1024 or ratio `1:1`, one result, no sketch. Free; to run only this, add `-- --case dry-run-generate`.
 - To set the team or project id for the recorder, use `PF_SCENARIO_TEAM_ID=<team-id>` and `PF_SCENARIO_PROJECT_ID=<project-id>`.
 
 ## 3. Check the recordings (free)
