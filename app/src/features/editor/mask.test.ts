@@ -341,6 +341,18 @@ describe('mask controller', () => {
     expect(maskHash(c.buffer!.data)).toBe(painted);
   });
 
+  test('FR-EDT-21 a region "change" to the same rect is no undo step and keeps Redo', async () => {
+    const { c, undo } = setup();
+    c.changeRegion(region(100, 100, 64, 64));
+    c.beginStroke({ x: 110, y: 110 }, 'paint', 12, 1);
+    c.endStroke();
+    await undo.undo();
+    const before = c.version;
+    c.changeRegion(region(100, 100, 64, 64)); // a Region-tool click inside the box
+    expect(undo.snapshot()).toMatchObject({ depth: 1, redo: 1 });
+    expect(c.version).toBe(before);
+  });
+
   test('FR-EDT-16 fill and clear set every pixel and are one undo step each', async () => {
     const { c, undo } = setup();
     c.changeRegion(region(0, 0, 8, 8));

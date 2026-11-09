@@ -48,6 +48,10 @@ export interface MaskControllerDeps {
   onChange?: () => void;
 }
 
+const sameRect = (a: Rect, b: Rect) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+const sameRegion = (a: RegionState | null, b: RegionState | null) =>
+  a === b || (!!a && !!b && sameRect(a.inner, b.inner) && sameRect(a.outer, b.outer));
+
 export class MaskController {
   private mask: MaskBuffer | null = null;
   private region: RegionState | null = null;
@@ -91,6 +95,8 @@ export class MaskController {
    *  discards the mask. One undo step. */
   changeRegion(next: RegionState | null): void {
     const prev = { region: this.region, mask: this.mask };
+    // The same rect (a Region-tool click inside the box): no change, no step, Redo stays.
+    if (sameRegion(prev.region, next)) return;
     const nextMask = next
       ? this.mask
         ? remap(this.mask, next.inner)
@@ -129,9 +135,8 @@ export class MaskController {
       this.load({ inner: { ...next.inner }, outer: { ...next.outer } }, null);
       return;
     }
-    const same = (a: Rect, b: Rect) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
-    if (cur && same(cur.inner, next.inner)) {
-      if (same(cur.outer, next.outer)) return;
+    if (cur && sameRect(cur.inner, next.inner)) {
+      if (sameRect(cur.outer, next.outer)) return;
       this.region = { inner: { ...next.inner }, outer: { ...next.outer } };
       this.deps.setRegion(this.region);
       return;
