@@ -15,6 +15,7 @@ import {
   canRetry,
   isActive,
   orderRows,
+  outputLabel,
   refsTooltip,
   retryJobId,
   shownState,
@@ -143,6 +144,17 @@ function RefsChip({ row }: { row: RgnIteration }) {
   );
 }
 
+/** FR-GEN-25: a generate iteration's `new image` badge and its sent size. */
+function NewImageBadge({ row }: { row: RgnIteration }) {
+  const size = outputLabel(row.output);
+  return (
+    <span className="pf-chip rgn-tracker-new" data-testid="gen-tracker-badge">
+      new image
+      {size && <span className="tabular"> · {size}</span>}
+    </span>
+  );
+}
+
 export function IterationTracker() {
   const s = useRgn((x) => x);
   const trash = useProjectState().trashNotice;
@@ -189,6 +201,7 @@ export function IterationTracker() {
                 <span className="rgn-tracker-slug" title={r.dir ?? undefined}>
                   {r.slug ?? 'job'}
                 </span>
+                {r.operation === 'generate' && <NewImageBadge row={r} />}
                 {(r.references ?? 0) > 0 && <RefsChip row={r} />}
                 {r.accepted_in_stack && (
                   <span

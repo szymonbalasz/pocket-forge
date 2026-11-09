@@ -1,30 +1,60 @@
 // The spend confirm dialog (§7, FR-RGN-14/15/16): estimate, spend after this job, cap, threshold
 // or unknown-cost warning, first-submit cap setup and the explicit "raise cap"
 // field. The only blocking modal (ui-guidelines). Esc closes; Enter never confirms an
-// over-threshold or unknown-cost job.
-import { useMemo, useRef, useState, type FormEvent } from 'react';
+// over-threshold or unknown-cost job. GEN's New image tab shows the same dialog (FR-GEN-21)
+// through `SpendConfirm`, with its own summary line.
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Checkbox, Dialog } from 'radix-ui';
 
+import type { Spend } from '../../api';
 import { IconCheck } from '../../shell/icons';
 import { referencesOnKeys, useReferencesBlock } from '../references';
-import { confirmPlan, initialForm, type ConfirmForm } from './confirm';
+import { confirmPlan, initialForm, type ConfirmForm, type ConfirmPlan } from './confirm';
+import type { SpendEstimate } from './confirm';
 import { amountLabel, errorText } from './format';
-import { rgn, useRgn } from './store';
+import { rgn, useRgn, type UiError } from './store';
 
 export function ConfirmDialog() {
   const s = useRgn((x) => x);
-  const est = s.estimate.result;
-  const open = s.confirmOpen && !!est;
   return (
-    <Dialog.Root open={open} onOpenChange={(o) => !o && rgn.closeConfirm()}>
-      {open && est && <ConfirmBody key={est.estimate_id} />}
+    <SpendConfirm
+      open={s.confirmOpen}
+      estimate={s.estimate.result}
+      spend={s.spend}
+      submitting={s.submitting}
+      error={s.confirmError}
+      onClose={() => rgn.closeConfirm()}
+      onConfirm={(plan) => void rgn.confirm(plan)}
+    />
+  );
+}
+
+export interface SpendConfirmProps {
+  open: boolean;
+  estimate: SpendEstimate | null;
+  spend: Spend | null;
+  submitting: boolean;
+  error: UiError | null;
+  /** What is being submitted (GEN: "New image · W × H"), above the table. */
+  summary?: ReactNode;
+  onClose(): void;
+  onConfirm(plan: ConfirmPlan): void;
+}
+
+/** The dialog for any job (RGN's region edit, GEN's new image). */
+export function SpendConfirm(props: SpendConfirmProps) {
+  const est = props.estimate;
+  const open = props.open && !!est;
+  return (
+    <Dialog.Root open={open} onOpenChange={(o) => !o && props.onClose()}>
+      {open && est && <ConfirmBody key={est.estimate_id} {...props} estimate={est} />}
     </Dialog.Root>
   );
 }
 
-function ConfirmBody() {
-  const s = useRgn((x) => x);
-  const est = s.estimate.result!;
+function ConfirmBody(props: SpendConfirmProps & { estimate: SpendEstimate }) {
+  const s = { spend: props.spend, submitting: props.submitting, confirmError: props.error };
+  const est = props.estimate;
   const stored = { cap: s.spend?.cap ?? est.cap, threshold: s.spend?.threshold ?? null };
   const live = { ...est, spend: s.spend?.spend ?? est.spend };
   const [form, setForm] = useState<ConfirmForm>(() => initialForm(live, stored.threshold));
@@ -41,7 +71,7 @@ function ConfirmBody() {
   const cancelRef = useRef<HTMLButtonElement>(null);
 
   const confirm = () => {
-    if (plan.canConfirm && !s.submitting) void rgn.confirm(plan);
+    if (plan.canConfirm && !s.submitting) props.onConfirm(plan);
   };
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -77,6 +107,7 @@ function ConfirmBody() {
         <Dialog.Description className="muted small">
           Spend is checked against your session cap before anything is sent.
         </Dialog.Description>
+        {props.summary}
         <form onSubmit={onSubmit}>
           <dl className="rgn-dialog-table tabular">
             <dt>Estimate</dt>

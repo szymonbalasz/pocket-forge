@@ -1,6 +1,6 @@
 // The iteration tracker's logic (FR-RGN-40): row order, the default selection, which row is the
 // job strip, the job actions per state (FR-RGN-19/20/21) and the picker's candidates. Pure.
-import type { CandidateRecord, JobState, RgnIteration } from '../../api';
+import type { CandidateRecord, GenOutput, JobState, RgnIteration } from '../../api';
 
 const TERMINAL: JobState[] = ['failed', 'canceled', 'lost', 'closed'];
 export const isTerminal = (s: JobState): boolean => TERMINAL.includes(s);
@@ -80,4 +80,11 @@ export function refsTooltip(row: RgnIteration): string {
   return (row.reference_files ?? [])
     .map((f) => [f.file, f.pack_name ?? 'project', f.role].filter(Boolean).join(' · '))
     .join('\n');
+}
+
+/** FR-GEN-25: a generate job's sent size, `W × H` or its ratio; null when unknown. */
+export function outputLabel(o: GenOutput | null | undefined): string | null {
+  if (!o) return null;
+  if (o.w && o.h) return `${o.w} × ${o.h}`;
+  return o.aspect ?? null;
 }

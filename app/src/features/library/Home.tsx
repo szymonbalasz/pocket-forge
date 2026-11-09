@@ -1,13 +1,14 @@
 // The home grid (asset-project §7, FR-PRJ-03, 49): shown in the canvas slot while no project is
 // open. Project cards of the selected section, + New, a full-area drop zone and paste. Also the
 // first-run root picker and the "Library unavailable" banner (FR-PRJ-01, 02).
-import { useEffect, useState } from 'react';
-import { Popover } from 'radix-ui';
+import { useEffect, useRef, useState } from 'react';
+import { DropdownMenu, Popover } from 'radix-ui';
 
-import { onFileDrop, pickPaths } from '../../api';
+import { onFileDrop, pickPaths, type Section } from '../../api';
 import { useHomeView } from '../../shared/home';
 import { IconPlus } from '../../shell/icons';
 import { projectStore, useProjectState } from '../../store/project';
+import { NewProjectDialog } from '../new-asset-generation';
 import { Card } from './Card';
 import { SECTIONS } from './format';
 import { isTextTarget, parsePastedPaths } from './paste';
@@ -135,7 +136,11 @@ function HomeView() {
       <header className="prj-home-header">
         <h1 data-testid="prj-home-title">{section.label}</h1>
         <span className="pf-spacer" />
-        <NewButton disabled={unavailable || !!lib.creating} />
+        <NewButton
+          disabled={unavailable || !!lib.creating}
+          section={lib.section}
+          taken={lib.cards?.map((c) => c.name) ?? []}
+        />
       </header>
       {lib.cards && lib.cards.length === 0 && !unavailable && (
         <div className="prj-home-empty" data-testid="prj-home-empty">
@@ -170,10 +175,23 @@ function HomeView() {
   );
 }
 
-/** + New (FR-PRJ-03): the native multi-select image dialog (#53). Where no dialog is available
- *  (tests on the mocked core), a popover takes file or folder paths, one per line. */
-function NewButton({ disabled }: { disabled: boolean }) {
+/** + New (OQ-GEN-10): a menu, **From image…** (FR-PRJ-03: the native multi-select image dialog,
+ *  #53; where no dialog is available, tests on the mocked core, a popover takes file or folder
+ *  paths, one per line) and **Generate new…** (FR-GEN-01: GEN's name dialog, then the new
+ *  project opens). */
+function NewButton({
+  disabled,
+  section,
+  taken,
+}: {
+  disabled: boolean;
+  section: Section;
+  taken: string[];
+}) {
   const [open, setOpen] = useState(false);
+  const [naming, setNaming] = useState(false);
+  /** An item opened a popover or dialog: the menu must not take focus back to + New. */
+  const picked = useRef(false);
   const [text, setText] = useState('');
   const paths = text
     .split(/\r?\n/)
@@ -181,23 +199,65 @@ function NewButton({ disabled }: { disabled: boolean }) {
     .filter(Boolean);
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Anchor asChild>
-        <button
-          type="button"
-          className="primary"
-          data-testid="prj-home-new"
-          disabled={disabled}
-          aria-haspopup="dialog"
-          onClick={() =>
-            pickPaths({ title: 'New from images', multiple: true, images: true }).then(
-              (picked) => void libraryStore.create(picked),
-              () => setOpen(true),
-            )
-          }
-        >
-          <IconPlus /> New
-        </button>
-      </Popover.Anchor>
+      <DropdownMenu.Root modal={false}>
+        <Popover.Anchor asChild>
+          <DropdownMenu.Trigger asChild>
+            <button
+              type="button"
+              className="primary"
+              data-testid="prj-home-new"
+              disabled={disabled}
+            >
+              <IconPlus /> New
+            </button>
+          </DropdownMenu.Trigger>
+        </Popover.Anchor>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            className="prj-menu"
+            align="end"
+            sideOffset={6}
+            onCloseAutoFocus={(e) => {
+              if (picked.current) e.preventDefault();
+              picked.current = false;
+            }}
+          >
+            <DropdownMenu.Item
+              className="prj-menu-item"
+              data-testid="prj-home-new-image"
+              onSelect={() => {
+                picked.current = true;
+                void pickPaths({ title: 'New from images', multiple: true, images: true }).then(
+                  (paths) => void libraryStore.create(paths),
+                  () => setOpen(true),
+                );
+              }}
+            >
+              From image…
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              className="prj-menu-item"
+              data-testid="prj-home-new-generate"
+              onSelect={() => {
+                picked.current = true;
+                setNaming(true);
+              }}
+            >
+              Generate new…
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      <NewProjectDialog
+        open={naming}
+        section={section}
+        taken={taken}
+        onOpenChange={setNaming}
+        onCreated={(path) => {
+          void libraryStore.refresh();
+          void projectStore.open(path);
+        }}
+      />
       <Popover.Portal>
         <Popover.Content className="prj-popover" align="end" sideOffset={6}>
           <form

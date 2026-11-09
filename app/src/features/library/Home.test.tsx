@@ -4,12 +4,20 @@ import { afterEach, beforeEach, expect, test } from 'vitest';
 
 import { prjMock, samplePrjSeed, type PrjMockSeed, type PrjMockState } from '../../api/mocks/prj';
 import { installTestCore } from '../../api/mocks/testCore';
+import { generateTab } from '../../shared/generateTabs';
 import { projectStore } from '../../store/project';
 import { Home } from './Home';
 import { Rail } from './Rail';
 import { libraryStore } from './store';
 
 const core = installTestCore();
+
+// Radix menus measure themselves (Popper): jsdom has no ResizeObserver.
+(globalThis as unknown as Record<string, unknown>).ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 let mock: PrjMockState;
 const LIB = 'C:/pf-mock/library';
 
@@ -29,6 +37,15 @@ function setup(patch: Partial<PrjMockSeed> = {}) {
 
 const cards = () => screen.queryAllByTestId('prj-home-card');
 const cardNames = () => cards().map((c) => within(c).getByTestId('prj-home-card-name').textContent);
+/** OQ-GEN-10: + New is a menu; `image` = From image…, `generate` = Generate new…. */
+async function newMenu(item: 'image' | 'generate') {
+  fireEvent.pointerDown(screen.getByTestId('prj-home-new'), {
+    button: 0,
+    ctrlKey: false,
+    pointerType: 'mouse',
+  });
+  fireEvent.click(await screen.findByTestId(`prj-home-new-${item}`));
+}
 const drop = (paths: string[]) =>
   act(async () => {
     core.emit('tauri://drag-drop', { paths, position: { x: 0, y: 0 } });
@@ -146,7 +163,7 @@ test('FR-PRJ-03 FR-PRJ-10 pasting image data creates a pasted-<time> project; a 
 test('FR-PRJ-03 + New takes several paths and creates them', async () => {
   setup();
   await waitFor(() => expect(cards()).toHaveLength(2));
-  fireEvent.click(screen.getByTestId('prj-home-new'));
+  await newMenu('image');
   fireEvent.change(await screen.findByTestId('prj-home-new-paths'), {
     target: { value: 'D:/a/One.png\nD:/a/Two.png' },
   });
@@ -286,7 +303,7 @@ test('FR-PRJ-03 #53 + New opens the native image dialog and creates the picked f
   const handlers = prjMock(samplePrjSeed(LIB), { emit: core.emit }).handlers;
   let picked: string[] | null = ['D:/a/One.png', 'D:/a/Two.png'];
   core.useHandlers({ ...handlers, 'plugin:dialog|open': () => picked });
-  fireEvent.click(screen.getByTestId('prj-home-new'));
+  await newMenu('image');
   await waitFor(() => expect(cardNames()).toEqual(expect.arrayContaining(['One', 'Two'])));
   expect(screen.queryByTestId('prj-home-new-paths')).toBeNull();
   const opts = core.calls.find((c) => c.cmd === 'plugin:dialog|open')?.input.options as Record<
@@ -301,7 +318,7 @@ test('FR-PRJ-03 #53 + New opens the native image dialog and creates the picked f
 
   picked = null;
   const before = cards().length;
-  fireEvent.click(screen.getByTestId('prj-home-new'));
+  await newMenu('image');
   await waitFor(() =>
     expect(core.names().filter((n) => n === 'plugin:dialog|open')).toHaveLength(2),
   );
@@ -323,4 +340,54 @@ test('FR-PRJ-01 #53 Browse… picks the library folder with the native folder di
     directory: true,
   });
   expect(core.calls.find((c) => c.cmd === 'library_set_roots')?.input).toEqual({ roots: [LIB] });
+});
+
+test('FR-GEN-01 OQ-GEN-10 + New → Generate new…: the name is prefilled per section and made free; the project is created and opens on New image', async () => {
+  setup({
+    projects: [
+      ...samplePrjSeed(LIB).projects,
+      { section: 'maps', name: 'New map', last_edited: '2026-11-01T10:00:00.000Z' },
+    ],
+  });
+  await waitFor(() => expect(cards()).toHaveLength(3));
+  await newMenu('generate');
+  const name = await screen.findByTestId<HTMLInputElement>('gen-new-name');
+  expect(name.value).toBe('New map (2)');
+
+  // A taken name is refused inline (FR-PRJ-44).
+  fireEvent.change(name, { target: { value: 'crypt' } });
+  await act(async () => fireEvent.click(screen.getByTestId('gen-new-ok')));
+  expect((await screen.findByTestId('gen-new-error')).textContent).toContain('already exists');
+
+  fireEvent.change(name, { target: { value: 'Flooded crypt' } });
+  await act(async () => fireEvent.click(screen.getByTestId('gen-new-ok')));
+  await waitFor(() => expect(projectStore.get().project?.name).toBe('Flooded crypt'));
+  expect(core.calls.filter((c) => c.cmd === 'gen_project_create').at(-1)?.input).toEqual({
+    section: 'maps',
+    name: 'Flooded crypt',
+  });
+  // FR-GEN-02/03: no image yet.
+  expect(projectStore.get().project?.image_path).toBeNull();
+  expect(projectStore.get().project?.layers).toEqual([]);
+  expect(screen.queryByTestId('gen-new')).toBeNull();
+  // The Generate area opens it on New image (FR-GEN-01).
+  generateTab.projectOpened();
+  expect(generateTab.get()).toBe('new-image');
+  generateTab.select('region');
+});
+
+test('FR-GEN-01 Generate new… prefills New token / New item by section; Cancel creates nothing', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  fireEvent.click(screen.getByTestId('prj-rail-tokens'));
+  await waitFor(() => expect(cardNames()).toEqual(['Goblin']));
+  await newMenu('generate');
+  expect((await screen.findByTestId<HTMLInputElement>('gen-new-name')).value).toBe('New token');
+  fireEvent.click(screen.getByTestId('gen-new-cancel'));
+  await waitFor(() => expect(screen.queryByTestId('gen-new')).toBeNull());
+  fireEvent.click(screen.getByTestId('prj-rail-items'));
+  await waitFor(() => expect(screen.getByTestId('prj-home-empty')).toBeTruthy());
+  await newMenu('generate');
+  expect((await screen.findByTestId<HTMLInputElement>('gen-new-name')).value).toBe('New item');
+  expect(core.names()).not.toContain('gen_project_create');
 });

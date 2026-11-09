@@ -2,6 +2,9 @@
 // whether Enter confirms, and the confirmations sent with submit. Pure.
 import type { SpendNeed, JobEstimate } from '../../api';
 
+/** What the dialog needs from an estimate: RGN's, or GEN's (no region fit, FR-GEN-21). */
+export type SpendEstimate = Omit<JobEstimate, 'fit' | 'candidate_count'>;
+
 export interface ConfirmForm {
   /** Cap and threshold as typed (setup, or the explicit "raise cap" field). */
   cap: string;
@@ -45,7 +48,7 @@ const parse = (s: string): number | null => {
   return Number.isFinite(n) && n >= 0 ? n : null;
 };
 
-export function initialForm(est: JobEstimate, threshold: number | null): ConfirmForm {
+export function initialForm(est: SpendEstimate, threshold: number | null): ConfirmForm {
   return {
     cap: est.cap === null ? '' : String(est.cap),
     threshold: threshold === null ? '' : String(threshold),
@@ -57,7 +60,7 @@ export function initialForm(est: JobEstimate, threshold: number | null): Confirm
  *  items), not the estimate's count: an estimate is reused while only non-cost-affecting slots
  *  change (FR-REF-24). Items the estimate found identical to an earlier one are sent once.
  *  `null` (no resolved block) → the estimate's count. */
-export function referencesSent(est: JobEstimate, onKeys: string[] | null): number {
+export function referencesSent(est: SpendEstimate, onKeys: string[] | null): number {
   if (!onKeys) return est.references ?? 0;
   const once = new Set(
     (est.reference_notices ?? []).filter((n) => n.code === 'duplicate').map((n) => n.key),
@@ -66,7 +69,7 @@ export function referencesSent(est: JobEstimate, onKeys: string[] | null): numbe
 }
 
 export function confirmPlan(
-  est: JobEstimate,
+  est: SpendEstimate,
   stored: { cap: number | null; threshold: number | null },
   form: ConfirmForm,
   onKeys: string[] | null = null,
@@ -118,4 +121,14 @@ export function confirmPlan(
     saveSpend,
     confirmations,
   };
+}
+
+/** BL-36: a fresh estimate may be submitted under the plan the DM confirmed: within its cap, no
+ *  dearer than the cost shown, and needing no confirmation that wasn't given. */
+export function withinConfirmed(fresh: SpendEstimate, plan: ConfirmPlan): boolean {
+  const cost = fresh.cost.amount;
+  if (plan.cap === null) return false;
+  if (fresh.spend + (cost === 'unknown' ? 0 : cost) > plan.cap) return false;
+  if (!fresh.needs.every((n) => plan.confirmations.includes(n))) return false;
+  return plan.cost === 'unknown' || (cost !== 'unknown' && cost <= plan.cost);
 }

@@ -61,6 +61,8 @@ export interface RefMockSeed {
   projectRefs?: ProjectRef[];
   /** Model id → its reference slots (FR-PRV-31). Unknown model → `unknown_model`. */
   slots?: Record<string, RefMockSlot[]>;
+  /** GEN: model id → the slot a chosen sketch is sent in; its `max` drops by 1 (FR-GEN-13). */
+  structureSlots?: Record<string, string>;
   /** The open project is read-only (FR-REF-27). */
   readOnly?: boolean;
 }
@@ -284,14 +286,26 @@ export function refMock(
     return item;
   };
 
+  /** GEN (FR-GEN-13): the slot whose max a chosen sketch reduces, or null. */
+  const reserveOf = (input: Rec): string | null =>
+    input.operation === 'generate' && input.structure
+      ? (seed.structureSlots?.[String(input.model_id)] ?? null)
+      : null;
+
   // ── ref_resolve (FR-REF-16..19), mirroring pf-core `references::resolve::reconcile` ──────
   /** pf-core `Resolved::lost_on` of the last resolve: ticked items now gone or corrupt
    *  (FR-REF-21; `__ref_prepare` fails on them). */
   let lostOn: { key: string; reason: 'missing' | 'corrupt' }[] = [];
-  const resolve = (modelId: string, prev: DraftReferences | null): RefResolved | Promise<never> => {
+  const resolve = (
+    modelId: string,
+    prev: DraftReferences | null,
+    reserve: string | null = null,
+  ): RefResolved | Promise<never> => {
     lostOn = [];
-    const slots = seed.slots?.[modelId];
-    if (!slots) return fail('unknown_model', `Unknown model ${modelId}`);
+    const all = seed.slots?.[modelId];
+    if (!all) return fail('unknown_model', `Unknown model ${modelId}`);
+    // FR-GEN-13: a chosen sketch takes one place in its slot.
+    const slots = all.map((x) => (x.name === reserve ? { ...x, max: Math.max(0, x.max - 1) } : x));
     const readOnly = !!seed.readOnly;
     if (!slots.length)
       return {
@@ -628,7 +642,11 @@ export function refMock(
     ref_resolve: (input) => {
       if (env.hasProject && !env.hasProject())
         return fail('no_project', 'no asset project is open');
-      return resolve(String(input.model_id), (input.references as DraftReferences | null) ?? null);
+      return resolve(
+        String(input.model_id),
+        (input.references as DraftReferences | null) ?? null,
+        reserveOf(input),
+      );
     },
     // Mock-only hooks for the RGN mock (not commands): pf-core's `prepare_for_send` rows
     // (FR-REF-21/25) and the Retry draft (`references::retry`, FR-REF-26).
@@ -636,6 +654,7 @@ export function refMock(
       const r = await resolve(
         String(input.model_id),
         (input.references as DraftReferences | null) ?? null,
+        reserveOf(input),
       );
       if (!r.visible) return [];
       // FR-REF-21: a ticked item that is gone or now corrupt is never dropped silently.
