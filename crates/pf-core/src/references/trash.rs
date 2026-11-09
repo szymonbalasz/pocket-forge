@@ -125,22 +125,47 @@ pub(crate) fn trash_files(
     write_item(ctx, &item_dir, &item)?;
     for (i, f) in files.iter().enumerate() {
         if let Err(e) = fsx::move_file(&dir.join(f), &item_dir.join(f)) {
-            // R102: back to the pack; the item keeps only what couldn't go back (if anything).
-            let stuck: Vec<String> = files[..i]
-                .iter()
-                .filter(|m| fsx::move_file(&item_dir.join(m), &dir.join(m)).is_err())
-                .cloned()
-                .collect();
-            if stuck.is_empty() {
-                let _ = std::fs::remove_dir_all(&item_dir);
-            } else {
-                item.files = stuck;
-                let _ = write_item(ctx, &item_dir, &item);
-            }
+            roll_back_moves(ctx, &item_dir, dir, &mut item, &files[..i]);
             return Err(e);
         }
     }
     Ok(item.id)
+}
+
+/// R102: a failed trash move puts the `moved` files back in the pack folder `dir`; the item
+/// keeps only what couldn't go back (if anything). R109: never leaves an `item.json` listing
+/// files that went back, or the startup roll-forward would trash them again.
+pub(crate) fn roll_back_moves(
+    ctx: &Context,
+    item_dir: &Path,
+    dir: &Path,
+    item: &mut TrashItem,
+    moved: &[String],
+) {
+    let stuck: Vec<String> = moved
+        .iter()
+        .filter(|m| fsx::move_file(&item_dir.join(m), &dir.join(m)).is_err())
+        .cloned()
+        .collect();
+    let all_back = stuck.is_empty();
+    if !all_back {
+        item.files = stuck;
+        match write_item(ctx, item_dir, item) {
+            Ok(()) => return,
+            // The stuck files stay in the item folder without an item (not listed, not purged).
+            Err(e) => {
+                tracing::warn!(item = %item.id, error = %e, "rolled-back trash item not narrowed; dropped")
+            }
+        }
+    }
+    if let Err(e) = std::fs::remove_file(item_dir.join(ITEM_FILE))
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        tracing::warn!(item = %item.id, error = %e, "rolled-back trash item not removed");
+    }
+    if all_back {
+        let _ = std::fs::remove_dir_all(item_dir);
+    }
 }
 
 /// `ref_pack_remove_images` (FR-REF-12).

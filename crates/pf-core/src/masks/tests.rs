@@ -400,3 +400,29 @@ fn fr_prj_21_r108_close_anyway_drops_the_waiting_mask() {
         .unwrap();
     assert!(e.core.state().project.is_none());
 }
+
+#[test]
+fn fr_edt_20_r109_a_draft_put_that_clears_the_mask_drops_a_waiting_mask() {
+    let mut e = env();
+    lock(&mut e, true);
+    e.submit(json!({"x": 10, "y": 10, "w": 16, "h": 16}), &[60; 256])
+        .unwrap_err();
+    // The region goes (draft save with `mask_id: null`), still locked: both wait.
+    let err = e
+        .core
+        .dispatch(
+            "project_put_draft",
+            json!({"draft": {"final_prompt": "moss", "mask_id": null}}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Locked);
+    lock(&mut e, false);
+    crate::project::commands::retry_pending_saves(&e.core);
+    crate::project::commands::retry_pending_saves(&e.core);
+    // Screen = disk (R108): no mask comes back.
+    assert_eq!(e.get()["draft"]["mask_id"], Value::Null);
+    assert!(!crate::project::has_unsaved(
+        e.core.state().project.as_ref().unwrap()
+    ));
+    e.core.dispatch("project_close", json!({})).unwrap();
+}

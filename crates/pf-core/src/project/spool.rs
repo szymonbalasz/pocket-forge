@@ -321,18 +321,24 @@ pub fn replay(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> CoreResul
                 })
             }),
         };
-        // Candidates of a job that hasn't got them yet (or whose job.json isn't readable here):
-        // paid output, never dropped.
-        let paid_waiting = entry.op == Op::AddCandidates
-            && p.jobs
-                .get(&entry.job_id)
-                .is_none_or(|j| !matches!(j.state, JobState::Fetched | JobState::Closed));
+        // Candidates are paid output, never dropped. R109: a job this store doesn't know yet
+        // (its job.json not synced or readable here) keeps them waiting; a known job that
+        // hasn't got them and refuses them for good sets them aside.
+        let candidates = entry.op == Op::AddCandidates;
+        let job = p.jobs.get(&entry.job_id);
+        let unknown_job = candidates && job.is_none();
+        let paid_waiting = candidates
+            && job.is_some_and(|j| !matches!(j.state, JobState::Fetched | JobState::Closed));
         match result {
             Ok(()) => {
                 remove_entry(&dir, &entry, &path);
                 out.entries += 1;
             }
             Err(e) if spoolable(&e) && !never_replays(&e) => return Ok(out),
+            Err(e) if unknown_job && !never_replays(&e) => {
+                tracing::info!(seq, job = %entry.job_id, "spooled candidates wait for their job");
+                return Ok(out);
+            }
             Err(e) if never_replays(&e) || paid_waiting => {
                 // R102: an entry that can't replay doesn't hold up the ones after it; set aside
                 // with its bytes (nothing paid is dropped).
