@@ -31,4 +31,5 @@ export const BADGE_LABEL: Record<string, string> = {
   conflict: 'Conflict',
   unreadable: 'Unreadable',
   not_available_offline: 'Not available offline',
+  no_image: 'No image yet',
 };

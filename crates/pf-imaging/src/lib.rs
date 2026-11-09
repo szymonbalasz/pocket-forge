@@ -8,6 +8,7 @@
 //! `sizing` are the export encoders, rescale and size maths. `webp` is the only module allowed
 //! `unsafe` (libwebp FFI).
 
+mod alpha;
 mod blend;
 mod compose;
 mod encode;
@@ -23,6 +24,7 @@ mod test_support;
 pub mod thumbnail;
 mod webp;
 
+pub use alpha::{FLATTEN_BG, flatten_px, flatten_rgba_in_place, to_rgb8_flattened};
 pub use blend::{
     BakedPatch, ColourFit, GAIN_RANGE, MIN_CONTEXT_SHARE, bake_patch, feather, fit_colour,
 };

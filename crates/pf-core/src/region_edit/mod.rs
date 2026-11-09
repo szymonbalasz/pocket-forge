@@ -75,6 +75,8 @@ pub fn pixel_source(
         .project
         .as_ref()
         .ok_or_else(|| CoreError::new(ErrorCode::NoProject, "no asset project is open"))?;
+    // FR-GEN-03: no region edit before the project has an image.
+    p.require_image()?;
     Ok(Arc::new(pixels::OpenProjectSource::new(ctx, p)))
 }
 

@@ -120,6 +120,8 @@ pub enum ErrorCode {
     EncodeFailed,
     /// More items than a list allows; `field` names the list (PRM `prm_helpers_save`, FR-PRM-01).
     TooMany,
+    /// The project has no image yet (Generate new, FR-GEN-03): region edit and export wait.
+    NoImage,
 }
 
 impl ErrorCode {
@@ -188,6 +190,7 @@ impl ErrorCode {
             ErrorCode::OutOfMemory => "out_of_memory",
             ErrorCode::EncodeFailed => "encode_failed",
             ErrorCode::TooMany => "too_many",
+            ErrorCode::NoImage => "no_image",
         }
     }
 }

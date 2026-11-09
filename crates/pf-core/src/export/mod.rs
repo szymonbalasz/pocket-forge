@@ -100,8 +100,9 @@ impl ExpState {
     }
 }
 
+/// `layers[0]`'s size (FR-EXP-04 amended); 0 × 0 with no image (FR-GEN-03).
 fn size(p: &OpenProject) -> (u32, u32) {
-    (p.manifest.original.width, p.manifest.original.height)
+    p.manifest.image_size().unwrap_or((0, 0))
 }
 
 /// The settings in effect: this session's, else the manifest record's, else the defaults.
@@ -145,6 +146,7 @@ pub(crate) fn set_settings(
 ) -> CoreResult<bool> {
     let State { project, exp, .. } = state;
     let p = project.as_ref().ok_or_else(crate::commands::no_project)?;
+    p.require_image()?;
     exp.bind(p);
     let (w, h) = size(p);
     settings.sizing(w, h)?;

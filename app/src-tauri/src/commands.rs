@@ -108,6 +108,8 @@ tauri_commands! {
     prm_helpers_save => c::PrmHelpersSave,
     prm_helpers_reset => c::PrmHelpersReset,
     prm_compose_preview => c::PrmComposePreview,
+    gen_project_create => c::GenProjectCreate,
+    gen_project_suggest_name => c::GenProjectSuggestName,
 }
 
 #[cfg(test)]

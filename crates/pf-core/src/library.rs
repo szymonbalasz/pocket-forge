@@ -240,6 +240,9 @@ pub enum CardBadge {
     Conflict,
     Unreadable,
     NotAvailableOffline,
+    /// "No image yet": a Generate new project before its first pick; the card shows a
+    /// placeholder instead of a thumbnail (FR-GEN-03).
+    NoImage,
 }
 
 /// One project card (FR-PRJ-49).
@@ -352,6 +355,11 @@ fn card_for(ctx: &Context, dir: &Path, name: String, kind: Kind) -> Option<Proje
         Some(n) if n > u64::from(MANIFEST_SCHEMA_VERSION) => card.badges.push(CardBadge::ReadOnly),
         Some(_) if project_id.is_some() => {}
         _ => card.badges.push(CardBadge::Unreadable),
+    }
+    // FR-GEN-03: no layers = no image yet (a stale thumbnail from before an undo is ignored).
+    if v["layers"].as_array().is_some_and(|l| l.is_empty()) {
+        card.badges.push(CardBadge::NoImage);
+        return Some(card);
     }
     let thumb = dir.join(THUMB_FILE);
     if thumb.is_file() && hydrate_if_needed(ctx, &thumb).is_ok() {

@@ -19,7 +19,7 @@ use crate::rgb_source::RgbSource;
 
 pub const TILE_SIZE: u32 = 512;
 /// Bump whenever the output changes: it is part of every pyramid key (FR-EDT-10).
-pub const BUILDER_VERSION: u32 = 1;
+pub const BUILDER_VERSION: u32 = 2; // 2: alpha over the flatten colour (FR-GEN-12)
 const JPEG_QUALITY: u8 = 90;
 
 /// One pyramid level.
@@ -302,6 +302,46 @@ mod tests {
 
     fn decode(path: &Path) -> image::RgbImage {
         image::open(path).unwrap().into_rgb8()
+    }
+
+    /// FR-GEN-12 golden: an alpha image's tiles show it over the flatten colour, at every level.
+    #[test]
+    fn fr_gen_12_tiles_of_an_alpha_image_sit_on_the_flatten_colour() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("token.png");
+        // Left half transparent, right half opaque red.
+        image::RgbaImage::from_fn(1030, 600, |x, _| {
+            if x < 515 {
+                image::Rgba([255, 0, 0, 0])
+            } else {
+                image::Rgba([255, 0, 0, 255])
+            }
+        })
+        .save(&src)
+        .unwrap();
+        let out = dir.path().join("tiles");
+        let specs = levels(1030, 600);
+        build(
+            &src,
+            &out,
+            (1030, 600),
+            &vec![true; specs.len()],
+            &mut |_| Ok(()),
+        )
+        .unwrap();
+        let l0 = decode(&tile_path(&out, &specs[0], 0, 0));
+        assert_eq!(
+            l0.get_pixel(10, 10).0,
+            crate::FLATTEN_BG,
+            "level 0 is lossless"
+        );
+        let last = specs[specs.len() - 1];
+        let small = decode(&tile_path(&out, &last, 0, 0));
+        let px = small.get_pixel(5, 5).0;
+        assert!(
+            px.iter().all(|&c| c.abs_diff(0x80) <= 3),
+            "jpeg level near #808080: {px:?}"
+        );
     }
 
     #[test]

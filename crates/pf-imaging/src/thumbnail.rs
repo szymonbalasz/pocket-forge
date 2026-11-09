@@ -60,7 +60,8 @@ pub fn working_thumbnail_jpeg(
     max_side: u32,
     quality: u8,
 ) -> Result<(Vec<u8>, u32, u32), ProbeError> {
-    let base = decode_whole(original)?;
+    // The base image's alpha goes over the flatten colour first (FR-GEN-12), as on the canvas.
+    let base = DynamicImage::ImageRgb8(crate::alpha::to_rgb8_flattened(decode_whole(original)?));
     let (bw, bh) = (base.width(), base.height());
     let (w, h) = fit_within(bw, bh, max_side);
     let mut canvas = if (w, h) == (bw, bh) {
@@ -68,7 +69,6 @@ pub fn working_thumbnail_jpeg(
     } else {
         base.resize_exact(w, h, FilterType::Lanczos3).into_rgba8()
     };
-    onto_black(&mut canvas);
     let f = f64::from(w) / f64::from(bw);
     for p in patches {
         let img = decode_whole(p.path)?.into_rgba8();
@@ -91,17 +91,6 @@ pub fn working_thumbnail_jpeg(
         .encode_image(&rgb)
         .map_err(ProbeError::encode)?;
     Ok((out, w, h))
-}
-
-/// The original sits on opaque black (export spec FR-EXP-02).
-fn onto_black(img: &mut image::RgbaImage) {
-    for px in img.pixels_mut() {
-        let a = u16::from(px.0[3]);
-        for c in &mut px.0[..3] {
-            *c = ((u16::from(*c) * a + 127) / 255) as u8;
-        }
-        px.0[3] = 255;
-    }
 }
 
 #[cfg(test)]
@@ -138,6 +127,29 @@ mod tests {
         let blue = back.get_pixel(400, 200).0;
         assert!(red[0] > 200 && red[2] < 60, "{red:?}");
         assert!(blue[2] > 150 && blue[0] < 60, "{blue:?}");
+    }
+
+    /// FR-GEN-12 golden: a transparent token's thumbnail shows it over the flatten colour.
+    #[test]
+    fn fr_gen_12_thumbnail_of_an_alpha_image_sits_on_the_flatten_colour() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("token.png");
+        image::RgbaImage::from_fn(1024, 1024, |x, _| {
+            if x < 512 {
+                image::Rgba([0, 255, 0, 0])
+            } else {
+                image::Rgba([0, 255, 0, 255])
+            }
+        })
+        .save(&src)
+        .unwrap();
+        let (jpeg, w, h) = working_thumbnail_jpeg(&src, &[], 512, 80).unwrap();
+        assert_eq!((w, h), (512, 512));
+        let back = image::load_from_memory(&jpeg).unwrap().into_rgb8();
+        let grey = back.get_pixel(40, 40).0;
+        assert!(grey.iter().all(|&c| c.abs_diff(0x80) <= 3), "{grey:?}");
+        let green = back.get_pixel(480, 40).0;
+        assert!(green[1] > 200 && green[0] < 40, "{green:?}");
     }
 
     #[test]

@@ -20,7 +20,8 @@
   Maps/  Tokens/  Items/                 sections (#44); kind map | token | item
   Maps/Crypt/                            project folder; folder name = project name (FR-PRJ-44)
     project.json                         the manifest: mutable, current state + indexes (commit point)
-    working/crypt.png                    the original, copied in: never written (FR-PRJ-15)
+    working/crypt.png                    the original, copied in: never written (FR-PRJ-15); absent in a project made by Generate new
+    working/001 crypt 02.png             a picked generate candidate (base image): write-once (FR-GEN-27)
     references/  structure/  parts/      user-owned: listed, never moved or deleted (FR-PRJ-47)
     results/001 kitchen/01.png           candidates: write-once, untouched, ext sniffed; one folder per iteration (§4.7)
     exports/Crypt_70px.png               EXP output (export spec)
@@ -62,6 +63,7 @@
 | Job state change (`update_job`) | `job.json` only | `job.json` rename | — |
 | Candidates stored (`add_candidates`) | `job.json` (`iteration` set) → candidate files in `results/NNN <slug>/` → manifest → `job.json` (`fetched`) | manifest rename | `succeeded` job whose candidates are in the manifest → `fetched`; otherwise the re-fetch replaces only that folder's unreferenced files |
 | Accept / dismiss / re-tune | layer PNG + revision → manifest → `job.json` (`closed`) | manifest rename | `fetched` job with an accepted candidate or none left `new` → `closed` |
+| Pick (GEN, FR-GEN-27) | `working/NNN <slug> NN.<ext>` (write-once copy; an existing file with the same hash is reused, one with other bytes gets ` (2)`) + revision → manifest → `job.json` (`closed`, first pick only) | manifest rename | as accept; an unreferenced `working/` copy is harmless and `working/` is never swept |
 
 - Before every manifest write: compare on-disk `commit{seq, install_id}` with the last loaded/written values (FR-PRJ-35).
 - On open: delete `*.pf-tmp-*`; move files in `.pforge/` referenced by **no** manifest field, revision or job file to the trash (`kind: orphan`). `thumb.jpg` and `project.v<N>.json` are known files. User-owned folders, and files the app didn't name, are never swept (FR-PRJ-47).
@@ -77,8 +79,8 @@
 | `kind` | `map\|token\|item` | from the section; follows the folder (FR-PRJ-46) |
 | `created_at` | time | project creation |
 | `commit` | `{seq, install_id, at}` | `seq` +1 per manifest write |
-| `original` | §4.2 | |
-| `layers[]` | §4.3 | **current** stack, draw order; `[0]` is the original. EXP and EDT read this (R6) |
+| `original` | §4.2 \| null | `null` for a project made by Generate new (FR-GEN-02, #60) |
+| `layers[]` | §4.3 | **current** stack, draw order; `[0]` is the original or a base image (FR-GEN-27); empty in a project with no image (FR-GEN-03). EXP and EDT read this (R6) |
 | `masks[]` | §4.4 | |
 | `draft` | §4.5 \| null | |
 | `jobs[]` | `{id, state, iteration}` | index, rebuilt from `.pforge/jobs/*/job.json` on open (R2); `iteration` = the job's `iteration.n` \| null, so a home card counts iterations from this file alone |
@@ -94,20 +96,21 @@
 ### 4.3 Layer
 | Field | Type | Notes |
 |---|---|---|
-| `id`, `kind` | ULID, `original\|patch` | |
-| `file` | path \| null | `.pforge/layers/<id>.png`; null for `original` (uses §4.2) |
+| `id`, `kind` | ULID, `original\|patch\|base` | `base` = a picked generate candidate (FR-GEN-27); `[0]` is `original` or `base` |
+| `file` | path \| null | `.pforge/layers/<id>.png`; `working/NNN <slug> NN.<ext>` for `base`; null for `original` (uses §4.2) |
 | `cx`, `cy`, `scale`, `rotation`, `opacity`, `visible` | number, bool | ADR 0003; patches: scale 1, rotation 0 (FR-RGN-27) |
 | **patch only:** `job_id`, `candidate_id`, `mask_id` | ULID | |
 | `region` | `{inner, outer, margin}` | rects + margin px (R1) |
 | `rect` | rect | placement of the cropped PNG |
 | `blend` | `{feather_px, colour_match{on, gain[3], offset[3]}}` | fitted gain/offset stored |
 | `retune_of` | ULID \| null | the layer this re-tune replaced (R3: new id + new file) |
+| **base only:** `content_hash`, `width`, `height`, `job_id`, `candidate_id` | hash, int, int, ULID, ULID | the picked file's hash and size, and where it came from (FR-GEN-27); centred, scale 1, rotation 0 |
 
 ### 4.4 Mask
 `id`, `file` (`.pforge/masks/<id>.png`), `rect` (the region, inner), `created_at`.
 
 ### 4.5 Draft
-`final_prompt`, `model_id`, `controls{}` (keyed by capability control `name`, #37), `seed` (int \| null), `region` (`{inner, margin}` \| null), `mask_id` (latest mask, R7) \| null, `references` (#51, REF: `{packs: [{pack_id, name}], items: [{key, on, role \| null, retry_of?, changed?}]}` \| null; null = REF's defaults, FR-REF-17; an item's `role` is set only when the user chose one, null = the model's default, R53; `retry_of` = the iteration `NNN` a Retry restored the item from, `changed: true` when its bytes differ from what that job sent, FR-REF-26), `blend_instruction` (bool, optional; absent = on; whether submit appends the blend instruction, #55), `prompt_helpers` (`[id]` \| null, optional; absent or null = the defaults: every visible helper of the kind with `default_on`; the ticks of [prompt-helper](../specs/prompt-helper.md) FR-PRM-05; GEN's `draft.generate` carries the same field), `updated_at`.
+`final_prompt`, `model_id`, `controls{}` (keyed by capability control `name`, #37), `seed` (int \| null), `region` (`{inner, margin}` \| null), `mask_id` (latest mask, R7) \| null, `references` (#51, REF: `{packs: [{pack_id, name}], items: [{key, on, role \| null, retry_of?, changed?}]}` \| null; null = REF's defaults, FR-REF-17; an item's `role` is set only when the user chose one, null = the model's default, R53; `retry_of` = the iteration `NNN` a Retry restored the item from, `changed: true` when its bytes differ from what that job sent, FR-REF-26), `blend_instruction` (bool, optional; absent = on; whether submit appends the blend instruction, #55), `prompt_helpers` (`[id]` \| null, optional; absent or null = the defaults: every visible helper of the kind with `default_on`; the ticks of [prompt-helper](../specs/prompt-helper.md) FR-PRM-05; GEN's `draft.generate` carries the same field), `generate` (object, optional: the New image tab's draft `{model_id, controls, seed, size{mode, cols?, rows?, pps?, aspect?, long_side?}, structure{file} \| null, references, typed_prompt, prompt_helpers}`, GEN owns the meaning, FR-GEN-19; `project_put_draft` without `draft` or with a draft holding only `generate` changes nothing else, and a region-edit save that omits it keeps it), `updated_at`.
 
 ### 4.6 Job (`.pforge/jobs/<id>/job.json`)
 | Field | Type | Notes |
