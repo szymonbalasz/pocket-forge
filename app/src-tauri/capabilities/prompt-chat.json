@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "prompt-chat",
+  "description": "Prompt chat pop-out window (#58, #60): core IPC and events only. Created at runtime from Rust; no dialogs, no shell.",
+  "windows": ["prompt-chat"],
+  "permissions": ["core:default"]
+}
