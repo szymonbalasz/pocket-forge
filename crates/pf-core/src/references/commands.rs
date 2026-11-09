@@ -415,6 +415,14 @@ pub struct RefResolveInput {
     /// The draft's `references`; `null` = REF's defaults (FR-REF-17).
     #[serde(default)]
     pub references: Option<DraftReferences>,
+    /// GEN (FR-GEN-13, R77): `generate` resolves against the model's generate slots. Absent =
+    /// `edit_masked` (RGN).
+    #[serde(default)]
+    pub operation: Option<pf_provider::Operation>,
+    /// GEN: the chosen sketch in `structure/` (null = None). With a model that takes one, its
+    /// slot's `max` is reduced by 1.
+    #[serde(default)]
+    pub structure: Option<String>,
 }
 
 const MAX_KEY_CHARS: usize = 600;
@@ -423,6 +431,9 @@ impl Validate for RefResolveInput {
     fn validate(&self) -> CoreResult<()> {
         if self.model_id.trim().is_empty() || self.model_id.len() > 200 {
             return Err(CoreError::invalid("model_id", "not a model id"));
+        }
+        if let Some(f) = &self.structure {
+            super::prepare::check_structure_file("structure", f)?;
         }
         if let Some(r) = &self.references {
             if r.packs.len() > 1000 {
@@ -461,13 +472,22 @@ impl Command for RefResolve {
             })?;
             (p.dir.clone(), p.read_only.is_some(), st.settings.clone())
         };
-        let caps = crate::region_edit::commands::capabilities(core, &input.model_id)?;
+        let op = input
+            .operation
+            .unwrap_or(pf_provider::Operation::EditMasked);
+        let caps = crate::region_edit::commands::capabilities_for(core, &input.model_id, op)?;
+        let slots = match op {
+            pf_provider::Operation::Generate => {
+                super::prepare::slots_for(&caps, input.structure.as_deref())
+            }
+            _ => caps.slots.clone(),
+        };
         let mut out = resolve::resolve(
             &core.ctx,
             &settings,
             &core.refs.probes,
             &dir,
-            &caps.slots,
+            &slots,
             input.references.as_ref(),
         );
         resolve::mark_duplicates(&mut out.items, |p| core.refs.prepared.content_hash_of(p));

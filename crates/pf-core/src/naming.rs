@@ -89,6 +89,12 @@ pub fn same_name(a: &str, b: &str) -> bool {
 /// digits → one space, trimmed, cut at a word boundary to ≤ 32 characters, then the FR-PRJ-44
 /// rules; empty → `edit`.
 pub fn iteration_slug(prompt: &str) -> String {
+    iteration_slug_or(prompt, "edit")
+}
+
+/// [`iteration_slug`] with `empty` for a prompt that gives no slug (`new` for a New image
+/// job, FR-GEN-24).
+pub fn iteration_slug_or(prompt: &str, empty: &str) -> String {
     let lowered = prompt.to_lowercase();
     let mut words = String::new();
     let mut gap = false;
@@ -119,7 +125,7 @@ pub fn iteration_slug(prompt: &str) -> String {
         slug.push_str(word);
     }
     if slug.is_empty() {
-        return "edit".into();
+        return empty.into();
     }
     sanitise_name(&slug)
 }

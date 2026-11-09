@@ -155,7 +155,7 @@ fn trash_inputs_if_all_discarded(ctx: &Context, m: &mut Manifest, job: &JobFile)
                 || (matches!(c.status, CandidateStatus::New | CandidateStatus::Dismissed)
                     && c.trash_id.is_none()))
     });
-    let inputs: Vec<String> = job.input_files().to_vec();
+    let inputs: Vec<String> = job.input_files();
     let already = m
         .trash
         .iter()
@@ -307,6 +307,27 @@ pub fn record_job(
     region_png: Vec<u8>,
     mask_png: Vec<u8>,
 ) -> CoreResult<JobFile> {
+    record(ctx, install_id, p, new, Some((region_png, mask_png)))
+}
+
+/// `record_job` for a `generate` job (FR-GEN-22): `job.json` only, no input PNGs, `inputs`
+/// null.
+pub fn record_job_without_inputs(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    new: NewJob,
+) -> CoreResult<JobFile> {
+    record(ctx, install_id, p, new, None)
+}
+
+fn record(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    new: NewJob,
+    inputs: Option<(Vec<u8>, Vec<u8>)>,
+) -> CoreResult<JobFile> {
     p.require_writable()?;
     if let Some(mid) = new.mask_id
         && !p.manifest.masks.iter().any(|k| k.id == mid)
@@ -337,7 +358,7 @@ pub fn record_job(
         region: new.region,
         fit: new.fit,
         mask_id: new.mask_id,
-        inputs: JobInputs::default(),
+        inputs: inputs.as_ref().map(|_| JobInputs::default()),
         references: new.references,
         estimate: new.estimate,
         cost: Value::Null,
@@ -349,9 +370,11 @@ pub fn record_job(
     };
     let record = job.clone();
     commit(ctx, install_id, p, |_, _, m, plan| {
-        let [region, mask] = record.input_files();
-        plan.files.push((region, region_png));
-        plan.files.push((mask, mask_png));
+        if let Some((region_png, mask_png)) = inputs {
+            let files = record.input_files();
+            plan.files.push((files[0].clone(), region_png));
+            plan.files.push((files[1].clone(), mask_png));
+        }
         m.jobs.push(JobIndex {
             id: record.id,
             state: record.state,
@@ -461,7 +484,7 @@ pub struct NewCandidate {
 
 /// The next iteration folder for `prompt` (FR-RGN-39): `n` = 1 + the highest in the project,
 /// `results/NNN <slug>`, ` (2)` if that folder is taken.
-fn next_iteration(p: &OpenProject, prompt: &str) -> Iteration {
+fn next_iteration(p: &OpenProject, prompt: &str, empty_slug: &str) -> Iteration {
     let n = p
         .jobs
         .values()
@@ -470,7 +493,7 @@ fn next_iteration(p: &OpenProject, prompt: &str) -> Iteration {
         .max()
         .unwrap_or(0)
         + 1;
-    let base = naming::iteration_dir_name(n, &naming::iteration_slug(prompt));
+    let base = naming::iteration_dir_name(n, &naming::iteration_slug_or(prompt, empty_slug));
     let name = naming::first_free(&base, |c| {
         std::fs::symlink_metadata(p.path(&format!("{RESULTS_DIR}/{c}"))).is_ok()
     });
@@ -510,7 +533,9 @@ pub fn add_candidates(
         return Err(CoreError::invalid("candidates", "no candidates"));
     }
     if job.iteration.is_none() {
-        job.iteration = Some(next_iteration(p, job.typed_prompt()));
+        // FR-GEN-24: an empty slug is `new` for a New image job, `edit` otherwise.
+        let empty_slug = if job.is_generate() { "new" } else { "edit" };
+        job.iteration = Some(next_iteration(p, job.typed_prompt(), empty_slug));
         job.updated_at = ctx.now();
         write_job(ctx, p, &job)?;
         p.jobs.insert(job_id, job.clone());

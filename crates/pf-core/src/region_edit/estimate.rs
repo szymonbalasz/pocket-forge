@@ -34,6 +34,28 @@ pub fn estimate_id(
     if !refs.is_empty() {
         canonical["refs"] = serde_json::json!(refs);
     }
+    hashed(&canonical)
+}
+
+/// FR-GEN-20: a generate job's estimate id hashes exactly the model, the sent size or ratio,
+/// the `cost_affecting` control values and the ordered `(slot, sent hash)` of cost-affecting
+/// slots (the sketch included, FR-REF-24). Never equal to a region edit's id.
+pub fn generate_estimate_id(
+    model_id: &str,
+    output: &pf_provider::OutputRequest,
+    cost_inputs: &BTreeMap<String, Value>,
+    refs: &[(String, String)],
+) -> String {
+    hashed(&serde_json::json!({
+        "operation": "generate",
+        "model": model_id,
+        "output": output,
+        "controls": cost_inputs,
+        "refs": refs,
+    }))
+}
+
+fn hashed(canonical: &Value) -> String {
     let digest = Sha256::digest(canonical.to_string().as_bytes());
     let hex: String = digest.iter().take(16).map(|b| format!("{b:02x}")).collect();
     format!("est-{hex}")

@@ -26,7 +26,7 @@ pub mod spend;
 pub mod spool;
 
 #[cfg(test)]
-mod job_tests;
+pub(crate) mod job_tests;
 #[cfg(test)]
 mod ref_tests;
 #[cfg(test)]

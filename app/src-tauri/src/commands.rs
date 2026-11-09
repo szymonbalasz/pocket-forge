@@ -110,6 +110,11 @@ tauri_commands! {
     prm_compose_preview => c::PrmComposePreview,
     gen_project_create => c::GenProjectCreate,
     gen_project_suggest_name => c::GenProjectSuggestName,
+    gen_size_fit => c::GenSizeFitCmd,
+    gen_controls_evaluate => c::GenControlsEvaluate,
+    gen_job_estimate => c::GenJobEstimate,
+    gen_job_submit => c::GenJobSubmit,
+    gen_job_retry_draft => c::GenJobRetryDraft,
 }
 
 #[cfg(test)]

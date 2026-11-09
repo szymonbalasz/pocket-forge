@@ -13,6 +13,7 @@ pub mod decoded;
 pub mod error;
 pub mod export;
 pub mod fsx;
+pub mod generate;
 pub mod images;
 pub mod job;
 pub mod library;

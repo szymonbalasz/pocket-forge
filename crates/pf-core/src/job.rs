@@ -15,6 +15,10 @@ pub const JOB_SCHEMA_VERSION: u32 = 1;
 pub const JOB_FILE: &str = "job.json";
 pub const REGION_INPUT: &str = "region.png";
 pub const MASK_INPUT: &str = "mask.png";
+/// `operation` of a New image job (GEN, FR-GEN-22).
+pub const OPERATION_GENERATE: &str = "generate";
+/// `operation` of a region edit job.
+pub const OPERATION_EDIT: &str = "edit_masked";
 
 /// Job states (schema §4.6 state diagram).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -97,6 +101,10 @@ impl Default for JobInputs {
     }
 }
 
+fn default_inputs() -> Option<JobInputs> {
+    Some(JobInputs::default())
+}
+
 /// `iteration{n, dir}`: set by `add_candidates` before any candidate file is written (FR-RGN-39).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Iteration {
@@ -141,8 +149,10 @@ pub struct JobFile {
     /// The draft mask the job was built from.
     #[serde(default)]
     pub mask_id: Option<Ulid>,
-    #[serde(default)]
-    pub inputs: JobInputs,
+    /// `null` for a `generate` job, which sends no input files (FR-GEN-22, schema §4.6).
+    /// Absent (a job from before GEN) = the default names.
+    #[serde(default = "default_inputs")]
+    pub inputs: Option<JobInputs>,
     /// The reference files sent, in request order (#51, FR-REF-25, FR-RGN-43); `[]` when none.
     /// Written with `requested`, never changed. REF owns the entry shape.
     #[serde(default)]
@@ -189,13 +199,18 @@ impl JobFile {
         crate::manifest::job_dir(self.id)
     }
 
-    /// Project paths of the inputs.
-    pub fn input_files(&self) -> [String; 2] {
+    /// Project paths of the inputs; none for a `generate` job (FR-GEN-22).
+    pub fn input_files(&self) -> Vec<String> {
         let d = self.dir();
-        [
-            format!("{d}/{}", self.inputs.region),
-            format!("{d}/{}", self.inputs.mask),
-        ]
+        match &self.inputs {
+            Some(i) => vec![format!("{d}/{}", i.region), format!("{d}/{}", i.mask)],
+            None => vec![],
+        }
+    }
+
+    /// True for a New image job (FR-GEN-22).
+    pub fn is_generate(&self) -> bool {
+        self.operation == OPERATION_GENERATE
     }
 
     /// Moves to `next` and stamps the time. Same state = no transition (a data update).
