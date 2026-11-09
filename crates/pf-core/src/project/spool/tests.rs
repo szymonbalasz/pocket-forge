@@ -129,3 +129,23 @@ fn fr_prj_40_r102_an_entry_that_wont_parse_is_quarantined() {
     assert_eq!((r.entries, r.quarantined.clone()), (1, vec![1]));
     assert!(!has_pending(&s.e.ctx, pid));
 }
+
+#[test]
+fn fr_rgn_37_r109_candidates_of_a_job_not_yet_known_wait_instead_of_quarantine() {
+    let mut s = setup();
+    let pid = s.p.manifest.project_id;
+    let job = succeeded(&mut s, "moss");
+    // This machine can't read the job yet (job.json not synced here).
+    let known = s.p.jobs.remove(&job.id).unwrap();
+    push_candidates(&s.e.ctx, pid, job.id, &[cand(1)]).unwrap();
+    let r = replay(&s.e.ctx, s.e.install(), &mut s.p).unwrap();
+    assert!(r.quarantined.is_empty(), "{:?}", r.quarantined);
+    assert!(r.dropped.is_empty());
+    assert!(has_pending(&s.e.ctx, pid), "still waiting");
+    // The job turns up: the next replay stores the candidates.
+    s.p.jobs.insert(job.id, known);
+    let r = replay(&s.e.ctx, s.e.install(), &mut s.p).unwrap();
+    assert_eq!(r.fetched, vec![job.id]);
+    assert!(!has_pending(&s.e.ctx, pid));
+    assert_eq!(s.p.jobs[&job.id].state, JobState::Fetched);
+}
