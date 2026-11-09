@@ -186,3 +186,5 @@ jobs:
       - run: cargo test -p pocket-forge --locked
       - name: pf-provider OS credential store test (Windows only, FR-PRV-06)
         run: cargo test -p pf-provider --locked fr_prv_06
+      - name: pf-chat tests on Windows (Job Object, process tree; R89)
+        run: cargo test -p pf-chat --locked
