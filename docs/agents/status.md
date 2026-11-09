@@ -81,7 +81,8 @@
 | Old-core review (phases 1–3) | 16 incl. 3 money + 2 data HIGH; fixed (R102, R104–R106) |
 | Regression walk (phase 4) | PASS; 6 low fixed (R103) |
 | Night walk (all fixes) | PASS; 2 med + 4 low fixed (R107, R108) |
-| Spec + schema sync | specs follow R96–R108 |
+| Review of the night's own fixes | 2 HIGH (X could wedge; X dead after a UI crash) + 5 MED; fixed (R109) |
+| Spec + schema sync | specs follow R96–R109 |
 
 **Open owner questions (picks in bold):**
 - Chat child environment (FR-PRM-34): **strip `ANTHROPIC_BASE_URL`/`AUTH_TOKEN`, Bedrock/Vertex switches, `NODE_OPTIONS` and warn at detection** · allow-list · leave as is.
@@ -91,3 +92,6 @@
 - FR-PRM-21 window singleton test needs Tauri's mock runtime (new dev feature, §3.5): **later** · now.
 - Glossary candidates: quarantine (spool), Fetch again, unconfirmed submit.
 - Confirm or change rulings R96–R108, especially R101 (app quit = close), R102 (lost, never Retry-to-resubmit) and R98 (undo leaves the New image draft alone).
+- After a Dismiss of a job whose fetch failed, it leaves the tracker, so `fetch_failed` isn't visible afterwards: **fine** · keep a row.
+- A References trash file whose move and rollback both failed stays in the trash folder with no item (logged only): **acceptable** · adopt such files at startup.
+- Chat "busy in another project" is UI-only; a core `other_turn_running` field would also cover the first second: **later** · now.
