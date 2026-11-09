@@ -129,7 +129,8 @@ function MarginInput({ margin }: { margin: number }) {
   const [text, setText] = useState(String(margin));
   useEffect(() => setText(String(margin)), [margin]);
   const commit = () => {
-    const n = Number(text);
+    // A cleared field is no value (`Number('')` is 0): the margin stays as it was.
+    const n = text.trim() === '' ? NaN : Number(text);
     if (Number.isFinite(n)) rgn.setMargin(n);
     else setText(String(margin));
   };

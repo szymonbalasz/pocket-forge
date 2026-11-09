@@ -225,6 +225,18 @@ describe('Generate panel (RGN slice 6)', { timeout: 20_000 }, () => {
     expect(screen.queryByTestId('rgn-panel-estimate-retry')).toBeNull();
   });
 
+  test('FR-RGN-02 a cleared margin field puts the margin back on blur, never 0', async () => {
+    await setup();
+    const fits = fake.callsOf('rgn_region_fit').length;
+    const field = screen.getByTestId('rgn-panel-margin') as HTMLInputElement;
+    fireEvent.change(field, { target: { value: '' } });
+    fireEvent.blur(field);
+    expect(rgn.get().margin).toBe(128);
+    expect(field.value).toBe('128');
+    await wait(50);
+    expect(fake.callsOf('rgn_region_fit').length).toBe(fits);
+  });
+
   test('FR-RGN-05 fit label recomputed on region and margin change', async () => {
     await setup();
     // 512 + 2×128 = 768, a multiple of 8 and ≤ 2048: unresampled.
