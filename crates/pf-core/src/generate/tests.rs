@@ -1258,3 +1258,31 @@ fn fr_gen_32_fr_prm_10_retry_badges_for_changed_and_missing_helpers() {
     );
     assert_eq!(r["prompt_helpers_changed"], json!([NO_PEOPLE]));
 }
+
+#[test]
+fn fr_gen_30_walk_l5_a_discarded_candidate_is_picked_after_storage_restore() {
+    let g = G::empty("maps", "Crypt");
+    let job = g.run(&g.two("crypt"));
+    let c = g.cands(job);
+    g.dispatch(
+        "rgn_candidate_discard",
+        json!({"job_id": job, "candidate_id": c[1]}),
+    )
+    .unwrap();
+    // #56: discarded = in the trash; it can't be picked as it is.
+    assert_eq!(code(g.pick(job, c[1])), ErrorCode::InvalidCandidate);
+    let trash = g.dispatch("project_trash_list", json!({})).unwrap();
+    let item = trash
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["kind"] == "candidates")
+        .unwrap()["id"]
+        .clone();
+    g.dispatch("project_trash_restore", json!({ "item_id": item }))
+        .unwrap();
+    // Storage → Restore makes it an ordinary kept result again: pickable, no spend.
+    let out = g.pick(job, c[1]).unwrap();
+    assert_eq!(out["file"], "working/001 crypt 02.png");
+    assert!(g.lab.project_dir.join("results/001 crypt/02.png").is_file());
+}
