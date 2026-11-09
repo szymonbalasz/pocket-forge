@@ -518,6 +518,58 @@ fn fr_prj_24_corrupt_manifest_is_rebuilt_too() {
 }
 
 #[test]
+fn fr_prj_24_r102_a_broken_manifest_is_backed_up_and_keeps_its_project_id() {
+    let e = env();
+    let dir = e.project("Crypt");
+    let p = e.open(&dir);
+    let id = p.manifest.project_id;
+    drop(p);
+    // Truncated by a sync: not JSON any more.
+    let full = std::fs::read(dir.join("project.json")).unwrap();
+    let cut = full[..full.len() / 2].to_vec();
+    std::fs::write(dir.join("project.json"), &cut).unwrap();
+    let q = e.open(&dir);
+    assert!(q.warnings.iter().any(|w| w.code == "recovered"));
+    assert_eq!(q.manifest.project_id, id, "the old project_id is kept");
+    let backups: Vec<_> = std::fs::read_dir(dir.join(BROKEN_DIR))
+        .unwrap()
+        .map(|e| std::fs::read(e.unwrap().path()).unwrap())
+        .collect();
+    assert_eq!(backups, [cut], "the broken file is copied aside first");
+}
+
+#[test]
+fn fr_prj_26_r102_an_unknown_enum_value_opens_read_only_as_newer() {
+    let e = env();
+    let dir = e.project("Crypt");
+    let mut p = e.open(&dir);
+    draft(&e, &mut p, "keep me").unwrap();
+    let mut v: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("project.json")).unwrap()).unwrap();
+    v["trash"] = serde_json::json!([{
+        "id": Ulid::from_parts(5, 5).to_string(),
+        "kind": "kind_from_the_future",
+        "files": [],
+        "trashed_at": "2026-01-01T00:00:00.000Z",
+        "reason": "x"
+    }]);
+    let bytes = serde_json::to_vec_pretty(&v).unwrap();
+    std::fs::write(dir.join("project.json"), &bytes).unwrap();
+    let q = e.open(&dir);
+    assert_eq!(q.read_only, Some(ReadOnlyReason::NewerVersion));
+    assert!(q.warnings.iter().any(|w| w.code == "newer_version"));
+    assert!(!q.warnings.iter().any(|w| w.code == "recovered"));
+    assert_eq!(q.manifest.project_id, p.manifest.project_id);
+    assert_eq!(q.manifest.draft.unwrap().final_prompt, "keep me");
+    assert_eq!(
+        std::fs::read(dir.join("project.json")).unwrap(),
+        bytes,
+        "never written"
+    );
+    assert!(!dir.join(BROKEN_DIR).exists());
+}
+
+#[test]
 fn fr_prj_47_fr_prj_48_user_folders_list_and_add_copies() {
     let e = env();
     let dir = e.project("Crypt");

@@ -283,6 +283,49 @@ fn fr_edt_10_aborted_build_is_never_served_and_rebuilt_on_reopen() {
 }
 
 #[test]
+fn fr_edt_12_an_empty_or_corrupt_tile_fails_and_rebuild_replaces_it() {
+    // R105: tiles aren't fsynced; after a power cut a complete level may hold an empty or
+    // corrupt tile. It must fail in the UI (fetch or decode → FR-EDT-12 retries, then the
+    // Rebuild badge), and Rebuild must write it again.
+    let e = env();
+    let snap = open_png(&e, "crypt.png", 600, 400);
+    let desc = tiles_open(&e, &snap, false);
+    let key = desc["key"].as_str().unwrap().to_owned();
+    wait_built(&e, &key);
+    let dir = cache_root(&e.core.ctx.data_dir).join(&key);
+    let specs = pyramid::levels(600, 400);
+    let empty = pyramid::tile_path(&dir, &specs[0], 1, 0);
+    let corrupt = pyramid::tile_path(&dir, &specs[1], 0, 0);
+    std::fs::write(&empty, b"").unwrap();
+    std::fs::write(&corrupt, b"\xff\xd8 not a jpeg").unwrap();
+
+    let served = |level, col| {
+        e.core
+            .serve_scheme(scheme_path(&tile_url(&desc, level, col, 0)))
+    };
+    assert_eq!(served(0, 1).status, 404, "an empty tile is a failed fetch");
+    let bad = served(1, 0);
+    assert_eq!(bad.status, 200);
+    assert!(
+        image::load_from_memory(&bad.body).is_err(),
+        "a corrupt tile fails the decode"
+    );
+
+    let again = tiles_open(&e, &snap, true);
+    wait_built(&e, &key);
+    for (level, col) in [(0, 1), (1, 0)] {
+        let r = e
+            .core
+            .serve_scheme(scheme_path(&tile_url(&again, level, col, 0)));
+        assert_eq!(r.status, 200);
+        assert!(
+            image::load_from_memory(&r.body).is_ok(),
+            "rebuilt tile decodes"
+        );
+    }
+}
+
+#[test]
 fn fr_edt_10_mtime_change_gives_a_new_key() {
     let e = env();
     let snap = open_png(&e, "m.png", 600, 400);
@@ -354,6 +397,30 @@ fn fr_edt_11_eviction_drops_least_recently_opened_unused_entries() {
     assert!(root.path().join("b").exists() && root.path().join("d").exists());
     assert!(evict(root.path(), 900, &in_use).is_empty(), "under the cap");
     assert_eq!(CACHE_CAP_BYTES, 2 << 30);
+}
+
+#[test]
+fn fr_edt_11_old_builder_caches_are_evicted_whole() {
+    let data = tempfile::tempdir().unwrap();
+    let root = cache_root(data.path());
+    let tiles = root.parent().unwrap().to_path_buf();
+    std::fs::create_dir_all(root.join("k")).unwrap();
+    std::fs::create_dir_all(tiles.join("v1/old-key/0")).unwrap();
+    std::fs::write(tiles.join("v1/old-key/0/0_0.webp"), [0u8; 64]).unwrap();
+    std::fs::create_dir_all(tiles.join("notes")).unwrap();
+    evict(&root, CACHE_CAP_BYTES, &HashSet::new());
+    assert!(!tiles.join("v1").exists(), "v1 is never served: removed");
+    assert!(
+        root.join("k").exists(),
+        "the current cache stays under the cap"
+    );
+    assert!(tiles.join("notes").exists(), "only v<N> folders");
+    // A root that isn't a cache root never touches its siblings.
+    let other = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(other.path().join("v1")).unwrap();
+    std::fs::create_dir_all(other.path().join("v2")).unwrap();
+    evict(&other.path().join("v2"), 0, &HashSet::new());
+    assert!(other.path().join("v1").exists());
 }
 
 #[test]

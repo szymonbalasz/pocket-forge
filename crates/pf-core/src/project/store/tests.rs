@@ -757,6 +757,98 @@ fn fr_prj_20_orphans_in_pforge_go_to_the_trash_and_user_files_stay() {
 }
 
 #[test]
+fn fr_prj_20_r102_an_unreadable_revision_stops_the_orphan_sweep() {
+    let mut s = setup();
+    let (job, c) = s.fetched("moss", 1);
+    let lc = s.accept(job.id, c[0].id).unwrap();
+    let r0 = s.p.manifest.revisions[0].id;
+    restore_revision(&s.e.ctx, s.e.install(), &mut s.p, r0).unwrap();
+    // The accept revision is the only reference to the patch layer; it can't be read (a sync
+    // still writing it, cloud-only while offline).
+    std::fs::write(s.dir.join(revision_file(lc.revision_id)), b"{ trunc").unwrap();
+    let stray = format!("{LAYERS_DIR}/{}.png", Ulid::from_parts(9, 9));
+    std::fs::write(s.dir.join(&stray), b"x").unwrap();
+    s.reopen();
+    assert!(s.dir.join(layer_file(lc.layer_id)).is_file(), "layer kept");
+    assert!(s.dir.join(&stray).is_file(), "nothing is swept this open");
+    assert!(
+        !s.p.manifest
+            .trash
+            .iter()
+            .any(|t| t.kind == TrashKind::Orphan)
+    );
+}
+
+#[test]
+fn fr_prj_20_r102_a_job_folder_still_syncing_stops_the_orphan_sweep() {
+    let mut s = setup();
+    let syncing = format!("{JOBS_DIR}/{}", Ulid::from_parts(7, 7));
+    std::fs::create_dir_all(s.dir.join(&syncing)).unwrap();
+    std::fs::write(s.dir.join(format!("{syncing}/region.png")), b"x").unwrap();
+    s.reopen();
+    assert!(s.dir.join(format!("{syncing}/region.png")).is_file());
+    assert!(
+        !s.p.manifest
+            .trash
+            .iter()
+            .any(|t| t.kind == TrashKind::Orphan)
+    );
+
+    // A week later its job.json never came: a crash leftover, swept.
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(8 * 86_400);
+    std::fs::File::options()
+        .write(true)
+        .open(s.dir.join(format!("{syncing}/region.png")))
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    s.reopen();
+    let orphan =
+        s.p.manifest
+            .trash
+            .iter()
+            .find(|t| t.kind == TrashKind::Orphan)
+            .unwrap();
+    assert_eq!(orphan.files, [format!("{syncing}/region.png")]);
+}
+
+#[test]
+fn fr_prj_21_r102_job_writes_after_a_folder_move_never_recreate_the_old_path() {
+    let mut s = setup();
+    let running = s.job("moss");
+    s.to(running.id, JobState::Submitted);
+    let succeeded = s.job("fern");
+    for st in [JobState::Submitted, JobState::Running, JobState::Succeeded] {
+        s.to(succeeded.id, st);
+    }
+    rename_dir(&s.dir, &s.dir.with_file_name("Elsewhere"));
+    let err = update_job(
+        &s.e.ctx,
+        &mut s.p,
+        running.id,
+        JobUpdate {
+            state: Some(JobState::Running),
+            provider: Some(serde_json::json!({"job_id": "handle"})),
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
+    assert!(crate::project::is_folder_moved(&err));
+    assert!(
+        crate::project::spool::spoolable(&err),
+        "spooled, replayed after reopen"
+    );
+    let cand = NewCandidate {
+        bytes: rgba_png(16, 14, [1, 0, 0, 255]),
+        ..Default::default()
+    };
+    let err =
+        add_candidates(&s.e.ctx, s.e.install(), &mut s.p, succeeded.id, vec![cand]).unwrap_err();
+    assert!(crate::project::is_folder_moved(&err));
+    assert!(!s.dir.exists(), "no ghost folder at the old path");
+}
+
+#[test]
 fn fr_prj_41_read_only_refuses_every_store_write() {
     let mut s = setup();
     let (job, c) = s.fetched("moss", 1);

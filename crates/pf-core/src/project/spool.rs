@@ -4,8 +4,10 @@
 //! `<data-dir>/pending/<project-id>/` holds `<seq>.json` = `{seq, op, job_id, payload,
 //! created_at}` plus `<seq>-<NN>.<ext>` candidate bytes. The bytes are written before the entry
 //! (the entry's rename is the commit point). Entries are replayed in `seq` order once the project
-//! is writable and out of conflict; each is deleted after its commit. Paid output is never
-//! dropped. Keyed by project id, so candidates for a closed project wait here too.
+//! is writable and out of conflict; each is deleted after its commit (the `.json` first, then its
+//! bytes, R102). Paid output is never dropped. Keyed by project id, so candidates for a closed
+//! project wait here too. An entry that can never replay (its bytes are gone, its candidate files
+//! are taken, it won't parse) moves to `quarantine/` with its bytes, so later entries go on (R102).
 //!
 //! Taken over from RGN's interim `region_edit/spool.rs` (R48), which now re-exports this.
 
@@ -85,11 +87,13 @@ struct Entry {
 }
 
 /// A store error the spool absorbs (FR-RGN-37): the write is retried after the cause is gone.
+/// A folder moved in Explorer counts (R102): the entry waits under the project id and replays
+/// when the project is reopened from its new place.
 pub fn spoolable(e: &CoreError) -> bool {
     matches!(
         e.code,
         ErrorCode::Conflict | ErrorCode::Locked | ErrorCode::ReadOnly | ErrorCode::Io
-    )
+    ) || crate::project::is_folder_moved(e)
 }
 
 fn dir(ctx: &Context, project_id: Ulid) -> PathBuf {
@@ -126,11 +130,14 @@ pub fn spool_dir(ctx: &Context, project_id: Ulid) -> PathBuf {
     dir(ctx, project_id)
 }
 
+/// Where entries that can never replay are kept, with their bytes (R102).
+pub const QUARANTINE_DIR: &str = "quarantine";
+
 fn next_seq(dir: &Path) -> u64 {
-    let from_names = std::fs::read_dir(dir)
-        .into_iter()
-        .flatten()
-        .flatten()
+    // Quarantined seqs stay taken, so a later entry never collides with one.
+    let from_names = [dir.to_path_buf(), dir.join(QUARANTINE_DIR)]
+        .iter()
+        .flat_map(|d| std::fs::read_dir(d).into_iter().flatten().flatten())
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().into_owned();
             name.split(['.', '-']).next()?.parse::<u64>().ok()
@@ -200,15 +207,40 @@ pub fn push_candidates(
     write_entry(ctx, &dir, &entry)
 }
 
+/// The byte files an entry lists (none for a job update).
+fn entry_files(entry: &Entry) -> Vec<String> {
+    match entry.op {
+        Op::AddCandidates => serde_json::from_value::<Vec<SpooledCandidate>>(entry.payload.clone())
+            .map(|l| l.into_iter().map(|c| c.file).collect())
+            .unwrap_or_default(),
+        Op::UpdateJob => vec![],
+    }
+}
+
+/// R102: the `.json` goes first, so a crash or an AV lock in between leaves stray bytes (never
+/// replayed), not an entry whose bytes are gone. Bytes stay if the `.json` can't be removed.
 fn remove_entry(dir: &Path, entry: &Entry, path: &Path) {
-    if let Op::AddCandidates = entry.op
-        && let Ok(list) = serde_json::from_value::<Vec<SpooledCandidate>>(entry.payload.clone())
-    {
-        for c in list {
-            let _ = std::fs::remove_file(dir.join(c.file));
+    if let Err(e) = std::fs::remove_file(path) {
+        tracing::warn!(path = %path.display(), error = %e, "spool entry not removed");
+        return;
+    }
+    for f in entry_files(entry) {
+        let _ = std::fs::remove_file(dir.join(f));
+    }
+}
+
+/// R102: moves an entry that can never replay to `quarantine/`, its bytes first (an entry there
+/// always finds them). False if it couldn't move (then it stays and is retried).
+fn quarantine(dir: &Path, path: &Path, files: &[String]) -> bool {
+    let q = dir.join(QUARANTINE_DIR);
+    for f in files {
+        let src = dir.join(f);
+        if src.exists() && fsx::move_file(&src, &q.join(f)).is_err() {
+            return false;
         }
     }
-    let _ = std::fs::remove_file(path);
+    let name = path.file_name().unwrap_or_default();
+    fsx::move_file(path, &q.join(name)).is_ok()
 }
 
 /// The event that tells the user a spooled write was dropped (BL-25):
@@ -234,6 +266,21 @@ pub struct Replayed {
     pub entries: usize,
     /// Entries refused for good and deleted; each also fired [`EVENT_SPOOL_DROPPED`].
     pub dropped: Vec<Dropped>,
+    /// Seqs of entries that can never replay, moved to `quarantine/` (R102).
+    pub quarantined: Vec<u64>,
+}
+
+/// The event that tells the user a spooled write was set aside (R102):
+/// `{project_id, job_id, seq, op}`. Its files stay in `quarantine/`; nothing is dropped.
+pub const EVENT_SPOOL_QUARANTINED: &str = "project:spool-quarantined";
+
+/// `detail.reason` of a spooled entry whose payload won't parse or whose bytes are gone.
+const SPOOL_BYTES_MISSING: &str = "spool_bytes_missing";
+
+/// True if retrying `e` can never help (R102): the entry's candidate bytes are gone, or its
+/// files already belong to candidates.
+fn never_replays(e: &CoreError) -> bool {
+    e.detail["reason"] == store::FILE_TAKEN || e.detail["reason"] == SPOOL_BYTES_MISSING
 }
 
 /// Replays the project's spool in `seq` order (FR-RGN-37). Stops at the first entry that still
@@ -246,56 +293,63 @@ pub fn replay(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> CoreResul
     if p.read_only.is_some() || p.conflict.is_some() {
         return Ok(out);
     }
-    let dir = dir(ctx, p.manifest.project_id);
-    for (_, path) in entries(&dir) {
-        let entry: Entry = match std::fs::read(&path)
-            .ok()
-            .and_then(|b| serde_json::from_slice(&b).ok())
-        {
-            Some(e) => e,
-            None => {
-                tracing::warn!(path = %path.display(), "unreadable spool entry; kept");
+    let pid = p.manifest.project_id;
+    let dir = dir(ctx, pid);
+    for (seq, path) in entries(&dir) {
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "spool entry unreadable; kept");
                 continue;
             }
+        };
+        let Ok(entry) = serde_json::from_slice::<Entry>(&bytes) else {
+            // R102: it will never parse; set aside so the entries after it go on.
+            tracing::warn!(seq, "spool entry won't parse; quarantined");
+            if quarantine(&dir, &path, &[]) {
+                out.quarantined.push(seq);
+            }
+            continue;
         };
         let result = match entry.op {
             Op::UpdateJob => serde_json::from_value::<SpoolUpdate>(entry.payload.clone())
                 .map_err(|e| CoreError::new(ErrorCode::Corrupt, e.to_string()))
                 .and_then(|u| store::update_job(ctx, p, entry.job_id, u.into()).map(|_| ())),
-            Op::AddCandidates => {
-                let list: Vec<SpooledCandidate> = serde_json::from_value(entry.payload.clone())
-                    .map_err(|e| CoreError::new(ErrorCode::Corrupt, e.to_string()))?;
-                let mut cands = vec![];
-                for c in list {
-                    let bytes = std::fs::read(dir.join(&c.file))
-                        .map_err(|e| CoreError::io("reading a spooled candidate", &e))?;
-                    cands.push(NewCandidate {
-                        bytes,
-                        seed: c.seed,
-                        provider_meta: c.provider_meta,
-                        invalid: c.invalid,
-                        extra: c.extra,
-                    });
-                }
+            Op::AddCandidates => spooled_candidates(&dir, &entry).and_then(|cands| {
                 store::add_candidates(ctx, install_id, p, entry.job_id, cands).map(|_| {
                     out.fetched.push(entry.job_id);
                 })
-            }
+            }),
         };
+        // Candidates of a job that hasn't got them yet (or whose job.json isn't readable here):
+        // paid output, never dropped.
+        let paid_waiting = entry.op == Op::AddCandidates
+            && p.jobs
+                .get(&entry.job_id)
+                .is_none_or(|j| !matches!(j.state, JobState::Fetched | JobState::Closed));
         match result {
             Ok(()) => {
                 remove_entry(&dir, &entry, &path);
                 out.entries += 1;
             }
-            Err(e) if spoolable(&e) => return Ok(out),
-            Err(e)
-                if entry.op == Op::AddCandidates
-                    && p.jobs.get(&entry.job_id).is_some_and(|j| {
-                        !matches!(j.state, JobState::Fetched | JobState::Closed)
-                    }) =>
-            {
-                // Paid output is never dropped: kept for the next replay.
-                tracing::warn!(seq = entry.seq, error = %e, "spooled candidates refused; kept");
+            Err(e) if spoolable(&e) && !never_replays(&e) => return Ok(out),
+            Err(e) if never_replays(&e) || paid_waiting => {
+                // R102: an entry that can't replay doesn't hold up the ones after it; set aside
+                // with its bytes (nothing paid is dropped).
+                tracing::warn!(seq, error = %e, "spool entry can't replay; quarantined");
+                if !quarantine(&dir, &path, &entry_files(&entry)) {
+                    return Ok(out);
+                }
+                out.quarantined.push(seq);
+                ctx.emit(
+                    EVENT_SPOOL_QUARANTINED,
+                    serde_json::json!({
+                        "project_id": pid,
+                        "job_id": entry.job_id,
+                        "seq": seq,
+                        "op": op_name(entry.op),
+                    }),
+                );
             }
             Err(e) => {
                 tracing::warn!(seq = entry.seq, error = %e, "spool entry refused; dropped");
@@ -303,10 +357,7 @@ pub fn replay(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> CoreResul
                 let d = Dropped {
                     seq: entry.seq,
                     job_id: entry.job_id,
-                    op: match entry.op {
-                        Op::UpdateJob => "update_job",
-                        Op::AddCandidates => "add_candidates",
-                    },
+                    op: op_name(entry.op),
                     code: e.code,
                 };
                 ctx.emit(
@@ -328,3 +379,42 @@ pub fn replay(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> CoreResul
     }
     Ok(out)
 }
+
+fn op_name(op: Op) -> &'static str {
+    match op {
+        Op::UpdateJob => "update_job",
+        Op::AddCandidates => "add_candidates",
+    }
+}
+
+/// The candidates of an `add_candidates` entry with their bytes. A payload that won't parse or a
+/// byte file that is gone can never replay (R102); other read errors are retried.
+fn spooled_candidates(dir: &Path, entry: &Entry) -> CoreResult<Vec<NewCandidate>> {
+    let missing = |msg: String| {
+        CoreError::new(ErrorCode::Corrupt, msg)
+            .with_detail(serde_json::json!({ "reason": SPOOL_BYTES_MISSING }))
+    };
+    let list: Vec<SpooledCandidate> =
+        serde_json::from_value(entry.payload.clone()).map_err(|e| missing(e.to_string()))?;
+    let mut cands = vec![];
+    for c in list {
+        let bytes = match std::fs::read(dir.join(&c.file)) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(missing(format!("spooled candidate {} is gone", c.file)));
+            }
+            Err(e) => return Err(CoreError::io("reading a spooled candidate", &e)),
+        };
+        cands.push(NewCandidate {
+            bytes,
+            seed: c.seed,
+            provider_meta: c.provider_meta,
+            invalid: c.invalid,
+            extra: c.extra,
+        });
+    }
+    Ok(cands)
+}
+
+#[cfg(test)]
+mod tests;
