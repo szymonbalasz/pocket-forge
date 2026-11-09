@@ -713,8 +713,12 @@ fn fr_prm_35_closing_the_project_ends_the_session() {
 // ---------------------------------------------------------------- the Claude Code adapter
 
 fn logged_in(data: &Path) -> String {
+    logged_in_as(data, "claude.ai")
+}
+
+fn logged_in_as(data: &Path, auth_method: &str) -> String {
     json!({
-        "loggedIn": true, "authMethod": "claude.ai", "subscriptionType": "max",
+        "loggedIn": true, "authMethod": auth_method, "subscriptionType": "max",
         "configDirectory": data.join("claude-config").to_string_lossy(),
         "email": "someone@example.com",
     })
@@ -723,6 +727,11 @@ fn logged_in(data: &Path) -> String {
 
 /// A lab whose chat runs the Claude Code adapter over a replay spawner.
 fn claude_lab() -> (Lab, Arc<ReplaySpawner>) {
+    claude_lab_as("claude.ai")
+}
+
+/// [`claude_lab`] logged in with `auth_method`.
+fn claude_lab_as(auth_method: &str) -> (Lab, Arc<ReplaySpawner>) {
     let clock = pf_chat::clock::FakeClock::new();
     let mut spawner: Option<Arc<ReplaySpawner>> = None;
     let lab = Lab::with_context(|ctx| {
@@ -742,7 +751,7 @@ fn claude_lab() -> (Lab, Arc<ReplaySpawner>) {
                 .on_run(
                     &["auth", "status", "--json"],
                     Some(0),
-                    &logged_in(&ctx.data_dir),
+                    &logged_in_as(&ctx.data_dir, auth_method),
                 ),
         );
         ctx.chat.mode = BackendMode::ClaudeCode;
@@ -1282,4 +1291,32 @@ fn fr_prm_21_closing_the_window_never_cancels_a_job() {
             .len(),
         2
     );
+}
+
+#[test]
+fn fr_prm_38_each_turn_records_usage_notional_only_on_a_plan_login() {
+    for (auth, notional) in [("claude.ai", true), ("api_key", false)] {
+        let (lab, sp) = claude_lab_as(auth);
+        let st = consent(&lab);
+        assert_eq!(st["backend"]["auth_method"], auth);
+        assert_eq!(st["backend"]["notional"], notional, "{auth}");
+        sp.push_script(Script::recordings(&[SUCCESS_IMAGE]));
+        publish(&lab, "rgn", lab.draft("a kitchen"));
+        send(&lab, "make this a kitchen").unwrap();
+        let end = events(&lab, super::EVENT_TURN).last().cloned().unwrap();
+        assert_eq!(end["state"], "done");
+        let want = json!({"input_tokens": 2, "output_tokens": 246, "cost_usd": 0.016376,
+            "notional": notional});
+        assert_eq!(end["usage"], want, "{auth}");
+        // Recorded on the reply turn in the thread file.
+        let turns = thread_view(&lab)["thread"]["turns"].clone();
+        assert_eq!(turns[1]["usage"], want, "{auth}");
+        assert!(turns[0]["usage"].is_null(), "the user turn has none");
+    }
+    // The fake bills nothing: notional (L4).
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "hi").unwrap();
+    let end = events(&lab, super::EVENT_TURN).last().cloned().unwrap();
+    assert_eq!(end["usage"]["notional"], true);
 }
