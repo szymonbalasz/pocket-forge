@@ -621,3 +621,222 @@ fn fr_prm_35_close_ends_the_session_and_sweeps_projects() {
     let (out, _) = turn(s.as_mut(), &input("hi"));
     assert!(matches!(out, TurnOutcome::Failed { .. }));
 }
+
+// ---------------------------------------------------------------- error heuristics
+
+fn result_line(is_error: bool, result: &str) -> Step {
+    Step::Line(
+        serde_json::json!({"type":"result","subtype":"success","is_error":is_error,"result":result})
+            .to_string(),
+    )
+}
+
+fn assistant_error(error: &str, text: &str) -> Step {
+    Step::Line(
+        serde_json::json!({"type":"assistant","error":error,"message":{"content":[{"type":"text","text":text}]}})
+            .to_string(),
+    )
+}
+
+fn outcome_of(steps: Vec<Step>, stderr: &str) -> (TurnOutcome, bool) {
+    let r = rig();
+    let mut s = r.open(
+        Script {
+            turns: vec![steps],
+            stderr: String::new(),
+        }
+        .with_stderr(stderr),
+    );
+    let (out, _) = turn(s.as_mut(), &input("hi"));
+    (out, s.is_alive())
+}
+
+fn code_of(out: &TurnOutcome) -> &'static str {
+    match out {
+        TurnOutcome::Failed { error, .. } => error.code(),
+        TurnOutcome::Completed { .. } => "completed",
+        TurnOutcome::Canceled { .. } => "canceled",
+    }
+}
+
+/// FR-PRM-37 / Appendix D: the committed recordings plus synthetic variants of what the CLI
+/// prints for each state (R89: heuristics until more real recordings exist).
+#[test]
+fn fr_prm_37_error_heuristics_map_cli_messages_to_states() {
+    let not_logged_in = Script::recordings(&[NOT_LOGGED_IN]).turns.remove(0);
+    let usage_limit = Script::recordings(&[USAGE_LIMIT]).turns.remove(0);
+    let expired = r#"API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired. Please obtain a new token or refresh your existing token."}}"#;
+    let cases: Vec<(&str, Vec<Step>, &str)> = vec![
+        // Not logged in.
+        ("recording: not logged in", not_logged_in, "not_logged_in"),
+        ("invalid api key", vec![init(), result_line(true, "Invalid API key · Please run /login")], "not_logged_in"),
+        // Auth expired (the 401 body, with and without the CLI's "/login" hint).
+        ("auth expired", vec![init(), result_line(true, expired)], "not_logged_in"),
+        ("auth expired + hint", vec![init(), result_line(true, &format!("{expired} · Please run /login"))], "not_logged_in"),
+        ("auth failed, empty result", vec![init(), assistant_error("authentication_failed", "OAuth token revoked"), result_line(true, "")], "not_logged_in"),
+        // Usage limit.
+        ("recording: usage limit", usage_limit, "usage_limit"),
+        ("old limit format", vec![init(), result_line(true, "Claude AI usage limit reached|1762700000")], "usage_limit"),
+        ("5-hour limit", vec![init(), result_line(true, "5-hour limit reached ∙ resets 3pm")], "usage_limit"),
+        ("weekly limit", vec![init(), result_line(true, "Weekly limit reached · resets Mon 9am")], "usage_limit"),
+        ("rate_limit assistant error", vec![init(), assistant_error("rate_limit", "Rate limited"), result_line(true, "")], "usage_limit"),
+        ("api 429", vec![init(), result_line(true, r#"API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Rate limited"}}"#)], "usage_limit"),
+        // Offline.
+        ("connection error", vec![init(), result_line(true, "API Error: Connection error.")], "offline"),
+        ("retrying", vec![init(), result_line(true, "API Error (Connection error.) · Retrying in 8 seconds… (attempt 10/10)")], "offline"),
+        ("dns", vec![init(), result_line(true, "getaddrinfo ENOTFOUND api.anthropic.com")], "offline"),
+        ("reset", vec![init(), result_line(true, "read ECONNRESET")], "offline"),
+        ("errors[] only", vec![init(), Step::Line(r#"{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["fetch failed"]}"#.into())], "offline"),
+        // Anything else.
+        ("other", vec![init(), result_line(true, "Something else broke")], "backend_error"),
+        ("context limit", vec![init(), result_line(true, "Context limit reached · /compact or /clear to continue")], "backend_error"),
+        // CLI crash mid-stream: no result, stdout closes.
+        ("crash with code", vec![init(), assistant("half"), Step::Exit(Some(1))], "backend_crashed"),
+        ("crash, killed", vec![init(), assistant("half"), Step::Exit(None)], "backend_crashed"),
+        // An auth error and then an exit without a result is still the auth state.
+        ("auth error then exit", vec![init(), assistant_error("authentication_failed", "Not logged in · Please run /login"), Step::Exit(Some(1))], "not_logged_in"),
+        // Truncated JSON lines.
+        ("truncated then exit", vec![init(), assistant("half"), Step::Line(r#"{"type":"assistant","message":{"content":[{"type":"te"#.into()), Step::Exit(Some(1))], "backend_crashed"),
+        ("truncated then result", vec![init(), Step::Line(r#"{"type":"assistant","mess"#.into()), result_line(false, "fine")], "completed"),
+        ("three truncated", vec![init(), Step::Line("{\"a".into()), Step::Line("{\"b".into()), Step::Line("{\"c".into())], "stream_malformed"),
+    ];
+    for (name, steps, want) in cases {
+        let (out, alive) = outcome_of(steps, "boom");
+        assert_eq!(code_of(&out), want, "{name}: {out:?}");
+        // Only a `result` keeps the process for the next turn.
+        let has_result =
+            !matches!(want, "backend_crashed" | "stream_malformed") && !name.contains("then exit");
+        assert_eq!(alive, has_result, "{name}");
+        if want == "usage_limit" {
+            let TurnOutcome::Failed { error, .. } = &out else {
+                unreachable!()
+            };
+            assert!(!error.fix.is_empty(), "{name}");
+        }
+        if name.starts_with("crash") || name == "truncated then exit" {
+            let TurnOutcome::Failed { error, partial } = &out else {
+                unreachable!()
+            };
+            assert_eq!(partial, "half", "{name}: the partial reply is kept");
+            assert_eq!(
+                error.detail.as_deref(),
+                Some("boom"),
+                "{name}: the stderr tail"
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------- login copy text
+
+/// review-sec 5 (R96): the folder is single-quoted, so `$`, backticks and `"` stay literal.
+#[test]
+fn fr_prm_45_login_copy_text_quotes_the_folder() {
+    use pf_chat::claude_code::login_copy_text;
+    assert_eq!(
+        login_copy_text(r"C:\pf $HOME `n o'brien\claude-config", true),
+        r"$env:CLAUDE_CONFIG_DIR = 'C:\pf $HOME `n o''brien\claude-config'; claude auth login"
+    );
+    assert_eq!(
+        login_copy_text("/pf $HOME `x` o'brien/claude-config", false),
+        r"CLAUDE_CONFIG_DIR='/pf $HOME `x` o'\''brien/claude-config' claude auth login"
+    );
+}
+
+/// The Windows copy text, run by real PowerShell (no CLI: `claude auth login` is replaced by
+/// printing the variable), sets exactly the folder.
+#[cfg(windows)]
+#[test]
+fn fr_prm_45_login_copy_text_round_trips_through_powershell() {
+    use pf_chat::claude_code::login_copy_text;
+    let dir = r"C:\pf $HOME $(whoami) `t o'brien & a;b ünï\claude-config";
+    let script = login_copy_text(dir, true).replace(
+        "claude auth login",
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; [Console]::Out.Write($env:CLAUDE_CONFIG_DIR)",
+    );
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let out = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+        .arg(pf_chat::base64::encode(&utf16))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim_start_matches('\u{feff}'),
+        dir
+    );
+}
+
+// ---------------------------------------------------------------- size caps
+
+/// review-sec 7 (R96): a stdout line over 1 MiB is `stream_malformed`; the child is killed.
+#[test]
+fn fr_prm_37_a_stdout_line_over_1_mib_is_malformed() {
+    let big = "x".repeat(pf_chat::stream::MAX_LINE);
+    let line =
+        serde_json::json!({"type":"assistant","message":{"content":[{"type":"text","text":big}]}})
+            .to_string();
+    assert!(line.len() > pf_chat::stream::MAX_LINE);
+    let (out, alive) = outcome_of(vec![init(), assistant("before"), Step::Line(line)], "");
+    let TurnOutcome::Failed { error, partial } = out else {
+        panic!("{out:?}")
+    };
+    assert_eq!(error.code(), "stream_malformed");
+    assert_eq!(partial, "before");
+    assert!(!alive);
+}
+
+/// review-sec 7 (R96): the reply is capped at 1 MiB; what fits is kept and streamed, cut at
+/// a character boundary, then the turn ends with `stream_malformed`.
+#[test]
+fn fr_prm_37_the_reply_is_capped() {
+    let cap = pf_chat::stream::MAX_REPLY;
+    // Each message is under the line cap; together they pass the reply cap.
+    let chunk = "é".repeat(cap / 6);
+    let steps: Vec<Step> = std::iter::once(init())
+        .chain((0..4).map(|_| assistant(&chunk)))
+        .chain(std::iter::once(result_line(false, "x")))
+        .collect();
+    let r = rig();
+    let mut s = r.open(Script {
+        turns: vec![steps],
+        stderr: String::new(),
+    });
+    let (out, deltas) = turn(s.as_mut(), &input("hi"));
+    let TurnOutcome::Failed { error, partial } = out else {
+        panic!("{out:?}")
+    };
+    assert_eq!(error.code(), "stream_malformed");
+    assert!(
+        partial.len() <= cap && partial.len() > cap - 4,
+        "{}",
+        partial.len()
+    );
+    assert_eq!(deltas.concat(), partial, "the UI saw exactly what is kept");
+    assert!(!s.is_alive());
+}
+
+// ---------------------------------------------------------------- blocked stdin
+
+/// review-code 5 (FR-PRM-36): a child that never reads its stdin can't hold the turn past
+/// the 60 s first-event budget; the write is given up on, the child killed.
+#[test]
+fn fr_prm_36_a_blocked_stdin_write_times_out() {
+    let r = rig();
+    let mut s = r.open(Script {
+        turns: vec![vec![Step::StdinStall]],
+        stderr: String::new(),
+    });
+    let (out, deltas) = turn(s.as_mut(), &input("hi"));
+    assert!(
+        matches!(&out, TurnOutcome::Failed { error, .. } if error.code() == "timeout"),
+        "{out:?}"
+    );
+    assert!(deltas.is_empty());
+    assert_eq!(r.clock.now(), S(60));
+    assert!(!s.is_alive(), "the child is killed");
+}

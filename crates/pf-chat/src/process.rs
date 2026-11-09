@@ -12,17 +12,66 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::invocation::{ExeKind, Executable};
+use crate::stream::MAX_LINE;
 
 /// The last bytes of stderr kept for an error's detail (FR-PRM-37).
 pub const STDERR_TAIL: usize = 2048;
 
-/// One process to start. `args` are the CLI's own arguments; how an npm shim is started
-/// (`cmd /d /s /c`) is the spawner's business ([`ExeKind::CmdShim`]).
+/// How long a one-shot command's stdout may still drain after the child ended, even at
+/// the deadline ([`OsSpawner::run`]).
+const READ_GRACE: Duration = Duration::from_secs(2);
+
+/// How long [`ChildProcess::stderr_tail`] waits for stderr to drain after the exit.
+const STDERR_DRAIN: Duration = Duration::from_secs(1);
+
+/// Stdout lines buffered between the reader thread and the turn (backpressure: a child
+/// that floods stdout waits instead of filling memory; review-sec 7).
+const LINE_QUEUE: usize = 16;
+
+/// Reads `r` line by line (without the line end) into `emit` until EOF, an error, or `emit`
+/// returns `false`. A line keeps at most [`MAX_LINE`] + 1 bytes and the rest up to its
+/// newline is skipped, so an endless line can't fill memory; the turn sees it longer than
+/// [`MAX_LINE`] and ends with `stream_malformed` (review-sec 7).
+pub fn read_lines(r: impl Read, mut emit: impl FnMut(String) -> bool) {
+    let mut r = BufReader::new(r);
+    let mut buf = Vec::new();
+    loop {
+        let (used, done) = match r.fill_buf() {
+            Ok([]) | Err(_) => break,
+            Ok(chunk) => {
+                let end = chunk.iter().position(|&b| b == b'\n');
+                let take = end.map_or(chunk.len(), |i| i + 1);
+                let room = (MAX_LINE + 1).saturating_sub(buf.len());
+                buf.extend_from_slice(&chunk[..take.min(room)]);
+                (take, end.is_some())
+            }
+        };
+        r.consume(used);
+        if done {
+            if !emit(line_of(&buf)) {
+                return;
+            }
+            buf.clear();
+        }
+    }
+    if !buf.is_empty() {
+        emit(line_of(&buf));
+    }
+}
+
+fn line_of(buf: &[u8]) -> String {
+    String::from_utf8_lossy(buf)
+        .trim_end_matches(['\r', '\n'])
+        .to_owned()
+}
+
+/// One process to start. `args` are the CLI's own arguments; an npm shim
+/// ([`ExeKind::CmdShim`]) is started through std's batch-file handling (see `os_command`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandSpec {
     pub program: PathBuf,
@@ -92,14 +141,17 @@ pub trait Kill: Send + Sync {
 /// A long-lived stream-json child: stdin stays open across turns (FR-PRM-35).
 pub trait ChildProcess: Send {
     /// Writes one line (the trailing newline is added).
-    fn send_line(&mut self, line: &str) -> io::Result<()>;
+    /// A write that hasn't finished within `timeout` (a child that stopped reading stdin,
+    /// with more queued than the pipe holds) returns `ErrorKind::TimedOut` (FR-PRM-36).
+    fn send_line(&mut self, line: &str, timeout: Duration) -> io::Result<()>;
     /// The next stdout line, waiting at most `timeout`.
     fn next_line(&mut self, timeout: Duration) -> Next;
     fn close_stdin(&mut self);
     /// Waits at most `timeout` for the exit; `None` while it still runs.
     fn wait(&mut self, timeout: Duration) -> Option<Exited>;
     fn killer(&self) -> Arc<dyn Kill>;
-    /// The last [`STDERR_TAIL`] bytes of stderr, raw (scrub before showing).
+    /// The last [`STDERR_TAIL`] bytes of stderr, raw (scrub before showing). After the
+    /// child exited it includes everything it wrote (the reader drains first, bounded).
     fn stderr_tail(&self) -> String;
 }
 
@@ -126,63 +178,14 @@ pub struct OsSpawner;
 /// Windows `CREATE_NEW_CONSOLE`: the login runs in its own visible console.
 pub const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
 
-/// MSVC-style quoting of one argument, always in double quotes (inside quotes `cmd` leaves
-/// `& | < > ^` alone).
-pub fn quote_arg(arg: &str) -> String {
-    let mut out = String::with_capacity(arg.len() + 2);
-    out.push('"');
-    let mut backslashes = 0usize;
-    for c in arg.chars() {
-        match c {
-            '\\' => backslashes += 1,
-            '"' => {
-                out.extend(std::iter::repeat_n('\\', backslashes * 2 + 1));
-                out.push('"');
-                backslashes = 0;
-            }
-            _ => {
-                out.extend(std::iter::repeat_n('\\', backslashes));
-                out.push(c);
-                backslashes = 0;
-            }
-        }
-    }
-    out.extend(std::iter::repeat_n('\\', backslashes * 2));
-    out.push('"');
-    out
-}
-
-/// The `cmd` arguments for an npm shim: `/d /s /c "<"shim"> <"arg">…"`. With `/s`, `cmd`
-/// strips exactly the outer pair of quotes and keeps the rest verbatim, so the quoted shim
-/// path and arguments reach the shim as written. Only fixed arguments ever go here (§10).
-pub fn shim_command_line(shim: &Path, args: &[String]) -> String {
-    let mut inner = quote_arg(&shim.to_string_lossy());
-    for a in args {
-        inner.push(' ');
-        inner.push_str(&quote_arg(a));
-    }
-    format!("/d /s /c \"{inner}\"")
-}
-
 fn os_command(spec: &CommandSpec, creation_flags: u32) -> Command {
-    let mut c = match spec.kind {
-        ExeKind::Native => {
-            let mut c = Command::new(&spec.program);
-            c.args(&spec.args);
-            c
-        }
-        ExeKind::CmdShim => {
-            let mut c = Command::new("cmd");
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                c.raw_arg(shim_command_line(&spec.program, &spec.args));
-            }
-            #[cfg(not(windows))]
-            c.arg(shim_command_line(&spec.program, &spec.args));
-            c
-        }
-    };
+    // An npm shim (`.cmd`) goes through std's batch-file handling: it runs the system
+    // `cmd.exe /e:ON /v:OFF /d /c` and escapes `%`, `!`, `^`, `&` and quotes so `cmd`
+    // can't expand or split an argument (CVE-2024-24576). A hand-built `cmd /s /c` line
+    // let `cmd` expand `%VAR%` inside a data-dir path. Only fixed arguments ever go
+    // here; std refuses arguments with line breaks (§10).
+    let mut c = Command::new(&spec.program);
+    c.args(&spec.args);
     c.env_clear()
         .envs(spec.env.iter().map(|(k, v)| (k, v)))
         .current_dir(&spec.cwd);
@@ -226,46 +229,58 @@ fn wait_child(child: &Mutex<Child>, timeout: Duration) -> Option<Exited> {
 }
 
 impl Spawner for OsSpawner {
+    /// Everything is bounded by `timeout` (plus [`READ_GRACE`] to drain stdout): the Job
+    /// Object is required (R75), and once the child exits or times out the whole tree is
+    /// ended, so a grandchild still holding stdout (the npm shim's `node`, a daemon) can't
+    /// hang detection (review-code 6, FR-PRM-33). Stdout keeps at most [`MAX_LINE`] bytes.
     fn run(&self, spec: &CommandSpec, timeout: Duration) -> io::Result<Captured> {
+        let deadline = Instant::now() + timeout;
         let mut cmd = os_command(spec, hidden_flags(spec));
         cmd.stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         let mut child = cmd.spawn()?;
         #[cfg(windows)]
-        let job = crate::job::JobObject::new()
-            .and_then(|j| j.assign(&child).map(|()| j))
-            .ok();
-        let mut out = child.stdout.take();
-        let mut err = child.stderr.take();
-        let out_t = thread::spawn(move || {
-            let mut buf = Vec::new();
-            if let Some(o) = out.as_mut() {
-                let _ = o.read_to_end(&mut buf);
+        let job = match crate::job::JobObject::new().and_then(|j| j.assign(&child).map(|()| j)) {
+            Ok(j) => j,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(e);
             }
-            buf
+        };
+        let out = child.stdout.take();
+        let err = child.stderr.take();
+        let (out_tx, out_rx) = mpsc::channel();
+        thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(o) = out {
+                let _ = o.take(MAX_LINE as u64).read_to_end(&mut buf);
+            }
+            let _ = out_tx.send(buf);
         });
-        // Stderr may hold account details: read and dropped (FR-PRM-33).
-        let err_t = thread::spawn(move || {
-            if let Some(e) = err.as_mut() {
-                let _ = io::copy(e, &mut io::sink());
+        // Stderr may hold account details: read and dropped (FR-PRM-33). Never joined.
+        thread::spawn(move || {
+            if let Some(mut e) = err {
+                let _ = io::copy(&mut e, &mut io::sink());
             }
         });
         let child = Mutex::new(child);
         let status = wait_child(&child, timeout);
-        let timed_out = status.is_none();
-        if timed_out {
-            #[cfg(windows)]
-            if let Some(j) = &job {
-                j.terminate();
-            }
-            if let Ok(mut c) = child.lock() {
-                let _ = c.kill();
-                let _ = c.wait();
-            }
+        let mut timed_out = status.is_none();
+        #[cfg(windows)]
+        job.terminate();
+        if timed_out && let Ok(mut c) = child.lock() {
+            let _ = c.kill();
+            let _ = c.wait();
         }
-        let stdout = out_t.join().unwrap_or_default();
-        let _ = err_t.join();
+        let wait = deadline
+            .saturating_duration_since(Instant::now())
+            .max(READ_GRACE);
+        let stdout = out_rx.recv_timeout(wait).unwrap_or_else(|_| {
+            timed_out = true;
+            Vec::new()
+        });
         Ok(Captured {
             code: status.and_then(|s| s.code),
             stdout: String::from_utf8_lossy(&stdout).into_owned(),
@@ -307,13 +322,80 @@ impl Kill for OsKill {
     }
 }
 
+/// The child's stdin, written by its own thread so a write that blocks (the child stopped
+/// reading, the pipe is full) can be given up on after a timeout (review-code 5, FR-PRM-36).
+/// The blocked thread ends when the child is killed and the pipe breaks. Dropping the
+/// writer closes stdin once no write is in flight.
+struct StdinWriter {
+    tx: mpsc::Sender<Vec<u8>>,
+    ack: Receiver<io::Result<()>>,
+    /// A write timed out and may still be blocked.
+    stuck: bool,
+}
+
+impl StdinWriter {
+    fn new(mut stdin: ChildStdin) -> Self {
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let (ack_tx, ack) = mpsc::channel();
+        thread::spawn(move || {
+            for buf in rx {
+                let r = stdin.write_all(&buf).and_then(|()| stdin.flush());
+                let failed = r.is_err();
+                if ack_tx.send(r).is_err() || failed {
+                    break;
+                }
+            }
+        });
+        Self {
+            tx,
+            ack,
+            stuck: false,
+        }
+    }
+
+    fn send(&mut self, line: &str, timeout: Duration) -> io::Result<()> {
+        if self.stuck {
+            match self.ack.try_recv() {
+                Ok(_) => self.stuck = false,
+                Err(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "an earlier stdin write is still blocked",
+                    ));
+                }
+            }
+        }
+        let mut buf = Vec::with_capacity(line.len() + 1);
+        buf.extend_from_slice(line.as_bytes());
+        buf.push(b'\n');
+        self.tx
+            .send(buf)
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "stdin closed"))?;
+        match self.ack.recv_timeout(timeout) {
+            Ok(r) => r,
+            Err(RecvTimeoutError::Timeout) => {
+                self.stuck = true;
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "the child didn't read its stdin in time",
+                ))
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "stdin closed"))
+            }
+        }
+    }
+}
+
 /// A real stream-json child.
 pub struct OsChild {
     child: Arc<Mutex<Child>>,
-    stdin: Option<ChildStdin>,
+    stdin: Option<StdinWriter>,
     rx: Receiver<Option<String>>,
     eof: bool,
     stderr: Arc<Mutex<VecDeque<u8>>>,
+    /// Set when the stderr reader has read to EOF.
+    stderr_done: Arc<(Mutex<bool>, Condvar)>,
     killer: Arc<OsKill>,
 }
 
@@ -333,34 +415,24 @@ impl OsChild {
                 return Err(e);
             }
         };
-        let stdin = child.stdin.take();
+        let stdin = child.stdin.take().map(StdinWriter::new);
         let stdout = child
             .stdout
             .take()
             .ok_or_else(|| io::Error::other("no stdout"))?;
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(LINE_QUEUE);
         thread::spawn(move || {
-            let mut r = BufReader::new(stdout);
-            let mut buf = Vec::new();
-            loop {
-                buf.clear();
-                match r.read_until(b'\n', &mut buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {
-                        let line = String::from_utf8_lossy(&buf)
-                            .trim_end_matches(['\r', '\n'])
-                            .to_owned();
-                        if tx.send(Some(line)).is_err() {
-                            return;
-                        }
-                    }
-                }
-            }
+            read_lines(stdout, |line| tx.send(Some(line)).is_ok());
             let _ = tx.send(None);
         });
         let stderr = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL)));
+        let stderr_done = Arc::new((Mutex::new(true), Condvar::new()));
         if let Some(mut e) = child.stderr.take() {
             let sink = Arc::clone(&stderr);
+            let done = Arc::clone(&stderr_done);
+            if let Ok(mut d) = done.0.lock() {
+                *d = false;
+            }
             thread::spawn(move || {
                 let mut chunk = [0u8; 4096];
                 while let Ok(n) = e.read(&mut chunk) {
@@ -373,6 +445,10 @@ impl OsChild {
                         s.drain(..over);
                     }
                 }
+                if let Ok(mut d) = done.0.lock() {
+                    *d = true;
+                }
+                done.1.notify_all();
             });
         }
         let child = Arc::new(Mutex::new(child));
@@ -387,20 +463,19 @@ impl OsChild {
             rx,
             eof: false,
             stderr,
+            stderr_done,
             killer,
         })
     }
 }
 
 impl ChildProcess for OsChild {
-    fn send_line(&mut self, line: &str) -> io::Result<()> {
+    fn send_line(&mut self, line: &str, timeout: Duration) -> io::Result<()> {
         let s = self
             .stdin
             .as_mut()
             .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "stdin closed"))?;
-        s.write_all(line.as_bytes())?;
-        s.write_all(b"\n")?;
-        s.flush()
+        s.send(line, timeout)
     }
 
     fn next_line(&mut self, timeout: Duration) -> Next {
@@ -430,6 +505,20 @@ impl ChildProcess for OsChild {
     }
 
     fn stderr_tail(&self) -> String {
+        // review-code 15: once the child has exited, let the reader drain the pipe first
+        // (bounded: a grandchild may still hold stderr open).
+        let exited = self
+            .child
+            .lock()
+            .ok()
+            .and_then(|mut c| c.try_wait().ok().flatten())
+            .is_some();
+        if exited && let Ok(d) = self.stderr_done.0.lock() {
+            let _ = self
+                .stderr_done
+                .1
+                .wait_timeout_while(d, STDERR_DRAIN, |done| !*done);
+        }
         self.stderr
             .lock()
             .map(|s| String::from_utf8_lossy(&s.iter().copied().collect::<Vec<_>>()).into_owned())
@@ -450,27 +539,157 @@ impl Drop for OsChild {
 mod tests {
     use super::*;
 
+    /// review-sec 7 (R96): an endless stdout line keeps at most MAX_LINE + 1 bytes, the
+    /// rest is skipped up to its newline, and the next line still arrives.
     #[test]
-    fn prm_s10_quote_arg_msvc_rules() {
-        assert_eq!(quote_arg(""), "\"\"");
-        assert_eq!(quote_arg("-p"), "\"-p\"");
-        assert_eq!(quote_arg("a b"), "\"a b\"");
-        assert_eq!(quote_arg(r"C:\x y\"), r#""C:\x y\\""#);
-        assert_eq!(quote_arg(r#"say "hi""#), r#""say \"hi\"""#);
-        assert_eq!(quote_arg("a&b|c"), "\"a&b|c\"");
+    fn prm_s10_read_lines_bounds_a_long_line() {
+        let mut input = b"first\r\n".to_vec();
+        input.extend(std::iter::repeat_n(b'x', 3 * MAX_LINE));
+        input.extend_from_slice(b"\nnext\nlast without newline");
+        let mut lines = Vec::new();
+        read_lines(io::Cursor::new(input), |l| {
+            lines.push(l);
+            true
+        });
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0], "first");
+        assert_eq!(lines[1].len(), MAX_LINE + 1);
+        assert_eq!(lines[2], "next");
+        assert_eq!(lines[3], "last without newline");
+
+        // A receiver that hangs up stops the reader.
+        let mut n = 0;
+        read_lines(io::Cursor::new(b"a\nb\nc\n".to_vec()), |_| {
+            n += 1;
+            false
+        });
+        assert_eq!(n, 1);
     }
 
+    /// review-code 5: a child that never reads stdin; a write bigger than the pipe gives up
+    /// after its timeout instead of blocking, and the kill still ends the child.
+    #[cfg(windows)]
     #[test]
-    fn prm_s10_npm_shim_command_line() {
-        let line = shim_command_line(
-            Path::new(r"C:\npm dir\claude.cmd"),
-            &["-p".into(), "--tools".into(), String::new()],
+    fn prm_s10_os_child_stdin_write_is_bounded() {
+        let exe = Executable {
+            path: PathBuf::from("cmd.exe"),
+            kind: ExeKind::Native,
+            source: crate::invocation::ExeSource::Override,
+        };
+        let env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+        let spec = CommandSpec::new(
+            &exe,
+            vec![
+                "/d".into(),
+                "/c".into(),
+                "echo ready & ping -n 30 127.0.0.1 >nul".into(),
+            ],
+            env,
+            &std::env::temp_dir(),
+            true,
         );
-        assert_eq!(
-            line,
-            r#"/d /s /c ""C:\npm dir\claude.cmd" "-p" "--tools" """"#
+        let mut child = OsSpawner
+            .spawn(&spec)
+            .unwrap_or_else(|e| panic!("spawn: {e}"));
+        assert!(matches!(
+            child.next_line(Duration::from_secs(10)),
+            Next::Line(_)
+        ));
+        let big = "x".repeat(8 << 20);
+        let start = Instant::now();
+        let e = child
+            .send_line(&big, Duration::from_millis(500))
+            .expect_err("8 MiB can't fit in the pipe");
+        assert_eq!(e.kind(), io::ErrorKind::TimedOut);
+        assert!(start.elapsed() < Duration::from_secs(5));
+        // A second write while the first is stuck fails at once.
+        let e = child
+            .send_line("{}", Duration::from_secs(5))
+            .expect_err("still stuck");
+        assert_eq!(e.kind(), io::ErrorKind::TimedOut);
+        assert!(start.elapsed() < Duration::from_secs(5));
+        child.killer().kill();
+        assert!(child.wait(Duration::from_secs(5)).is_some());
+    }
+
+    #[cfg(windows)]
+    fn cmd_spec(script: &str) -> CommandSpec {
+        let exe = Executable {
+            path: PathBuf::from("cmd.exe"),
+            kind: ExeKind::Native,
+            source: crate::invocation::ExeSource::Override,
+        };
+        let env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+        CommandSpec::new(
+            &exe,
+            vec!["/d".into(), "/c".into(), script.into()],
+            env,
+            &std::env::temp_dir(),
+            true,
+        )
+    }
+
+    /// review-code 6 (FR-PRM-33, R75): a one-shot command whose grandchild keeps stdout open
+    /// (like the npm shim's `node`) returns once the child exits; the tree is ended.
+    #[cfg(windows)]
+    #[test]
+    fn prm_s10_run_is_not_held_by_a_grandchild() {
+        let start = Instant::now();
+        let out = OsSpawner
+            .run(
+                &cmd_spec("echo 2.1.319 & start /b ping -n 60 127.0.0.1"),
+                Duration::from_secs(30),
+            )
+            .unwrap_or_else(|e| panic!("run: {e}"));
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            start.elapsed()
         );
-        assert!(!line.contains('\n'));
+        assert!(!out.timed_out);
+        assert_eq!(out.code, Some(0));
+        assert!(out.stdout.contains("2.1.319"), "{}", out.stdout);
+    }
+
+    /// review-code 6: a hanging one-shot command is killed, tree included, at its timeout.
+    #[cfg(windows)]
+    #[test]
+    fn prm_s10_run_times_out_and_ends_the_tree() {
+        let start = Instant::now();
+        let out = OsSpawner
+            .run(
+                &cmd_spec("echo partial & ping -n 60 127.0.0.1 >nul"),
+                Duration::from_secs(1),
+            )
+            .unwrap_or_else(|e| panic!("run: {e}"));
+        assert!(out.timed_out);
+        assert!(
+            start.elapsed() < Duration::from_secs(6),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+
+    /// review-code 15: right after the exit, the stderr tail already holds the last line the
+    /// child wrote, even after a burst of stderr.
+    #[cfg(windows)]
+    #[test]
+    fn prm_s10_stderr_tail_is_complete_after_the_exit() {
+        for _ in 0..5 {
+            let mut child = OsSpawner
+                .spawn(&cmd_spec(
+                    "(for /l %i in (1,1,300) do @echo stderr line %i 1>&2) & echo END-OF-STDERR 1>&2 & exit 3",
+                ))
+                .unwrap_or_else(|e| panic!("spawn: {e}"));
+            while child.next_line(Duration::from_secs(10)) != Next::Eof {}
+            assert_eq!(
+                child.wait(Duration::from_secs(10)),
+                Some(Exited { code: Some(3) })
+            );
+            let tail = child.stderr_tail();
+            assert!(tail.trim_end().ends_with("END-OF-STDERR"), "{tail}");
+            assert!(tail.len() <= STDERR_TAIL);
+        }
     }
 
     /// The real spawner and the job object, on a harmless system command (never the CLI).

@@ -97,6 +97,57 @@ mod tests {
         assert_eq!(parse_version("2.1"), None);
     }
 
+    /// Real-world `--version` output shapes (stderr is dropped unread by the spawner, so
+    /// only stdout noise reaches the parser).
+    #[test]
+    fn fr_prm_33_version_output_variants() {
+        let v = |t: &str| parse_version(t);
+        let want = Some(Version::new(2, 1, 319));
+        assert_eq!(v("2.1.319 (Claude Code)\r\n"), want);
+        assert_eq!(v("\u{feff}2.1.319 (Claude Code)\r\n"), want);
+        assert_eq!(v("\r\n\r\n  2.1.319\r\n"), want);
+        assert_eq!(v("Claude Code v2.1.319"), want);
+        assert_eq!(v("\x1b[32m2.1.319\x1b[0m (Claude Code)"), want);
+        // A pre-release suffix is ignored (FR-PRM-33 parses the first triple only).
+        assert_eq!(
+            v("2.1.320-beta.3 (Claude Code)"),
+            Some(Version::new(2, 1, 320))
+        );
+        assert_eq!(v("2.1.319-rc.1+build.7"), want);
+        // Extra text: the first full triple wins; a two-part number doesn't count.
+        assert_eq!(
+            v("Update available 2.1 → see notes\n2.1.319 (Claude Code)"),
+            want
+        );
+        assert_eq!(v("2.1.3190 (Claude Code)"), Some(Version::new(2, 1, 3190)));
+        assert_eq!(
+            v("99999999999.1.1"),
+            None,
+            "overflow is no version, not a panic"
+        );
+        assert_eq!(v(""), None);
+        assert_eq!(v("\r\n"), None);
+    }
+
+    #[test]
+    fn fr_prm_33_below_the_floor_is_disabled_with_a_clear_reason() {
+        for (text, ok) in [
+            ("2.1.318 (Claude Code)", false),
+            ("2.0.999", false),
+            ("1.99.400", false),
+            ("2.1.319 (Claude Code)", true),
+            ("2.1.400", true),
+            ("3.0.0", true),
+        ] {
+            let found = parse_version(text).unwrap_or_else(|| panic!("{text}"));
+            assert_eq!(found >= MIN_VERSION_FLOOR, ok, "{text}");
+        }
+        let e = crate::error::ChatError::version_unsupported(Version::new(2, 1, 318));
+        assert_eq!(e.code(), "version_unsupported");
+        assert_eq!(e.message, "Claude Code 2.1.318 is too old (needs 2.1.319).");
+        assert_eq!(e.fix, "Run `claude update`.");
+    }
+
     #[test]
     fn fr_prm_33_versions_order_numerically() {
         assert!(Version::new(2, 1, 319) >= MIN_VERSION_FLOOR);

@@ -11,6 +11,14 @@ use serde_json::Value;
 /// Non-JSON lines in a row that make the stream malformed (§10).
 pub const MALFORMED_RUN: u32 = 3;
 
+/// The longest stdout line accepted (1 MiB); a longer one is `stream_malformed`
+/// (review-sec 7, R96).
+pub const MAX_LINE: usize = 1 << 20;
+
+/// The longest reply kept for one turn (1 MiB, the same bound: one `result` line can't
+/// carry more). Past it the turn ends with `stream_malformed`, keeping what fits.
+pub const MAX_REPLY: usize = 1 << 20;
+
 /// What `system/init` says, as far as the chat needs it. The lists hold names only.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct InitInfo {

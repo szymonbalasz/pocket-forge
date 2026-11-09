@@ -8,10 +8,12 @@ use crate::backend::{CancelHandle, TurnEvent, TurnOutcome, Usage};
 use crate::clock::{Clock, TurnBudget, TurnTimer};
 use crate::error::{ChatError, ChatErrorKind};
 use crate::process::ChildProcess;
-use crate::stream::{LineOutcome, LineParser, StreamEvent, TurnResult};
+use crate::stream::{LineOutcome, LineParser, MAX_LINE, MAX_REPLY, StreamEvent, TurnResult};
 
 /// How long a crashed child gets to report its exit code.
 const EXIT_WAIT: Duration = Duration::from_secs(5);
+/// How long a child killed after [`EXIT_WAIT`] gets to be gone.
+const KILL_WAIT: Duration = Duration::from_secs(2);
 
 /// What the turn saw besides text.
 #[derive(Debug, Default)]
@@ -37,13 +39,21 @@ pub fn run_turn(
     if cancel.is_cancelled() {
         return (TurnOutcome::Canceled { partial }, false);
     }
-    if let Err(e) = child.send_line(stdin_line) {
+    // FR-PRM-36's clock starts before the write: a child that stops reading stdin (an image
+    // turn is more than the pipe holds) can't hold the turn past the first-event budget.
+    let mut timer = TurnTimer::start(budget, clock.now());
+    let write_budget = timer.remaining(clock.now()).unwrap_or_default();
+    if let Err(e) = child.send_line(stdin_line, write_budget) {
         if cancel.is_cancelled() {
             return (TurnOutcome::Canceled { partial }, false);
         }
+        if e.kind() == std::io::ErrorKind::TimedOut {
+            child.killer().kill();
+            let error = ChatError::new(ChatErrorKind::Timeout);
+            return (TurnOutcome::Failed { error, partial }, false);
+        }
         return (crashed(child, &partial, scrub, Some(e.to_string())), false);
     }
-    let mut timer = TurnTimer::start(budget, clock.now());
     let mut parser = LineParser::new();
     let mut signals = Signals::default();
     let mut streaming = false;
@@ -63,33 +73,42 @@ pub fn run_turn(
                 if cancel.is_cancelled() {
                     return (TurnOutcome::Canceled { partial }, false);
                 }
+                // An auth or limit message and then an exit without a `result` is still
+                // that state, not a crash.
+                if let Some(error) = signalled(&signals) {
+                    let _ = child.wait(EXIT_WAIT);
+                    return (TurnOutcome::Failed { error, partial }, false);
+                }
                 return (crashed(child, &partial, scrub, None), false);
             }
             crate::process::Next::Line(line) => {
                 timer.event(clock.now());
-                match parser.push(&line) {
+                if line.len() > MAX_LINE {
+                    child.killer().kill();
+                    let error = ChatError::new(ChatErrorKind::StreamMalformed)
+                        .with_detail("a stdout line was longer than 1 MiB");
+                    return (TurnOutcome::Failed { error, partial }, false);
+                }
+                let fits = match parser.push(&line) {
                     LineOutcome::Event(StreamEvent::AssistantText(t)) => {
-                        if !streaming {
-                            push_message(&t, &mut partial, on_event);
-                        }
+                        streaming || push_message(&t, &mut partial, on_event)
                     }
                     LineOutcome::Event(StreamEvent::TextDelta(t)) => {
                         // Only with --include-partial-messages; the whole messages that
                         // follow repeat the deltas and are skipped.
                         streaming = true;
-                        if !t.is_empty() {
-                            partial.push_str(&t);
-                            on_event(TurnEvent::Delta(t));
-                        }
+                        append(&t, &mut partial, on_event)
                     }
                     LineOutcome::Event(StreamEvent::AssistantError { error, text }) => {
                         signals.assistant_error = Some(error);
                         signals.assistant_error_text = Some(text);
+                        true
                     }
                     LineOutcome::Event(StreamEvent::RateLimit { status }) => {
                         if status.as_deref() == Some("rejected") {
                             signals.rate_limited = true;
                         }
+                        true
                     }
                     LineOutcome::Event(StreamEvent::Result(r)) => {
                         return (finish(r, &signals, partial), true);
@@ -100,7 +119,13 @@ pub fn run_turn(
                             .with_detail("three lines in a row weren't JSON");
                         return (TurnOutcome::Failed { error, partial }, false);
                     }
-                    _ => {}
+                    _ => true,
+                };
+                if !fits {
+                    child.killer().kill();
+                    let error = ChatError::new(ChatErrorKind::StreamMalformed)
+                        .with_detail("the reply was longer than 1 MiB");
+                    return (TurnOutcome::Failed { error, partial }, false);
                 }
             }
         }
@@ -108,17 +133,27 @@ pub fn run_turn(
 }
 
 /// Appends one whole assistant message, separated from the previous one by a blank line.
-fn push_message(text: &str, partial: &mut String, on_event: &mut dyn FnMut(TurnEvent)) {
+/// `false` when the reply passed [`MAX_REPLY`] (what fits is kept).
+fn push_message(text: &str, partial: &mut String, on_event: &mut dyn FnMut(TurnEvent)) -> bool {
     if text.is_empty() {
-        return;
-    }
-    let piece = if partial.is_empty() {
-        text.to_owned()
+        true
+    } else if partial.is_empty() {
+        append(text, partial, on_event)
     } else {
-        format!("\n\n{text}")
-    };
-    partial.push_str(&piece);
-    on_event(TurnEvent::Delta(piece));
+        append(&format!("\n\n{text}"), partial, on_event)
+    }
+}
+
+/// Appends `piece` to the reply and streams it, up to [`MAX_REPLY`] bytes in all (cut at a
+/// character boundary); `false` when it didn't all fit (review-sec 7).
+fn append(piece: &str, partial: &mut String, on_event: &mut dyn FnMut(TurnEvent)) -> bool {
+    let room = MAX_REPLY.saturating_sub(partial.len());
+    let kept = &piece[..piece.floor_char_boundary(room)];
+    if !kept.is_empty() {
+        partial.push_str(kept);
+        on_event(TurnEvent::Delta(kept.to_owned()));
+    }
+    kept.len() == piece.len()
 }
 
 fn crashed(
@@ -127,10 +162,12 @@ fn crashed(
     scrub: &dyn Fn(&str) -> String,
     io_error: Option<String>,
 ) -> TurnOutcome {
-    let exit = child.wait(EXIT_WAIT);
+    let mut exit = child.wait(EXIT_WAIT);
     if exit.is_none() {
         child.killer().kill();
+        exit = child.wait(KILL_WAIT);
     }
+    // Read after the exit: the tail then holds all of stderr (review-code 15).
     let mut detail = scrub(child.stderr_tail().trim());
     if let Some(e) = io_error {
         if !detail.is_empty() {
@@ -149,17 +186,70 @@ fn crashed(
 }
 
 /// Words that mean the network is down (the CLI's API errors).
-const OFFLINE_HINTS: [&str; 9] = [
+const OFFLINE_HINTS: [&str; 12] = [
     "connection error",
     "unable to connect",
     "enotfound",
     "econnrefused",
+    "econnreset",
     "etimedout",
     "eai_again",
     "network error",
     "fetch failed",
     "getaddrinfo",
+    "socket hang up",
+    "network is unreachable",
 ];
+
+/// Words that mean the login is missing, expired or revoked (FR-PRM-37 `not_logged_in`).
+const AUTH_HINTS: [&str; 7] = [
+    "not logged in",
+    "/login",
+    "authentication_error",
+    "oauth token has expired",
+    "token has been revoked",
+    "invalid api key",
+    "api error: 401",
+];
+
+/// Words that mean the plan's limit is reached (FR-PRM-37 `usage_limit`).
+/// Not a bare "limit reached": "Context limit reached" is not the plan's limit.
+const LIMIT_HINTS: [&str; 6] = [
+    "hit your limit",
+    "usage limit",
+    "5-hour limit",
+    "weekly limit",
+    "session limit",
+    "rate_limit_error",
+];
+
+/// Maps the CLI's error message and the turn's signals to an FR-PRM-37 error.
+fn classify(message: &str, s: &Signals) -> ChatError {
+    let lower = message.to_lowercase();
+    let error_kind = s.assistant_error.as_deref().unwrap_or_default();
+    if error_kind == "authentication_failed" || AUTH_HINTS.iter().any(|h| lower.contains(h)) {
+        ChatError::new(ChatErrorKind::NotLoggedIn)
+    } else if s.rate_limited
+        || error_kind == "rate_limit"
+        || LIMIT_HINTS.iter().any(|h| lower.contains(h))
+    {
+        ChatError::usage_limit(Some(message))
+    } else if OFFLINE_HINTS.iter().any(|h| lower.contains(h)) {
+        ChatError::new(ChatErrorKind::Offline).with_detail(message)
+    } else {
+        ChatError::backend_error(message)
+    }
+}
+
+/// The state an assistant error or a rejected rate limit means when the stream ends
+/// without a `result`; `None` when it would only be a `backend_error`.
+fn signalled(s: &Signals) -> Option<ChatError> {
+    if s.assistant_error.is_none() && !s.rate_limited {
+        return None;
+    }
+    let e = classify(s.assistant_error_text.as_deref().unwrap_or_default(), s);
+    (e.kind != ChatErrorKind::BackendError).then_some(e)
+}
 
 fn finish(r: TurnResult, s: &Signals, partial: String) -> TurnOutcome {
     if !r.is_error {
@@ -185,23 +275,6 @@ fn finish(r: TurnResult, s: &Signals, partial: String) -> TurnOutcome {
         .or_else(|| (!r.errors.is_empty()).then(|| r.errors.join("; ")))
         .or_else(|| s.assistant_error_text.clone())
         .unwrap_or_else(|| r.subtype.clone());
-    let lower = message.to_lowercase();
-    let error_kind = s.assistant_error.as_deref().unwrap_or_default();
-    let error = if error_kind == "authentication_failed"
-        || lower.contains("not logged in")
-        || lower.contains("/login")
-    {
-        ChatError::new(ChatErrorKind::NotLoggedIn)
-    } else if s.rate_limited
-        || error_kind == "rate_limit"
-        || lower.contains("hit your limit")
-        || lower.contains("usage limit")
-    {
-        ChatError::usage_limit(Some(&message))
-    } else if OFFLINE_HINTS.iter().any(|h| lower.contains(h)) {
-        ChatError::new(ChatErrorKind::Offline).with_detail(message)
-    } else {
-        ChatError::backend_error(message)
-    };
+    let error = classify(&message, s);
     TurnOutcome::Failed { error, partial }
 }
