@@ -190,7 +190,7 @@ sequenceDiagram
 ## 11. Edge cases
 | Case | Behaviour |
 |---|---|
-| Crash mid-save | Thread file temp → rename. A `pending` user turn without a reply on open → `interrupted`, with "Resend". Settings are temp → rename (PRJ). Job helpers are in the `requested` commit, so all or nothing. |
+| Crash mid-save | Thread file temp → rename. A `pending` user turn without a reply on open (a hard kill or crash) → `interrupted`, with "Resend". A clean quit or closing the chat window mid-turn cancels the turn: it reads "Stopped." (`canceled`) with its partial text kept, not `interrupted` (R103). Settings are temp → rename (PRJ). Job helpers are in the `requested` commit, so all or nothing. |
 | App crash with a child running | The job object ends the child with the app. At startup, `<data-dir>/chat/*/` and `<data-dir>/claude-config/projects/` are emptied. |
 | Sync conflict / locked | A thread conflict copy (detected by PRJ, §14 *Amendments*): the file with the later `updated_at` stays the thread, the other goes to the project trash as `conflict_copy`, with a notice (as OQ-REF-05); nothing is merged. A locked thread file is retried for ≤ 3 s; then the turn still runs, its turns are kept in memory until the project closes, and the banner says "Not saved: the chat file is locked". The next save that works writes them; Replace works on them (FR-PRM-22, R97). Settings conflicts follow PRJ. |
 | Offline | Detection still works (local commands). A turn fails as `offline`, and Send, Retry and Resend stay disabled until Recheck. Helpers and Insert work offline. |

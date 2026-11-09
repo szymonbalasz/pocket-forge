@@ -182,8 +182,8 @@ PRJ owns storage and commits; fields go into [manifest-schema](../architecture/m
 | 2 | Pick `fake-gen-wh`; grid 30 × 40, pps 70 | "model limit": pps 51, sent 1520 × 2032, "50.7 × 50.8 px per square"; estimate in CU |
 | 3 | Structural sketch → Add… the layout fixture and select it; tick a pack; type a prompt; Generate | Sketch **None** until selected; confirm "New image · W × H, with N references"; `results/001 <slug>/` fills; tracker badge `new image` |
 | 4 | Quit mid-`running`, reopen | Job resumes; candidates appear |
-| 5 | Select #2 (preview), pick it | Canvas shows it; `working/001 <slug> 02.png`; revision `r1`; home card thumbnail updated |
-| 6 | Region edit a room, accept; then pick #3 of `001` | Patch accepted (`r2`); then `r3`: stack = #3 only, notice "1 patch layer kept in history" |
+| 5 | Set num samples to 4 before step 3's Generate (the fake models default to 1, R103); select #2 (preview), pick it | Canvas shows it; `working/001 <slug> 02.png`; revision `r1`; home card thumbnail updated |
+| 6 | Region edit a room, accept; then pick #3 of `001` (4 samples, step 5) | Patch accepted (`r2`); then `r3`: stack = #3 only, notice "1 patch layer kept in history" |
 | 7 | Undo twice | `r2`'s stack with the patch is back, then `r1` |
 | 8 | Tokens: + New → Generate new…, `fake-gen-wh` | `background` defaults to transparent; candidate PNGs have alpha; after a pick the canvas and thumbnail show the token over mid grey, and export pixels where alpha = 0 are `#808080` |
 | 9 | Switch to `fake-gen-aspect`, grid 25 × 40 | Nearest ratio 2:3, "cells won't be square"; 1 result per job |
