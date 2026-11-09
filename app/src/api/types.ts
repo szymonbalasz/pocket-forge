@@ -592,6 +592,10 @@ export interface RgnIteration {
   output?: GenOutput | null;
   /** The chip tooltip: each file sent, its pack (null = the project) and role (FR-RGN-45). */
   reference_files: { file: string; pack_name: string | null; role: RefRole | null }[];
+  /** R108: the provider handle is saved (a `lost` job may still finish at the provider). */
+  handle_kept?: boolean;
+  /** The job's normalised error, `null` when none (the strip's hint after a reopen, R108). */
+  error?: { code: string; hint?: string; message?: string } | null;
 }
 
 export interface RgnBlend {

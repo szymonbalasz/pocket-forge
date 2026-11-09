@@ -7,7 +7,15 @@ import { Tooltip } from 'radix-ui';
 
 import { IconCheck } from '../../shell/icons';
 import { projectStore, useProjectState } from '../../store/project';
-import { costLabel, elapsedLabel, iterationNumber, jobErrorText, STATE_LABEL } from './format';
+import {
+  chargeHint,
+  costLabel,
+  elapsedLabel,
+  iterationNumber,
+  jobErrorText,
+  lostText,
+  STATE_LABEL,
+} from './format';
 import { rgn, useRgn, type LiveJob } from './store';
 import {
   canCancel,
@@ -87,8 +95,13 @@ function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined 
         </div>
       )}
       {state === 'lost' && (
-        <div className="warning small" data-testid="rgn-job-lost">
-          The job may have been charged, but its result can’t be recovered.
+        <div
+          className="warning small"
+          data-testid="rgn-job-lost"
+          data-handle={row.handle_kept ? 'kept' : 'none'}
+        >
+          {lostText(!!row.handle_kept)}
+          <div data-testid="rgn-job-charge-hint">{chargeHint(error ?? row.error)}</div>
         </div>
       )}
       <div className="rgn-strip-buttons">
