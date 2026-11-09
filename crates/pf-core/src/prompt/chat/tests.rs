@@ -1228,3 +1228,52 @@ fn fr_prm_23_a_close_during_a_publish_leaves_no_context() {
     lab.core.state().project = parked;
     assert_eq!(thread_view(&lab)["current_host"], Value::Null);
 }
+
+/// FR-PRM-21 / FR-PRM-35 (code review 14): what runs as the chat window closes, on the main
+/// thread, never waits for a process: saving the rect detects nothing (even with the 60 s
+/// cache expired), and the session ends without waiting for a turn that still holds it.
+#[test]
+fn fr_prm_35_closing_the_window_never_waits_for_a_process() {
+    let (lab, sp) = claude_lab();
+    consent(&lab);
+    let runs = || sp.log().runs.len();
+    let before = runs();
+    lab.clock.advance(Duration::from_secs(61));
+    let st = lab
+        .core
+        .dispatch(
+            "prm_chat_settings_put",
+            json!({"window": {"x": 10, "y": 20, "w": 400, "h": 600}}),
+        )
+        .unwrap();
+    assert_eq!(runs(), before, "no detection for the window rect");
+    assert_eq!(st["backend"]["state"], "ok", "the cached status");
+    assert_eq!(lab.core.state().settings.prompt_chat.window.unwrap().w, 400);
+
+    // A turn holds the session (a stopping turn): neither the window's close nor a project
+    // close waits for it; the session goes once the turn lets go.
+    let lab = lab_with_session();
+    let held = lab.core.chat.session.clone();
+    let guard = super::lock(&held);
+    let t = std::time::Instant::now();
+    lab.core.chat.end_session_in_background();
+    lab.core.chat.on_project_close(pid(&lab));
+    assert!(t.elapsed() < Duration::from_millis(500), "returned at once");
+    drop(guard);
+    for _ in 0..200 {
+        if !lab.core.chat.has_session() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the session didn't end");
+}
+
+/// A fake-chat lab with an open session.
+fn lab_with_session() -> Lab {
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "hi").unwrap();
+    assert!(lab.core.chat.has_session());
+    lab
+}

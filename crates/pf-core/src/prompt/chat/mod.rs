@@ -18,7 +18,7 @@ mod tests;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
 
 use pf_chat::backend::{
     BackendMode, CancelHandle, ChatBackend, ChatSession, SessionOptions, TurnEvent, TurnImage,
@@ -242,16 +242,58 @@ impl ChatRuntime {
             }
             rt.running.as_ref().map(|r| r.project_id)
         };
-        match running {
-            Some(p) if p == project_id => self.end_session(),
-            Some(_) => {}
-            None => {
-                let mut slot = lock(&self.session);
-                if slot.as_ref().is_some_and(|e| e.project_id == project_id)
-                    && let Some(mut e) = slot.take()
-                {
-                    e.session.close();
+        // Called under the core's state lock: the session ends without waiting for the
+        // stopped turn or the child (code review 14). Another project's turn keeps its own.
+        if running.is_none_or(|p| p == project_id) {
+            self.close_detached(Some(project_id));
+        }
+    }
+
+    /// FR-PRM-35 without waiting (code review 14: the chat window closing on the main thread):
+    /// the running turn is canceled, and the session ends on its own thread.
+    pub fn end_session_in_background(&self) {
+        let cancel = lock(&self.rt).running.as_ref().map(|r| r.cancel.clone());
+        if let Some(c) = cancel {
+            c.cancel();
+        }
+        self.close_detached(None);
+    }
+
+    /// Takes the session (`only`: just that project's) out of its slot and closes it on its
+    /// own thread. A free slot is emptied now; a slot a stopping turn still holds is emptied
+    /// as soon as the turn lets go.
+    fn close_detached(&self, only: Option<Ulid>) {
+        let matches = move |e: &SessionEntry| only.is_none_or(|p| e.project_id == p);
+        let mut slot = match self.session.try_lock() {
+            Ok(slot) => slot,
+            Err(TryLockError::Poisoned(e)) => e.into_inner(),
+            Err(TryLockError::WouldBlock) => {
+                let session = self.session.clone();
+                let waited = std::thread::Builder::new()
+                    .name("pf-chat-close".into())
+                    .spawn(move || {
+                        let entry = {
+                            let mut slot = lock(&session);
+                            slot.take_if(|e| matches(e))
+                        };
+                        if let Some(mut e) = entry {
+                            e.session.close();
+                        }
+                    });
+                if let Err(e) = waited {
+                    tracing::warn!(error = %e, "the chat session isn't closed until the next turn");
                 }
+                return;
+            }
+        };
+        let entry = slot.take_if(|e| matches(e));
+        drop(slot);
+        if let Some(mut e) = entry {
+            let closing = std::thread::Builder::new()
+                .name("pf-chat-close".into())
+                .spawn(move || e.session.close());
+            if let Err(e) = closing {
+                tracing::warn!(error = %e, "the chat session wasn't closed cleanly");
             }
         }
     }
@@ -414,6 +456,27 @@ pub fn status(core: &Core, refresh: bool) -> ChatStatus {
         } else {
             None
         },
+        claude_path: chat.claude_path.clone(),
+    }
+}
+
+/// [`status`] without starting anything: the cached detection (or `not_checked`) and no login
+/// command.
+fn status_without_process(core: &Core) -> ChatStatus {
+    let chat = core.state().settings.prompt_chat.clone();
+    let mode = core.ctx.chat.mode;
+    let backend = match &lock(&core.chat.rt).status {
+        Some((_, st)) if consented(&chat) && chat.enabled => st.clone(),
+        _ => BackendStatus::NotChecked,
+    };
+    ChatStatus {
+        enabled: chat.enabled,
+        consent: consented(&chat),
+        notice_version: NOTICE_VERSION,
+        mode,
+        backend,
+        fake_case: (mode == BackendMode::Fake).then(|| core.ctx.chat.fake.case().to_string()),
+        login_command: None,
         claude_path: chat.claude_path.clone(),
     }
 }
@@ -609,6 +672,9 @@ impl Command for PrmChatSettingsPut {
     type Output = ChatStatus;
 
     fn run(core: &Core, input: ChatSettingsInput) -> CoreResult<ChatStatus> {
+        // The window's rect alone (saved as the chat window closes, on the main thread):
+        // nothing to detect or announce (code review 14).
+        let window_only = input.enabled.is_none() && input.claude_path.is_none();
         let (turned_off, path_changed) = {
             let mut state = core.state();
             let mut next = state.settings.clone();
@@ -632,6 +698,9 @@ impl Command for PrmChatSettingsPut {
         if turned_off || path_changed {
             core.chat.clear_status();
             core.chat.end_session();
+        }
+        if window_only {
+            return Ok(status_without_process(core));
         }
         let st = status(core, false);
         emit_status(core, &st);
