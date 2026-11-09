@@ -7,7 +7,11 @@ import { HelperSettings } from './HelperSettings';
 // no slot. Its Settings section edits the helper definitions (FR-PRM-02/03).
 export { PromptBlock, type PromptBlockProps, type PromptRetry } from './PromptBlock';
 export { PLACEHOLDER as promptPlaceholder, type PromptHost } from './logic';
-export { loadHelpers as loadPromptHelpers, useHelpers as usePromptHelpers } from './store';
+export {
+  loadHelpers as loadPromptHelpers,
+  resetHelpersStore as resetPromptHelpers,
+  useHelpers as usePromptHelpers,
+} from './store';
 
 export const promptHelperFeature: Feature = {
   id: 'prompt-helper',

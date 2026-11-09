@@ -10,6 +10,7 @@ use crate::commands::NoInput;
 use crate::core::{Command, Core, Validate};
 use crate::error::{CoreError, CoreResult};
 use crate::manifest::Kind;
+use crate::prompt;
 use crate::settings::{self, RegionEditSettings};
 
 /// The built-in instruction (owner, #55). The kind sentence is added per asset kind.
@@ -66,19 +67,39 @@ pub fn compose(typed: &str, on: bool, instruction: &str) -> String {
     format!("{typed}{suffix}")
 }
 
-/// The prompt a submit sends for this draft (#55): the typed prompt plus the open project's
-/// instruction when the draft has it on. Without an open project (test seam) no kind sentence.
-pub fn sent_prompt(core: &Core, typed: &str, on: bool) -> String {
-    if !on {
-        return typed.to_owned();
-    }
+/// The final prompt a job sends for this draft (FR-RGN-09 as amended by PRM, FR-PRM-06): PRM's
+/// [`prompt::compose`] of the typed prompt, the ticked helpers of the open project's kind and the
+/// open project's instruction when the draft has it on. Without an open project (test seam):
+/// no helpers and no kind sentence.
+///
+/// #55 "appended once" still holds: a typed prompt that already ends with the instruction is
+/// sent without a second copy.
+pub fn final_prompt(
+    core: &Core,
+    typed: &str,
+    on: bool,
+    ticks: Option<&[String]>,
+) -> prompt::FinalPrompt {
     let state = core.state();
     let s = &state.settings.region_edit;
-    let instruction = match state.project.as_ref() {
-        Some(p) => instruction_for(s, p.manifest.kind),
-        None => base_text(s).trim().to_owned(),
+    let (kind, helpers, instruction) = match state.project.as_ref() {
+        Some(p) => (
+            p.manifest.kind,
+            prompt::helpers::effective(&state.settings),
+            instruction_for(s, p.manifest.kind),
+        ),
+        None => (Kind::Map, Vec::new(), base_text(s).trim().to_owned()),
     };
-    compose(typed, on, &instruction)
+    drop(state);
+    let blend = (on && !instruction.is_empty()).then_some(instruction.as_str());
+    let typed = match blend {
+        Some(b) => typed
+            .strip_suffix(b)
+            .and_then(|t| t.strip_suffix("\n\n"))
+            .unwrap_or(typed),
+        None => typed,
+    };
+    prompt::compose(kind, typed, ticks, &helpers, blend)
 }
 
 /// `rgn_blend_instruction_get` / `_set` output.

@@ -125,7 +125,7 @@ test('FR-REF-21 FR-RGN-45 walk R1/R2: the confirm counts the current ticks; a ti
     capabilities: { 'fake-refs': REFS },
   });
   await drawMaskedRegion(page, [400, 500], [800, 900]);
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-submit')).toBeEnabled();
   const estimates = (await inputsOf(page, 'rgn_job_estimate')).length;
 
@@ -181,7 +181,7 @@ test('FR-REF-21 BL-34 with the default selection, a default-ticked file gone bef
     capabilities: { 'fake-refs': REFS },
   });
   await drawMaskedRegion(page, [400, 500], [800, 900]);
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-submit')).toBeEnabled();
   // REF's defaults (FR-REF-17): both project files ticked, nothing saved as a selection.
   await expect(check(page, 'project:mood-b.png')).toBeChecked();

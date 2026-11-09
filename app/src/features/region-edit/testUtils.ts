@@ -3,8 +3,10 @@
 // open project.
 import allTypes from '../../../../fixtures/rgn/capabilities-all-types.json';
 import type { Capabilities } from '../../api';
+import { installPrmMock, type PrmMockSeed } from '../../api/mocks/prm';
 import { installRgnMock, type RgnMockSeed } from '../../api/mocks/rgn';
 import { baseSnapshot, installFakeTauri, type FakeTauri } from '../../api/mocks/tauri';
+import { resetPromptHelpers } from '../prompt-helper';
 
 /** `fixtures/rgn/capabilities-all-types.json` (RGN §13). */
 export const ALL_TYPES = allTypes as Capabilities;
@@ -48,14 +50,17 @@ export function seedOf(patch: Partial<RgnMockSeed> = {}): RgnMockSeed {
   };
 }
 
-/** Installs the mocked core; `project_open` returns the base snapshot + the mock's fields. */
-export function mockCore(patch: Partial<RgnMockSeed> = {}): FakeTauri {
+/** Installs the mocked core; `project_open` returns the base snapshot + the mock's fields. The
+ *  PRM mock backs the prompt block (prompt-helper §7); `prm` seeds its helper list. */
+export function mockCore(patch: Partial<RgnMockSeed> = {}, prm: PrmMockSeed = {}): FakeTauri {
+  resetPromptHelpers();
   const fake = installFakeTauri(baseSnapshot());
   const w = window as unknown as {
     __pfMockHandlers: Record<string, (i: unknown) => unknown>;
     __pfMockSnapshot: Record<string, unknown>;
   };
   installRgnMock(seedOf(patch));
+  installPrmMock(prm);
   w.__pfMockHandlers.project_open = () => ({ ...baseSnapshot(), ...w.__pfMockSnapshot });
   w.__pfMockHandlers.provider_status = () => ({
     mode: 'fake',

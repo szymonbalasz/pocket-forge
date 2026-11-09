@@ -13,7 +13,7 @@ test('FR-RGN-03 owner-2026-11-08 no painted mask: Generate disabled with a hint;
   const maskRegion = page.getByTestId('edt-toolbar-mask-region');
   await expect(maskRegion).toBeDisabled(); // no region yet
   await drawRegion(page, [400, 500], [800, 900]);
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   const hint = page.getByTestId('rgn-panel-mask-hint');
   await expect(hint).toHaveText('Paint a mask inside the region to choose what changes.');
   await expect(page.getByTestId('rgn-panel-submit')).toBeDisabled();
@@ -25,7 +25,7 @@ test('FR-RGN-03 owner-2026-11-08 no painted mask: Generate disabled with a hint;
   expect((await hook<{ label: string | null }>(page, 'undoDepth')).label).toBe('mask whole region');
   // The mask goes through the existing hand-off (edt_mask_submit), then Generate is possible.
   await expect.poll(async () => (await inputsOf(page, 'edt_mask_submit')).length).toBe(1);
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('CU');
   await expect(page.getByTestId('rgn-panel-submit')).toBeEnabled();
 
@@ -61,12 +61,12 @@ test('owner-55 blend instruction: on by default, in the final prompt once, Setti
   await openRgn(page);
   await drawRegion(page, [400, 500], [800, 900]);
   await page.getByTestId('edt-toolbar-mask-region').click();
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   const toggle = page.getByTestId('rgn-panel-blend-instruction');
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
-  await page.getByTestId('rgn-panel-final').locator('summary').click();
-  await expect(page.getByTestId('rgn-panel-final')).toContainText('Final prompt (as sent)');
-  const shown = page.getByTestId('rgn-panel-final-prompt');
+  await page.getByTestId('prm-block-final').locator('summary').click();
+  await expect(page.getByTestId('prm-block-final')).toContainText('Final prompt (as sent)');
+  const shown = page.getByTestId('prm-block-final-prompt');
   await expect(shown).toContainText('A stone well');
   await expect(shown).toContainText('Keep everything near the edges');
   await expect(shown).toContainText('Top-down battlemap view.');

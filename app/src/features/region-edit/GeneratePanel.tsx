@@ -15,15 +15,15 @@ import { useSlotIdle } from '../../shared/slot';
 import { useProjectState } from '../../store/project';
 import { useEditorMaskPainted, useEditorRegion, useEditorRegionRestored } from '../editor';
 import { openProviderSettings } from '../provider';
+import { PromptBlock } from '../prompt-helper';
 import { ReferencesBlock } from '../references';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ControlField } from './ControlField';
 import { controlKind, isValueControl, stateOf } from './controls';
 import { amountLabel, costLabel, errorText, fitLabel } from './format';
 import {
-  currentDraft,
+  blendForPreview,
   costUnit,
-  finalPrompt,
   isOffline,
   MASK_HINT,
   missing,
@@ -239,75 +239,49 @@ function ModelSection({ s }: { s: RgnState }) {
 }
 
 function PromptSection({ s }: { s: RgnState }) {
-  const required = !!s.caps?.prompt_required;
+  const { project } = useProjectState();
   const seedCtl = s.caps?.controls.find((c) => controlKind(c) === 'seed');
-  const draft = currentDraft(s);
   return (
-    <div className="rgn-section">
-      <label className="rgn-control-label" htmlFor="rgn-prompt">
-        Prompt
-        {required && (
-          <span className="rgn-required" title="Required">
-            *
-          </span>
-        )}
-      </label>
-      <textarea
-        id="rgn-prompt"
-        className="rgn-prompt"
-        data-testid="rgn-panel-prompt"
-        rows={4}
-        value={s.prompt}
-        placeholder="Describe the change, e.g. turn this room into a kitchen"
-        onChange={(e) => rgn.setPrompt(e.target.value)}
-      />
-      {/* Walk owner-UX L4: a Radix tip, not a native title (ui-guidelines). */}
-      <Tooltip.Provider delayDuration={400}>
-        <Tooltip.Root>
-          <Tooltip.Trigger asChild>
-            <label className="rgn-check" data-tooltip={BLEND_TIP}>
-              <Switch.Root
-                className="rgn-switch"
-                aria-label="Blend with surroundings"
-                data-testid="rgn-panel-blend-instruction"
-                checked={s.blendInstruction}
-                onCheckedChange={(v) => rgn.setBlendInstruction(v)}
-              >
-                <Switch.Thumb className="rgn-switch-thumb" />
-              </Switch.Root>
-              Blend with surroundings
-            </label>
-          </Tooltip.Trigger>
-          <Tooltip.Portal>
-            <Tooltip.Content className="pf-tooltip" side="left" sideOffset={6}>
-              {BLEND_TIP}
-            </Tooltip.Content>
-          </Tooltip.Portal>
-        </Tooltip.Root>
-      </Tooltip.Provider>
-      {draft && (
-        <details className="rgn-final" data-testid="rgn-panel-final">
-          <summary className="muted small">Final prompt (as sent)</summary>
-          {s.prompt.trim() === '' ? (
-            // BL-39: no prompt yet (e.g. cleared after an accept): an empty prompt, not the
-            // instruction alone next to "Required: prompt".
-            <>
-              <pre className="small muted" data-testid="rgn-panel-final-prompt" data-empty="true">
-                —
-              </pre>
-              {s.blendInstruction && s.blendText?.trim() && (
-                <p className="muted small" data-testid="rgn-panel-final-blend-note">
-                  + blend instruction at send
-                </p>
-              )}
-            </>
-          ) : (
-            <pre className="small" data-testid="rgn-panel-final-prompt">
-              {finalPrompt(s)}
-            </pre>
-          )}
-        </details>
-      )}
+    <>
+      {/* PRM §7: the prompt block (typed prompt, helpers, final prompt, chat) replaces RGN's
+          prompt rows; the blend toggle stays an RGN row inside it (#55). */}
+      <PromptBlock
+        host="rgn"
+        kind={project?.kind ?? 'map'}
+        prompt={s.prompt}
+        onPromptChange={(t) => rgn.setPrompt(t)}
+        helperIds={s.promptHelpers}
+        onHelperIdsChange={(ids) => rgn.setPromptHelpers(ids)}
+        blendInstruction={blendForPreview(s)}
+        readOnly={!!s.readOnly}
+        required={!!s.caps?.prompt_required}
+        retry={s.promptRetry}
+      >
+        {/* Walk owner-UX L4: a Radix tip, not a native title (ui-guidelines). */}
+        <Tooltip.Provider delayDuration={400}>
+          <Tooltip.Root>
+            <Tooltip.Trigger asChild>
+              <label className="rgn-check" data-tooltip={BLEND_TIP}>
+                <Switch.Root
+                  className="rgn-switch"
+                  aria-label="Blend with surroundings"
+                  data-testid="rgn-panel-blend-instruction"
+                  checked={s.blendInstruction}
+                  onCheckedChange={(v) => rgn.setBlendInstruction(v)}
+                >
+                  <Switch.Thumb className="rgn-switch-thumb" />
+                </Switch.Root>
+                Blend with surroundings
+              </label>
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content className="pf-tooltip" side="left" sideOffset={6}>
+                {BLEND_TIP}
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+        </Tooltip.Provider>
+      </PromptBlock>
       {s.caps?.seed && seedCtl && (
         <div className="rgn-row" data-testid="rgn-panel-seed">
           <span className="muted">Seed</span>
@@ -338,7 +312,7 @@ function PromptSection({ s }: { s: RgnState }) {
           )}
         </div>
       )}
-    </div>
+    </>
   );
 }
 

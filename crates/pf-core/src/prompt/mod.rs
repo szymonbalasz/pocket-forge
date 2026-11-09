@@ -6,6 +6,7 @@
 //! commands ([`commands`]). Plain text only: nothing here calls the provider (FR-PRM-31).
 
 pub mod commands;
+pub mod context;
 pub mod helpers;
 
 #[cfg(test)]
@@ -14,7 +15,7 @@ mod tests;
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::{Extra, Kind};
-pub use helpers::{Helper, RetryTicks, retry_ticks};
+pub use helpers::{Helper, PromptRetry, RetryTicks, retry_ticks};
 
 /// Event: the helper definitions changed (save or reset); payload = the full list.
 pub const EVENT_HELPERS_CHANGED: &str = "prm:helpers-changed";
@@ -96,8 +97,9 @@ fn contains_phrase(hay: &str, needle: &str) -> bool {
 }
 
 /// FR-PRM-06/07: the final prompt = the non-empty parts joined with `\n\n`: (1) the typed prompt,
-/// trimmed at the end; (2) the ticked helpers' texts in helpers-row (settings) order, joined with
-/// one space; (3) the blend instruction (RGN only; `None` or blank = none).
+/// trimmed at the end (byte for byte when nothing is added, FR-RGN-09); (2) the ticked helpers'
+/// texts in helpers-row (settings) order, joined with one space; (3) the blend instruction (RGN
+/// only; `None` or blank = none).
 ///
 /// `ticks` is the draft's list (`None` = the defaults, FR-PRM-05). An unticked, hidden, deleted
 /// or wrong-kind helper is never added. A helper whose text is in the blend instruction, or equal
@@ -144,8 +146,15 @@ pub fn compose(
     }
 
     let mut parts = Vec::new();
-    let typed = typed.trim_end();
-    if !typed.is_empty() {
+    // Trimmed at the end before an added part; a typed prompt with nothing added is sent byte for
+    // byte (FR-RGN-09, blend off), so the preview stays exactly what is sent (FR-PRM-08).
+    let raw = typed;
+    let typed = if sent.is_empty() && blend.is_none() {
+        raw
+    } else {
+        raw.trim_end()
+    };
+    if !typed.trim_end().is_empty() {
         parts.push(PromptPart {
             source: PartSource::Typed,
             id: None,
@@ -166,7 +175,7 @@ pub fn compose(
     }
 
     let mut blocks: Vec<String> = Vec::new();
-    if !typed.is_empty() {
+    if !typed.trim_end().is_empty() {
         blocks.push(typed.to_owned());
     }
     if !sent.is_empty() {

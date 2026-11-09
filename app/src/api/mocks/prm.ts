@@ -196,6 +196,16 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       else sent.push(h);
       earlier.push(n);
     }
+    // As pf-core: a typed prompt with nothing added is kept byte for byte (FR-RGN-09).
+    const alone = !sent.length && !blend && typed;
+    const shown = alone ? String(input.typed_prompt) : typed;
+    if (alone)
+      return {
+        text: shown,
+        parts: [{ source: 'typed', text: shown }],
+        skipped,
+        chars: [...shown].length,
+      };
     const parts = [
       ...(typed ? [{ source: 'typed', text: typed }] : []),
       ...sent.map((h) => ({ source: 'helper', id: h.id, text: h.text.trim() })),
@@ -204,5 +214,39 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     const blocks = [typed, sent.map((h) => h.text.trim()).join(' '), blend].filter((b) => b !== '');
     const text = blocks.join('\n\n');
     return { text, parts, skipped, chars: [...text].length };
+  };
+  // Hooks for the host mocks (RGN; GEN in its slice 6), as pf-core's `compose` / `retry_ticks`.
+  /** FR-PRM-09: the helpers a submit sends (`{id, label, text}` in order). */
+  handlers.__prm_sent = async (input) => {
+    const p = (await handlers.prm_compose_preview!(input)) as {
+      parts: { source: string; id?: string; text: string }[];
+    };
+    return p.parts
+      .filter((x) => x.source === 'helper')
+      .map((x) => ({
+        id: x.id,
+        label: list.find((h) => h.id === x.id)?.label ?? '',
+        text: x.text,
+      }));
+  };
+  /** FR-PRM-10 (R78): the job's helpers ticked again; changed texts badged; a deleted, hidden
+   *  or wrong-kind helper is missing. `prompt_retry` only when there is something to badge. */
+  handlers.__prm_retry = (input) => {
+    const kind = input.kind as Kind;
+    const recorded = (input.recorded ?? []) as { id: string; label: string; text: string }[];
+    const ticks: string[] = [];
+    const changed: string[] = [];
+    const missing: typeof recorded = [];
+    for (const r of recorded) {
+      const h = list.find((x) => x.id === r.id && !x.hidden && x.kinds.includes(kind));
+      if (!h) missing.push(r);
+      else {
+        if (h.text !== r.text) changed.push(h.id);
+        ticks.push(h.id);
+      }
+    }
+    return changed.length || missing.length
+      ? { ticks, prompt_retry: { since: input.since, changed, missing } }
+      : { ticks };
   };
 }

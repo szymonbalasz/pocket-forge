@@ -106,13 +106,13 @@ test('FR-GEN-04 OQ-GEN-09 the tab strip is Region edit | New image; each tab mou
   await setup({ tab: null });
   await waitFor(() => expect(tabIds()).toEqual(['region', 'new-image']));
   expect(selectedTab()).toBe('region');
-  expect(screen.getByTestId('rgn-panel-prompt')).toBeTruthy();
+  expect(screen.getByTestId('prm-block-prompt')).toBeTruthy();
   expect(screen.queryByTestId('gen-panel')).toBeNull();
 
   fireEvent.click(screen.getAllByTestId('gen-tab')[1]!);
   expect(selectedTab()).toBe('new-image');
   await screen.findByTestId('gen-panel');
-  expect(screen.queryByTestId('rgn-panel-prompt')).toBeNull();
+  expect(screen.queryByTestId('prm-block-prompt')).toBeNull();
   // Arrow keys move along the strip.
   fireEvent.keyDown(screen.getAllByTestId('gen-tab')[1]!, { key: 'ArrowLeft' });
   expect(selectedTab()).toBe('region');
@@ -124,7 +124,7 @@ test('FR-GEN-03 FR-GEN-04 a project with no image shows only the New image tab',
   await waitFor(() => expect(tabIds()).toEqual(['new-image']));
   expect(selectedTab()).toBe('new-image');
   expect(screen.getByTestId('gen-panel')).toBeTruthy();
-  expect(screen.queryByTestId('rgn-panel-prompt')).toBeNull();
+  expect(screen.queryByTestId('prm-block-prompt')).toBeNull();
 });
 
 test('FR-GEN-01 a project opened from Generate new… starts on the New image tab', async () => {

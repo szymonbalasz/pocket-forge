@@ -117,8 +117,8 @@ test('FR-REF-15 the block sits between Model and Prompt and hides for a model wi
   await setup();
   const order = [...document.querySelectorAll('[data-testid]')]
     .map((e) => e.getAttribute('data-testid'))
-    .filter((t) => ['rgn-panel-model', 'ref-block', 'rgn-panel-prompt'].includes(t!));
-  expect(order).toEqual(['rgn-panel-model', 'ref-block', 'rgn-panel-prompt']);
+    .filter((t) => ['rgn-panel-model', 'ref-block', 'prm-block-prompt'].includes(t!));
+  expect(order).toEqual(['rgn-panel-model', 'ref-block', 'prm-block-prompt']);
 
   fireEvent.pointerDown(screen.getByTestId('rgn-panel-model'), {
     button: 0,

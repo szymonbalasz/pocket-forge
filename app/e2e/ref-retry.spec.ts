@@ -45,7 +45,7 @@ test('FR-RGN-41 FR-RGN-42 FR-RGN-45 FR-REF-26 references go with the job and com
     capabilities: { 'fake-refs': REFS },
   });
   await drawMaskedRegion(page, [400, 500], [800, 900]);
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('2 CU');
   await expect(check(page, 'project:mood-a.png')).toBeChecked();
   await expect(check(page, 'project:mood-b.png')).toBeChecked();

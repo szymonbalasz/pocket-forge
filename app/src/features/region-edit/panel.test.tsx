@@ -49,7 +49,7 @@ async function estimated() {
 }
 
 async function typePrompt(text: string) {
-  fireEvent.change(screen.getByTestId('rgn-panel-prompt'), { target: { value: text } });
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: text } });
 }
 
 /** Opens a Radix select and returns its option labels. */
@@ -131,7 +131,7 @@ describe('Generate panel (RGN slice 6)', { timeout: 20_000 }, () => {
     expect([steps.min, steps.max]).toEqual(['10', '']);
     expect(within(control('steps')!).queryByRole('slider')).toBeNull();
     expect(within(control('hd')!).getByRole('switch')).toBeTruthy();
-    expect(screen.getByTestId('rgn-panel-prompt')).toBeTruthy();
+    expect(screen.getByTestId('prm-block-prompt')).toBeTruthy();
     expect(screen.getByTestId('rgn-panel-seed')).toBeTruthy();
     expect(screen.getByTestId('rgn-panel-warning').textContent).toContain('"lora"');
     expect(await openSelect(within(control('mode')!).getByRole('combobox'))).toEqual([
@@ -237,7 +237,9 @@ describe('Generate panel (RGN slice 6)', { timeout: 20_000 }, () => {
     await typePrompt(prompt);
     fireEvent.click(screen.getByTestId('rgn-panel-blend-instruction'));
     expect(rgn.get().blendInstruction).toBe(false);
-    expect(screen.getByTestId('rgn-panel-final-prompt').textContent).toBe(prompt);
+    await waitFor(() =>
+      expect(screen.getByTestId('prm-block-final-prompt').textContent).toBe(prompt),
+    );
     expect((screen.getByTestId('rgn-panel-submit') as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByTestId('rgn-panel-submit'));
     fireEvent.click(await screen.findByTestId('rgn-confirm-ok'));
@@ -250,21 +252,25 @@ describe('Generate panel (RGN slice 6)', { timeout: 20_000 }, () => {
   test('BL-39 an empty prompt shows as empty with "+ blend instruction at send", not the instruction alone', async () => {
     await setup();
     await waitFor(() => expect(rgn.get().blendText).not.toBeNull());
-    const shown = () => screen.getByTestId('rgn-panel-final-prompt');
+    const shown = () => screen.getByTestId('prm-block-final-prompt');
+    await waitFor(() =>
+      expect(screen.getByTestId('prm-block-final-note').textContent).toBe(
+        '+ blend instruction at send',
+      ),
+    );
     expect(shown().textContent).toBe('—');
     expect(shown().dataset.empty).toBe('true');
-    expect(screen.getByTestId('rgn-panel-final-blend-note').textContent).toBe(
-      '+ blend instruction at send',
-    );
-    expect(screen.getByTestId('rgn-panel-final').textContent).not.toMatch(/Keep everything/);
+    expect(screen.getByTestId('prm-block-final').textContent).not.toMatch(/Keep everything/);
     // Blend off: just the empty prompt.
     fireEvent.click(screen.getByTestId('rgn-panel-blend-instruction'));
-    expect(screen.queryByTestId('rgn-panel-final-blend-note')).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId('prm-block-final-note')).toBeNull());
     // A typed prompt shows as sent again.
     fireEvent.click(screen.getByTestId('rgn-panel-blend-instruction'));
     await typePrompt('a stone well');
-    expect(shown().textContent).toMatch(/^a stone well\n\nKeep everything near the edges/);
-    expect(screen.queryByTestId('rgn-panel-final-blend-note')).toBeNull();
+    await waitFor(() =>
+      expect(shown().textContent).toMatch(/^a stone well\n\nKeep everything near the edges/),
+    );
+    expect(screen.queryByTestId('prm-block-final-note')).toBeNull();
   });
 
   test('owner-55 blend instruction: on by default, shown once in the final prompt, saved in the draft, Settings text used', async () => {
@@ -273,16 +279,16 @@ describe('Generate panel (RGN slice 6)', { timeout: 20_000 }, () => {
     expect(toggle.getAttribute('aria-checked')).toBe('true');
     await typePrompt('a stone well');
     await waitFor(() => expect(rgn.get().blendText).not.toBeNull());
-    expect(screen.getByTestId('rgn-panel-final').textContent).toMatch(/^Final prompt \(as sent\)/);
-    const shown = () => screen.getByTestId('rgn-panel-final-prompt').textContent ?? '';
-    expect(shown()).toMatch(/^a stone well\n\nKeep everything near the edges/);
+    expect(screen.getByTestId('prm-block-final').textContent).toMatch(/^Final prompt \(as sent\)/);
+    const shown = () => screen.getByTestId('prm-block-final-prompt').textContent ?? '';
+    await waitFor(() => expect(shown()).toMatch(/^a stone well\n\nKeep everything near the edges/));
     expect(shown()).toMatch(/toward the centre of the edited area\. Top-down battlemap view\.$/);
     expect(shown().match(/battlemap/g)).toHaveLength(1);
     // Not cost-affecting: toggling never re-estimates.
     await estimated();
     const n = fake.callsOf('rgn_job_estimate').length;
     fireEvent.click(toggle);
-    expect(shown()).toBe('a stone well');
+    await waitFor(() => expect(shown()).toBe('a stone well'));
     await waitFor(
       () =>
         expect(fake.callsOf('project_put_draft').at(-1)?.draft).toMatchObject({
@@ -619,7 +625,7 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     const before = fake.callsOf('rgn_job_estimate').length;
     fireEvent.click(screen.getByTestId('rgn-job-retry'));
     await waitFor(() =>
-      expect((screen.getByTestId('rgn-panel-prompt') as HTMLTextAreaElement).value).toBe(
+      expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).value).toBe(
         'first prompt',
       ),
     );
@@ -712,7 +718,7 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(screen.getByTestId('rgn-tracker-accepted')).toBeTruthy();
     // Kept: #1 accepted + #2 starred; #3 invalid. Prompt cleared after accept.
     expect(screen.getByTestId('rgn-tracker-kept').textContent).toBe('2/3 kept');
-    expect((screen.getByTestId('rgn-panel-prompt') as HTMLTextAreaElement).value).toBe('');
+    expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).value).toBe('');
     expect(screen.queryByTestId('rgn-job-strip')).toBeNull();
 
     // A second job: it leads; the older iteration stays selectable, its accept is refused.

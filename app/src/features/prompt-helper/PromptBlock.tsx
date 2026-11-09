@@ -106,7 +106,11 @@ export function PromptBlock(props: PromptBlockProps) {
         </p>
       )}
       {props.children}
-      <FinalPrompt preview={preview} helpers={helpers ?? []} />
+      <FinalPrompt
+        preview={preview}
+        helpers={helpers ?? []}
+        awaitingPrompt={!!props.required && prompt.trim() === ''}
+      />
       <div className="prm-block-actions">
         <Tooltip.Provider delayDuration={400}>
           <Tooltip.Root>
@@ -267,15 +271,26 @@ function HelpersRow({ helpers, kind, ticks, readOnly, skipped, retry, onChange }
   );
 }
 
+/** What a blank required prompt would still add at send (BL-39 note). */
+function addedNote(preview: ComposePreview | null): string | null {
+  const has = (src: string) => !!preview?.parts.some((p) => p.source === src);
+  const added = [has('helper') && 'helpers', has('blend') && 'blend instruction'].filter(Boolean);
+  return added.length ? `+ ${added.join(' and ')} at send` : null;
+}
+
 /** FR-PRM-08: the composed text exactly as sent, each part marked by its source (typed, the
- *  helper's label, blend instruction), and its character count. */
+ *  helper's label, blend instruction), and its character count. BL-39: while a required prompt
+ *  is blank (submit is blocked) it shows an empty prompt and a note, not the added parts alone. */
 function FinalPrompt({
   preview,
   helpers,
+  awaitingPrompt,
 }: {
   preview: ComposePreview | null;
   helpers: PromptHelper[];
+  awaitingPrompt: boolean;
 }) {
+  const note = awaitingPrompt ? addedNote(preview) : null;
   const source = (p: ComposePreview['parts'][number]) =>
     p.source === 'typed'
       ? 'Typed prompt'
@@ -287,10 +302,10 @@ function FinalPrompt({
       <summary className="muted small">
         Final prompt (as sent){' '}
         <span className="tabular" data-testid="prm-block-chars">
-          {preview ? `· ${preview.chars} characters` : ''}
+          {preview && !awaitingPrompt ? `· ${preview.chars} characters` : ''}
         </span>
       </summary>
-      {preview && preview.parts.length > 0 ? (
+      {preview && preview.parts.length > 0 && !awaitingPrompt ? (
         <pre className="small prm-final-text" data-testid="prm-block-final-prompt">
           {preview.parts.map((p, i) => {
             const prev = preview.parts[i - 1];
@@ -317,9 +332,16 @@ function FinalPrompt({
           })}
         </pre>
       ) : (
-        <pre className="small muted" data-testid="prm-block-final-prompt" data-empty="true">
-          —
-        </pre>
+        <>
+          <pre className="small muted" data-testid="prm-block-final-prompt" data-empty="true">
+            —
+          </pre>
+          {note && (
+            <p className="muted small" data-testid="prm-block-final-note">
+              {note}
+            </p>
+          )}
+        </>
       )}
     </details>
   );

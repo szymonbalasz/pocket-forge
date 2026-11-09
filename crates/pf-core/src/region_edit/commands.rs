@@ -12,10 +12,11 @@ use super::controls::{self, ControlsEvaluation};
 use super::estimate::estimate_id;
 use super::fit::{self, DEFAULT_MARGIN, MAX_MARGIN, RectIn, RegionFit};
 use super::spend::{self, SpendView};
-use super::{EVENT_SPEND, check_project, pixel_source, prepare};
+use super::{EVENT_SPEND, check_project, instruction, pixel_source, prepare};
 use crate::commands::NoInput;
 use crate::core::{Command, Core, Validate};
 use crate::error::{CoreError, CoreResult, ErrorCode};
+use crate::prompt::FinalPrompt;
 use crate::provider_commands::provider_call;
 use crate::references::{self, DraftReferences, Prepared, resolve::Notice};
 use crate::settings;
@@ -207,6 +208,9 @@ pub struct JobDraft {
     /// #55: append the blend instruction to the prompt at submit. Absent = on (the default).
     #[serde(default = "blend_on")]
     pub blend_instruction: bool,
+    /// PRM's helper ticks (FR-PRM-05): `[id]`; absent or `null` = the defaults.
+    #[serde(default)]
+    pub prompt_helpers: Option<Vec<String>>,
 }
 
 fn blend_on() -> bool {
@@ -225,6 +229,10 @@ impl Validate for JobDraft {
             ));
         }
         check_controls_map("draft.controls", &self.controls)?;
+        crate::prompt::helpers::check_ticks(
+            "draft.prompt_helpers",
+            self.prompt_helpers.as_deref(),
+        )?;
         if let Some(r) = &self.references
             && (r.packs.len() > 1000
                 || r.items.len() > 10_000
@@ -251,6 +259,9 @@ pub struct PreparedJob {
     /// REF's prepared references (FR-RGN-41): `JobRequest.references` and the job rows.
     pub references: Prepared,
     pub estimate_id: String,
+    /// FR-RGN-09 / FR-PRM-06: the final prompt as sent (typed + helpers + blend instruction) and
+    /// the helpers sent (the job's `prompt_helpers[]`, FR-PRM-09). Never cost-affecting.
+    pub prompt: FinalPrompt,
 }
 
 impl PreparedJob {
@@ -319,6 +330,12 @@ pub fn prepare_job(
     let images = prepare::prepare(&*src, &fit, &mask, &caps)?;
     let refs = references::prepare::estimate_inputs(&references.sent, &caps.slots);
     let estimate_id = estimate_id(draft.model_id.trim(), &fit, &sent.cost_inputs, &refs);
+    let prompt = instruction::final_prompt(
+        core,
+        &draft.final_prompt,
+        draft.blend_instruction,
+        draft.prompt_helpers.as_deref(),
+    );
     Ok(PreparedJob {
         caps,
         fit,
@@ -326,6 +343,7 @@ pub fn prepare_job(
         images,
         references,
         estimate_id,
+        prompt,
     })
 }
 
