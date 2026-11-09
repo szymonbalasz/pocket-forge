@@ -63,6 +63,12 @@ pub fn run_turn(
                 if cancel.is_cancelled() {
                     return (TurnOutcome::Canceled { partial }, false);
                 }
+                // An auth or limit message and then an exit without a `result` is still
+                // that state, not a crash.
+                if let Some(error) = signalled(&signals) {
+                    let _ = child.wait(EXIT_WAIT);
+                    return (TurnOutcome::Failed { error, partial }, false);
+                }
                 return (crashed(child, &partial, scrub, None), false);
             }
             crate::process::Next::Line(line) => {
@@ -149,17 +155,70 @@ fn crashed(
 }
 
 /// Words that mean the network is down (the CLI's API errors).
-const OFFLINE_HINTS: [&str; 9] = [
+const OFFLINE_HINTS: [&str; 12] = [
     "connection error",
     "unable to connect",
     "enotfound",
     "econnrefused",
+    "econnreset",
     "etimedout",
     "eai_again",
     "network error",
     "fetch failed",
     "getaddrinfo",
+    "socket hang up",
+    "network is unreachable",
 ];
+
+/// Words that mean the login is missing, expired or revoked (FR-PRM-37 `not_logged_in`).
+const AUTH_HINTS: [&str; 7] = [
+    "not logged in",
+    "/login",
+    "authentication_error",
+    "oauth token has expired",
+    "token has been revoked",
+    "invalid api key",
+    "api error: 401",
+];
+
+/// Words that mean the plan's limit is reached (FR-PRM-37 `usage_limit`).
+/// Not a bare "limit reached": "Context limit reached" is not the plan's limit.
+const LIMIT_HINTS: [&str; 6] = [
+    "hit your limit",
+    "usage limit",
+    "5-hour limit",
+    "weekly limit",
+    "session limit",
+    "rate_limit_error",
+];
+
+/// Maps the CLI's error message and the turn's signals to an FR-PRM-37 error.
+fn classify(message: &str, s: &Signals) -> ChatError {
+    let lower = message.to_lowercase();
+    let error_kind = s.assistant_error.as_deref().unwrap_or_default();
+    if error_kind == "authentication_failed" || AUTH_HINTS.iter().any(|h| lower.contains(h)) {
+        ChatError::new(ChatErrorKind::NotLoggedIn)
+    } else if s.rate_limited
+        || error_kind == "rate_limit"
+        || LIMIT_HINTS.iter().any(|h| lower.contains(h))
+    {
+        ChatError::usage_limit(Some(message))
+    } else if OFFLINE_HINTS.iter().any(|h| lower.contains(h)) {
+        ChatError::new(ChatErrorKind::Offline).with_detail(message)
+    } else {
+        ChatError::backend_error(message)
+    }
+}
+
+/// The state an assistant error or a rejected rate limit means when the stream ends
+/// without a `result`; `None` when it would only be a `backend_error`.
+fn signalled(s: &Signals) -> Option<ChatError> {
+    if s.assistant_error.is_none() && !s.rate_limited {
+        return None;
+    }
+    let e = classify(s.assistant_error_text.as_deref().unwrap_or_default(), s);
+    (e.kind != ChatErrorKind::BackendError).then_some(e)
+}
 
 fn finish(r: TurnResult, s: &Signals, partial: String) -> TurnOutcome {
     if !r.is_error {
@@ -185,23 +244,6 @@ fn finish(r: TurnResult, s: &Signals, partial: String) -> TurnOutcome {
         .or_else(|| (!r.errors.is_empty()).then(|| r.errors.join("; ")))
         .or_else(|| s.assistant_error_text.clone())
         .unwrap_or_else(|| r.subtype.clone());
-    let lower = message.to_lowercase();
-    let error_kind = s.assistant_error.as_deref().unwrap_or_default();
-    let error = if error_kind == "authentication_failed"
-        || lower.contains("not logged in")
-        || lower.contains("/login")
-    {
-        ChatError::new(ChatErrorKind::NotLoggedIn)
-    } else if s.rate_limited
-        || error_kind == "rate_limit"
-        || lower.contains("hit your limit")
-        || lower.contains("usage limit")
-    {
-        ChatError::usage_limit(Some(&message))
-    } else if OFFLINE_HINTS.iter().any(|h| lower.contains(h)) {
-        ChatError::new(ChatErrorKind::Offline).with_detail(message)
-    } else {
-        ChatError::backend_error(message)
-    };
+    let error = classify(&message, s);
     TurnOutcome::Failed { error, partial }
 }

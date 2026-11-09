@@ -621,3 +621,108 @@ fn fr_prm_35_close_ends_the_session_and_sweeps_projects() {
     let (out, _) = turn(s.as_mut(), &input("hi"));
     assert!(matches!(out, TurnOutcome::Failed { .. }));
 }
+
+// ---------------------------------------------------------------- error heuristics
+
+fn result_line(is_error: bool, result: &str) -> Step {
+    Step::Line(
+        serde_json::json!({"type":"result","subtype":"success","is_error":is_error,"result":result})
+            .to_string(),
+    )
+}
+
+fn assistant_error(error: &str, text: &str) -> Step {
+    Step::Line(
+        serde_json::json!({"type":"assistant","error":error,"message":{"content":[{"type":"text","text":text}]}})
+            .to_string(),
+    )
+}
+
+fn outcome_of(steps: Vec<Step>, stderr: &str) -> (TurnOutcome, bool) {
+    let r = rig();
+    let mut s = r.open(
+        Script {
+            turns: vec![steps],
+            stderr: String::new(),
+        }
+        .with_stderr(stderr),
+    );
+    let (out, _) = turn(s.as_mut(), &input("hi"));
+    (out, s.is_alive())
+}
+
+fn code_of(out: &TurnOutcome) -> &'static str {
+    match out {
+        TurnOutcome::Failed { error, .. } => error.code(),
+        TurnOutcome::Completed { .. } => "completed",
+        TurnOutcome::Canceled { .. } => "canceled",
+    }
+}
+
+/// FR-PRM-37 / Appendix D: the committed recordings plus synthetic variants of what the CLI
+/// prints for each state (R89: heuristics until more real recordings exist).
+#[test]
+fn fr_prm_37_error_heuristics_map_cli_messages_to_states() {
+    let not_logged_in = Script::recordings(&[NOT_LOGGED_IN]).turns.remove(0);
+    let usage_limit = Script::recordings(&[USAGE_LIMIT]).turns.remove(0);
+    let expired = r#"API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth token has expired. Please obtain a new token or refresh your existing token."}}"#;
+    let cases: Vec<(&str, Vec<Step>, &str)> = vec![
+        // Not logged in.
+        ("recording: not logged in", not_logged_in, "not_logged_in"),
+        ("invalid api key", vec![init(), result_line(true, "Invalid API key · Please run /login")], "not_logged_in"),
+        // Auth expired (the 401 body, with and without the CLI's "/login" hint).
+        ("auth expired", vec![init(), result_line(true, expired)], "not_logged_in"),
+        ("auth expired + hint", vec![init(), result_line(true, &format!("{expired} · Please run /login"))], "not_logged_in"),
+        ("auth failed, empty result", vec![init(), assistant_error("authentication_failed", "OAuth token revoked"), result_line(true, "")], "not_logged_in"),
+        // Usage limit.
+        ("recording: usage limit", usage_limit, "usage_limit"),
+        ("old limit format", vec![init(), result_line(true, "Claude AI usage limit reached|1762700000")], "usage_limit"),
+        ("5-hour limit", vec![init(), result_line(true, "5-hour limit reached ∙ resets 3pm")], "usage_limit"),
+        ("weekly limit", vec![init(), result_line(true, "Weekly limit reached · resets Mon 9am")], "usage_limit"),
+        ("rate_limit assistant error", vec![init(), assistant_error("rate_limit", "Rate limited"), result_line(true, "")], "usage_limit"),
+        ("api 429", vec![init(), result_line(true, r#"API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"Rate limited"}}"#)], "usage_limit"),
+        // Offline.
+        ("connection error", vec![init(), result_line(true, "API Error: Connection error.")], "offline"),
+        ("retrying", vec![init(), result_line(true, "API Error (Connection error.) · Retrying in 8 seconds… (attempt 10/10)")], "offline"),
+        ("dns", vec![init(), result_line(true, "getaddrinfo ENOTFOUND api.anthropic.com")], "offline"),
+        ("reset", vec![init(), result_line(true, "read ECONNRESET")], "offline"),
+        ("errors[] only", vec![init(), Step::Line(r#"{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["fetch failed"]}"#.into())], "offline"),
+        // Anything else.
+        ("other", vec![init(), result_line(true, "Something else broke")], "backend_error"),
+        ("context limit", vec![init(), result_line(true, "Context limit reached · /compact or /clear to continue")], "backend_error"),
+        // CLI crash mid-stream: no result, stdout closes.
+        ("crash with code", vec![init(), assistant("half"), Step::Exit(Some(1))], "backend_crashed"),
+        ("crash, killed", vec![init(), assistant("half"), Step::Exit(None)], "backend_crashed"),
+        // An auth error and then an exit without a result is still the auth state.
+        ("auth error then exit", vec![init(), assistant_error("authentication_failed", "Not logged in · Please run /login"), Step::Exit(Some(1))], "not_logged_in"),
+        // Truncated JSON lines.
+        ("truncated then exit", vec![init(), assistant("half"), Step::Line(r#"{"type":"assistant","message":{"content":[{"type":"te"#.into()), Step::Exit(Some(1))], "backend_crashed"),
+        ("truncated then result", vec![init(), Step::Line(r#"{"type":"assistant","mess"#.into()), result_line(false, "fine")], "completed"),
+        ("three truncated", vec![init(), Step::Line("{\"a".into()), Step::Line("{\"b".into()), Step::Line("{\"c".into())], "stream_malformed"),
+    ];
+    for (name, steps, want) in cases {
+        let (out, alive) = outcome_of(steps, "boom");
+        assert_eq!(code_of(&out), want, "{name}: {out:?}");
+        // Only a `result` keeps the process for the next turn.
+        let has_result =
+            !matches!(want, "backend_crashed" | "stream_malformed") && !name.contains("then exit");
+        assert_eq!(alive, has_result, "{name}");
+        if want == "usage_limit" {
+            let TurnOutcome::Failed { error, .. } = &out else {
+                unreachable!()
+            };
+            assert!(!error.fix.is_empty(), "{name}");
+        }
+        if name.starts_with("crash") || name == "truncated then exit" {
+            let TurnOutcome::Failed { error, partial } = &out else {
+                unreachable!()
+            };
+            assert_eq!(partial, "half", "{name}: the partial reply is kept");
+            assert_eq!(
+                error.detail.as_deref(),
+                Some("boom"),
+                "{name}: the stderr tail"
+            );
+        }
+    }
+}
