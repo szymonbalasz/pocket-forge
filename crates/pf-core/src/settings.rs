@@ -79,6 +79,10 @@ pub struct Settings {
     pub provider: ProviderSettings,
     #[serde(default)]
     pub region_edit: RegionEditSettings,
+    /// `prompt_helpers` section (PRM, FR-PRM-02), raw: absent = the starter set; an invalid one
+    /// falls back to the starter set with a warning instead of resetting the file (PRM §11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_helpers: Option<Value>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -92,6 +96,7 @@ impl Settings {
             spend: SpendSettings::default(),
             provider: ProviderSettings::default(),
             region_edit: RegionEditSettings::default(),
+            prompt_helpers: None,
             extra: BTreeMap::new(),
         }
     }
@@ -139,7 +144,12 @@ pub fn load_or_init(ctx: &Context) -> CoreResult<(Settings, Vec<SettingsWarning>
             }
         });
     match parsed {
-        Ok(s) => Ok((s, vec![])),
+        Ok(s) => {
+            let warnings = crate::prompt::helpers::load_warning(&s)
+                .into_iter()
+                .collect();
+            Ok((s, warnings))
+        }
         Err(reason) => {
             let aside = ctx
                 .data_dir
@@ -169,7 +179,13 @@ pub fn save(ctx: &Context, settings: &Settings) -> CoreResult<()> {
 }
 
 /// The sections other features read and write through PRJ (R4, R8).
-pub const SECTIONS: [&str; 4] = ["library", "spend", "provider", "region_edit"];
+pub const SECTIONS: [&str; 5] = [
+    "library",
+    "spend",
+    "provider",
+    "region_edit",
+    "prompt_helpers",
+];
 
 fn unknown_section(name: &str) -> CoreError {
     CoreError::invalid(
@@ -185,6 +201,8 @@ pub fn section_get(settings: &Settings, name: &str) -> CoreResult<Value> {
         "spend" => serde_json::to_value(&settings.spend),
         "provider" => serde_json::to_value(&settings.provider),
         "region_edit" => serde_json::to_value(&settings.region_edit),
+        // Absent = `null` (the starter set, FR-PRM-02).
+        "prompt_helpers" => Ok(settings.prompt_helpers.clone().unwrap_or(Value::Null)),
         other => return Err(unknown_section(other)),
     };
     v.map_err(|e| CoreError::internal(format!("serialising settings: {e}")))
@@ -206,6 +224,13 @@ pub fn section_put(
         "spend" => next.spend = serde_json::from_value(value).map_err(bad)?,
         "provider" => next.provider = serde_json::from_value(value).map_err(bad)?,
         "region_edit" => next.region_edit = serde_json::from_value(value).map_err(bad)?,
+        // Validated by PRM's rules (FR-PRM-01); `null` = back to the starter set.
+        "prompt_helpers" => {
+            if !value.is_null() {
+                crate::prompt::helpers::parse_section(&value)?;
+            }
+            next.prompt_helpers = (!value.is_null()).then_some(value);
+        }
         other => return Err(unknown_section(other)),
     }
     save(ctx, &next)?;

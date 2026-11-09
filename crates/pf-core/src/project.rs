@@ -808,6 +808,9 @@ pub struct DraftInput {
     /// #55: the blend instruction setting; absent or `null` = on (the default).
     #[serde(default)]
     pub blend_instruction: Option<bool>,
+    /// PRM's helper ticks (FR-PRM-05); absent or `null` = the defaults.
+    #[serde(default)]
+    pub prompt_helpers: Option<Vec<String>>,
     /// The New image tab's `draft.generate` (FR-GEN-19). Absent = keep the saved one (so a region
     /// edit draft save never touches it); `null` = clear it.
     #[serde(default, deserialize_with = "present")]
@@ -1013,6 +1016,7 @@ pub(crate) fn apply_draft(
             mask_id: draft.mask_id.unwrap_or(kept_mask),
             references: draft.references,
             blend_instruction: draft.blend_instruction,
+            prompt_helpers: draft.prompt_helpers,
             generate,
             updated_at: ctx.now(),
             extra,

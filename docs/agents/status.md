@@ -56,4 +56,5 @@
 | GEN 2: image-less project, base layer, pick commit | `gen-2` | building | — | — |
 | GEN 5: + New menu, New image tab (mocked) | — | merged | done (R77) | slice 4 picker routing, slice 6 prompt block |
 | PRM 0: `pf-chat` crate + probe | `prm-0` | building | — | owner runs the probe |
-| PRM 1: helpers core | `prm-1` | building | — | — |
+| PRM 1: helpers core | — | merged | done (R78) | — |
+| PRM 2: prompt block + Settings UI (mocked) | `prm-1` | building | — | — |

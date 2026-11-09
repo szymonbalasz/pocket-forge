@@ -176,6 +176,14 @@ impl JobFile {
             .unwrap_or(&self.final_prompt)
     }
 
+    /// The helpers sent (FR-PRM-09), in order; a job from before PRM has none (`[]`).
+    pub fn prompt_helpers(&self) -> Vec<crate::prompt::SentHelper> {
+        self.extra
+            .get(crate::prompt::JOB_FIELD)
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default()
+    }
+
     /// Project path of the job folder.
     pub fn dir(&self) -> String {
         crate::manifest::job_dir(self.id)

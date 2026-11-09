@@ -107,7 +107,7 @@
 `id`, `file` (`.pforge/masks/<id>.png`), `rect` (the region, inner), `created_at`.
 
 ### 4.5 Draft
-`final_prompt`, `model_id`, `controls{}` (keyed by capability control `name`, #37), `seed` (int \| null), `region` (`{inner, margin}` \| null), `mask_id` (latest mask, R7) \| null, `references` (#51, REF: `{packs: [{pack_id, name}], items: [{key, on, role \| null, retry_of?, changed?}]}` \| null; null = REF's defaults, FR-REF-17; an item's `role` is set only when the user chose one, null = the model's default, R53; `retry_of` = the iteration `NNN` a Retry restored the item from, `changed: true` when its bytes differ from what that job sent, FR-REF-26), `blend_instruction` (bool, optional; absent = on; whether submit appends the blend instruction, #55), `updated_at`.
+`final_prompt`, `model_id`, `controls{}` (keyed by capability control `name`, #37), `seed` (int \| null), `region` (`{inner, margin}` \| null), `mask_id` (latest mask, R7) \| null, `references` (#51, REF: `{packs: [{pack_id, name}], items: [{key, on, role \| null, retry_of?, changed?}]}` \| null; null = REF's defaults, FR-REF-17; an item's `role` is set only when the user chose one, null = the model's default, R53; `retry_of` = the iteration `NNN` a Retry restored the item from, `changed: true` when its bytes differ from what that job sent, FR-REF-26), `blend_instruction` (bool, optional; absent = on; whether submit appends the blend instruction, #55), `prompt_helpers` (`[id]` \| null, optional; absent or null = the defaults: every visible helper of the kind with `default_on`; the ticks of [prompt-helper](../specs/prompt-helper.md) FR-PRM-05; GEN's `draft.generate` carries the same field), `updated_at`.
 
 ### 4.6 Job (`.pforge/jobs/<id>/job.json`)
 | Field | Type | Notes |
@@ -119,6 +119,7 @@
 | `capability_snapshot` | object | KQ-17 |
 | `final_prompt`, `controls{}`, `candidate_count` | | as submitted; `final_prompt` is the prompt as sent, blend instruction included (#55) |
 | `typed_prompt`, `blend_instruction` | string, bool; optional | #55, R73: the prompt as typed and whether the instruction was appended. `typed_prompt` drives Retry, the iteration slug and the accept label. Absent on jobs from before #55 (typed = `final_prompt`) |
+| `prompt_helpers[]` | `{id, label, text}` | [prompt-helper](../specs/prompt-helper.md) FR-PRM-09: each helper actually sent, in order (skipped ones excluded). Written with `requested`, never changed. Absent on jobs from before PRM (reads as `[]`) |
 | `seed` | `{requested, returned}` | int \| null each |
 | `region` | `{inner, outer, margin}` | |
 | `fit` | `{sent_w, sent_h, scale}` | |
@@ -225,6 +226,7 @@ No `name`: the folder name is the pack name (OQ-REF-01).
 | `spend` | `cap`, `threshold` (provider units; null = not set, asked on first submit) | RGN |
 | `provider` | `team_id?`, `project_id?` (never credentials; those are in the OS store) | PRV |
 | `region_edit` | `blend_instruction?` (string ≤ 2000 chars; absent = the built-in default text, #55) | RGN |
+| `prompt_helpers` | `helpers[]` in settings order: a built-in is `{id, label?, text?, kinds?, default_on?, hidden?}` (overrides only; `{id}` = unmodified), a user-made one `{id (ULID), label, text, kinds[], default_on, hidden?}`. Absent = the starter set. Invalid → the starter set + a warning; the section is kept until the next save ([prompt-helper](../specs/prompt-helper.md) FR-PRM-01/02, §11) | PRM |
 
 Corrupt or unreadable → defaults + a warning; the bad file is kept as `settings.corrupt-<UTC>.json`. Unknown sections are kept.
 

@@ -677,6 +677,15 @@ impl Validate for ProjectPutDraftInput {
             {
                 return Err(CoreError::invalid("draft.model_id", "not a valid model id"));
             }
+            if let Some(ticks) = &d.prompt_helpers
+                && (ticks.len() > crate::prompt::helpers::MAX_HELPERS
+                    || ticks.iter().any(|t| t.is_empty() || t.len() > 100))
+            {
+                return Err(CoreError::invalid(
+                    "draft.prompt_helpers",
+                    "not a list of prompt helper ids",
+                ));
+            }
         }
         if let Some(e) = &self.export
             && let Some(k) = e
@@ -1115,6 +1124,13 @@ pub use crate::export::commands::{
     ExportCancel, ExportGetSettings, ExportPlan, ExportSetSettings, ExportStart,
 };
 
+// ---------------------------------------------------------------- prompt helper
+
+/// Prompt helper commands live in their own module (prompt-helper spec §9).
+pub use crate::prompt::commands::{
+    PrmComposePreview, PrmHelpersList, PrmHelpersReset, PrmHelpersSave,
+};
+
 // ---------------------------------------------------------------- registry (append-only)
 
 /// A registry row: command name → JSON adapter.
@@ -1202,6 +1218,10 @@ registry![
     RgnJobDiscardRest,
     RgnBlendInstructionGet,
     RgnBlendInstructionSet,
+    PrmHelpersList,
+    PrmHelpersSave,
+    PrmHelpersReset,
+    PrmComposePreview,
     GenProjectCreate,
     GenProjectSuggestName,
 ];

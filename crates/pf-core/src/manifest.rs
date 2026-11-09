@@ -258,6 +258,9 @@ pub struct Draft {
     /// #55: append the blend instruction at submit; absent = on (the default).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend_instruction: Option<bool>,
+    /// PRM's helper ticks (FR-PRM-05): `[id]`; absent or `null` = the defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_helpers: Option<Vec<String>>,
     /// The New image tab's draft `draft.generate` (FR-GEN-19, schema §4.5); GEN owns the meaning.
     /// Absent = none saved yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -279,6 +282,7 @@ impl Draft {
             mask_id: None,
             references: None,
             blend_instruction: None,
+            prompt_helpers: None,
             generate: None,
             updated_at,
             extra: Extra::new(),
@@ -775,6 +779,7 @@ mod tests {
             mask_id: None,
             references: None,
             blend_instruction: None,
+            prompt_helpers: None,
             generate,
             updated_at: Timestamp(0),
             extra: Extra::new(),
