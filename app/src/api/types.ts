@@ -155,6 +155,8 @@ export interface Draft {
   blend_instruction?: boolean | null;
   /** GEN's New image tab (FR-GEN-19, schema §4.5 `draft.generate`); absent = defaults. */
   generate?: GenDraft | null;
+  /** PRM's helper ticks (FR-PRM-05); absent/null = the defaults. */
+  prompt_helpers?: string[] | null;
   updated_at: string;
 }
 
@@ -250,6 +252,8 @@ export interface DraftInput {
   blend_instruction?: boolean | null;
   /** GEN's New image draft (FR-GEN-19); absent = keep the stored one. */
   generate?: GenDraft | null;
+  /** PRM's helper ticks (FR-PRM-05); absent/null = the defaults. */
+  prompt_helpers?: string[] | null;
 }
 
 export interface ImageOpen {
@@ -751,6 +755,10 @@ export interface Commands {
     { job_id: string; candidate_id: string },
     { layer_id: string; revision_id: string },
   ];
+  prm_helpers_list: [{ kind?: ProjectKind }, PromptHelper[]];
+  prm_helpers_save: [{ helpers: PromptHelperInput[] }, PromptHelper[]];
+  prm_helpers_reset: [{ id: string } | { all: true }, PromptHelper[]];
+  prm_compose_preview: [ComposePreviewInput, ComposePreview];
 }
 
 export type CommandName = keyof Commands;
@@ -807,6 +815,8 @@ export interface Events {
   'ref:add-progress': { done: number; total: number };
   'ref:thumb-updated': { pack_id: string };
   'ref:trash-purged': { count: number; bytes: number };
+  /** The helper definitions changed (save or reset): the full list (PRM §9). */
+  'prm:helpers-changed': PromptHelper[];
 }
 
 // ── Reference packs (REF §9, #51, #54; shapes final per R50, pf-core `references/`) ──────────
@@ -1020,4 +1030,69 @@ export interface GenEstimate extends Omit<JobEstimate, 'fit'> {
  *  changed since that job (`changed_since` = `NNN`) or it is gone (`missing`). */
 export interface GenRetryDraft extends GenDraft {
   structure: { file: string; changed_since?: string | null; missing?: boolean } | null;
+}
+
+// ── Prompt helper (PRM §9, pf-core `prompt/`) ───────────────────────────────────────────────
+
+/** A prompt helper (FR-PRM-01), as `prm_helpers_list` returns it, in settings order. */
+export interface PromptHelper {
+  /** `builtin:<slug>` or a ULID. */
+  id: string;
+  /** 1–40 characters. */
+  label: string;
+  /** 1–500 characters. */
+  text: string;
+  /** In `map, token, item` order; at least one. */
+  kinds: ProjectKind[];
+  default_on: boolean;
+  builtin: boolean;
+  hidden: boolean;
+  /** A built-in whose label, text, kinds or `default_on` differ from the starter. */
+  modified: boolean;
+}
+
+/** One helper for `prm_helpers_save` (the full ordered list). No `id` = a new helper. A list
+ *  row can be sent back as is (`builtin`, `modified` are ignored). */
+export interface PromptHelperInput {
+  id?: string;
+  label: string;
+  text: string;
+  kinds: ProjectKind[];
+  default_on: boolean;
+  hidden: boolean;
+}
+
+export interface ComposePreviewInput {
+  kind: ProjectKind;
+  typed_prompt: string;
+  /** The draft's ticks; null = the defaults (FR-PRM-05). */
+  helper_ids: string[] | null;
+  /** The blend instruction as appended (RGN, while on); null = none. */
+  blend_instruction: string | null;
+}
+
+export type PromptPartSource = 'typed' | 'helper' | 'blend';
+
+export interface PromptPart {
+  source: PromptPartSource;
+  /** Helper parts: the helper id. */
+  id?: string;
+  text: string;
+}
+
+export type HelperSkipReason = 'duplicate' | 'in_blend_instruction';
+
+/** `prm_compose_preview` (FR-PRM-08): the final prompt as it would be sent. */
+export interface ComposePreview {
+  text: string;
+  parts: PromptPart[];
+  skipped: { id: string; reason: HelperSkipReason }[];
+  chars: number;
+}
+
+/** A job's `prompt_helpers[]` entry (FR-PRM-09). */
+export interface SentHelper {
+  id: string;
+  label: string;
+  text: string;
 }
