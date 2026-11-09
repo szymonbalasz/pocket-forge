@@ -128,9 +128,10 @@ mod quit {
             self.guards.fetch_sub(1, Ordering::SeqCst);
         }
 
-        /// The app is exiting from here on: a close is never held again.
-        pub fn exiting(&self) {
-            self.exiting.store(true, Ordering::SeqCst);
+        /// The app is exiting from here on: a close is never held again. True for the first
+        /// caller only (it runs the teardown and exits).
+        pub fn exiting(&self) -> bool {
+            !self.exiting.swap(true, Ordering::SeqCst)
         }
 
         /// True if a close request must wait for the UI.
@@ -165,8 +166,9 @@ mod quit {
             assert!(!q.hold(), "no UI yet: X closes");
             q.guard();
             assert!(q.hold(), "the UI runs the close guards");
-            q.exiting();
+            assert!(q.exiting(), "the first exit runs the teardown");
             assert!(!q.hold(), "the UI said exit");
+            assert!(!q.exiting(), "a second exit leaves it to the first");
         }
 
         #[test]
@@ -219,16 +221,19 @@ fn app_close_ack() {
     quit::QUIT.ack();
 }
 
-/// The UI closed the project (or none was open): the app exits (R101).
-#[tauri::command]
+/// The UI closed the project (or none was open): the app exits (R101). Off the main thread:
+/// the teardown waits for the chat turn.
+#[tauri::command(async)]
 fn app_exit(app: AppHandle) {
     exit_app(&app);
 }
 
-/// Ends the app.
+/// Ends the app after the windows' teardown (R109); a second call leaves it to the first.
 fn exit_app(app: &AppHandle) {
-    quit::QUIT.exiting();
-    app.exit(0);
+    if quit::QUIT.exiting() {
+        chat_window::quit_teardown(app);
+        app.exit(0);
+    }
 }
 
 /// R109: a held close the UI didn't ack within `ACK_WITHIN` closes the app anyway.
