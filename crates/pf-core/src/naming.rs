@@ -25,8 +25,9 @@ fn is_reserved(s: &str) -> bool {
 }
 
 /// Applies the FR-PRJ-44 rules: `<>:"/\|?*` and control characters → `-`, leading dots and
-/// spaces and trailing dots and spaces trimmed, reserved Windows names suffixed with `_`,
-/// at most 64 characters; empty → `untitled`.
+/// spaces and trailing dots and spaces trimmed, reserved Windows names suffixed with `_` (before
+/// the first dot: `NUL.tar` → `NUL_.tar`, as `NUL.anything` is reserved too), at most 64
+/// characters; empty → `untitled`.
 pub fn sanitise_name(raw: &str) -> String {
     let replaced: String = raw
         .chars()
@@ -41,10 +42,9 @@ pub fn sanitise_name(raw: &str) -> String {
     let mut name: String = trim_name(&replaced).chars().take(MAX_NAME_CHARS).collect();
     name = trim_name(&name).to_owned();
     if is_reserved(&name) {
-        if name.chars().count() >= MAX_NAME_CHARS {
-            name = name.chars().take(MAX_NAME_CHARS - 1).collect();
-        }
-        name.push('_');
+        let at = name.find('.').unwrap_or(name.len());
+        name.insert(at, '_');
+        name = trim_name(&name.chars().take(MAX_NAME_CHARS).collect::<String>()).to_owned();
     }
     if name.is_empty() {
         name = "untitled".into();
@@ -173,11 +173,26 @@ mod tests {
         assert_eq!(sanitise_name("CON"), "CON_");
         assert_eq!(sanitise_name("con"), "con_");
         assert_eq!(sanitise_name("com1"), "com1_");
-        assert_eq!(sanitise_name("NUL.tar"), "NUL.tar_");
+        assert_eq!(sanitise_name("NUL.tar"), "NUL_.tar");
         assert_eq!(sanitise_name("CONSOLE"), "CONSOLE");
         assert_eq!(sanitise_name(""), "untitled");
         assert_eq!(sanitise_name("..."), "untitled");
         assert_eq!(sanitise_name("Grüne Höhle 洞窟"), "Grüne Höhle 洞窟");
+    }
+
+    #[test]
+    fn fr_prj_44_a_reserved_name_with_an_extension_gets_its_suffix_before_the_dot() {
+        // Windows reserves `NUL.anything`: `NUL.tar_` would still be refused.
+        for raw in ["NUL.tar", "nul.tar.gz", "COM1.x", "aux .old"] {
+            let name = sanitise_name(raw);
+            assert!(!is_reserved(&name), "{raw} → {name} is still reserved");
+            assert!(is_valid_name(&name));
+        }
+        assert_eq!(sanitise_name("nul.tar.gz"), "nul_.tar.gz");
+        assert!(!is_valid_name("NUL.tar_"));
+        let long = format!("CON.{}", "x".repeat(70));
+        assert_eq!(sanitise_name(&long).chars().count(), 64);
+        assert!(sanitise_name(&long).starts_with("CON_."));
     }
 
     #[test]
