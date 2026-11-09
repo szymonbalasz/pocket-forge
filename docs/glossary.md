@@ -47,8 +47,15 @@
 | **Reference pack** | A named, reusable set of reference images kept as a folder in `<library-root>/References/<pack>/`, optionally attached to a request (#51). |
 | **Structural sketch** | A drawn or imported image that fixes layout or pose (the *structure* role). |
 | **Art recipe** | Reusable production guidance: style text, approved references, composition constraints, output requirements and tested settings. |
-| **Final prompt** | The exact prompt text submitted to the provider: the user's typed prompt, plus the **blend instruction** when it is on (#55). It is always visible; the typed part is editable. |
+| **Final prompt** | The exact prompt text submitted to the provider: the user's typed prompt, plus the ticked **prompt helper** texts, plus the **blend instruction** in a region edit when it is on (#55, #60). It is always visible as "Final prompt (as sent)"; the typed part is editable. |
 | **Blend instruction** | A fixed, editable instruction appended to a region edit's typed prompt (on by default) that tells the model to continue the surrounding map across the mask edge (#55). Not an alpha fade; see **feather**. |
+| **Base image** | Layer 0 of a working image: the original, or a generated candidate picked in the New image tab (#59, #60). Written once to `working/`; never modified. |
+| **Prompt helper** | A predefined, editable text snippet for an asset kind, ticked like a reference, that adds visible text to the final prompt (#58). |
+| **Prompt block** | The shared prompt area in Region edit and New image: typed prompt, prompt helper chips, the "Final prompt (as sent)" preview and the prompt chat button (#60). |
+| **Prompt chat** | An optional pop-out chat (Claude Code headless) that sees the chat host's context and proposes prompts; only the user's click puts a proposal into the prompt (#58, #60). |
+| **Chat thread** | The prompt chat history of one asset project (one per project in v1, #60). |
+| **Proposal** | A prompt the prompt chat suggests, shown as a card the user can insert (Replace prompt) or copy. |
+| **Chat host** | The visible tab (Region edit or New image) whose prompt block the prompt chat reads and inserts into. |
 | **Provider** | The generation service. Currently Scenario. |
 | **Fake provider** | A deterministic stand-in provider used in dev and tests. It never spends credits. |
 | **Mask convention** | How a given model reads a mask (e.g. white = edit, black = edit, transparent = edit). The app converts from its canonical mask. |
@@ -65,7 +72,7 @@
 | **Colour match** | An automatic colour adjustment that makes a patch layer match its surroundings. |
 | **Section** | One asset type's folder in a library root (`Maps/`, `Tokens/`, `Items/`) and its rail entry (#44). Not the same as section-based editing, which means editing by region. |
 | **Project folder** | The visible folder of one asset project: `<section>/<name>/` with `project.json`, `working/`, `references/`, `structure/`, `parts/`, `results/`, `exports/` and a hidden `.pforge/` (#44). |
-| **Working image** | The original plus its accepted patch layers: what the canvas shows and the home thumbnail depicts. |
+| **Working image** | The **base image** (an original or a picked generated image) plus its accepted patch layers: what the canvas shows and the home thumbnail depicts (#60). |
 | **Iteration** | One job that returned candidates, stored as one `results/NNN <slug>/` folder. |
 | **Iteration tracker** | The bottom strip listing a project's iterations; it hosts the candidate picker for the selected one. |
 | **Part** | A reusable cut-out (door, statue, cart) kept in `parts/` and placed on other projects later (tier A, #45). |
