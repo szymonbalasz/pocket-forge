@@ -13,6 +13,8 @@ import { regionEditFeature } from '../region-edit';
 import { newAssetGenerationFeature } from '.';
 import { gen } from './store';
 import {
+  GEN_ASPECT,
+  GEN_WH,
   genControls,
   mockGenCore,
   polyfillRadix,
@@ -477,4 +479,21 @@ test('R84 FR-GEN-21 the confirm dialog names the sketch: "with a sketch and N re
   expect(within(dialog).getByTestId('rgn-confirm-references').textContent?.trim()).toBe(
     'with a sketch and 1 reference',
   );
+});
+
+test('BL-40 a project just made by Generate new… opens focused on Generate when no prompt is needed', async () => {
+  const noPrompt = {
+    ...GEN_WH,
+    prompt_required: false,
+    controls: GEN_WH.controls.map((c) => (c.role === 'prompt' ? { ...c, required: false } : c)),
+  };
+  gen.focusOnOpen();
+  await setup({
+    gen: { capabilities: { 'fake-gen-wh': noPrompt, 'fake-gen-aspect': GEN_ASPECT } },
+  });
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('gen-panel-submit')), {
+    timeout: 4000,
+  });
+  // Once only: a later open doesn't steal the focus.
+  expect(gen.focusRequested()).toBe(false);
 });
