@@ -80,8 +80,9 @@ export const generateTab = {
     listeners.add(listener);
     return () => listeners.delete(listener);
   },
-  /** The next project that opens starts on this tab. */
-  openNextWith(id: string): void {
+  /** The next project that opens starts on this tab; `null` withdraws the request (the open it
+   *  was for failed or was cancelled). */
+  openNextWith(id: string | null): void {
     nextOpen = id;
   },
   /** A project was opened: its starting tab (the requested one, else the one last shown for
