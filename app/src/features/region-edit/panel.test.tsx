@@ -441,6 +441,28 @@ describe('confirm dialog (FR-RGN-14..16, §7)', { timeout: 20_000 }, () => {
     await waitFor(() => expect(screen.queryByTestId('rgn-confirm')).toBeNull());
   });
 
+  test('FR-RGN-14 the confirm closes when its estimate goes away and doesn’t come back by itself', async () => {
+    await ready({ spend: { cap: 100, threshold: 10 } });
+    const handlers = (
+      window as unknown as { __pfMockHandlers: Record<string, (i: unknown) => unknown> }
+    ).__pfMockHandlers;
+    const status = (connectivity: string) => () => ({
+      mode: 'fake',
+      configured: true,
+      connectivity,
+      store_unavailable: false,
+    });
+    handlers.provider_status = status('offline');
+    act(() => fake.emit('provider:status-changed', { connectivity: 'offline' }));
+    await waitFor(() => expect(screen.queryByTestId('rgn-confirm')).toBeNull());
+    handlers.provider_status = status('ok');
+    act(() => fake.emit('provider:status-changed', { connectivity: 'ok' }));
+    await estimated();
+    await wait(50);
+    expect(screen.queryByTestId('rgn-confirm')).toBeNull();
+    expect(rgn.get().confirmOpen).toBe(false);
+  });
+
   test('FR-RGN-15 above the threshold: Enter never confirms; the second confirmation is explicit', async () => {
     const dlg = await ready({ spend: { cap: 100, threshold: 3 } }, 4);
     expect(dlg.dataset.overThreshold).toBe('true');

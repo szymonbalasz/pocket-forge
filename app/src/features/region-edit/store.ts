@@ -364,12 +364,15 @@ function schedule(): void {
   const sig = signatureOf(state);
   if (sig === debouncer.signature && sig !== null) return;
   debouncer.update(sig);
-  set({
+  set((s) => ({
     estimate:
       sig === null
         ? { status: 'idle', result: null, error: null, signature: null }
         : { status: 'waiting', result: null, error: null, signature: sig },
-  });
+    // FR-RGN-14: the confirm showed the estimate that is gone now (offline, a reference
+    // changed…); it closes rather than coming back by itself with another cost.
+    ...(s.confirmOpen && !s.submitting ? { confirmOpen: false, confirmError: null } : {}),
+  }));
 }
 
 async function runEstimate(sig: string): Promise<void> {
