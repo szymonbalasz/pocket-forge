@@ -132,7 +132,7 @@ Field shapes go to [manifest-schema](../architecture/manifest-schema.md) as add-
 
 - **Rust API:** `prompt::compose(kind, typed, ticks, &helpers, blend) → FinalPrompt{text, sent[], skipped[]}` for RGN and GEN. The trait `ChatContextSource { fn build(&self, core, project, input) -> ChatContext }` (FR-PRM-41) is implemented by RGN (FR-PRM-24) and GEN (FR-PRM-42).
 - **Chat window's commands** (R96): `prm_chat_status`, `prm_chat_consent`, `prm_chat_thread_get`, `prm_chat_preview`, `prm_chat_send`, `prm_chat_cancel`, `prm_chat_insert`, `prm_chat_login` and `project_get`. Every other command is granted to the main window only.
-- **Events:** `prm:chat-delta{turn_id, text}` · `prm:chat-turn{turn_id, state, usage?, error?, proposals?}` · `prm:chat-status` · `prm:insert{project_id, host, proposal_id, text}` (applied only by that host's attached block) · `prm:chat-enable{}` (chat window → main window, which calls `prm_chat_settings_put{enabled: true}`, R99) · `prm:helpers-changed`.
+- **Events:** `prm:chat-delta{turn_id, text}` · `prm:chat-turn{turn_id, state, usage?, error?, proposals?}` · `prm:chat-status` · `prm:insert{project_id, host, proposal_id, text}` (applied only by that host's attached block) · `prm:chat-enable{}` (chat window → main window, which calls `prm_chat_settings_put{enabled: true}`, R99) · `prm:context-published{project_id, host}` (main window → chat window after each `prm_context_publish`; the next-turn strip re-reads its preview, R103) · `prm:helpers-changed`.
 
 ## 10. Provider interaction
 **Scenario:** none. No PRM command calls PRV (FR-PRM-31). Helpers only change the text RGN or GEN submits.

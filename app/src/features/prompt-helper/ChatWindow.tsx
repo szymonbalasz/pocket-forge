@@ -4,7 +4,8 @@
 // context strip, the composer (Send / Stop) and the usage footer. Every state of §7: consent,
 // off, backend errors with their fix and Recheck, no project, no prompt block, running,
 // errors with Retry, offline, read-only, fake. It follows the main window through
-// `prm:chat-context` (project and host changes, BL-41) and re-reads on focus.
+// `prm:chat-context` (project and host changes, BL-41), refreshes the strip on
+// `prm:context-published` (R103) and re-reads on focus.
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
@@ -85,7 +86,7 @@ export function ChatWindow() {
   /** L3: a failed turn's detail (stderr tail / message), from its event; never stored. */
   const [details, setDetails] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<ChatPreview | null>(null);
-  const [focusTick, setFocusTick] = useState(0);
+  const [refreshTick, setRefreshTick] = useState(0);
   const [list, setList] = useState<HTMLOListElement | null>(null);
   /** M3: the transcript follows the newest turn unless the user scrolled up. */
   const stick = useRef(true);
@@ -135,7 +136,7 @@ export function ChatWindow() {
     const focus = () => {
       void loadStatus(true);
       void loadProject();
-      setFocusTick((n) => n + 1);
+      setRefreshTick((n) => n + 1);
     };
     window.addEventListener('focus', focus);
     return () => window.removeEventListener('focus', focus);
@@ -149,7 +150,7 @@ export function ChatWindow() {
   }, [pid, loadThread]);
 
   // FR-PRM-26 / BL-42: what the next turn would send, refreshed when the host, the thread or
-  // Include images changes, and on focus.
+  // Include images changes, when the main window publishes context (R103), and on focus.
   const host = view?.current_host ?? null;
   const turnCount = view?.thread?.turns.length ?? 0;
   useEffect(() => {
@@ -162,7 +163,7 @@ export function ChatWindow() {
     return () => {
       stale = true;
     };
-  }, [pid, host, includeImages, turnCount, focusTick]);
+  }, [pid, host, includeImages, turnCount, refreshTick]);
 
   // M3: the newest turn is in view on open, after a send and after a restart; a streaming reply
   // is followed while the transcript is at the bottom.
@@ -194,6 +195,10 @@ export function ChatWindow() {
       onEvent('prm:chat-context', (c) => {
         if (c.project_id !== pidRef.current) void loadProject();
         else void loadThread(c.project_id);
+      }),
+      // R103: a main-window edit (a publish) refreshes the next-turn strip.
+      onEvent('prm:context-published', (c) => {
+        if (c.project_id === pidRef.current) setRefreshTick((n) => n + 1);
       }),
     ];
     return () =>

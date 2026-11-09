@@ -450,6 +450,36 @@ test('BL-42 FR-PRM-26 the strip previews what the next turn sends', async () => 
   });
 });
 
+test('R103 FR-PRM-26 the strip follows a main-window publish without a refocus', async () => {
+  setup({ chat: { consent: true } });
+  chatContext.reset();
+  installChatSink();
+  const w = window as unknown as { __pfMockHandlers: Record<string, (i: never) => unknown> };
+  w.__pfMockHandlers.project_open = () => baseSnapshot();
+  projectStore.reset();
+  await act(() => projectStore.open(baseSnapshot().project_dir));
+  const preview = w.__pfMockHandlers.prm_chat_preview;
+  let refs = 0;
+  w.__pfMockHandlers.prm_chat_preview = (i: never) => ({
+    ...(preview(i) as object),
+    summary: `${refs} images · prompt · fake model`,
+  });
+  await act(async () => {
+    chatContext.publish('gen', { refs: 0 });
+    await chatContext.flush();
+  });
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-preview').textContent).toContain('0 images'));
+  // Same host, new input (8 references turned on): no host change, no focus event.
+  refs = 8;
+  await act(async () => {
+    chatContext.publish('gen', { refs: 8 });
+    await chatContext.flush();
+  });
+  await waitFor(() => expect(id('prm-chat-preview').textContent).toContain('8 images'));
+  chatContext.reset();
+});
+
 test("BL-42 FR-PRM-23 a send from the window first flushes the main window's pending edit", async () => {
   setup({ chat: { consent: true } });
   chatContext.reset();

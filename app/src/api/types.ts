@@ -879,6 +879,9 @@ export interface Events {
   /** R96 (window to window): the chat window's "Turn it on" asks the main window to turn the
    *  chat on, since only the main window may call `prm_chat_settings_put`. */
   'prm:chat-enable': Record<string, never>;
+  /** R103 (window to window): the main window published a tab's context; the chat window's
+   *  next-turn strip re-reads its preview (the core announces host changes only, BL-41). */
+  'prm:context-published': { project_id: string; host: ChatHostId };
   /** BL-41: the open project or its attached host changed (the chat window follows it). */
   'prm:chat-context': { project_id: string | null; host: ChatHostId | null };
   /** Replace (FR-PRM-29): applied only by that host's attached prompt block. */
