@@ -31,6 +31,7 @@ const CRATES = {
   'crates/pf-core/': 'pf-core',
   'crates/pf-imaging/': 'pf-imaging',
   'crates/pf-provider/': 'pf-provider',
+  'crates/pf-chat/': 'pf-chat',
   'app/src-tauri/': 'pocket-forge',
 };
 const RUST_SHARED = ['Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'clippy.toml', 'scripts/check-crate-deps.mjs'];

@@ -53,8 +53,10 @@
 | Spec: new-asset generation (GEN) | — | merged | complete (#60) | — |
 | Spec: prompt helper (PRM) | — | merged | complete (#60) | — |
 | GEN 1: PRV `generate` op, fake gen models | — | merged | done (R76) | owner: free dry-run-generate recordings |
-| GEN 2: image-less project, base layer, pick commit | (paused) | WIP pushed `build/gen-2` | nearly done | resume: re-run registry test, report |
+| GEN 2: image-less project, base layer, pick commit | — | merged | done (R79) | — |
+| GEN 3: core generate jobs | `gen-3` | building | — | — |
 | GEN 5: + New menu, New image tab (mocked) | — | merged | done (R77) | slice 4 picker routing, slice 6 prompt block |
-| PRM 0: `pf-chat` crate + probe | (paused) | WIP pushed `build/prm-0` | nearly done | resume: pnpm check, report; then owner runs the probe |
+| PRM 0: `pf-chat` crate + probe | `prm-0` (kept for the probe) | merged | done; pf-chat in CI | **owner runs the probe** (docs/guides/prompt-chat-probe.md) |
 | PRM 1: helpers core | — | merged | done (R78) | — |
-| PRM 2: prompt block + Settings UI (mocked) | (paused) | WIP pushed `build/prm-2` | 3 provider e2e failing | resume: check failures vs main |
+| PRM 2: prompt block + Settings UI (mocked) | — | merged | done | — |
+| PRM 3: prompt block in Region edit | `prm-1` | building | — | — |

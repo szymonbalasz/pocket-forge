@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
 
 import { prjMock, type PrjMockProject, type PrjMockSeed } from '../src/api/mocks/prj';
+import { installPrmMock } from '../src/api/mocks/prm';
 
 export const FIXTURE = fileURLToPath(
   new URL('../../fixtures/images/grid-map-512x640.png', import.meta.url),
@@ -75,6 +76,8 @@ export async function mockCore(page: Page, seed: MockSeed = defaultSeed): Promis
       for (const [k, v] of Object.entries(m.handlers)) if (!(k in h)) h[k] = v;
     })();`,
   });
+  // PRM helper commands (the Settings section and the prompt block, prompt-helper §9).
+  await page.addInitScript({ content: `(${installPrmMock.toString()})({});` });
   await page.addInitScript((image: { w: number; h: number }) => {
     type Rec = Record<string, unknown>;
     const calls: { cmd: string; args: unknown }[] = [];

@@ -36,10 +36,11 @@ if [[ -n "$emails" ]]; then
   fail=1
 fi
 
-# FR-PRV-28: CI never enables real provider calls (cargo feature `real-call`, PF_REAL_CALL)
-real=$(git grep -I -n -E -e '--all-features|real-call|PF_REAL_CALL' -- .github/workflows || true)
+# FR-PRV-28 / PRM §13: CI never enables real provider or chat calls (cargo feature `real-call`
+# in pf-provider and pf-chat, PF_REAL_CALL, PF_CHAT_REAL)
+real=$(git grep -I -n -E -e '--all-features|real-call|PF_REAL_CALL|PF_CHAT_REAL' -- .github/workflows || true)
 if [[ -n "$real" ]]; then
-  echo "::error::A workflow enables real provider calls (FR-PRV-28)"
+  echo "::error::A workflow enables real provider or chat calls (FR-PRV-28, PRM §13)"
   echo "$real"
   fail=1
 fi
