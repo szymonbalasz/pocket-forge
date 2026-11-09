@@ -75,6 +75,9 @@ export function ChatWindow() {
   const [declined, setDeclined] = useState(false);
   const [preview, setPreview] = useState<ChatPreview | null>(null);
   const [focusTick, setFocusTick] = useState(0);
+  const [list, setList] = useState<HTMLOListElement | null>(null);
+  /** M3: the transcript follows the newest turn unless the user scrolled up. */
+  const stick = useRef(true);
   const deltas = useRef(new Map<string, string>());
   const ended = useRef(new Set<string>());
   const pid = project?.project_id ?? null;
@@ -148,6 +151,15 @@ export function ChatWindow() {
       stale = true;
     };
   }, [pid, host, includeImages, turnCount, focusTick]);
+
+  // M3: the newest turn is in view on open, after a send and after a restart; a streaming reply
+  // is followed while the transcript is at the bottom.
+  useEffect(() => {
+    stick.current = true;
+  }, [pid, turnCount]);
+  useEffect(() => {
+    if (list && stick.current) list.scrollTop = list.scrollHeight;
+  }, [list, pid, turnCount, view, live?.text]);
 
   useEffect(() => {
     const subs = [
@@ -345,7 +357,16 @@ export function ChatWindow() {
   return (
     <main className="prm-chat" data-testid="prm-chat">
       {header}
-      <ol className="prm-chat-transcript" aria-label="Chat">
+      <ol
+        className="prm-chat-transcript"
+        aria-label="Chat"
+        data-testid="prm-chat-transcript"
+        ref={setList}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+        }}
+      >
         {turns.length === 0 && (
           <li className="prm-chat-empty">Ask for ideas about the prompt of the visible tab.</li>
         )}

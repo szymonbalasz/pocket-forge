@@ -100,6 +100,34 @@ test('FR-PRM-27 FR-PRM-28 FR-PRM-29 send streams the reply; Replace and Copy on 
   expect(fake.callsOf('prm_chat_insert')).toHaveLength(1);
 });
 
+test('FR-PRM-22 M3 the transcript shows the newest turn on open and after a send', async () => {
+  setup({ chat: { consent: true } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  const set: number[] = [];
+  let height = 300;
+  const proto = HTMLOListElement.prototype;
+  Object.defineProperty(proto, 'scrollHeight', { configurable: true, get: () => height });
+  Object.defineProperty(proto, 'clientHeight', { configurable: true, get: () => 100 });
+  Object.defineProperty(proto, 'scrollTop', {
+    configurable: true,
+    get: () => set.at(-1) ?? 0,
+    set: (v: number) => void set.push(v),
+  });
+  try {
+    render(<ChatWindow />);
+    await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+    expect(set.at(-1)).toBe(300);
+    height = 900;
+    await type('ideas');
+    fireEvent.click(id('prm-chat-send'));
+    await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
+    expect(set.at(-1)).toBe(900);
+  } finally {
+    for (const k of ['scrollHeight', 'clientHeight', 'scrollTop'])
+      delete (proto as unknown as Record<string, unknown>)[k];
+  }
+});
+
 test('FR-PRM-27 Stop keeps the partial reply', async () => {
   setup({ chat: { consent: true, case: 'slow(4)' } });
   await api.chat.contextPublish(PID, 'gen', {});
