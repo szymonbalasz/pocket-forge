@@ -154,13 +154,32 @@ struct SessionEntry {
     received: HashSet<(String, String)>,
 }
 
+/// A test-only hook run at a named point of a command (races made deterministic).
+#[cfg(test)]
+pub(crate) type TestHook = Box<dyn FnOnce(&Core) + Send>;
+
 /// The chat's memory: one per core (see the module docs for the locks).
 #[derive(Default)]
 pub struct ChatRuntime {
     rt: Arc<Mutex<Rt>>,
     session: Arc<Mutex<Option<SessionEntry>>>,
     thread_io: Arc<Mutex<()>>,
+    #[cfg(test)]
+    pub(crate) hooks: Mutex<HashMap<&'static str, TestHook>>,
 }
+
+/// Runs the test hook set for `point`, if any.
+#[cfg(test)]
+fn test_hook(core: &Core, point: &'static str) {
+    let hook = lock(&core.chat.hooks).remove(point);
+    if let Some(h) = hook {
+        h(core);
+    }
+}
+
+#[cfg(not(test))]
+#[inline(always)]
+fn test_hook(_: &Core, _: &'static str) {}
 
 impl std::fmt::Debug for ChatRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -987,16 +1006,15 @@ impl Command for PrmChatSend {
 
     fn run(core: &Core, input: SendInput) -> CoreResult<SendOutput> {
         let pid = input.project_id;
+        // FR-PRM-27 / R97: the running slot is claimed before anything is checked or built,
+        // so a second send meanwhile is refused. Released again if the send fails.
+        let claim = Claim::take(core, pid)?;
+        let (turn_id, user_turn_id, cancel) =
+            (claim.turn_id, claim.user_turn_id, claim.cancel.clone());
         let (dir, read_only) = open_project(core, pid)?;
         let (chat, ready) = require_ready(core)?;
         let (host, published) = {
             let rt = lock(&core.chat.rt);
-            if rt.running.is_some() {
-                return Err(CoreError::new(
-                    ErrorCode::TurnActive,
-                    "wait for the current reply, or stop it",
-                ));
-            }
             rt.contexts
                 .iter()
                 .filter(|((p, _), _)| *p == pid)
@@ -1005,6 +1023,7 @@ impl Command for PrmChatSend {
                 .ok_or_else(|| no_prompt_block(None))?
         };
         let ctx = source(host).build(core, pid, &published)?;
+        test_hook(core, "send_after_build");
         let backend = backend(core, &chat);
         let now = core.ctx.now();
 
@@ -1073,8 +1092,6 @@ impl Command for PrmChatSend {
         let block = message::context_block(&ctx, &sent, &dropped, &already);
         let summary = message::summary(&ctx, &sent, &dropped, input.include_images);
         let dropped_labels: Vec<String> = dropped.iter().map(|i| i.label.clone()).collect();
-        let user_turn_id = core.ctx.new_id();
-        let turn_id = core.ctx.new_id();
         thread.turns.push(Turn {
             id: user_turn_id,
             at: now,
@@ -1124,17 +1141,10 @@ impl Command for PrmChatSend {
             extra: Default::default(),
         });
         thread.updated_at = now;
-        // Running before the first save, so a reload never reads this turn as `interrupted`
-        // (M2).
-        let cancel = CancelHandle::new();
+        // The claim is running since the start, so a reload never reads this turn as
+        // `interrupted` (M2).
         {
             let mut rt = lock(&core.chat.rt);
-            rt.running = Some(Running {
-                turn_id,
-                user_turn_id,
-                project_id: pid,
-                cancel: cancel.clone(),
-            });
             if read_only {
                 let mut ids = unsaved.take().unwrap_or_default();
                 ids.extend([user_turn_id, turn_id]);
@@ -1183,6 +1193,8 @@ impl Command for PrmChatSend {
             cancel,
             notional: ready.notional,
         };
+        // The turn's job owns the slot from here: it releases it when it ends.
+        claim.hand_over();
         if core.ctx.inline_background {
             job.run();
         } else {
@@ -1206,6 +1218,62 @@ impl Command for PrmChatSend {
             fresh_session: fresh,
             saved,
         })
+    }
+}
+
+/// A send's hold on the running slot (FR-PRM-27, R97): taken before the context is built;
+/// dropped without [`Claim::hand_over`] (the send failed) it frees the slot again.
+struct Claim<'a> {
+    rt: &'a Mutex<Rt>,
+    turn_id: Ulid,
+    user_turn_id: Ulid,
+    cancel: CancelHandle,
+    held: bool,
+}
+
+impl<'a> Claim<'a> {
+    fn take(core: &'a Core, project_id: Ulid) -> CoreResult<Self> {
+        let mut rt = lock(&core.chat.rt);
+        if rt.running.is_some() {
+            return Err(CoreError::new(
+                ErrorCode::TurnActive,
+                "wait for the current reply, or stop it",
+            ));
+        }
+        let claim = Claim {
+            rt: &core.chat.rt,
+            user_turn_id: core.ctx.new_id(),
+            turn_id: core.ctx.new_id(),
+            cancel: CancelHandle::new(),
+            held: true,
+        };
+        rt.running = Some(Running {
+            turn_id: claim.turn_id,
+            user_turn_id: claim.user_turn_id,
+            project_id,
+            cancel: claim.cancel.clone(),
+        });
+        Ok(claim)
+    }
+
+    /// The turn's job owns the slot now.
+    fn hand_over(mut self) {
+        self.held = false;
+    }
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        if self.held {
+            let mut rt = lock(self.rt);
+            if rt
+                .running
+                .as_ref()
+                .is_some_and(|r| r.turn_id == self.turn_id)
+            {
+                rt.running = None;
+            }
+        }
     }
 }
 

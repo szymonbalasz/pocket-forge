@@ -1057,3 +1057,39 @@ fn bl_42_fr_prm_26_the_preview_shows_what_the_next_turn_sends() {
     assert_eq!(p["images"][0]["already_sent"], true);
     assert!(p["summary"].as_str().unwrap().contains("(already sent)"));
 }
+
+/// Sets the test hook run at `point` (see `super::test_hook`).
+fn hook(lab: &Lab, point: &'static str, f: impl FnOnce(&crate::core::Core) + Send + 'static) {
+    super::lock(&lab.core.chat.hooks).insert(point, Box::new(f));
+}
+
+/// FR-PRM-27 / R97 (code review 4): a send claims the running slot before it builds the
+/// context, so a second send meanwhile (a double-clicked Retry) is refused.
+#[test]
+fn fr_prm_27_a_second_send_while_the_first_builds_is_refused() {
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    let second = Arc::new(std::sync::Mutex::new(None));
+    let seen = second.clone();
+    let p = pid(&lab);
+    hook(&lab, "send_after_build", move |core| {
+        let r = core.dispatch("prm_chat_send", json!({"project_id": p, "text": "twice"}));
+        *seen.lock().unwrap() = Some(r.map(|_| ()).map_err(|e| e.code));
+    });
+    send(&lab, "once").unwrap();
+    assert_eq!(
+        second.lock().unwrap().take(),
+        Some(Err(ErrorCode::TurnActive))
+    );
+    assert_eq!(user_turns(&lab).len(), 1, "the message is sent once");
+    assert!(lab.core.chat.running_turn().is_none());
+    // A send that fails after its claim frees the slot again.
+    lab.core
+        .dispatch(
+            "prm_context_clear",
+            json!({"project_id": pid(&lab), "host": "rgn"}),
+        )
+        .unwrap();
+    assert_eq!(code(send(&lab, "hi")), ErrorCode::NoPromptBlock);
+    assert!(lab.core.chat.running_turn().is_none());
+}

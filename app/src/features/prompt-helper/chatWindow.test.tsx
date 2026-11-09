@@ -187,6 +187,25 @@ test('FR-PRM-37 a failed turn shows its error with Retry, which resends the same
   expect(sends.map((s) => s.text)).toEqual(['ideas', 'ideas']);
 });
 
+test('FR-PRM-27 a double-clicked Retry sends once; Retry waits while a turn is sent', async () => {
+  setup({ chat: { consent: true, case: 'usage_limit' } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(id('prm-chat-retry')).toBeTruthy());
+  await api.chat.fakeSetCase('slow(4)');
+  const retry = id('prm-chat-retry');
+  fireEvent.click(retry);
+  fireEvent.click(retry);
+  await waitFor(() => expect(id('prm-chat-stop')).toBeTruthy());
+  expect(fake.callsOf('prm_chat_send')).toHaveLength(2);
+  expect(screen.queryByTestId('prm-chat-error')).toBeNull();
+  // The old failed turn's Retry is disabled while the new one runs.
+  expect((id('prm-chat-retry') as HTMLButtonElement).disabled).toBe(true);
+});
+
 test('FR-PRM-37 L3 a crashed turn shows the stderr tail under Details', async () => {
   setup({ chat: { consent: true, case: 'crash' } });
   await api.chat.contextPublish(PID, 'rgn', {});
