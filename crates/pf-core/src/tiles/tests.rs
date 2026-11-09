@@ -357,6 +357,30 @@ fn fr_edt_11_eviction_drops_least_recently_opened_unused_entries() {
 }
 
 #[test]
+fn fr_edt_11_old_builder_caches_are_evicted_whole() {
+    let data = tempfile::tempdir().unwrap();
+    let root = cache_root(data.path());
+    let tiles = root.parent().unwrap().to_path_buf();
+    std::fs::create_dir_all(root.join("k")).unwrap();
+    std::fs::create_dir_all(tiles.join("v1/old-key/0")).unwrap();
+    std::fs::write(tiles.join("v1/old-key/0/0_0.webp"), [0u8; 64]).unwrap();
+    std::fs::create_dir_all(tiles.join("notes")).unwrap();
+    evict(&root, CACHE_CAP_BYTES, &HashSet::new());
+    assert!(!tiles.join("v1").exists(), "v1 is never served: removed");
+    assert!(
+        root.join("k").exists(),
+        "the current cache stays under the cap"
+    );
+    assert!(tiles.join("notes").exists(), "only v<N> folders");
+    // A root that isn't a cache root never touches its siblings.
+    let other = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(other.path().join("v1")).unwrap();
+    std::fs::create_dir_all(other.path().join("v2")).unwrap();
+    evict(&other.path().join("v2"), 0, &HashSet::new());
+    assert!(other.path().join("v1").exists());
+}
+
+#[test]
 fn fr_edt_31_transient_images_cap_at_four_and_unregister_on_close() {
     let e = env();
     let snap = open_png(&e, "t.png", 64, 64);
