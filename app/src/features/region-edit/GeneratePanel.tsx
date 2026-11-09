@@ -479,6 +479,11 @@ function useTabs(hasImage: boolean) {
     ...extra.map((t) => ({ id: t.id, label: t.label })),
   ];
   const current = all.some((t) => t.id === chosen) ? chosen : (all[0]?.id ?? REGION_TAB);
+  // The tab shown is the chosen one from now on: a project with no image shows New image, and
+  // its first pick (which adds Region edit) must not jump away from it (R84).
+  useEffect(() => {
+    if (pid && current !== chosen) generateTab.select(current);
+  }, [pid, current, chosen]);
   return { all, current, Tab: extra.find((t) => t.id === current)?.Component ?? null };
 }
 
