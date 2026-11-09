@@ -73,7 +73,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        crate: [pf-core, pf-imaging, pf-provider]
+        crate: [pf-core, pf-imaging, pf-provider, pf-chat]
     steps:
       - uses: actions/checkout@v4
       - name: Rust toolchain (rust-toolchain.toml)
