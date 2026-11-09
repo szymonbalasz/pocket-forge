@@ -765,27 +765,42 @@ pub(crate) fn commit_with(
         return Err(folder_moved());
     }
 
-    for (rel, bytes) in &plan.files {
-        let target = p.path(rel);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| CoreError::io(format!("creating {}", parent.display()), &e))?;
-        }
-        fsx::write_atomic(ctx, &target, bytes)?;
-    }
-    for rev in &plan.revisions {
-        fsx::write_json_atomic(ctx, &p.path(&revision_file(rev.id)), rev)?;
-    }
-    for job in &plan.jobs_before {
-        write_job(ctx, p, job)?;
-    }
+    // R108: the write-once files this commit adds are removed again if it fails before the
+    // commit point, so a refused save never turns into history after a restart.
+    let mut added: Vec<PathBuf> = Vec::new();
     let seq = p.last_commit.map_or(0, |c| c.0) + 1;
-    next.commit = Commit {
-        seq,
-        install_id,
-        at: ctx.now(),
-    };
-    fsx::write_json_atomic(ctx, &p.manifest_path(), &next)?;
+    let written = (|| {
+        for (rel, bytes) in &plan.files {
+            let target = p.path(rel);
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| CoreError::io(format!("creating {}", parent.display()), &e))?;
+            }
+            write_new(&mut added, &target, |t| fsx::write_atomic(ctx, t, bytes))?;
+        }
+        for rev in &plan.revisions {
+            let target = p.path(&revision_file(rev.id));
+            write_new(&mut added, &target, |t| fsx::write_json_atomic(ctx, t, rev))?;
+        }
+        for job in &plan.jobs_before {
+            write_job(ctx, p, job)?;
+        }
+        next.commit = Commit {
+            seq,
+            install_id,
+            at: ctx.now(),
+        };
+        fsx::write_json_atomic(ctx, &p.manifest_path(), &next)
+    })();
+    if let Err(e) = written {
+        for path in &added {
+            if let Err(err) = std::fs::remove_file(path) {
+                // Unreferenced: the next open's sweep trashes it (FR-PRJ-20).
+                tracing::warn!(error = %err, "a failed commit's file stays for the sweep");
+            }
+        }
+        return Err(e);
+    }
 
     // Committed. Everything below is rolled forward on open if it fails.
     let layers_changed = next.layers != p.manifest.layers;
@@ -815,6 +830,21 @@ pub(crate) fn commit_with(
         p.request_thumbnail(ctx);
     }
     Ok(seq)
+}
+
+/// Writes a write-once file and notes it in `added` if it didn't exist before (R108: only a
+/// file this commit created is removed when the commit fails).
+fn write_new(
+    added: &mut Vec<PathBuf>,
+    target: &Path,
+    write: impl FnOnce(&Path) -> CoreResult<()>,
+) -> CoreResult<()> {
+    let existed = target.exists();
+    write(target)?;
+    if !existed {
+        added.push(target.to_path_buf());
+    }
+    Ok(())
 }
 
 pub(crate) fn write_job(ctx: &Context, p: &OpenProject, job: &JobFile) -> CoreResult<()> {

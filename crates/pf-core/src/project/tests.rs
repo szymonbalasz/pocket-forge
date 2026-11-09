@@ -683,3 +683,37 @@ fn fr_prj_42_decoded_original_is_owned_by_the_project() {
     let img = store::decoded_original(&e.ctx, &p).unwrap();
     assert_eq!((img.width(), img.height()), (40, 30));
 }
+
+#[test]
+fn fr_prj_23_r108_a_save_refused_as_locked_never_becomes_history() {
+    let mut e = env();
+    let dir = e.project("Crypt");
+    let mut p = e.open(&dir);
+    draft(&e, &mut p, "moss").unwrap();
+    let revisions = |dir: &Path| {
+        std::fs::read_dir(dir.join(".pforge/revisions"))
+            .map(|d| d.count())
+            .unwrap_or(0)
+    };
+    let files_before = revisions(&dir);
+    e.ctx.faults = Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap();
+    for label in ["locked save", "again"] {
+        let err = save_revision(&e.ctx, e.install(), &mut p, Some(label.into())).unwrap_err();
+        assert_eq!(err.code, ErrorCode::Locked);
+    }
+    assert_eq!(
+        revisions(&dir),
+        files_before,
+        "no revision file left behind"
+    );
+    // After a restart and once the lock lifts, the history is r0 only; the next commit
+    // doesn't bring the refused saves back.
+    e.ctx.faults = Faults::none();
+    drop(p);
+    let mut p = e.open(&dir);
+    assert_eq!(p.manifest.revisions.len(), 1);
+    draft(&e, &mut p, "fern").unwrap();
+    let p = e.open(&dir);
+    assert_eq!(p.manifest.revisions.len(), 1);
+    assert!(p.manifest.revisions.iter().all(|r| r.label.is_none()));
+}
