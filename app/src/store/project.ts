@@ -183,7 +183,18 @@ function listen(): void {
 async function openNow(path: string): Promise<boolean> {
   set({ busy: true, error: null, opening: path });
   try {
-    if (state.project) await api.project.close().catch(() => undefined);
+    if (state.project) {
+      // `unsaved` (FR-PRJ-21): a save is still waiting; opening would drop it, so stay and say
+      // why (the core's `project_open` doesn't ask). Other refusals don't block the open.
+      const refused = await api.project.close().then(
+        () => null,
+        (e: unknown) => errorOf(e),
+      );
+      if (refused?.code === 'unsaved') {
+        set({ error: refused, busy: false, opening: null });
+        return false;
+      }
+    }
     const project = await api.project.open(path);
     // A conflict found at open shows as Conflict, not Saved (walk 2 N3).
     set({ project, save: settled(project), busy: false, opening: null, trashNotice: null });

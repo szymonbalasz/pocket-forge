@@ -112,3 +112,17 @@ test('FR-PRJ-23 a save or restore answered after the project closed changes noth
     expect(projectStore.get().save).toEqual({ kind: 'saved', at: '' });
   }
 });
+
+test('FR-PRJ-21 opening another project never drops this one’s waiting save', async () => {
+  const seed = samplePrjSeed(LIB);
+  seed.projects[0] = { ...seed.projects[0]!, pendingSave: true };
+  core.useHandlers(prjMock(seed, { emit: core.emit }).handlers);
+  projectStore.reset();
+  await projectStore.open(CRYPT);
+  core.calls.length = 0;
+  expect(await projectStore.open(`${LIB}/Maps/Harbour`)).toBe(false);
+  expect(cmds()).toEqual(['project_close']);
+  expect(projectStore.get().project?.name).toBe('Crypt');
+  expect(projectStore.get().error?.code).toBe('unsaved');
+  expect(projectStore.get()).toMatchObject({ busy: false, opening: null });
+});
