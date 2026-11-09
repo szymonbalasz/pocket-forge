@@ -3,11 +3,12 @@
 use std::time::Duration;
 
 use crate::ProviderError;
+use crate::scenario::api::RETRY_AFTER_CAP;
 
 /// Delay before the next `status` poll.
 ///
 /// 2 s for the first 30 s, then +2 s per poll up to 10 s. `rate_limited` waits at least its
-/// `retry_after`. `offline` waits 10 s. Polling never resubmits (OQ-PRV-05).
+/// `retry_after`, capped at 30 s (FR-PRV-24). `offline` waits 10 s. Polling never resubmits (OQ-PRV-05).
 pub fn poll_delay(elapsed: Duration, last_error: Option<&ProviderError>) -> Duration {
     const BASE: u64 = 2;
     const MAX: u64 = 10;
@@ -21,7 +22,7 @@ pub fn poll_delay(elapsed: Duration, last_error: Option<&ProviderError>) -> Dura
     };
     match last_error {
         Some(ProviderError::RateLimited { retry_after_ms }) => {
-            schedule.max(Duration::from_millis(*retry_after_ms))
+            schedule.max(Duration::from_millis(*retry_after_ms).min(RETRY_AFTER_CAP))
         }
         Some(ProviderError::Offline) => Duration::from_secs(MAX),
         _ => schedule,
@@ -79,6 +80,25 @@ mod tests {
         assert_eq!(
             poll_delay(Duration::ZERO, Some(&ProviderError::Offline)),
             Duration::from_secs(10)
+        );
+    }
+
+    /// Review item 16: a rate limit's wait is capped at 30 s, whatever the provider asked.
+    #[test]
+    fn fr_prv_24_a_rate_limit_wait_is_capped_at_30_seconds() {
+        let day = ProviderError::RateLimited {
+            retry_after_ms: 86_400_000,
+        };
+        assert_eq!(
+            poll_delay(Duration::ZERO, Some(&day)),
+            Duration::from_secs(30)
+        );
+        let max = ProviderError::RateLimited {
+            retry_after_ms: u64::MAX,
+        };
+        assert_eq!(
+            poll_delay(Duration::from_secs(600), Some(&max)),
+            Duration::from_secs(30)
         );
     }
 

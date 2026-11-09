@@ -779,6 +779,130 @@ fn fr_rgn_22_a_crash_before_the_handle_is_lost_with_a_possible_charge_notice() {
     );
 }
 
+/// A `requested` record without a handle, as a submit in flight (or a crash before it
+/// returned) leaves it.
+fn record_requested(lab: &Lab, prompt: &str) -> Ulid {
+    let mut state = lab.core.state();
+    let install = state.settings.install_id;
+    let p = state.project.as_mut().unwrap();
+    let new = store::NewJob {
+        operation: "edit_masked".into(),
+        model_id: "fake-white-edit".into(),
+        final_prompt: prompt.into(),
+        mask_id: Some(lab.mask_id),
+        ..Default::default()
+    };
+    store::record_job(&lab.core.ctx, install, p, new, vec![1], vec![2])
+        .unwrap()
+        .id
+}
+
+fn has_lost_warning(snap: &Value, id: Ulid) -> bool {
+    snap["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|w| w["code"] == "lost" && w["detail"]["job_ids"][0] == json!(id))
+}
+
+/// Review item 3 / R102: the open sweep marks a `requested` job `lost` only if this process
+/// isn't submitting it and it's older than the submit timeout + 60 s. A young one (another
+/// machine may be submitting it) ages out in the runner, with the possible-charge notice.
+#[test]
+fn fr_prj_29_a_requested_job_is_lost_only_when_not_in_flight_and_old() {
+    let lab = Lab::new();
+    let id = record_requested(&lab, "kitchen");
+    // In flight here: never lost, however old, across a close and reopen.
+    let guard = lab.core.ctx.submitting.begin(id);
+    lab.close();
+    lab.clock.advance(std::time::Duration::from_secs(3600));
+    let snap = lab.open();
+    assert_eq!(lab.job(id).state, JobState::Requested);
+    assert!(!has_lost_warning(&snap, id));
+    runner::tick(&lab.core, true);
+    assert_eq!(
+        lab.job(id).state,
+        JobState::Requested,
+        "the runner waits too"
+    );
+    drop(guard);
+
+    // Not in flight, but young (another machine may be submitting it): kept.
+    let lab = Lab::new();
+    let id = record_requested(&lab, "kitchen");
+    lab.close();
+    lab.clock.advance(std::time::Duration::from_secs(60));
+    let snap = lab.open();
+    assert_eq!(lab.job(id).state, JobState::Requested);
+    assert!(!has_lost_warning(&snap, id));
+    runner::tick(&lab.core, true);
+    assert_eq!(lab.job(id).state, JobState::Requested);
+    // Once older than the submit timeout + 60 s, the runner marks it lost.
+    lab.clock.advance(std::time::Duration::from_secs(61));
+    runner::tick(&lab.core, true);
+    let job = lab.job(id);
+    assert_eq!(job.state, JobState::Lost);
+    assert!(
+        job.error.as_ref().unwrap()["hint"]
+            .as_str()
+            .unwrap()
+            .contains("charged")
+    );
+    assert!(lab.core.state().rgn.runner.tracked().is_empty());
+    let last = lab.events_named(runner::EVENT_JOB_STATE).pop().unwrap();
+    assert_eq!(last["state"], "lost");
+}
+
+/// Review item 3 / R102: a submit that returns a handle for a job already marked `lost` saves
+/// the handle and resumes polling (`lost -> submitted` only for that case); the candidates are
+/// fetched, nothing is submitted twice.
+#[test]
+fn fr_rgn_23_a_submit_returning_for_a_lost_job_saves_the_handle_and_polls() {
+    let lab = Lab::new();
+    // A real handle the fake knows (its job is done, so it fetches at once).
+    let first = lab.run("first");
+    let returned = pf_provider::ProviderRecord(lab.job(first).provider.clone());
+    let id = record_requested(&lab, "kitchen");
+    let (pid, dir, requested) = {
+        let state = lab.core.state();
+        let p = state.project.as_ref().unwrap();
+        (p.manifest.project_id, p.dir.clone(), p.jobs[&id].clone())
+    };
+    // Another machine's sweep (or an older build) marked it lost meanwhile.
+    lab.close();
+    lab.clock.advance(std::time::Duration::from_secs(3600));
+    lab.open();
+    assert_eq!(lab.job(id).state, JobState::Lost);
+    let submits = lab.fake().call_count();
+    let out = super::jobs::finish_submit(
+        &lab.core,
+        requested,
+        pid,
+        dir,
+        pf_provider::CostAmount::Known(1.0),
+        Ok(returned.clone()),
+    )
+    .unwrap();
+    assert_eq!(out.job_id, id);
+    let job = lab.job(id);
+    assert_eq!(job.state, JobState::Submitted, "lost -> submitted");
+    assert_eq!(job.provider["job_handle"], returned.0["job_handle"]);
+    assert!(job.error.is_none(), "the lost notice is cleared");
+    assert_eq!(lab.core.state().rgn.runner.tracked(), vec![id]);
+    lab.drive();
+    assert_eq!(lab.job(id).state, JobState::Fetched);
+    assert!(!lab.candidates(id).is_empty());
+    assert_eq!(
+        lab.fake().call_count() - submits,
+        2,
+        "one status and one fetch; no second submit"
+    );
+    // A lost job that had a handle (polling gave up) is never revived this way.
+    let mut j = lab.job(first);
+    j.state = JobState::Lost;
+    assert!(j.transition(JobState::Submitted, Timestamp(T0)).is_err());
+}
+
 #[test]
 fn fr_rgn_19_cancel_on_ack_and_not_cancellable() {
     let lab = Lab::new();
@@ -898,6 +1022,97 @@ fn fr_rgn_23_offline_mid_job_is_unknown_until_reconnect() {
     let job = lab.job(id);
     assert_eq!(job.state, JobState::Fetched);
     assert!(job.error.is_none(), "cleared on reconnect");
+}
+
+/// Review item 2 / R102: a paid `succeeded` job never becomes `failed` on a fetch error. It
+/// stays `succeeded` with the error shown, keeps retrying with backoff, and "Fetch again"
+/// fetches at once without a new submit.
+#[test]
+fn fr_rgn_24_a_fetch_error_keeps_the_job_succeeded_and_fetch_again_never_resubmits() {
+    let lab = Lab::new();
+    let id = lab.submit("kitchen");
+    for _ in 0..3 {
+        runner::tick(&lab.core, true);
+    }
+    assert_eq!(lab.job(id).state, JobState::Succeeded);
+    let calls_before = lab.fake().call_count();
+    lab.set_case("auth");
+    let t0 = lab.core.ctx.now();
+    let mut waits = vec![];
+    for _ in 0..4 {
+        runner::tick(&lab.core, true);
+        let job = lab.job(id);
+        assert_eq!(job.state, JobState::Succeeded, "never failed");
+        assert_eq!(job.error.as_ref().unwrap()["code"], "auth");
+        waits.push(runner::tick(&lab.core, false).unwrap());
+    }
+    assert!(
+        waits.windows(2).all(|w| w[1] >= w[0]) && waits[3] > waits[0],
+        "backs off: {waits:?}"
+    );
+    assert_eq!(lab.core.ctx.now(), t0);
+    let shown = lab.events_named(runner::EVENT_JOB_STATE).pop().unwrap();
+    assert_eq!(shown["state"], "succeeded");
+    assert_eq!(shown["error"]["code"], "auth");
+    // A failed job can't be fetched again; a succeeded one can, at once.
+    lab.set_case("success");
+    lab.core
+        .dispatch("rgn_job_fetch_again", json!({"job_id": id}))
+        .unwrap();
+    assert_eq!(runner::tick(&lab.core, false), None, "fetched at once");
+    let job = lab.job(id);
+    assert_eq!(job.state, JobState::Fetched);
+    assert!(job.error.is_none(), "the fetch error is cleared");
+    assert_eq!(lab.candidates(id).len(), 3);
+    assert_eq!(
+        lab.fake().call_count() - calls_before,
+        5,
+        "four failed fetches and one good one; no submit"
+    );
+    assert_eq!(
+        code(
+            lab.core
+                .dispatch("rgn_job_fetch_again", json!({"job_id": id}))
+        ),
+        ErrorCode::InvalidInput,
+        "only a succeeded job"
+    );
+}
+
+/// Review item 6 / R102: non-transient poll errors are counted; after 10 in a row the job goes
+/// `lost` with its handle kept (no endless loop that blocks the project). A good poll resets
+/// the count.
+#[test]
+fn fr_rgn_23_ten_poll_errors_in_a_row_end_the_job_as_lost_with_its_handle() {
+    let lab = Lab::new();
+    let id = lab.submit("kitchen");
+    runner::tick(&lab.core, true);
+    assert_eq!(lab.job(id).state, JobState::Queued);
+    lab.set_case("auth");
+    for _ in 0..9 {
+        runner::tick(&lab.core, true);
+    }
+    assert_eq!(
+        lab.job(id).state,
+        JobState::Queued,
+        "9 errors: still polling"
+    );
+    // One good poll resets the count.
+    lab.set_case("slow(30)");
+    runner::tick(&lab.core, true);
+    lab.set_case("auth");
+    for _ in 0..9 {
+        runner::tick(&lab.core, true);
+    }
+    assert!(lab.core.state().rgn.runner.tracked().contains(&id));
+    runner::tick(&lab.core, true);
+    let job = lab.job(id);
+    assert_eq!(job.state, JobState::Lost, "the 10th error in a row ends it");
+    assert!(job.has_handle(), "the handle is kept");
+    assert_eq!(job.error.as_ref().unwrap()["code"], "auth");
+    assert!(lab.core.state().rgn.runner.tracked().is_empty());
+    let last = lab.events_named(runner::EVENT_JOB_STATE).pop().unwrap();
+    assert_eq!(last["state"], "lost");
 }
 
 #[test]

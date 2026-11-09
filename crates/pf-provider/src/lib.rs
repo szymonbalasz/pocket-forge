@@ -36,6 +36,10 @@ pub use scenario::{ScenarioConfig, ScenarioProvider};
 pub use secret::{Credentials, Secret};
 pub use types::*;
 
+/// The longest a `submit` call waits for the provider's answer once its request is sent
+/// (FR-PRV-24). The open sweep waits this plus 60 s before calling a `requested` job lost (R102).
+pub const SUBMIT_TIMEOUT: std::time::Duration = scenario::api::REQUEST_TIMEOUT;
+
 /// Result of every provider operation.
 pub type ProviderResult<T> = Result<T, ProviderError>;
 

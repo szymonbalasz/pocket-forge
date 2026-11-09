@@ -321,6 +321,13 @@ pub struct Cost {
 #[serde(transparent)]
 pub struct ProviderRecord(pub Value);
 
+/// True if a persisted `provider{}` object carries a job handle (`submit` returned; R102). The
+/// one fact about the record the core may ask for: whether polling can go on without a new
+/// submit.
+pub fn has_job_handle(provider: &Value) -> bool {
+    provider.get("job_handle").is_some_and(|h| !h.is_null())
+}
+
 /// Result of `estimate`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Estimate {

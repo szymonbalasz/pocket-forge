@@ -43,6 +43,14 @@ pub const EVENT_CANDIDATE_READY: &str = "rgn:candidate-ready";
 /// How long the pump sleeps with nothing due (it also retries spool replays then).
 pub const IDLE: Duration = Duration::from_secs(30);
 
+/// The first wait after a fetch error that isn't transient; it doubles per error up to
+/// [`FETCH_BACKOFF_MAX`] (R102: a succeeded job keeps retrying, never `failed`).
+pub const FETCH_BACKOFF: Duration = Duration::from_secs(10);
+pub const FETCH_BACKOFF_MAX: Duration = Duration::from_secs(600);
+
+/// Non-transient poll errors in a row before a job goes `lost` with its handle kept (R102).
+pub const MAX_POLL_ERRORS: u32 = 10;
+
 /// A candidate's aspect may differ from the sent one by this much before it gets a warning
 /// (FR-RGN-24).
 pub const ASPECT_TOLERANCE: f64 = 0.01;
@@ -88,6 +96,10 @@ struct Tracked {
     /// A tick is working on it without the lock.
     busy: bool,
     progress: f64,
+    /// Non-transient poll errors in a row (R102); a good answer resets it.
+    poll_errors: u32,
+    /// Fetch errors in a row that weren't transient (R102): they set the backoff.
+    fetch_errors: u32,
 }
 
 /// The runner's state, in [`super::RgnState`]. Memory only (spec §8).
@@ -107,6 +119,13 @@ impl Runner {
             .entry(job.id)
             .and_modify(|t| {
                 t.project_dir = project_dir.clone();
+                if t.job.state == JobState::Requested && job.state != JobState::Requested {
+                    // A `requested` job watched since the open got its submit answer (R102):
+                    // drive the new copy; a tick in flight discards its stale answer.
+                    t.job = job.clone();
+                    t.generation = generation;
+                    t.next_at = now;
+                }
             })
             .or_insert(Tracked {
                 project_id,
@@ -117,6 +136,8 @@ impl Runner {
                 generation,
                 busy: false,
                 progress: 0.0,
+                poll_errors: 0,
+                fetch_errors: 0,
             });
         self.wake.notify();
     }
@@ -147,6 +168,25 @@ impl Runner {
         } else if let Some(t) = self.jobs.get_mut(&job.id) {
             t.job = job;
             t.generation = generation;
+        }
+    }
+
+    /// "Fetch again" (R102): a `succeeded` job fetches at the next tick, its backoff reset.
+    /// Starts driving it if the runner had let go. Never submits.
+    pub fn fetch_now(
+        &mut self,
+        project_id: Ulid,
+        project_dir: PathBuf,
+        job: JobFile,
+        now: Timestamp,
+    ) {
+        match self.jobs.get_mut(&job.id) {
+            Some(t) => {
+                t.next_at = now;
+                t.fetch_errors = 0;
+                self.wake.notify();
+            }
+            None => self.track(project_id, project_dir, job, now),
         }
     }
 
@@ -291,6 +331,8 @@ pub(crate) fn commit_job_update(
         generation: 0,
         busy: false,
         progress: 0.0,
+        poll_errors: 0,
+        fetch_errors: 0,
     };
     commit_update(ctx, state, &t, u)
 }
@@ -345,8 +387,16 @@ enum Outcome {
     Candidates(Vec<NewCandidate>, Option<i64>),
     /// Nothing to commit; retry after the delay.
     Retry(ProviderError),
+    /// A non-transient poll error (auth, a stale handle, a provider failure): counted, and the
+    /// job goes `lost` after [`MAX_POLL_ERRORS`] in a row (R102).
+    PollError(ProviderError),
+    /// A fetch error that isn't transient: the job stays `succeeded` with the error shown and
+    /// fetches again after a backoff (R102). Never `failed`: the candidates are paid for.
+    FetchError(ProviderError),
     /// Not a state the runner drives.
     Done,
+    /// Nothing to commit; look again after this long (a watched `requested` job).
+    Wait(Duration),
 }
 
 fn job_state_of(s: ProviderJobState) -> JobState {
@@ -428,8 +478,57 @@ fn poll(core: &Core, t: &Tracked) -> Outcome {
             let _ = e;
             Outcome::Updates(vec![u], t.progress, Some(ProviderError::Offline))
         }
-        Err(e) => Outcome::Retry(e),
+        Err(e @ ProviderError::RateLimited { .. }) => Outcome::Retry(e),
+        Err(e) => Outcome::PollError(e),
     }
+}
+
+/// `lost` after [`MAX_POLL_ERRORS`] poll errors in a row: the handle stays in `provider{}`, the
+/// possible-charge notice applies (R102).
+fn poll_gave_up(e: &ProviderError) -> SpoolUpdate {
+    SpoolUpdate {
+        state: Some(JobState::Lost),
+        error: Some(json!({
+            "code": e.code(),
+            "hint": format!(
+                "Polling stopped after {MAX_POLL_ERRORS} errors in a row ({e}). The job may still run and be charged; check the provider before retrying."
+            ),
+        })),
+        ..Default::default()
+    }
+}
+
+/// R102: a `requested` job seen at open (another machine, or this process, may be submitting
+/// it). It becomes `lost` with the possible-charge notice once [`JobFile::requested_gone`]; if
+/// its file moved on meanwhile (the submitter saved the handle), the runner lets go.
+fn watch_requested(core: &Core, t: &Tracked) -> Outcome {
+    let ctx = &core.ctx;
+    let now = ctx.now();
+    if ctx.submitting.contains(t.job.id) {
+        return Outcome::Wait(Duration::from_secs(5));
+    }
+    let path = t.project_dir.join(job_dir(t.job.id)).join(JOB_FILE);
+    if let Ok(bytes) = std::fs::read(&path)
+        && let Ok(disk) = serde_json::from_slice::<JobFile>(&bytes)
+        && disk.state != JobState::Requested
+    {
+        return Outcome::Done;
+    }
+    if t.job.requested_gone(&ctx.submitting, now) {
+        return Outcome::Updates(
+            vec![SpoolUpdate {
+                state: Some(JobState::Lost),
+                error: Some(crate::job::lost_before_handle_error()),
+                ..Default::default()
+            }],
+            0.0,
+            None,
+        );
+    }
+    let due = t.job.requested_at().plus(crate::job::LOST_AFTER);
+    Outcome::Wait(Duration::from_millis(
+        due.millis().saturating_sub(now.millis()).max(0) as u64,
+    ))
 }
 
 fn decodes(bytes: &[u8]) -> Option<(u32, u32)> {
@@ -512,16 +611,25 @@ fn fetch(core: &Core, t: &Tracked) -> Outcome {
             | ProviderError::Timeout
             | ProviderError::RateLimited { .. }),
         ) => Outcome::Retry(e),
-        Err(e) => Outcome::Updates(
-            vec![SpoolUpdate {
-                state: Some(JobState::Failed),
-                error: Some(error_value(&e)),
-                ..Default::default()
-            }],
-            1.0,
-            None,
-        ),
+        Err(e) => Outcome::FetchError(e),
     }
+}
+
+/// The wait before the `n`th fetch retry (n >= 1): 10 s, doubling, at most 10 min.
+fn fetch_backoff(n: u32) -> Duration {
+    FETCH_BACKOFF
+        .saturating_mul(1u32 << n.saturating_sub(1).min(16))
+        .min(FETCH_BACKOFF_MAX)
+}
+
+/// The `error` a succeeded job shows while its candidates can't be downloaded (R102).
+fn fetch_error_value(e: &ProviderError) -> Value {
+    json!({
+        "code": e.code(),
+        "hint": format!(
+            "The results couldn't be downloaded ({e}). The job is paid for; it retries on its own, or use Fetch again."
+        ),
+    })
 }
 
 fn unreadable() -> SpoolUpdate {
@@ -548,9 +656,12 @@ fn store_candidates(
     let ctx = &core.ctx;
     let install_id = state.settings.install_id;
     let mut job = t.job.clone();
-    if seed_returned.is_some() {
+    // A fetch error shown meanwhile is cleared with the same commit (R102).
+    let clear_error = t.job.error.is_some();
+    if seed_returned.is_some() || clear_error {
         let u = SpoolUpdate {
             seed_returned,
+            error: clear_error.then_some(Value::Null),
             ..Default::default()
         };
         if let Ok(j) = commit_update(ctx, state, t, u) {
@@ -603,6 +714,7 @@ fn step(core: &Core, t: Tracked) {
             poll(core, &t)
         }
         JobState::Succeeded => fetch(core, &t),
+        JobState::Requested => watch_requested(core, &t),
         _ => Outcome::Done,
     };
     let ctx = &core.ctx;
@@ -623,13 +735,47 @@ fn step(core: &Core, t: Tracked) {
     let now = ctx.now();
     let mut cur = t.clone();
     let mut delay_error = None;
+    let mut delay = None;
     match outcome {
         Outcome::Done => {
             state.rgn.runner.untrack(cur.job.id);
             return;
         }
         Outcome::Retry(e) => delay_error = Some(e),
+        Outcome::Wait(d) => delay = Some(d),
+        Outcome::PollError(e) => {
+            cur.poll_errors += 1;
+            tracing::warn!(job = %cur.job.id, errors = cur.poll_errors, error = %e, "poll failed");
+            if cur.poll_errors >= MAX_POLL_ERRORS {
+                match commit_update(ctx, &mut state, &cur, poll_gave_up(&e)) {
+                    Ok(j) => cur.job = j,
+                    Err(e) => tracing::warn!(job = %cur.job.id, error = %e, "lost not committed"),
+                }
+                emit_state(ctx, &cur.job, Some(cur.progress));
+            }
+            delay_error = Some(e);
+        }
+        Outcome::FetchError(e) => {
+            cur.fetch_errors += 1;
+            tracing::warn!(job = %cur.job.id, errors = cur.fetch_errors, error = %e, "fetch failed; the job stays succeeded");
+            let shown = fetch_error_value(&e);
+            if cur.job.error.as_ref() != Some(&shown) {
+                let u = SpoolUpdate {
+                    error: Some(shown),
+                    ..Default::default()
+                };
+                match commit_update(ctx, &mut state, &cur, u) {
+                    Ok(j) => cur.job = j,
+                    Err(e) => {
+                        tracing::warn!(job = %cur.job.id, error = %e, "fetch error not committed")
+                    }
+                }
+            }
+            emit_state(ctx, &cur.job, Some(1.0));
+            delay = Some(fetch_backoff(cur.fetch_errors));
+        }
         Outcome::Updates(updates, progress, err) => {
+            cur.poll_errors = 0;
             cur.progress = progress;
             delay_error = err;
             for u in updates {
@@ -677,7 +823,9 @@ fn step(core: &Core, t: Tracked) {
     }
     cur.busy = false;
     cur.last_error = delay_error;
-    cur.next_at = now.plus(poll_delay(elapsed(&cur.job, now), cur.last_error.as_ref()));
+    let delay =
+        delay.unwrap_or_else(|| poll_delay(elapsed(&cur.job, now), cur.last_error.as_ref()));
+    cur.next_at = now.plus(delay);
     state.rgn.runner.jobs.insert(cur.job.id, cur);
 }
 
@@ -773,8 +921,8 @@ fn replay_open(ctx: &Context, state: &mut State) {
 
 /// FR-RGN-22, called by `project_open` before its snapshot: replays the spool, then resumes
 /// every non-terminal job from its job file (`submitted`, `queued`, `running`, `unknown` →
-/// poll; `succeeded` → fetch). PRJ's open sweep already turned `requested` into `lost` with
-/// the possible-charge warning.
+/// poll; `succeeded` → fetch). PRJ's open sweep already turned an old `requested` job into
+/// `lost` with the possible-charge warning; a young one is watched until it ages out (R102).
 pub fn on_project_open(
     ctx: &Context,
     install_id: Ulid,
@@ -794,7 +942,8 @@ pub fn on_project_open(
         .filter(|j| {
             matches!(
                 j.state,
-                JobState::Submitted
+                JobState::Requested
+                    | JobState::Submitted
                     | JobState::Queued
                     | JobState::Running
                     | JobState::Unknown

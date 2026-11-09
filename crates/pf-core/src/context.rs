@@ -416,6 +416,8 @@ pub struct Context {
     pub inline_background: bool,
     /// The prompt chat's seams (FR-PRM-32): backend mode, process spawner, clock, the fake.
     pub chat: ChatSeams,
+    /// Jobs this process is submitting right now (R102): never swept as `lost`.
+    pub submitting: crate::job::Submitting,
 }
 
 // ---------------------------------------------------------------- prompt chat (PRM)
@@ -497,6 +499,7 @@ impl Context {
             tiles_base_url: default_tiles_base_url(),
             inline_background: false,
             chat: ChatSeams::fake(Arc::new(pf_chat::clock::SystemClock::new())),
+            submitting: crate::job::Submitting::default(),
         }
     }
 

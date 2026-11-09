@@ -680,6 +680,8 @@ export interface Commands {
   /** null resets to the default. */
   rgn_blend_instruction_set: [{ text: string | null }, BlendInstruction];
   rgn_job_dismiss: [{ job_id: string }, { trashed: number }];
+  /** R102: fetch a succeeded job's results again (never resubmits). */
+  rgn_job_fetch_again: [{ job_id: string }, { job_id: string }];
   rgn_candidate_preview: [{ job_id: string; candidate_id: string; blend: RgnBlend }, RgnPreview];
   rgn_candidate_accept: [
     { job_id: string; candidate_id: string; blend: RgnBlend },
@@ -828,6 +830,8 @@ export interface Events {
   'rgn:spend': { spend: number; cap: number | null };
   'rgn:blend-instruction': BlendInstruction;
   'project:original-ready': Record<string, never> | null;
+  /** R104: the background decode failed (`corrupt`, `io`, `not_found`, …); it isn't retried. */
+  'project:original-failed': { project_id: string; code: string };
   'export:progress': { export_id: string; phase: ExportPhase; fraction: number };
   'export:done': {
     export_id: string;

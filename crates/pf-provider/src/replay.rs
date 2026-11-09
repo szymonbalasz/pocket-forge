@@ -288,6 +288,7 @@ impl Transport for ReplayTransport {
         if resp.status == 0 {
             let err = match resp.body.as_str() {
                 Some("timeout") => TransportError::Timeout,
+                Some("interrupted") => TransportError::Interrupted,
                 _ => TransportError::Offline("replayed".into()),
             };
             return Box::pin(std::future::ready(Err(err)));

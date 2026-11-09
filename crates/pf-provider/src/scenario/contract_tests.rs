@@ -459,7 +459,8 @@ fn fr_prv_17_submit_is_never_retried_and_insufficient_balance_is_distinct() {
     );
     assert_eq!(
         block_on(r.p.submit(&request(V3))).unwrap_err().code(),
-        "provider_failure"
+        "timeout",
+        "a 5xx after sending may have created the job (R102)"
     );
     assert_eq!(r.t.remaining(), 0);
     assert!(
@@ -484,6 +485,94 @@ fn fr_prv_17_submit_is_never_retried_and_insufficient_balance_is_distinct() {
     assert_eq!(
         block_on(r.p.submit(&request(V3))).unwrap_err(),
         ProviderError::InsufficientBalance
+    );
+}
+
+/// Review item 1 / R102: once the submit was sent, anything but a clear refusal may have
+/// created (and billed) the job, so it is `timeout` (RGN: `lost` + possible charge), never an
+/// error RGN turns into `failed` + Retry.
+#[test]
+fn fr_prv_17_a_submit_the_provider_may_have_accepted_is_a_timeout() {
+    let up = |n: u32| {
+        ex(
+            Method::Post,
+            "/assets",
+            200,
+            json!({"asset": {"id": format!("a{n}")}}),
+        )
+    };
+    let gen_path = format!("/generate/custom/{V3}");
+    let cases: [(u16, Value); 7] = [
+        (0, json!("interrupted")),
+        (500, json!({"reason": "boom"})),
+        (502, json!({"message": "bad gateway"})),
+        (503, json!({"message": "busy"})),
+        (504, json!({"message": "gateway timeout"})),
+        (200, json!({"job": {"status": "queued"}})),
+        (200, json!("not json {")),
+    ];
+    for (status, body) in cases {
+        let r = rig_with(
+            vec![
+                get_model(V3),
+                up(1),
+                up(2),
+                ex(Method::Post, &gen_path, status, body.clone()),
+            ],
+            &[V3],
+        );
+        assert_eq!(
+            block_on(r.p.submit(&request(V3))).unwrap_err(),
+            ProviderError::Timeout,
+            "status {status} {body}"
+        );
+        assert_eq!(r.t.remaining(), 0);
+        assert!(r.sleeps.delays().is_empty(), "never retried");
+    }
+    // A connection that never opened sent nothing: still `offline` (→ `failed`).
+    let r = rig_with(
+        vec![
+            get_model(V3),
+            up(1),
+            up(2),
+            ex(Method::Post, &gen_path, 0, json!("offline")),
+        ],
+        &[V3],
+    );
+    assert_eq!(
+        block_on(r.p.submit(&request(V3))).unwrap_err(),
+        ProviderError::Offline
+    );
+    // An interrupted idempotent call is retried, then `offline`.
+    let r = rig_with(
+        vec![
+            get_model(V3),
+            up(1),
+            up(2),
+            ex(
+                Method::Post,
+                &format!("{gen_path}?dryRun=true"),
+                0,
+                json!("interrupted"),
+            ),
+            ex(
+                Method::Post,
+                &format!("{gen_path}?dryRun=true"),
+                0,
+                json!("interrupted"),
+            ),
+            ex(
+                Method::Post,
+                &format!("{gen_path}?dryRun=true"),
+                0,
+                json!("interrupted"),
+            ),
+        ],
+        &[V3],
+    );
+    assert_eq!(
+        block_on(r.p.estimate(&request(V3))).unwrap_err(),
+        ProviderError::Offline
     );
 }
 
@@ -521,7 +610,7 @@ fn fr_prv_23_estimate_and_submit_return_every_normalised_error() {
             json!({"asset": {"id": format!("a{n}")}}),
         )
     };
-    let cases: [(u16, Value, ProviderError); 7] = [
+    let cases: [(u16, Value, ProviderError); 8] = [
         (401, json!({}), ProviderError::Auth),
         (402, json!({}), ProviderError::InsufficientBalance),
         (
@@ -538,6 +627,14 @@ fn fr_prv_23_estimate_and_submit_return_every_normalised_error() {
                 field: "prompt".into(),
             },
         ),
+        (
+            409,
+            json!({"reason": "boom"}),
+            ProviderError::ProviderFailure {
+                hint: "boom".into(),
+            },
+        ),
+        // A submit's 5xx may have created the job: `timeout` (R102, review item 1).
         (
             500,
             json!({"reason": "boom"}),
@@ -565,6 +662,11 @@ fn fr_prv_23_estimate_and_submit_return_every_normalised_error() {
                     .unwrap_err()
             } else {
                 block_on(r.p.submit(&request(V3))).map(|_| ()).unwrap_err()
+            };
+            let want = if !dry && status >= 500 {
+                ProviderError::Timeout
+            } else {
+                want.clone()
             };
             assert_eq!(got, want, "status {status}, dry run {dry}");
             assert_eq!(r.t.remaining(), 0);

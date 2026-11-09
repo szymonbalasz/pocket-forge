@@ -963,6 +963,11 @@ function subscribe(): void {
       if (p.state === 'fetched' || p.state === 'closed') void refreshProject();
     }),
     onEventSafe('rgn:candidate-ready', () => void refreshProject()),
+    // R104: the original can't be decoded, so Generate can't run; say why instead of "loading".
+    onEventSafe('project:original-failed', (p) => {
+      if (p.project_id === state.projectId)
+        set({ submitError: { code: p.code, message: 'The original can’t be read.' } });
+    }),
     onEventSafe('rgn:spend', (p) =>
       set((cur) => ({
         spend: { spend: p.spend, cap: p.cap, threshold: cur.spend?.threshold ?? null },
@@ -1309,6 +1314,17 @@ export const rgn = {
       set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
     }
     void refreshIterations();
+  },
+
+  /** R102: download a succeeded job's results again. Never a submit, never a new charge. */
+  async fetchAgain(jobId: string): Promise<void> {
+    try {
+      await api.region.fetchAgain(jobId);
+      set({ trackerNotice: null });
+    } catch (e) {
+      const err = uiError(e);
+      set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
+    }
   },
 
   /** FR-RGN-21: pre-fill the panel from the job, then estimate → confirm again. A generate

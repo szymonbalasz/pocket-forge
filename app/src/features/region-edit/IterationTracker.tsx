@@ -12,6 +12,7 @@ import { rgn, useRgn, type LiveJob } from './store';
 import {
   canCancel,
   canDismiss,
+  canFetchAgain,
   canRetry,
   isActive,
   orderRows,
@@ -80,6 +81,11 @@ function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined 
           {jobErrorText(error)}
         </div>
       )}
+      {error && canFetchAgain(state, error) && (
+        <div className="error small" data-testid="rgn-job-fetch-error" data-code={error.code}>
+          {jobErrorText(error)}
+        </div>
+      )}
       {state === 'lost' && (
         <div className="warning small" data-testid="rgn-job-lost">
           The job may have been charged, but its result can’t be recovered.
@@ -93,6 +99,15 @@ function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined 
             onClick={stop(() => void rgn.cancelJob(row.job_id))}
           >
             Cancel
+          </button>
+        )}
+        {canFetchAgain(state, error) && (
+          <button
+            type="button"
+            data-testid="rgn-job-fetch-again"
+            onClick={stop(() => void rgn.fetchAgain(row.job_id))}
+          >
+            Fetch again
           </button>
         )}
         {canRetry(state) && (

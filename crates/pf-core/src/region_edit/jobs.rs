@@ -229,7 +229,7 @@ pub(crate) fn submit_job(core: &Core, job: SubmitJob<'_>) -> CoreResult<JobSubmi
     } = job;
     let now = core.ctx.now();
     // Spend guard, active-job check and the `requested` record: one lock (FR-RGN-14–17).
-    let (job, project_id, project_dir, estimate) = {
+    let in_flight = {
         let mut state = core.state();
         let estimate = state.rgn.estimates.get(estimate_id, now).ok_or_else(|| {
             CoreError::new(
@@ -260,12 +260,35 @@ pub(crate) fn submit_job(core: &Core, job: SubmitJob<'_>) -> CoreResult<JobSubmi
             }
             None => store::record_job_without_inputs(&core.ctx, install_id, p, new)?,
         };
-        (job, p.manifest.project_id, p.dir.clone(), estimate)
+        // R102: in flight until its answer is committed; no sweep calls it lost meanwhile.
+        (
+            core.ctx.submitting.begin(job.id),
+            job,
+            p.manifest.project_id,
+            p.dir.clone(),
+            estimate,
+        )
     };
+    let (_in_flight, job, project_id, project_dir, estimate) = in_flight;
     emit_state(&core.ctx, &job, None);
 
     // The provider call, without the lock. Submit is never retried (ADR 0001).
     let result = provider_raw(core, core.ctx.provider.submit(&request));
+    finish_submit(core, job, project_id, project_dir, estimate.amount, result)
+}
+
+/// The second half of [`submit_job`], under the lock: commits the provider's answer to the
+/// `requested` job (`submitted` with the handle, `failed` or `lost`), records the spend,
+/// resolves the earlier jobs and hands a submitted job to the runner. A handle for a job the
+/// open sweep already marked `lost` revives it (R102).
+pub(crate) fn finish_submit(
+    core: &Core,
+    job: JobFile,
+    project_id: Ulid,
+    project_dir: std::path::PathBuf,
+    estimate: CostAmount,
+    result: Result<ProviderRecord, ProviderError>,
+) -> CoreResult<JobSubmitOutput> {
     let ctx = &core.ctx;
     let mut state = core.state();
     let (update, err, charged) = match &result {
@@ -273,18 +296,21 @@ pub(crate) fn submit_job(core: &Core, job: SubmitJob<'_>) -> CoreResult<JobSubmi
             SpoolUpdate {
                 state: Some(JobState::Submitted),
                 provider: Some(record.0.clone()),
+                // Clears a `lost` notice the open sweep may have set meanwhile (R102).
+                error: Some(Value::Null),
                 ..Default::default()
             },
             None,
             true,
         ),
-        // FR-RGN-23: a timeout may still have started (and charged) the job.
+        // FR-RGN-23 / R102: a timeout, or any answer after sending that isn't a clear refusal
+        // (the provider maps those to `timeout`), may still have started and charged the job.
         Err(e @ ProviderError::Timeout) => (
             SpoolUpdate {
                 state: Some(JobState::Lost),
                 error: Some(json!({
                     "code": "timeout",
-                    "hint": "The provider didn't answer the submit. The job may still run and be charged; check the provider before retrying.",
+                    "hint": "The provider didn't confirm the submit. The job may still run and be charged; check the provider before retrying.",
                 })),
                 ..Default::default()
             },
@@ -312,7 +338,7 @@ pub(crate) fn submit_job(core: &Core, job: SubmitJob<'_>) -> CoreResult<JobSubmi
     .unwrap_or(job);
     if charged {
         // A lost job counts its estimate (FR-RGN-14).
-        state.rgn.ledger.record_submit(job.id, estimate.amount);
+        state.rgn.ledger.record_submit(job.id, estimate);
     }
     if job.state == JobState::Submitted {
         // The next submit resolves the earlier jobs (FR-RGN-28).
@@ -415,6 +441,48 @@ impl Command for RgnJobCancel {
         emit_state(ctx, &done, None);
         emit_spend(ctx, &state);
         Ok(CancelOutput { result: ack })
+    }
+}
+
+// ---------------------------------------------------------------- rgn_job_fetch_again
+
+/// `rgn_job_fetch_again` (R102): a `succeeded` job whose candidates couldn't be downloaded
+/// fetches them now. Never submits; nothing is charged again.
+pub struct RgnJobFetchAgain;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct FetchAgainOutput {
+    pub job_id: Ulid,
+}
+
+impl Command for RgnJobFetchAgain {
+    const NAME: &'static str = "rgn_job_fetch_again";
+    type Input = JobIdInput;
+    type Output = FetchAgainOutput;
+
+    fn run(core: &Core, input: JobIdInput) -> CoreResult<FetchAgainOutput> {
+        let mut state = core.state();
+        let (project_id, dir, job) = find_job(&state, input.job_id)?;
+        if job.state != JobState::Succeeded {
+            return Err(CoreError::invalid(
+                "job_id",
+                format!("a {} job has nothing to fetch", job.state.as_str()),
+            ));
+        }
+        if super::spool::has_pending(&core.ctx, project_id) {
+            // Its candidates may already be in the spool, waiting to be saved (FR-RGN-37).
+            return Err(CoreError::new(
+                ErrorCode::Conflict,
+                "results are waiting to be saved; resolve the project first",
+            ));
+        }
+        let now = core.ctx.now();
+        state
+            .rgn
+            .runner
+            .fetch_now(project_id, dir, job.clone(), now);
+        emit_state(&core.ctx, &job, Some(1.0));
+        Ok(FetchAgainOutput { job_id: job.id })
     }
 }
 

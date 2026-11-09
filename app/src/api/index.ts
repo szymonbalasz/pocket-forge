@@ -269,6 +269,7 @@ export const api = {
     cancel: (jobId: string) => call('rgn_job_cancel', { job_id: jobId }),
     retryDraft: (jobId: string) => call('rgn_job_retry_draft', { job_id: jobId }),
     dismiss: (jobId: string) => call('rgn_job_dismiss', { job_id: jobId }),
+    fetchAgain: (jobId: string) => call('rgn_job_fetch_again', { job_id: jobId }),
     preview: (input: Commands['rgn_candidate_preview'][0]) => call('rgn_candidate_preview', input),
     accept: (input: Commands['rgn_candidate_accept'][0]) => call('rgn_candidate_accept', input),
     star: (jobId: string, candidateId: string, starred: boolean) =>

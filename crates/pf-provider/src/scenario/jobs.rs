@@ -95,6 +95,14 @@ fn upload_state(out: &Value, creds: &Credentials) -> ProviderResult<UploadState>
     }
 }
 
+/// A submit the provider may have accepted (and billed) without confirming it: after the
+/// request was sent, anything but a clear refusal (R102, FR-PRV-17). RGN records it as `lost`
+/// with the possible-charge notice and never offers a plain Retry (FR-RGN-23). `timeout`
+/// because ADR 0001 fixes the error set and this is "no usable answer".
+fn unconfirmed() -> ProviderError {
+    ProviderError::Timeout
+}
+
 fn malformed(what: &str) -> ProviderError {
     ProviderError::ProviderFailure {
         hint: format!("the provider sent a malformed {what}"),
@@ -582,6 +590,8 @@ impl ScenarioProvider {
     }
 
     /// Sends a generate call; on "asset missing" re-uploads once and retries once (FR-PRV-15).
+    /// A real (not dry-run) call that may have created the job without saying so (5xx, a 2xx
+    /// that can't be read, a broken connection) is `timeout` (R102, see [`unconfirmed`]).
     async fn generate(
         &self,
         creds: &Credentials,
@@ -614,7 +624,14 @@ impl ScenarioProvider {
                 )
                 .await?;
             if resp.is_success() {
-                return Ok((resp.status, parse_json(&resp.body)?, body, refs));
+                let out = match parse_json(&resp.body) {
+                    Err(_) if !dry_run => return Err(unconfirmed()),
+                    other => other?,
+                };
+                return Ok((resp.status, out, body, refs));
+            }
+            if !dry_run && resp.status >= 500 {
+                return Err(unconfirmed());
             }
             if refs.is_some() && is_missing_asset(&resp) {
                 if attempt == 0 {
@@ -687,12 +704,13 @@ impl ScenarioProvider {
         let (_, out, body, refs) = self
             .generate(&creds, request, &p, Some(refs), false)
             .await?;
-        let job = out.get("job").ok_or_else(|| malformed("job response"))?;
-        let handle = job
-            .get("jobId")
-            .or_else(|| job.get("id"))
+        // Accepted (2xx) but no handle to follow: the job may exist and be billed (R102).
+        let handle = out
+            .get("job")
+            .and_then(|job| job.get("jobId").or_else(|| job.get("id")))
             .and_then(Value::as_str)
-            .ok_or_else(|| malformed("job response"))?;
+            .ok_or_else(unconfirmed)?;
+        let job = &out["job"];
         let mut rec = self.record(request, &body, refs.as_ref());
         rec["job_handle"] = json!(handle);
         if let Some(s) = job.get("status") {
