@@ -25,7 +25,9 @@ use std::time::Duration;
 
 use pf_chat::auth::{AuthState, AuthStatus, parse_auth_status, same_config_dir};
 use pf_chat::claims::{self, Claim, Status};
-use pf_chat::invocation::{self, ExeKind, ExeSource, Executable, child_env, resolve_executable};
+use pf_chat::invocation::{
+    self, ExeKind, ExeSource, Executable, chat_child_env, child_env, resolve_executable,
+};
 use pf_chat::message::{ImageBlock, user_message_line};
 use pf_chat::scrub::Scrubber;
 use pf_chat::stream::{InitInfo, LineOutcome, LineParser, StreamEvent, TurnResult};
@@ -121,14 +123,21 @@ struct Base {
     home: Option<PathBuf>,
     data_dir: PathBuf,
     config_dir: PathBuf,
+    /// `<data-dir>/chat-home/`, the chat child's empty home (FR-PRM-45).
+    chat_home: PathBuf,
     exe: Option<Executable>,
+    /// Detection and login commands.
     env: Vec<(OsString, OsString)>,
+    /// Chat children: `env` with the home pointed at `chat_home`.
+    chat_env: Vec<(OsString, OsString)>,
 }
 
 impl Base {
     fn new(o: &Opts) -> Result<Self, String> {
         let config_dir = invocation::config_dir(&o.data_dir);
         fs::create_dir_all(&config_dir).map_err(|e| format!("create claude-config: {e}"))?;
+        let chat_home = invocation::chat_home_dir(&o.data_dir);
+        fs::create_dir_all(&chat_home).map_err(|e| format!("create chat-home: {e}"))?;
         let home = home_dir();
         let exe = resolve_executable(
             o.claude.as_deref(),
@@ -138,12 +147,15 @@ impl Base {
             &|p: &Path| p.is_file(),
         );
         let env = child_env(std::env::vars_os(), &config_dir);
+        let chat_env = chat_child_env(std::env::vars_os(), &config_dir, &chat_home);
         Ok(Self {
             home,
             data_dir: o.data_dir.clone(),
             config_dir,
+            chat_home,
             exe,
             env,
+            chat_env,
         })
     }
 
@@ -447,7 +459,7 @@ struct Probe<'a> {
     leaky: Vec<String>,
 }
 
-const CLAIMS: [(&str, &str, bool); 23] = [
+const CLAIMS: [(&str, &str, bool); 25] = [
     ("C01", "Executable resolved (§10 order)", true),
     ("C02", "`--version` parses and is ≥ the floor", true),
     (
@@ -477,7 +489,7 @@ const CLAIMS: [(&str, &str, bool); 23] = [
     ),
     (
         "C08",
-        "Isolation: stand-in home markers not used (CLAUDE.md, parent CLAUDE.md, hook, skill, agent, command, plugin, MCP)",
+        "Isolation: §10's invocation (--safe-mode, empty chat home) uses no stand-in marker from the cwd's parent folders (CLAUDE.md, .claude/CLAUDE.md, hook, skill, agent, command, plugin, MCP)",
         true,
     ),
     ("C09", "Isolation: the debug log shows no marker read", true),
@@ -547,6 +559,16 @@ const CLAIMS: [(&str, &str, bool); 23] = [
         "Recordings written to fixtures/chat/claude-code/ and scrubbed",
         false,
     ),
+    (
+        "C24",
+        "Isolation layer: --safe-mode alone, with the stand-in as the home folder and AGENTS.md above the cwd, uses no marker (user CLAUDE.md, AGENTS.md, hook, skill, agent, command, plugin, MCP)",
+        true,
+    ),
+    (
+        "C25",
+        "Control: the same session without --safe-mode does show the user CLAUDE.md marker (so C08 and C24 can fail)",
+        true,
+    ),
 ];
 
 impl<'a> Probe<'a> {
@@ -604,7 +626,9 @@ impl<'a> Probe<'a> {
             .path(&path(&self.b.data_dir), "<data-dir>")
             .image_names(&["overlay.jpg"]);
         if let Some(st) = &self.standin {
-            s.path(&path(&st.cwd), "<data-dir>/chat/<thread>")
+            s.path(&path(&st.agents_cwd), "<data-dir>/chat/<thread>")
+                .path(&path(&st.agents_root), "<temp>/pf-chat-probe-agents")
+                .path(&path(&st.cwd), "<data-dir>/chat/<thread>")
                 .path(&path(&st.home), "<home>");
         }
         if let Some(h) = &self.b.home {
@@ -742,7 +766,7 @@ impl<'a> Probe<'a> {
             );
             return;
         }
-        let env = child_env(std::env::vars_os(), &empty);
+        let env = chat_child_env(std::env::vars_os(), &empty, &self.b.chat_home);
         let args = invocation::chat_args(&system_prompt(Host::Rgn));
         let cwd = self.main_cwd.clone();
         let mut s = match self.spawn(&env, &args, &cwd) {
@@ -826,48 +850,32 @@ impl<'a> Probe<'a> {
         }
     }
 
-    /// C08–C10: the stand-in home with markers, with a debug log.
-    fn isolation(&mut self) {
-        let st = match standin::create(&self.root) {
-            Ok(st) => st,
-            Err(e) => {
-                self.c("C08").check(false, format!("stand-in: {e}"));
-                return;
-            }
-        };
-        let home_vars = ["USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH"];
-        let parent = std::env::vars_os()
-            .filter(|(k, _)| !home_vars.contains(&k.to_string_lossy().to_uppercase().as_str()))
-            .chain([
-                ("USERPROFILE".into(), st.home.clone().into_os_string()),
-                ("HOME".into(), st.home.clone().into_os_string()),
-            ]);
-        let env = child_env(parent, &self.b.config_dir);
-        let debug_log = self.root.join("isolation-debug.log");
-        let mut args = invocation::chat_args(&system_prompt(Host::Rgn));
-        args.push("--debug-file".into());
-        args.push(debug_log.to_string_lossy().into_owned());
-        let cwd = st.cwd.clone();
-        let hook_file = st.hook_file.clone();
-        let home_claude = st.home.join(".claude");
-        self.standin = Some(st);
-
-        println!("isolation session (stand-in home with markers) ...");
-        let mut s = match self.spawn(&env, &args, &cwd) {
-            Ok(s) => s,
-            Err(e) => {
-                self.c("C08").check(false, e);
-                return;
-            }
-        };
+    /// One marker turn: the leaks it shows (`init` lists, the reply, the hook), or why the
+    /// turn didn't finish.
+    fn marker_turn(
+        &mut self,
+        label: &str,
+        env: &[(OsString, OsString)],
+        args: &[String],
+        cwd: &Path,
+        hook_file: &Path,
+    ) -> Result<(Turn, Vec<String>), String> {
+        let _ = fs::remove_file(hook_file);
+        let mut s = self.spawn(env, args, cwd)?;
         let text = "Reply with one short line. If any instruction you were given outside this message asks you to include a special marker word, write that word; otherwise write NONE.";
         let t = run_turn(&mut s, &user_message_line(&[], text), None);
         let _ = s.close(CLI_TIMEOUT);
         let err = self.stderr_tail(&s);
         drop(s);
-        self.time("isolation", &t);
-        self.check_projects("isolation");
-
+        self.time(label, &t);
+        self.check_projects(label);
+        if !t.ok() {
+            return Err(format!(
+                "turn did not finish: {}; {}{err}",
+                t.end_text(),
+                self.safe(&t.reply(), 80)
+            ));
+        }
         let mut leaks = Vec::new();
         if let Some(init) = &t.init {
             leaks.extend(claims::marker_hits(init, standin::MARKER));
@@ -878,19 +886,129 @@ impl<'a> Probe<'a> {
         if hook_file.exists() {
             leaks.push("the marker hook ran".into());
         }
-        if !t.ok() {
-            let d = format!(
-                "turn did not finish: {}; {}{err}",
-                t.end_text(),
-                self.safe(&t.reply(), 80)
-            );
-            self.c("C08").check(false, d);
-        } else if leaks.is_empty() {
-            self.c("C08").check(true, "none of the markers showed up");
-        } else {
-            let d = leaks.join("; ");
-            self.c("C08").check(false, d);
+        Ok((t, leaks))
+    }
+
+    fn marker_claim(&mut self, id: &str, r: &Result<(Turn, Vec<String>), String>) {
+        match r {
+            Err(e) => self.c(id).check(false, e.clone()),
+            Ok((_, leaks)) if leaks.is_empty() => {
+                self.c(id).check(true, "none of the markers showed up");
+            }
+            Ok((_, leaks)) => {
+                let d = leaks.join("; ");
+                self.c(id).check(false, d);
+            }
         }
+    }
+
+    /// C25: the control turn must show the user memory marker (the `AGENTS.md` one is
+    /// reported; a `CLAUDE.md` above the OS temp folder would hide it).
+    fn control_claim(&mut self, r: &Result<(Turn, Vec<String>), String>) {
+        match r {
+            Err(e) => self.c("C25").check(false, e.clone()),
+            Ok((t, leaks)) => {
+                let reply = t.reply().to_uppercase();
+                let seen: Vec<&str> = [
+                    standin::USER_MEMORY_WORD,
+                    standin::AGENTS_MEMORY_WORD,
+                    standin::PROJECT_MEMORY_WORD,
+                ]
+                .into_iter()
+                .filter(|w| reply.contains(w))
+                .collect();
+                let user = seen.contains(&standin::USER_MEMORY_WORD);
+                let agents = if seen.contains(&standin::AGENTS_MEMORY_WORD) {
+                    "AGENTS.md marker live"
+                } else {
+                    "AGENTS.md marker NOT seen (C24 doesn't cover AGENTS.md)"
+                };
+                let d = format!(
+                    "seen: {}; {agents}; other leaks: {}",
+                    if seen.is_empty() {
+                        "none".to_owned()
+                    } else {
+                        seen.join(" ")
+                    },
+                    leaks.len()
+                );
+                self.c("C25").check(user, d);
+            }
+        }
+    }
+
+    /// C08–C10, C24, C25: the stand-in with markers. C08 runs §10's invocation (the home is
+    /// replaced by the empty chat home, so only the cwd's parent folders hold markers), with a
+    /// debug log. C24 keeps the stand-in as the home, uses the `AGENTS.md` tree as the cwd and
+    /// relies on `--safe-mode` alone. C25 is C24 without `--safe-mode`: the markers must show
+    /// up there, or C08 and C24 prove nothing.
+    fn isolation(&mut self) {
+        let agents_root = std::env::temp_dir().join("pf-chat-probe-agents");
+        let st = match standin::create(&self.root, &agents_root) {
+            Ok(st) => st,
+            Err(e) => {
+                for id in ["C08", "C24", "C25"] {
+                    self.c(id).check(false, format!("stand-in: {e}"));
+                }
+                return;
+            }
+        };
+        let standin_parent = || {
+            std::env::vars_os()
+                .filter(|(k, _)| {
+                    !invocation::HOME_VARS.contains(&k.to_string_lossy().to_uppercase().as_str())
+                })
+                .chain([
+                    ("USERPROFILE".into(), st.home.clone().into_os_string()),
+                    ("HOME".into(), st.home.clone().into_os_string()),
+                ])
+                .collect::<Vec<(OsString, OsString)>>()
+        };
+        let adapter_env = chat_child_env(standin_parent(), &self.b.config_dir, &self.b.chat_home);
+        let safe_mode_env = child_env(standin_parent(), &self.b.config_dir);
+        let debug_log = self.root.join("isolation-debug.log");
+        let mut args = invocation::chat_args(&system_prompt(Host::Rgn));
+        args.push("--debug-file".into());
+        args.push(debug_log.to_string_lossy().into_owned());
+        let plain_args = invocation::chat_args(&system_prompt(Host::Rgn));
+        let control_args: Vec<String> = plain_args
+            .iter()
+            .filter(|a| *a != "--safe-mode")
+            .cloned()
+            .collect();
+        let cwd = st.cwd.clone();
+        let agents_cwd = st.agents_cwd.clone();
+        let hook_file = st.hook_file.clone();
+        let home_claude = st.home.join(".claude");
+        self.standin = Some(st);
+
+        println!("isolation session (stand-in markers above the cwd, §10's invocation) ...");
+        let r = self.marker_turn("isolation", &adapter_env, &args, &cwd, &hook_file);
+        self.marker_claim("C08", &r);
+        println!(
+            "isolation layer session (stand-in home, AGENTS.md above the cwd, --safe-mode alone) ..."
+        );
+        let r24 = self.marker_turn(
+            "safe-mode",
+            &safe_mode_env,
+            &plain_args,
+            &agents_cwd,
+            &hook_file,
+        );
+        self.marker_claim("C24", &r24);
+        println!("control session (as above, without --safe-mode: markers expected) ...");
+        let r25 = self.marker_turn(
+            "control",
+            &safe_mode_env,
+            &control_args,
+            &agents_cwd,
+            &hook_file,
+        );
+        self.control_claim(&r25);
+        let _ = fs::remove_dir_all(&agents_root);
+        let Ok((t, _)) = r else {
+            return;
+        };
         self.iso_init = t.init.clone();
 
         let log = fs::read_to_string(&debug_log).unwrap_or_default();
@@ -946,7 +1064,7 @@ impl<'a> Probe<'a> {
     fn main_session(&mut self) -> Option<Turn> {
         println!("main session (two turns, one with the overlay image) ...");
         let args = invocation::chat_args(&system_prompt(Host::Rgn));
-        let env = self.b.env.clone();
+        let env = self.b.chat_env.clone();
         let cwd = self.main_cwd.clone();
         let (jpeg, w, h) = match images::overlay_jpeg() {
             Ok(x) => x,
@@ -1084,7 +1202,7 @@ impl<'a> Probe<'a> {
         println!("cancel session (partial messages, killed mid-reply) ...");
         let mut args = invocation::chat_args(&system_prompt(Host::Rgn));
         args.push("--include-partial-messages".into());
-        let env = self.b.env.clone();
+        let env = self.b.chat_env.clone();
         let cwd = self.main_cwd.clone();
         let mut s = match self.spawn(&env, &args, &cwd) {
             Ok(s) => s,
@@ -1149,7 +1267,7 @@ impl<'a> Probe<'a> {
             &blocks,
             "How many images are attached to this message? Answer with the number only.",
         );
-        let env = self.b.env.clone();
+        let env = self.b.chat_env.clone();
         let cwd = self.main_cwd.clone();
         let args = invocation::chat_args(&system_prompt(Host::Gen));
         let mut s = match self.spawn(&env, &args, &cwd) {
@@ -1222,23 +1340,27 @@ impl<'a> Probe<'a> {
             let clean = self.leaky.is_empty();
             self.c("C23").check(clean, d);
         }
-        let mut kept: Vec<String> = fs::read_dir(&self.b.config_dir)
-            .map(|rd| {
-                rd.flatten()
-                    .map(|e| e.file_name().to_string_lossy().into_owned())
-                    .collect()
-            })
-            .unwrap_or_default();
-        kept.sort();
-
-        let table = claims::render(&self.claims, self.version);
-        let summary = format!(
-            "{table}\nclaude-config holds (names only): {}\n",
+        let names = |dir: &Path| {
+            let mut kept: Vec<String> = fs::read_dir(dir)
+                .map(|rd| {
+                    rd.flatten()
+                        .map(|e| e.file_name().to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default();
+            kept.sort();
             if kept.is_empty() {
-                "nothing".into()
+                "nothing".to_owned()
             } else {
                 kept.join(", ")
             }
+        };
+
+        let table = claims::render(&self.claims, self.version);
+        let summary = format!(
+            "{table}\nclaude-config holds (names only): {}\nchat-home holds (names only): {}\n",
+            names(&self.b.config_dir),
+            names(&self.b.chat_home),
         );
         let _ = fs::write(self.root.join("summary.md"), &summary);
         println!("\n===== paste from here =====\n{summary}===== to here =====");

@@ -138,20 +138,25 @@ Field shapes go to [manifest-schema](../architecture/manifest-schema.md) as add-
 ```
 <claude> -p --input-format stream-json --output-format stream-json --verbose
   --tools "" --strict-mcp-config --disable-slash-commands --no-session-persistence
+  --safe-mode                      # no CLAUDE.md, memory, skills, plugins, hooks, MCP
   --system-prompt <Appendix B>     # replaces the coding prompt
 cwd = <data-dir>/chat/<thread-id>/
-env = user env − PF_* + CLAUDE_CONFIG_DIR=<data-dir>/claude-config/,
+env = user env − PF_* − HOMEDRIVE/HOMEPATH + CLAUDE_CONFIG_DIR=<data-dir>/claude-config/,
+      USERPROFILE=HOME=<data-dir>/chat-home/ (empty),
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1, DISABLE_AUTOUPDATER=1
+      (detection and login commands keep the user's home)
 ```
 
 | Claim | Status |
 |---|---|
 | `-p`, stream-json in and out with `--verbose`, `--tools ""`, `--strict-mcp-config`, `--disable-slash-commands`, `--system-prompt`, `--no-session-persistence`; base64 image blocks in streaming input; `result.total_cost_usd`; the env vars, `CLAUDE_CONFIG_DIR` included (it moves all state and credentials); `auth status` exit codes 0 / 1, `authMethod`, `configDirectory` (≥ 2.1.268) | documented |
 | `auth status --json` fields `loggedIn` and `subscriptionType` | **observed** on 2.1.319, not documented |
-| With `CLAUDE_CONFIG_DIR` set, nothing from `<home>/.claude/` or `<home>/.claude.json` is read (hooks, plugins, skills, MCP, CLAUDE.md, memory) | **unverified**. Slice 0 checks it; if it fails, the chat stays disabled (FR-PRM-45, #60) |
+| With `CLAUDE_CONFIG_DIR` set, nothing from `<home>/.claude/` or `<home>/.claude.json` is read (hooks, plugins, skills, MCP, CLAUDE.md, memory) | **false** on 2.1.319 (probe C08, 2026-11-09): the home folder's `.claude/CLAUDE.md` and the cwd's parent folders' `CLAUDE.md` still load. Hooks, skills, agents, commands, plugins and MCP did not (C09–C11). Hence `--safe-mode` and the empty chat home |
+| `--safe-mode` keeps CLAUDE.md (every scope), auto memory, skills, plugins, hooks, MCP servers, commands and agents from loading; the login, model and built-in tools work normally (≥ 2.1.169) | documented. Whether it also skips a parent folder's `AGENTS.md` is **unverified**: probe C24 checks it, C25 checks the markers are live |
+| With `USERPROFILE` / `HOME` pointed at an empty folder, the plan login in `CLAUDE_CONFIG_DIR` still works | **observed** on 2.1.319 (probe C08's stand-in home, logged in) |
 | `--no-session-persistence` still allows several turns in one stream-json process, and writes no transcript | **unverified**. Slice 0 checks it; `projects/` is emptied anyway |
 | A 10 MB cap on stdin applies to stream-json input | **unverified**. FR-PRM-25 keeps a turn ≤ 4 MiB of images regardless |
-| Not used: `--bare` (never reads the subscription login), `--safe-mode` and `--permission-prompts` (unverified, and not needed now that the config is isolated and there are no tools), `--resume` and `--model` (deferred, #60), `--allowedTools`, image file paths (would need the Read tool) | — |
+| Not used: `--bare` (never reads the subscription login), `--permission-prompts` (unverified, and not needed with no tools), `--resume` and `--model` (deferred, #60), `--allowedTools`, image file paths (would need the Read tool) | — |
 
 - **Slice 0 gates slice 4.** The probe runs the exact list above on the owner's CLI. It puts marker files in a throwaway stand-in for the user's config (a `CLAUDE.md`, a hook, a plugin dir). It then checks that `system/init` lists no plugins, skills, MCP servers or agents, that the debug log shows no marker read, that two turns work in one process, and that `<data-dir>/claude-config/projects/` stays empty. The probe fixes the minimum version, which is no lower than 2.1.268. If isolation fails, the adapter is still built, but the chat ships disabled with `isolation_unavailable`.
 - **Stdin message** per turn, one JSON line: `{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/jpeg","data":…}}…,{"type":"text","text":<host note? + context block + user text>}]},"parent_tool_use_id":null}`.
