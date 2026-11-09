@@ -12,6 +12,10 @@ import type {
   CoreErrorShape,
   DraftReferences,
   Events,
+  GenJobDraft,
+  GenSize,
+  Operation,
+  ProjectKind,
   ExportSettingsInput,
   MaskBytes,
   ProjectFolder,
@@ -262,7 +266,11 @@ export const api = {
       call('provider_settings_set', { team_id: teamId, project_id: projectId }),
     listModels: (operation: Commands['provider_list_models'][0]['operation']) =>
       call('provider_list_models', { operation }),
-    getCapabilities: (modelId: string) => call('provider_get_capabilities', { model_id: modelId }),
+    getCapabilities: (modelId: string, operation?: Operation) =>
+      call('provider_get_capabilities', {
+        model_id: modelId,
+        ...(operation === undefined ? {} : { operation }),
+      }),
     balance: () => call('provider_balance', {}),
     fakeSetCase: (fakeCase: string) => call('provider_fake_set_case', { case: fakeCase }),
   },
@@ -285,7 +293,28 @@ export const api = {
     delete: (packId: string) => call('ref_pack_delete', { pack_id: packId }),
     trashList: () => call('ref_trash_list', {}),
     trashRestore: (itemId: string) => call('ref_trash_restore', { id: itemId }),
-    resolve: (modelId: string, references: DraftReferences | null) =>
-      call('ref_resolve', { model_id: modelId, references }),
+    /** GEN passes `{operation: 'generate', structure}` (FR-GEN-13); RGN passes nothing. */
+    resolve: (
+      modelId: string,
+      references: DraftReferences | null,
+      gen?: { operation: Operation; structure: string | null },
+    ) => call('ref_resolve', { model_id: modelId, references, ...(gen ?? {}) }),
+  },
+  /** new-asset-generation §9 (GEN). Cancel, dismiss, star, discard and the iterations list are
+   *  RGN's commands, reused as is. */
+  gen: {
+    projectCreate: (section: Section, name: string) =>
+      call('gen_project_create', { section, name }),
+    sizeFit: (modelId: string, kind: ProjectKind, size: GenSize) =>
+      call('gen_size_fit', { model_id: modelId, kind, size }),
+    evaluateControls: (modelId: string, values: Record<string, unknown>) =>
+      call('gen_controls_evaluate', { model_id: modelId, values }),
+    estimate: (draft: GenJobDraft) => call('gen_job_estimate', { draft }),
+    submit: (input: Commands['gen_job_submit'][0]) => call('gen_job_submit', input),
+    retryDraft: (jobId: string) => call('gen_job_retry_draft', { job_id: jobId }),
+    preview: (jobId: string, candidateId: string) =>
+      call('gen_candidate_preview', { job_id: jobId, candidate_id: candidateId }),
+    pick: (jobId: string, candidateId: string) =>
+      call('gen_candidate_pick', { job_id: jobId, candidate_id: candidateId }),
   },
 };

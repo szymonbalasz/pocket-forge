@@ -927,6 +927,7 @@ fn fr_rgn_11_a_restored_count_the_capabilities_reject_resets_with_a_notice() {
     let mut caps = pf_provider::block_on(pf_provider::Provider::get_capabilities(
         &FakeProvider::default(),
         "fake-white-edit",
+        pf_provider::Operation::EditMasked,
     ))
     .unwrap();
     let mut lower = caps.clone();

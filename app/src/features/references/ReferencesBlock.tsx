@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { Popover } from 'radix-ui';
 
 import type { DraftReferences, RefItem, RefResolved, RefRole } from '../../api';
-import { block, useBlock } from './blockStore';
+import { block, useBlock, type RefHost } from './blockStore';
 import {
   badgeLabel,
   headerCount,
@@ -33,19 +33,28 @@ export interface ReferencesBlockProps {
   readOnly: boolean;
   /** Called after each change; `save` = a user edit to write with the draft (FR-REF-20). */
   onChange(save: boolean): void;
+  /** Who renders it (FR-GEN-13): RGN's Region edit tab (default) or GEN's New image tab. */
+  host?: RefHost;
+  /** GEN: the chosen structural sketch file, or null = None (its slot's max drops by 1). */
+  structure?: string | null;
 }
 
 export function ReferencesBlock(props: ReferencesBlockProps) {
   const { projectId, draftReferences, modelId, hasSlots, onChange } = props;
+  const host = props.host ?? 'rgn';
+  const structure = props.structure ?? null;
   const active = hasSlots ? modelId : null;
   useEffect(() => {
     block.onChange(onChange);
   }, [onChange]);
   useEffect(() => {
-    block.attach(projectId, draftReferences ?? null);
-    // The draft is read once per project; later edits live in the block store.
+    block.attach(projectId, draftReferences ?? null, host);
+    // The draft is read once per project and host; later edits live in the block store.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, host]);
+  useEffect(() => {
+    if (host === 'gen') block.setStructure(structure);
+  }, [host, structure]);
   useEffect(() => {
     block.setModel(projectId ? active : null);
   }, [projectId, active]);

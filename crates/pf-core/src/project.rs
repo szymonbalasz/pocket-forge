@@ -750,6 +750,9 @@ pub struct DraftInput {
     /// #55: the blend instruction setting; absent or `null` = on (the default).
     #[serde(default)]
     pub blend_instruction: Option<bool>,
+    /// PRM's helper ticks (FR-PRM-05); absent or `null` = the defaults.
+    #[serde(default)]
+    pub prompt_helpers: Option<Vec<String>>,
 }
 
 /// Tells an absent field (`None`, via `default`) from an explicit `null` (`Some(None)`).
@@ -895,6 +898,7 @@ pub(crate) fn apply_draft(
         mask_id: draft.mask_id.unwrap_or(kept_mask),
         references: draft.references,
         blend_instruction: draft.blend_instruction,
+        prompt_helpers: draft.prompt_helpers,
         updated_at: ctx.now(),
         extra,
     });

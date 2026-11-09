@@ -118,6 +118,8 @@ pub enum ErrorCode {
     OutOfMemory,
     /// An encoder failed (EXP §9).
     EncodeFailed,
+    /// More items than a list allows; `field` names the list (PRM `prm_helpers_save`, FR-PRM-01).
+    TooMany,
 }
 
 impl ErrorCode {
@@ -185,6 +187,7 @@ impl ErrorCode {
             ErrorCode::DiskFull => "disk_full",
             ErrorCode::OutOfMemory => "out_of_memory",
             ErrorCode::EncodeFailed => "encode_failed",
+            ErrorCode::TooMany => "too_many",
         }
     }
 }

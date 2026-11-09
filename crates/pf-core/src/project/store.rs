@@ -258,6 +258,7 @@ pub fn put_mask(
             mask_id: None,
             references: None,
             blend_instruction: None,
+            prompt_helpers: None,
             updated_at: ctx.now(),
             extra: Extra::new(),
         });

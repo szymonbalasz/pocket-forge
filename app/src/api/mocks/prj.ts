@@ -32,6 +32,8 @@ export interface PrjMockProject {
   trash?: TrashItem[];
   /** No thumbnail yet (`thumb_url: null`). */
   noThumb?: boolean;
+  /** Made by Generate new (FR-GEN-02): no image yet (`image_path: null`, `layers: []`). */
+  noImage?: boolean;
   /** `project.json` unreadable: the card has no `last_edited` and the `unreadable` badge (R45). */
   unreadable?: boolean;
   /** A save still pending after `locked`: `project_close` answers `unsaved` (FR-PRJ-21). */
@@ -148,11 +150,14 @@ export function prjMock(
       thumb: !p.noThumb,
       unreadable: !!p.unreadable,
       original,
+      noImage: !!p.noImage,
       source: p.source ?? null,
       read_only: p.read_only ?? null,
       warnings: p.warnings ?? [],
       folders: {
-        working: [{ name: original, bytes: 4096, mtime: p.last_edited, image: true }],
+        working: p.noImage
+          ? []
+          : [{ name: original, bytes: 4096, mtime: p.last_edited, image: true }],
         references: [],
         structure: [],
         parts: [],
@@ -193,27 +198,29 @@ export function prjMock(
       project_id: p.id,
       kind: KIND[String(p.section)],
       name: p.name,
-      image_path: `${String(p.path)}/working/${String(p.original)}`,
+      image_path: p.noImage ? null : `${String(p.path)}/working/${String(p.original)}`,
       project_dir: p.path,
       saved: true,
       read_only: p.read_only,
       warnings: [...(p.warnings as Rec[])],
-      width: seed.image.w,
-      height: seed.image.h,
+      width: p.noImage ? 0 : seed.image.w,
+      height: p.noImage ? 0 : seed.image.h,
       format: 'png',
-      layers: [
-        {
-          id: '01JLAYER00000000000000000',
-          kind: 'original',
-          file: null,
-          cx: seed.image.w / 2,
-          cy: seed.image.h / 2,
-          scale: 1,
-          rotation: 0,
-          opacity: 1,
-          visible: true,
-        },
-      ],
+      layers: p.noImage
+        ? []
+        : [
+            {
+              id: '01JLAYER00000000000000000',
+              kind: 'original',
+              file: null,
+              cx: seed.image.w / 2,
+              cy: seed.image.h / 2,
+              scale: 1,
+              rotation: 0,
+              opacity: 1,
+              visible: true,
+            },
+          ],
       draft: null,
       revisions: [...revisions],
       head_revision: revisions.at(-1)?.id ?? null,
@@ -306,6 +313,25 @@ export function prjMock(
         name,
         original: `${name}.png`,
         last_edited: seed.now,
+      });
+      return { path: rec.path };
+    },
+    // GEN (FR-GEN-01/02): a project with no image, named as asked (FR-PRJ-44 rules).
+    gen_project_create: (input) => {
+      if (state.config.unavailable) return fail('library_unavailable', 'Library unavailable');
+      const section = String(input.section);
+      if (!SECTION_DIR[section])
+        return fail('invalid_input', 'Unknown section', { field: 'section' });
+      const raw = String(input.name ?? '').trim();
+      if (!raw) return fail('invalid_name', 'Enter a name', { field: 'name' });
+      const name = sanitize(raw);
+      if (taken(section, name)) return fail('name_taken', `“${name}” is taken`, { field: 'name' });
+      const rec = addProject({
+        section: section as Section,
+        name,
+        last_edited: seed.now,
+        noImage: true,
+        noThumb: true,
       });
       return { path: rec.path };
     },
