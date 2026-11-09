@@ -572,3 +572,28 @@ test('FR-GEN-19 R97 a late model list of the previous project never lands in the
   expect(gen.get().modelId).toBe('fake-gen-wh');
   expect(gen.get().notices).toEqual([]);
 });
+
+test('R109 FR-PRJ-19 a second close while the close-time save runs waits for it', async () => {
+  await setup();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  mockWindow().__pfMockHandlers.project_put_draft = async () => {
+    await gate;
+    return { seq: 9 };
+  };
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'sunken temple' } });
+  let first!: Promise<void>;
+  let second!: Promise<void>;
+  act(() => {
+    // The window X, then ← Home at once.
+    first = projectStore.close();
+    second = projectStore.close();
+  });
+  await act(() => new Promise((r) => setTimeout(r, 0)));
+  expect(fake.callsOf('project_put_draft')).toHaveLength(1);
+  expect(fake.callsOf('project_close'), 'no close before the save lands').toHaveLength(0);
+  release();
+  await act(() => Promise.all([first, second]));
+  expect(fake.callsOf('project_close').length).toBeGreaterThan(0);
+  expect(projectStore.get().project).toBeNull();
+});
