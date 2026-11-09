@@ -1253,3 +1253,33 @@ fn fr_prm_44_a_host_switched_turn_gets_the_now_on_note() {
     assert!(second.ends_with("a flooded crypt"));
     assert!(!second.contains(HOST_RGN_V1));
 }
+
+#[test]
+fn fr_prm_21_closing_the_window_never_cancels_a_job() {
+    use crate::job::JobState;
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "make this a kitchen").unwrap();
+    let id = lab.submit("a kitchen");
+    assert_eq!(lab.job(id).state, JobState::Submitted);
+    let calls = lab.fake().call_count();
+    // What the window's `Destroyed` handler runs (app/src-tauri chat_window.rs).
+    lab.core.chat.end_session();
+    assert_eq!(lab.job(id).state, JobState::Submitted, "still running");
+    assert_eq!(
+        lab.fake().call_count(),
+        calls,
+        "no provider call (no cancel)"
+    );
+    lab.drive();
+    assert_eq!(lab.job(id).state, JobState::Fetched);
+    assert_eq!(lab.candidates(id).len(), 3);
+    // The thread is kept.
+    assert_eq!(
+        thread_view(&lab)["thread"]["turns"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
