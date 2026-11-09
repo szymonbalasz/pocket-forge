@@ -103,11 +103,15 @@ pub const KEPT_HEADERS: [&str; 3] = ["content-type", "retry-after", "etag"];
 /// Transport failure before a response arrived.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TransportError {
-    /// Connect, DNS or I/O failure.
+    /// Nothing was sent: connect, DNS or setup failure.
     #[error("the provider can't be reached ({0})")]
     Offline(String),
     #[error("the request timed out")]
     Timeout,
+    /// The connection broke after the request went out (reset, body read error): the provider
+    /// may have received and acted on it (R102).
+    #[error("the connection broke after the request was sent")]
+    Interrupted,
 }
 
 /// Sends one HTTP request.
@@ -191,13 +195,16 @@ impl HttpTransport {
 }
 
 fn map_reqwest(e: &reqwest::Error) -> TransportError {
+    // Never the error's Display: it names the full URL, and signed URLs carry tokens.
     if e.is_timeout() {
         TransportError::Timeout
     } else if e.is_connect() {
         TransportError::Offline("connection failed".into())
+    } else if e.is_builder() {
+        TransportError::Offline("the request could not be built".into())
     } else {
-        // Never the error's Display: it names the full URL, and signed URLs carry tokens.
-        TransportError::Offline("transfer failed".into())
+        // Anything after the connection opened may have reached the provider (R102).
+        TransportError::Interrupted
     }
 }
 
@@ -248,9 +255,7 @@ impl Transport for HttpTransport {
         })();
         Box::pin(async move {
             match prepared {
-                Ok(handle) => handle
-                    .await
-                    .unwrap_or_else(|_| Err(TransportError::Offline("request task failed".into()))),
+                Ok(handle) => handle.await.unwrap_or(Err(TransportError::Interrupted)),
                 Err(e) => Err(e),
             }
         })

@@ -89,7 +89,8 @@ impl Api {
     }
 
     /// Sends one request with the retry policy and returns the raw response (any status).
-    /// Transport failures that survive the retries become `offline` / `timeout`.
+    /// Transport failures that survive the retries become `offline` / `timeout`. A [`Retry::Once`]
+    /// call whose connection broke after sending is `timeout`: it may have been acted on (R102).
     pub async fn send(
         &self,
         creds: Option<&Credentials>,
@@ -153,7 +154,10 @@ impl Api {
                 self.note(url, &out);
                 return out.map_err(|e| match e {
                     TransportError::Timeout => ProviderError::Timeout,
-                    TransportError::Offline(_) => ProviderError::Offline,
+                    TransportError::Interrupted if retry == Retry::Once => ProviderError::Timeout,
+                    TransportError::Interrupted | TransportError::Offline(_) => {
+                        ProviderError::Offline
+                    }
                 });
             }
             let backoff = Duration::from_secs(BACKOFF_SECS[attempt - 1]);

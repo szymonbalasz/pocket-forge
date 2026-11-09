@@ -275,10 +275,10 @@ impl RecordingTransport {
                     Err(e) => RecordedResponse {
                         status: 0,
                         headers: BTreeMap::new(),
-                        body: json!(if *e == TransportError::Timeout {
-                            "timeout"
-                        } else {
-                            "offline"
+                        body: json!(match e {
+                            TransportError::Timeout => "timeout",
+                            TransportError::Interrupted => "interrupted",
+                            TransportError::Offline(_) => "offline",
                         }),
                     },
                 };

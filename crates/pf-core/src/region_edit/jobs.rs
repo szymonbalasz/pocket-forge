@@ -278,13 +278,14 @@ pub(crate) fn submit_job(core: &Core, job: SubmitJob<'_>) -> CoreResult<JobSubmi
             None,
             true,
         ),
-        // FR-RGN-23: a timeout may still have started (and charged) the job.
+        // FR-RGN-23 / R102: a timeout, or any answer after sending that isn't a clear refusal
+        // (the provider maps those to `timeout`), may still have started and charged the job.
         Err(e @ ProviderError::Timeout) => (
             SpoolUpdate {
                 state: Some(JobState::Lost),
                 error: Some(json!({
                     "code": "timeout",
-                    "hint": "The provider didn't answer the submit. The job may still run and be charged; check the provider before retrying.",
+                    "hint": "The provider didn't confirm the submit. The job may still run and be charged; check the provider before retrying.",
                 })),
                 ..Default::default()
             },
