@@ -1320,3 +1320,41 @@ fn fr_prm_38_each_turn_records_usage_notional_only_on_a_plan_login() {
     let end = events(&lab, super::EVENT_TURN).last().cloned().unwrap();
     assert_eq!(end["usage"]["notional"], true);
 }
+
+#[test]
+fn fr_prm_32_the_mode_picks_the_backend_over_injected_seams() {
+    // Fake mode: the shared fake; the process spawner is never touched.
+    let lab = Lab::with_context(|ctx| {
+        ctx.chat.mode = BackendMode::Fake;
+        ctx.chat.spawner = Arc::new(PanicSpawner);
+    });
+    let st = consent(&lab);
+    assert_eq!(st["mode"], "fake");
+    assert_eq!(st["backend"]["auth_method"], "fake");
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "hi").unwrap();
+    let end = events(&lab, super::EVENT_TURN).last().cloned().unwrap();
+    assert_eq!(end["state"], "done");
+    let view = thread_view(&lab);
+    assert_eq!(view["thread"]["backend"], "fake");
+
+    // Claude Code mode: the adapter, over the injected spawner (replay) and clock.
+    let (lab, sp) = claude_lab();
+    let st = consent(&lab);
+    assert_eq!(st["mode"], "claude-code");
+    assert_eq!(st["backend"]["version"], "2.1.319");
+    assert_eq!(
+        sp.log().runs.len(),
+        2,
+        "detection ran on the injected spawner"
+    );
+    sp.push_script(Script::recordings(&[SUCCESS_IMAGE]));
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "hi").unwrap();
+    assert_eq!(
+        sp.log().spawns.len(),
+        1,
+        "the turn's child came from the seam"
+    );
+    assert_eq!(thread_view(&lab)["thread"]["backend"], "claude-code");
+}

@@ -244,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn prm_s13_backend_mode_needs_both_variables_and_never_runs_in_ci() {
+    fn fr_prm_32_prm_s13_backend_mode_fake_by_default_real_needs_both_variables_never_in_ci() {
         assert_eq!(backend_mode(&env(&[]), false), Ok(BackendMode::Fake));
         assert_eq!(
             backend_mode(&env(&[(ENV_BACKEND, "claude-code")]), false),
