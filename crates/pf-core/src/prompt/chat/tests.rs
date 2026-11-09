@@ -182,7 +182,10 @@ fn fr_prm_33_claude_path_is_an_absolute_claude_executable() {
     let stored = lab.core.state().settings.prompt_chat.claude_path.clone();
     for (bad, why) in [
         ("claude.exe", "relative"),
-        (r"cc\claude.exe", "relative"),
+        (
+            &format!("cc{}claude.exe", std::path::MAIN_SEPARATOR),
+            "relative",
+        ),
         ("./claude", "relative"),
         (&format!("{dir}claude.bat") as &str, "end in"),
         (&format!("{dir}evil.exe"), "end in"),
