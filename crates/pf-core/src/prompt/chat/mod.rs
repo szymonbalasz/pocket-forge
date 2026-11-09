@@ -134,6 +134,16 @@ struct Rt {
     contexts: HashMap<(Ulid, ChatHost), (u64, Value)>,
     seq: u64,
     running: Option<Running>,
+    /// §7 / R94: a read-only project's thread lives here (nothing is written).
+    memory: Option<MemoryThread>,
+}
+
+/// A read-only project's thread kept in memory: the file's turns (if any) plus the turns
+/// sent since, which are shown "not saved" (§7, R94). Dropped when the project closes.
+struct MemoryThread {
+    project_id: Ulid,
+    thread: Thread,
+    unsaved: Vec<Ulid>,
 }
 
 struct SessionEntry {
@@ -182,6 +192,13 @@ impl ChatRuntime {
         let running = {
             let mut rt = lock(&self.rt);
             rt.contexts.retain(|(p, _), _| *p != project_id);
+            if rt
+                .memory
+                .as_ref()
+                .is_some_and(|m| m.project_id == project_id)
+            {
+                rt.memory = None;
+            }
             rt.running.as_ref().map(|r| r.project_id)
         };
         match running {
@@ -710,6 +727,8 @@ pub struct ThreadView {
     /// The host whose prompt block is attached for the project (the latest published), or
     /// `null`: the window's header and "Send disabled: no prompt block" (FR-PRM-27/43).
     pub current_host: Option<ChatHost>,
+    /// Turns kept in memory only (a read-only project, §7 / R94): shown "not saved".
+    pub unsaved_turn_ids: Vec<Ulid>,
 }
 
 /// `prm_chat_thread_get` (FR-PRM-22).
@@ -723,10 +742,21 @@ impl Command for PrmChatThreadGet {
     fn run(core: &Core, input: ProjectInput) -> CoreResult<ThreadView> {
         let (dir, read_only) = open_project(core, input.project_id)?;
         let live = core.chat.live_turns();
-        let loaded = {
+        let mut loaded = {
             let _io = lock(&core.chat.thread_io);
             thread::load(&core.ctx, &dir, !read_only, &live)
         };
+        // A read-only project shows the turns kept in memory (§7 / R94).
+        let mut unsaved_turn_ids = Vec::new();
+        if read_only
+            && let Some(m) = lock(&core.chat.rt)
+                .memory
+                .as_ref()
+                .filter(|m| m.project_id == input.project_id)
+        {
+            loaded.thread = Some(m.thread.clone());
+            unsaved_turn_ids = m.unsaved.clone();
+        }
         let running_turn_id = core.chat.running_turn();
         let fresh_session_next = running_turn_id.is_none()
             && !core
@@ -742,6 +772,7 @@ impl Command for PrmChatThreadGet {
             corrupt_set_aside: loaded.corrupt_set_aside,
             fresh_session_next,
             current_host,
+            unsaved_turn_ids,
         })
     }
 }
@@ -961,11 +992,25 @@ impl Command for PrmChatSend {
         let now = core.ctx.now();
 
         // The thread (created at the first send).
-        let mut thread = {
-            let _io = lock(&core.chat.thread_io);
-            thread::load(&core.ctx, &dir, !read_only, &[]).thread
-        }
-        .unwrap_or_else(|| Thread::new(core.ctx.new_id(), now, backend_name(core.ctx.chat.mode)));
+        // A read-only project continues its in-memory thread (§7 / R94).
+        let memory = if read_only {
+            lock(&core.chat.rt)
+                .memory
+                .as_ref()
+                .filter(|m| m.project_id == pid)
+                .map(|m| (m.thread.clone(), m.unsaved.clone()))
+        } else {
+            None
+        };
+        let (memory_thread, mut unsaved) = memory.unzip();
+        let mut thread = memory_thread
+            .or_else(|| {
+                let _io = lock(&core.chat.thread_io);
+                thread::load(&core.ctx, &dir, !read_only, &[]).thread
+            })
+            .unwrap_or_else(|| {
+                Thread::new(core.ctx.new_id(), now, backend_name(core.ctx.chat.mode))
+            });
         let thread_id = thread.id;
         let cwd = core.ctx.data_dir.join("chat").join(thread_id.to_string());
 
@@ -1065,12 +1110,24 @@ impl Command for PrmChatSend {
         // Running before the first save, so a reload never reads this turn as `interrupted`
         // (M2).
         let cancel = CancelHandle::new();
-        lock(&core.chat.rt).running = Some(Running {
-            turn_id,
-            user_turn_id,
-            project_id: pid,
-            cancel: cancel.clone(),
-        });
+        {
+            let mut rt = lock(&core.chat.rt);
+            rt.running = Some(Running {
+                turn_id,
+                user_turn_id,
+                project_id: pid,
+                cancel: cancel.clone(),
+            });
+            if read_only {
+                let mut ids = unsaved.take().unwrap_or_default();
+                ids.extend([user_turn_id, turn_id]);
+                rt.memory = Some(MemoryThread {
+                    project_id: pid,
+                    thread: thread.clone(),
+                    unsaved: ids,
+                });
+            }
+        }
         let saved = !read_only && {
             let _io = lock(&core.chat.thread_io);
             thread::save(&core.ctx, &dir, &thread).is_ok()
@@ -1230,23 +1287,35 @@ impl TurnJob {
         let saved = {
             let _io = lock(&self.thread_io);
             let live = [self.turn_id, self.user_turn_id];
-            let mut thread = thread::load(&self.ctx, &self.project_dir, self.writable, &live)
-                .thread
-                .filter(|t| t.id == self.thread.id)
-                .unwrap_or_else(|| self.thread.clone());
-            if let Some(u) = thread.turn_mut(self.user_turn_id) {
-                u.state = TurnState::Done;
+            let finish = |thread: &mut Thread| {
+                if let Some(u) = thread.turn_mut(self.user_turn_id) {
+                    u.state = TurnState::Done;
+                }
+                if let Some(t) = thread.turn_mut(self.turn_id) {
+                    t.state = state;
+                    t.text = text.clone();
+                    t.error = error.as_ref().map(turn_error);
+                    t.usage = usage;
+                    t.proposals = proposals.clone();
+                    t.at = now;
+                }
+                thread.updated_at = now;
+            };
+            if self.writable {
+                let mut thread = thread::load(&self.ctx, &self.project_dir, self.writable, &live)
+                    .thread
+                    .filter(|t| t.id == self.thread.id)
+                    .unwrap_or_else(|| self.thread.clone());
+                finish(&mut thread);
+                thread::save(&self.ctx, &self.project_dir, &thread).is_ok()
+            } else {
+                // Read-only (§7 / R94): the reply goes to the in-memory thread only.
+                let mut rt = lock(&self.rt);
+                if let Some(m) = rt.memory.as_mut().filter(|m| m.thread.id == self.thread.id) {
+                    finish(&mut m.thread);
+                }
+                false
             }
-            if let Some(t) = thread.turn_mut(self.turn_id) {
-                t.state = state;
-                t.text = text;
-                t.error = error.as_ref().map(turn_error);
-                t.usage = usage;
-                t.proposals = proposals.clone();
-                t.at = now;
-            }
-            thread.updated_at = now;
-            self.writable && thread::save(&self.ctx, &self.project_dir, &thread).is_ok()
         };
         {
             let mut rt = lock(&self.rt);

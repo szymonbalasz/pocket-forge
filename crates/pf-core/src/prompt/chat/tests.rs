@@ -265,6 +265,58 @@ fn fr_prm_27_send_streams_and_records_the_turns() {
     assert_eq!(std::fs::read_dir(&cwd).unwrap().count(), 1);
 }
 
+/// §7 / R94: on a read-only project the chat works with the turns kept in memory, shown as
+/// "not saved"; nothing is written, and the memory goes with the project.
+#[test]
+fn fr_prm_22_read_only_project_keeps_turns_in_memory() {
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "first, saved").unwrap();
+    let saved_view = thread_view(&lab);
+    let id: Ulid = saved_view["thread"]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let path = thread::thread_path(&lab.project_dir, id);
+    let before = std::fs::read(&path).unwrap();
+    lab.core.state().project.as_mut().unwrap().read_only =
+        Some(crate::project::ReadOnlyReason::NewerVersion);
+
+    let out = send(&lab, "second, in memory").unwrap();
+    assert_eq!(out["saved"], false);
+    assert_eq!(
+        events(&lab, super::EVENT_TURN).last().unwrap()["saved"],
+        false
+    );
+    let view = thread_view(&lab);
+    let turns = view["thread"]["turns"].as_array().unwrap();
+    assert_eq!(turns.len(), 4, "the saved turns, then the new ones");
+    assert_eq!(turns[2]["text"], "second, in memory");
+    assert_eq!(turns[3]["state"], "done");
+    assert_eq!(turns[3]["proposals"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        view["unsaved_turn_ids"],
+        json!([turns[2]["id"], turns[3]["id"]])
+    );
+    // A second turn continues the same memory thread.
+    send(&lab, "third").unwrap();
+    assert_eq!(
+        thread_view(&lab)["unsaved_turn_ids"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), before, "nothing is written");
+
+    // Closing the project drops the memory.
+    lab.core.chat.on_project_close(pid(&lab));
+    let view = thread_view(&lab);
+    assert_eq!(view["thread"]["turns"].as_array().unwrap().len(), 2);
+    assert_eq!(view["unsaved_turn_ids"], json!([]));
+}
+
 #[test]
 fn fr_prm_27_send_needs_a_block_and_one_turn_at_a_time() {
     let lab = lab();

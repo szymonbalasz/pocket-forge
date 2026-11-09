@@ -200,3 +200,8 @@
 .prm-chat-preview img.is-sent {
   opacity: 0.4;
 }
+
+.prm-chat-tag.is-unsaved {
+  color: var(--pf-warn);
+  border-color: var(--pf-warn);
+}

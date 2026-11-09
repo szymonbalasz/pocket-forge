@@ -269,6 +269,8 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     threads: new Map<string, { id: string; turns: Turn[]; updated_at: string }>(),
     running: null as null | { turnId: string; cancel: () => void },
     session: null as null | string,
+    /** §7 / R94: turns sent on a read-only project (kept in memory only). */
+    unsaved: [] as string[],
     ids: 0,
   };
   const chatId = () => `01CHAT${String(++chat.ids).padStart(20, '0')}`;
@@ -422,6 +424,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
           : null,
         running_turn_id: chat.running?.turnId ?? null,
         corrupt_set_aside: false,
+        unsaved_turn_ids: chat.unsaved,
         fresh_session_next: chat.session !== String(input.project_id),
         current_host: (() => {
           let host: Host | null = null;
@@ -464,6 +467,8 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     chat.threads.set(pid, t);
     const userId = chatId();
     const turnId = chatId();
+    const readOnly = !!(handlers.project_get?.({}) as Rec | null)?.read_only;
+    if (readOnly) chat.unsaved.push(userId, turnId);
     const summary =
       host === 'rgn'
         ? 'crop 556×456 + mask · prompt · fake model'
@@ -509,7 +514,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       t.updated_at = now();
       chat.running = null;
       if (state !== 'done') chat.session = null;
-      emit('prm:chat-turn', { turn_id: turnId, state, saved: true, ...extra });
+      emit('prm:chat-turn', { turn_id: turnId, state, saved: !readOnly, ...extra });
     };
     chat.running = {
       turnId,
@@ -549,7 +554,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       context_summary: summary,
       dropped: [],
       fresh_session: fresh,
-      saved: true,
+      saved: !readOnly,
     };
   };
   handlers.prm_chat_cancel = (input) => {

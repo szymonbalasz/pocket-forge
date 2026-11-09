@@ -130,7 +130,7 @@ test('FR-PRM-37 a failed turn shows its error with Retry, which resends the same
   expect(sends.map((s) => s.text)).toEqual(['ideas', 'ideas']);
 });
 
-test('§7 read-only project: the chat works, nothing is saved, Replace is disabled', async () => {
+test('§7 R94 read-only project: the turns show, marked "Not saved"; Replace is disabled', async () => {
   setup({ chat: { consent: true } }, {
     ...baseSnapshot(),
     read_only: 'original_changed',
@@ -142,6 +142,11 @@ test('§7 read-only project: the chat works, nothing is saved, Replace is disabl
   fireEvent.click(id('prm-chat-send'));
   await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
   expect((id('prm-chat-proposal-replace') as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getAllByText('ideas').length).toBeGreaterThan(0);
+  expect(screen.getAllByTestId('prm-chat-unsaved').map((e) => e.textContent)).toEqual([
+    'Not saved',
+    'Not saved',
+  ]);
 });
 
 test('FR-PRM-21 the Chat button opens the chat window', async () => {

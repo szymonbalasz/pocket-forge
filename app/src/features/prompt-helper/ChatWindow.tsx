@@ -332,6 +332,7 @@ export function ChatWindow() {
     );
 
   const turns = view?.thread?.turns ?? [];
+  const unsaved = new Set(view?.unsaved_turn_ids ?? []);
   const running = live?.turnId ?? view?.running_turn_id ?? null;
   const readOnly = !!project.read_only;
   const usage = usageLabel(turns);
@@ -354,6 +355,7 @@ export function ChatWindow() {
             turn={t}
             liveText={t.id === live?.turnId ? live.text : null}
             running={t.id === running}
+            unsaved={unsaved.has(t.id)}
             readOnly={readOnly}
             onReplace={replace}
             onRetry={() => {
@@ -511,16 +513,24 @@ function TurnView(props: {
   turn: ChatTurn;
   liveText: string | null;
   running: boolean;
+  /** Kept in memory only (read-only project, §7 / R94). */
+  unsaved: boolean;
   readOnly: boolean;
   onReplace(p: ChatProposal): Promise<void>;
   onRetry(): void;
 }) {
   const t = props.turn;
+  const notSaved = props.unsaved && (
+    <span className="prm-chat-tag is-unsaved" data-testid="prm-chat-unsaved">
+      Not saved
+    </span>
+  );
   if (t.role === 'user')
     return (
       <li className="prm-chat-turn is-user" data-record-id={t.id}>
         {t.fresh_session && <p className="prm-chat-session muted small">New session</p>}
         <span className="prm-chat-tag">{HOST_LABEL[t.host]}</span>
+        {notSaved}
         <p className="prm-chat-text">{t.text}</p>
         {t.context && <span className="prm-chat-summary small muted">{t.context.summary}</span>}
       </li>
@@ -528,6 +538,7 @@ function TurnView(props: {
   const text = props.liveText ?? t.text;
   return (
     <li className="prm-chat-turn is-reply" data-record-id={t.id} aria-busy={props.running}>
+      {notSaved}
       {segments(text).map((s, i) =>
         s.kind === 'code' ? (
           <pre key={i} className="prm-chat-code" data-lang={s.lang || undefined}>
