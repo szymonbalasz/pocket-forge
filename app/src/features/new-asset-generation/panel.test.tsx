@@ -301,7 +301,8 @@ test('FR-GEN-20 FR-GEN-21 FR-GEN-22 FR-GEN-25 estimate, confirm "New image · W 
   fireEvent.change(screen.getByTestId('gen-panel-prompt'), { target: { value: 'flooded crypt' } });
   await act(() => new Promise((r) => setTimeout(r, 700)));
   expect(fake.callsOf('gen_job_estimate').length).toBe(est);
-  expect(screen.getByTestId('gen-panel-estimate').dataset.cost).toBe('2');
+  // fake-gen-wh's default count is 1 (the fixture is the fake's own, R80).
+  expect(screen.getByTestId('gen-panel-estimate').dataset.cost).toBe('1');
 
   await act(async () => fireEvent.click(screen.getByTestId('gen-panel-submit')));
   const dialog = await screen.findByTestId('rgn-confirm');

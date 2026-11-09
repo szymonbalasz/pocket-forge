@@ -1,7 +1,7 @@
 // GEN thin e2e on the mocked core (new-asset-generation §13; slice 5, UI on mocked commands):
 // + New menu → Generate new… → name → the project opens on the New image tab → size, prompt →
-// estimate → confirm → the job runs in RGN's tracker with the `new image` badge. Pick and undo
-// come with slice 4.
+// estimate → confirm → the job runs in RGN's tracker with the `new image` badge. Slice 4: pick
+// (alone preview with no image yet), undo back to "No image yet", re-pick from an older iteration.
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -80,4 +80,62 @@ test('FR-GEN-01 FR-GEN-04 FR-GEN-08 FR-GEN-21 FR-GEN-25 + New → Generate new�
     size: { mode: 'grid', cols: 30, rows: 40, pps: 70 },
     structure: null,
   });
+});
+
+async function newProject(page: import('@playwright/test').Page, name: string) {
+  await page.getByTestId('prj-home-new').click();
+  await page.getByTestId('prj-home-new-generate').click();
+  await page.getByTestId('gen-new-name').fill(name);
+  await page.getByTestId('gen-new-ok').click();
+  await expect(page.getByTestId('gen-panel')).toBeVisible();
+}
+
+async function generate(page: import('@playwright/test').Page, prompt: string) {
+  await page.getByTestId('gen-panel-prompt').fill(prompt);
+  await expect(page.getByTestId('gen-panel-estimate')).toHaveAttribute('data-status', 'ready');
+  await expect(page.getByTestId('gen-panel-submit')).toBeEnabled();
+  await page.getByTestId('gen-panel-submit').click();
+  await page.getByTestId('rgn-confirm-ok').click();
+  await expect(page.getByTestId('rgn-confirm')).toBeHidden();
+  await drive(page, 'finish', 2);
+  await expect(page.getByTestId('edt-picker-item')).toHaveCount(2);
+}
+
+test('FR-GEN-26 FR-GEN-27 FR-GEN-29 FR-GEN-30 generate → pick → undo → re-pick from an older iteration', async ({
+  page,
+}) => {
+  await newProject(page, 'Crypt');
+  await expect(page.getByTestId('edt-canvas-no-image')).toBeVisible();
+  await generate(page, 'flooded crypt');
+
+  // FR-GEN-26: no image yet → the candidate is shown alone, fit to view.
+  await page.getByTestId('edt-picker-item').nth(1).click();
+  await expect(page.getByTestId('edt-preview-alone')).toBeVisible();
+  expect(await inputsOf(page, 'rgn_candidate_preview')).toHaveLength(0);
+
+  // FR-GEN-27: Pick (Enter) makes it the bottom image; the canvas replaces "No image yet".
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('edt-canvas-stage')).toBeVisible();
+  await expect(page.getByTestId('edt-canvas-no-image')).toHaveCount(0);
+  const first = (await inputsOf(page, 'gen_candidate_pick')).at(-1)!;
+  expect(await inputsOf(page, 'rgn_candidate_accept')).toHaveLength(0);
+  await expect(page.getByTestId('rgn-tracker-item')).toHaveAttribute('data-accepted', 'true');
+
+  // FR-GEN-29: undo the first pick → "No image yet" again.
+  await page.getByTestId('edt-toolbar-undo').click();
+  await expect(page.getByTestId('edt-canvas-no-image')).toBeVisible();
+  expect((await inputsOf(page, 'project_restore_revision')).at(-1)).toEqual({ rev_id: 'r0' });
+
+  // A second iteration, then back to the older 001 and pick its other candidate (OQ-GEN-08).
+  await generate(page, 'dry crypt');
+  await page.locator('[data-testid="rgn-tracker-item"][data-n="1"]').click();
+  await expect(page.getByTestId('edt-picker-item')).toHaveCount(2);
+  await page.getByTestId('edt-picker-item').nth(0).click();
+  await expect(page.getByTestId('edt-preview-alone')).toBeVisible();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('edt-canvas-stage')).toBeVisible();
+  const repick = (await inputsOf(page, 'gen_candidate_pick')).at(-1)!;
+  expect(repick.job_id).toBe(first.job_id);
+  expect(repick.candidate_id).not.toBe(first.candidate_id);
+  expect(await inputsOf(page, 'gen_candidate_pick')).toHaveLength(2);
 });

@@ -38,6 +38,7 @@ import {
   revisionUndoEntry,
   thumbnailUrl,
   type PickerCandidate,
+  type UndoEntry,
 } from '../editor';
 import {
   referencesBlocker,
@@ -134,7 +135,9 @@ export interface RgnState {
   layers: Layer[];
   headRevision: string | null;
   selectedCandidateId: string | null;
-  preview: RgnPreview | null;
+  /** The selected candidate's preview; `alone` = a generate candidate of another size (or no
+   *  working image), shown alone, fit to view (FR-GEN-26). */
+  preview: (RgnPreview & { alone?: boolean }) | null;
   blend: RgnBlend;
   trackerNotice: { kind: 'info' | 'error'; text: string } | null;
   thumbs: Record<string, string>;
@@ -699,7 +702,7 @@ function syncPicker(): void {
     thumbUrl: s.thumbs[c.id] ?? null,
     preview:
       c.id === s.selectedCandidateId && s.preview
-        ? { url: s.preview.url, rect: s.preview.rect }
+        ? { url: s.preview.url, rect: s.preview.rect, alone: s.preview.alone }
         : null,
     warning: c.aspectWarning ? ASPECT_WARNING : null,
   }));
@@ -725,11 +728,78 @@ function syncPicker(): void {
   }
 }
 
+/** FR-GEN-25: a New image iteration (its candidates are previewed whole and picked, never
+ *  baked; any of them can be picked, OQ-GEN-08). */
+const isGenerateJob = (s: RgnState, jobId: string | null): boolean =>
+  !!jobId && s.iterations.some((r) => r.job_id === jobId && r.operation === 'generate');
+
+/** FR-GEN-26: the whole candidate; compared when it has the working image's size, else alone. */
+async function previewGenerate(jobId: string, candId: string): Promise<void> {
+  const t = nextToken('preview');
+  try {
+    const p = await api.gen.preview(jobId, candId);
+    if (!isCurrent('preview', t) || state.selectedCandidateId !== candId) return;
+    const alone = !p.same_size;
+    set({ preview: { key: p.key, url: p.url, rect: p.rect, alone } });
+    editorBridge.setCompare({ url: p.url, rect: p.rect, alone });
+  } catch (e) {
+    if (!isCurrent('preview', t)) return;
+    const err = uiError(e);
+    set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
+  }
+}
+
+/** FR-GEN-29: undo = restore the parent revision, redo = the pick's; then PRJ's snapshot is read
+ *  again so the canvas follows the bottom image (or goes back to "No image yet"). */
+function pickUndoEntry(parent: string, later: string): UndoEntry {
+  const e = revisionUndoEntry('Pick new image', parent, later);
+  return {
+    ...e,
+    undo: async () => {
+      await e.undo();
+      await projectStore.reload();
+    },
+    redo: async () => {
+      await e.redo();
+      await projectStore.reload();
+    },
+  };
+}
+
+const PATCHES_KEPT = (n: number): string =>
+  `${n} patch layer${n === 1 ? '' : 's'} kept in history (undo restores them).`;
+
+/** FR-GEN-27/28/30: picks a generate candidate as the new bottom image (one revision, undoable),
+ *  from any generate iteration (no spend). */
+async function pickNewImage(jobId: string, candidateId: string): Promise<void> {
+  const parent = state.headRevision;
+  try {
+    const r = await api.gen.pick(jobId, candidateId);
+    if (parent) pushUndo(pickUndoEntry(parent, r.revision_id));
+    const kept = r.patches_dropped ?? 0;
+    set({
+      trackerNotice: {
+        kind: 'info',
+        text: kept ? `New image picked. ${PATCHES_KEPT(kept)}` : 'New image picked.',
+      },
+      preview: null,
+    });
+    editorBridge.setCompare(null);
+  } catch (e) {
+    const err = uiError(e);
+    set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
+  }
+  // The snapshot isn't refetched on commit: the canvas and the tab strip follow PRJ's.
+  await projectStore.reload();
+  await Promise.all([refreshProject(), refreshIterations()]);
+}
+
 async function previewSelected(): Promise<void> {
   const s = state;
   const jobId = s.selectedJobId;
   const candId = s.selectedCandidateId;
   if (!jobId || !candId) return;
+  if (isGenerateJob(s, jobId)) return previewGenerate(jobId, candId);
   const t = nextToken('preview');
   try {
     const p = await api.region.preview({ job_id: jobId, candidate_id: candId, blend: s.blend });
@@ -1199,6 +1269,7 @@ export const rgn = {
 
   setBlend(patch: Partial<RgnBlend>): void {
     set((s) => ({ blend: { ...s.blend, ...patch } }));
+    if (isGenerateJob(state, state.selectedJobId)) return; // a whole image has no blend
     if (previewTimer) clearTimeout(previewTimer);
     previewTimer = setTimeout(() => {
       previewTimer = null;
@@ -1210,6 +1281,7 @@ export const rgn = {
     const s = state;
     const jobId = s.selectedJobId;
     if (!jobId) return;
+    if (isGenerateJob(s, jobId)) return pickNewImage(jobId, candidateId);
     const parent = s.headRevision;
     try {
       const r = await api.region.accept({

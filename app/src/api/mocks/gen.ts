@@ -30,7 +30,8 @@ export function installGenMock(seed: GenMockSeed): void {
   const snap = (w.__pfMockSnapshot ??= {}) as Rec;
   const rgn = () =>
     (w.__pfRgnMock as { state(): Rec } | undefined)?.state() as
-      (Rec & { jobs: Rec[]; cands: Rec[]; spend: number; cap: number | null }) | undefined;
+      | (Rec & { jobs: Rec[]; cands: Rec[]; revs: Rec[]; spend: number; cap: number | null })
+      | undefined;
   const fail = (code: string, message: string, field?: string, detail?: unknown) =>
     Promise.reject({ code, message, ...(field ? { field } : {}), ...(detail ? { detail } : {}) });
   const emit = (event: string, payload: unknown) =>
@@ -389,6 +390,140 @@ export function installGenMock(seed: GenMockSeed): void {
         structure,
         references,
       };
+    },
+  });
+
+  // ── FR-GEN-26/27/29/30: preview, pick, and undo back to no image ───────────────────────────
+  type Layer = Rec & { kind?: string; width?: number; height?: number; file?: string };
+  /** The merged snapshot as `project_get` serves it (PRJ's, or the snapshot overrides). */
+  const view = (): Rec => {
+    const p = handlers.project_get?.({});
+    return { ...(p && !(p instanceof Promise) ? (p as Rec) : {}), ...snap };
+  };
+  /** The project had no image at r0 (Generate new): undo to r0 returns to "No image yet". */
+  let r0NoImage: boolean | null = null;
+  /** Snapshot image fields from the bottom layer, as pf-core's snapshot has them. */
+  const applyImage = (layers: Layer[]) => {
+    const l = layers[0];
+    if (l?.kind === 'base') {
+      Object.assign(snap, {
+        image_path: l.file,
+        original_image_id: l.id,
+        has_image: true,
+        width: l.width,
+        height: l.height,
+        format: 'png',
+      });
+    } else if (l) {
+      for (const k of ['image_path', 'original_image_id', 'has_image', 'width', 'height', 'format'])
+        delete snap[k];
+    } else {
+      Object.assign(snap, {
+        image_path: null,
+        original_image_id: null,
+        has_image: false,
+        width: 0,
+        height: 0,
+        format: null,
+      });
+    }
+  };
+  const rgnMock = () => w.__pfRgnMock as { state(): Rec; commit(): void };
+  type GenCand = Rec & {
+    id: string;
+    job_id: string;
+    status: string;
+    width: number;
+    height: number;
+  };
+  const lookup = (input: Rec) => {
+    const s = rgn()!;
+    const j = s.jobs.find((x) => x.id === input.job_id);
+    if (!j) return { err: fail('not_found', 'no such job', 'job_id') };
+    if (j.operation !== 'generate')
+      return { err: fail('wrong_operation', 'Accept it from Region edit.', 'job_id') };
+    const c = (s.cands as GenCand[]).find((x) => x.id === input.candidate_id);
+    if (!c) return { err: fail('not_found', 'no such candidate', 'candidate_id') };
+    if (c.job_id !== j.id || c.status === 'invalid' || c.status === 'discarded')
+      return { err: fail('invalid_candidate', 'The candidate can’t be used.', 'candidate_id') };
+    return { s, j, c };
+  };
+  const prevRestore = handlers.project_restore_revision;
+  Object.assign(handlers, {
+    gen_candidate_preview: (input: Rec) => {
+      const r = lookup(input);
+      if (r.err) return r.err;
+      const v = view();
+      const key = `gp-${r.c.id}`;
+      return {
+        key,
+        url: `http://pf-tiles.localhost/i/${key}.png`,
+        rect: { x: 0, y: 0, w: r.c.width, h: r.c.height },
+        same_size: !!v.image_path && v.width === r.c.width && v.height === r.c.height,
+      };
+    },
+    gen_candidate_pick: (input: Rec) => {
+      if (snap.read_only) return fail('read_only', 'The project is read-only.');
+      const r = lookup(input);
+      if (r.err) return r.err;
+      const { s, j, c } = r;
+      r0NoImage ??= !view().image_path;
+      const layers = s.layers as Layer[];
+      const dropped = layers.filter((l) => l.kind === 'patch').length;
+      const n = String((c.index as number) + 1).padStart(2, '0');
+      const layer: Layer = {
+        id: `01JLAYERB${String(s.revs.length + 1).padStart(4, '0')}${c.id.slice(-4)}`,
+        kind: 'base',
+        file: `working/${String(j.dir).replace(/^results\//, '')} ${n}.png`,
+        content_hash: `sha256:${c.id}`,
+        width: c.width,
+        height: c.height,
+        job_id: j.id,
+        candidate_id: c.id,
+        cx: c.width / 2,
+        cy: c.height / 2,
+        scale: 1,
+        rotation: 0,
+        opacity: 1,
+        visible: true,
+      };
+      s.layers = [layer];
+      c.status = 'accepted';
+      c.trash_id = null;
+      if (j.state === 'fetched') {
+        for (const o of s.cands as GenCand[])
+          if (o.job_id === j.id && o.status === 'new') o.status = 'dismissed';
+        j.state = 'closed';
+        j.resolved = true;
+      }
+      const typed = String((j.draft as Rec).typed_prompt ?? (j.draft as Rec).final_prompt ?? '');
+      const rev = {
+        id: `01JREVG${String(s.revs.length + 1).padStart(4, '0')}`,
+        seq: s.revs.length + 1,
+        layers: [{ ...layer }],
+        reason: 'accept',
+        label: `New: ${typed.trim().slice(0, 40)}`,
+      };
+      s.revs.push(rev);
+      applyImage(s.layers as Layer[]);
+      rgnMock().commit();
+      emit('rgn:job-state', { job_id: j.id, state: j.state, progress: 1, error: null });
+      return {
+        layer_id: layer.id,
+        revision_id: rev.id,
+        file: layer.file,
+        patches_dropped: dropped,
+      };
+    },
+    project_restore_revision: async (input: Rec) => {
+      const out = await prevRestore?.(input);
+      const s = rgn();
+      if (s) {
+        if (input.rev_id === 'r0' && r0NoImage) s.layers = [];
+        applyImage(s.layers as Layer[]);
+        rgnMock().commit();
+      }
+      return out;
     },
   });
 

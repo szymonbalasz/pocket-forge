@@ -76,6 +76,14 @@ fn bake_job(core: &Core, job_id: Ulid, candidate_id: Ulid) -> CoreResult<BakeJob
     let state = core.state();
     let p = state.project.as_ref().ok_or_else(no_project)?;
     let job = store::job(p, job_id)?.clone();
+    // A New image candidate is picked, never baked as a patch (FR-GEN-27, GEN §9).
+    if job.is_generate() {
+        return Err(CoreError::new(
+            ErrorCode::WrongOperation,
+            "that job made a new image; pick it from New image",
+        )
+        .with_field("job_id"));
+    }
     let cand = p
         .manifest
         .candidates

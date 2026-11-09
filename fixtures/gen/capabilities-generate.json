@@ -1,178 +1,166 @@
 {
-  "fake-gen-wh": {
-    "model_id": "fake-gen-wh",
-    "operations": [
-      "generate"
-    ],
+  "fake-gen-aspect": {
     "controls": [
       {
-        "min": null,
-        "max": null,
-        "step": null,
         "allowed": [],
-        "default": null,
-        "required": true,
         "cost_affecting": false,
+        "default": null,
+        "max": null,
+        "min": null,
         "name": "prompt",
-        "type": "string",
-        "role": "prompt"
-      },
-      {
-        "min": 1,
-        "max": 4,
-        "step": 1,
-        "allowed": [],
-        "default": 2,
-        "required": false,
-        "cost_affecting": true,
-        "name": "num_samples",
-        "type": "int",
-        "role": "candidate_count"
-      },
-      {
-        "min": null,
-        "max": null,
+        "required": true,
+        "role": "prompt",
         "step": null,
-        "allowed": [
-          "opaque",
-          "transparent"
-        ],
-        "default": "opaque",
-        "required": false,
+        "type": "string"
+      },
+      {
+        "allowed": [],
         "cost_affecting": false,
-        "name": "background",
-        "type": "enum",
-        "role": "background"
-      },
-      {
-        "min": null,
-        "max": null,
-        "step": null,
-        "allowed": [],
         "default": null,
-        "required": false,
-        "cost_affecting": false,
-        "name": "refs",
-        "type": "image",
-        "role": "reference"
-      },
-      {
-        "min": null,
-        "max": null,
-        "step": null,
-        "allowed": [],
-        "default": null,
-        "required": false,
-        "cost_affecting": false,
+        "max": 1.8446744073709552e19,
+        "min": 0.0,
         "name": "seed",
-        "type": "seed",
-        "role": "seed"
+        "required": false,
+        "role": "seed",
+        "step": 1.0,
+        "type": "seed"
+      },
+      {
+        "allowed": [],
+        "cost_affecting": false,
+        "default": null,
+        "max": null,
+        "min": null,
+        "name": "style_refs",
+        "required": false,
+        "role": "reference",
+        "step": null,
+        "type": "image"
       }
     ],
-    "rules": [],
-    "mask": null,
     "input_px": {
-      "min": 64,
       "max": 2048,
+      "min": 64,
       "multiple_of": 16
     },
-    "max_bytes": 20000000,
-    "seed": true,
+    "mask": null,
+    "max_bytes": 52428800,
+    "model_id": "fake-gen-aspect",
+    "operations": ["generate"],
+    "output_size": {
+      "allowed": ["1:1", "3:4", "4:3", "2:3"],
+      "mode": "aspect"
+    },
     "prompt_required": true,
+    "rules": [],
+    "seed": true,
     "slots": [
       {
-        "name": "refs",
-        "role": null,
+        "array": true,
+        "cost_affecting": false,
+        "max": 2,
         "min": 0,
-        "max": 4,
-        "cost_affecting": true,
-        "array": true
+        "name": "style_refs",
+        "role": "style"
       }
     ],
-    "warnings": [],
-    "output_size": {
-      "mode": "wh",
-      "min": 64,
+    "structure": null,
+    "warnings": []
+  },
+  "fake-gen-wh": {
+    "controls": [
+      {
+        "allowed": [],
+        "cost_affecting": false,
+        "default": null,
+        "max": null,
+        "min": null,
+        "name": "prompt",
+        "required": true,
+        "role": "prompt",
+        "step": null,
+        "type": "string"
+      },
+      {
+        "allowed": [],
+        "cost_affecting": true,
+        "default": 1,
+        "max": 4.0,
+        "min": 1.0,
+        "name": "num_samples",
+        "required": false,
+        "role": "candidate_count",
+        "step": 1.0,
+        "type": "int"
+      },
+      {
+        "allowed": [],
+        "cost_affecting": false,
+        "default": null,
+        "max": 1.8446744073709552e19,
+        "min": 0.0,
+        "name": "seed",
+        "required": false,
+        "role": "seed",
+        "step": 1.0,
+        "type": "seed"
+      },
+      {
+        "allowed": ["opaque", "transparent"],
+        "cost_affecting": false,
+        "default": "opaque",
+        "max": null,
+        "min": null,
+        "name": "background",
+        "required": false,
+        "role": "background",
+        "step": null,
+        "type": "enum"
+      },
+      {
+        "allowed": [],
+        "cost_affecting": true,
+        "default": null,
+        "max": null,
+        "min": null,
+        "name": "refs",
+        "required": false,
+        "role": "reference",
+        "step": null,
+        "type": "image"
+      }
+    ],
+    "input_px": {
       "max": 2048,
+      "min": 64,
+      "multiple_of": 16
+    },
+    "mask": null,
+    "max_bytes": 52428800,
+    "model_id": "fake-gen-wh",
+    "operations": ["generate"],
+    "output_size": {
+      "max": 2048,
+      "min": 64,
+      "mode": "wh",
       "step": 16
     },
-    "structure": {
-      "slot": "refs"
-    }
-  },
-  "fake-gen-aspect": {
-    "model_id": "fake-gen-aspect",
-    "operations": [
-      "generate"
-    ],
-    "controls": [
-      {
-        "min": null,
-        "max": null,
-        "step": null,
-        "allowed": [],
-        "default": null,
-        "required": true,
-        "cost_affecting": false,
-        "name": "prompt",
-        "type": "string",
-        "role": "prompt"
-      },
-      {
-        "min": null,
-        "max": null,
-        "step": null,
-        "allowed": [],
-        "default": null,
-        "required": false,
-        "cost_affecting": false,
-        "name": "style_refs",
-        "type": "image",
-        "role": "reference"
-      },
-      {
-        "min": null,
-        "max": null,
-        "step": null,
-        "allowed": [],
-        "default": null,
-        "required": false,
-        "cost_affecting": false,
-        "name": "seed",
-        "type": "seed",
-        "role": "seed"
-      }
-    ],
-    "rules": [],
-    "mask": null,
-    "input_px": {
-      "min": 64,
-      "max": 2048,
-      "multiple_of": 16
-    },
-    "max_bytes": 20000000,
-    "seed": true,
     "prompt_required": true,
+    "rules": [],
+    "seed": true,
     "slots": [
       {
-        "name": "style_refs",
-        "role": "style",
+        "array": true,
+        "cost_affecting": true,
+        "max": 4,
         "min": 0,
-        "max": 2,
-        "cost_affecting": false,
-        "array": true
+        "name": "refs",
+        "role": null
       }
     ],
-    "warnings": [],
-    "output_size": {
-      "mode": "aspect",
-      "allowed": [
-        "1:1",
-        "3:4",
-        "4:3",
-        "2:3"
-      ]
+    "structure": {
+      "slot": "refs"
     },
-    "structure": null
+    "warnings": []
   }
 }

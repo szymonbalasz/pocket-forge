@@ -588,3 +588,170 @@ impl Command for GenJobRetryDraft {
         })
     }
 }
+
+// ---------------------------------------------------------------- gen_candidate_preview / _pick
+
+/// `{job_id, candidate_id}` of a generate candidate.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CandidateInput {
+    pub job_id: Ulid,
+    pub candidate_id: Ulid,
+}
+
+impl Validate for CandidateInput {}
+
+fn no_project() -> CoreError {
+    CoreError::new(ErrorCode::NoProject, "no asset project is open")
+}
+
+/// The open project's generate job `job_id` (`not_found` / `wrong_operation`).
+fn generate_job(p: &crate::project::OpenProject, job_id: Ulid) -> CoreResult<&JobFile> {
+    let job = p
+        .jobs
+        .get(&job_id)
+        .ok_or_else(|| CoreError::new(ErrorCode::NotFound, "no such job").with_field("job_id"))?;
+    if !job.is_generate() {
+        return Err(CoreError::new(
+            ErrorCode::WrongOperation,
+            "that job is a region edit; accept it from Region edit",
+        )
+        .with_field("job_id"));
+    }
+    Ok(job)
+}
+
+/// `gen_candidate_preview` (FR-GEN-26, OQ-GEN-13): the candidate registered as a transient image
+/// (FR-EDT-31) over its own size. `same_size` = it matches the working image, so EDT compares
+/// (split, flip); otherwise, or with no image, EDT shows it alone, fit to view. A candidate with
+/// alpha is shown over the flatten colour, as the canvas will show it after a pick (FR-GEN-12).
+pub struct GenCandidatePreview;
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PreviewOutput {
+    pub key: String,
+    pub url: String,
+    /// The candidate's own rect, image px from the top left.
+    pub rect: crate::region_edit::fit::RectPx,
+    pub same_size: bool,
+}
+
+impl Command for GenCandidatePreview {
+    const NAME: &'static str = "gen_candidate_preview";
+    type Input = CandidateInput;
+    type Output = PreviewOutput;
+
+    fn run(core: &Core, input: CandidateInput) -> CoreResult<PreviewOutput> {
+        let (project_id, path, working) = {
+            let state = core.state();
+            let p = state.project.as_ref().ok_or_else(no_project)?;
+            generate_job(p, input.job_id)?;
+            let cand = p
+                .manifest
+                .candidates
+                .iter()
+                .find(|c| c.id == input.candidate_id)
+                .ok_or_else(|| {
+                    CoreError::new(ErrorCode::NotFound, "no such candidate")
+                        .with_field("candidate_id")
+                })?;
+            if cand.job_id != input.job_id {
+                return Err(CoreError::new(
+                    ErrorCode::InvalidCandidate,
+                    "the candidate belongs to another job",
+                )
+                .with_field("candidate_id"));
+            }
+            if cand.status == crate::manifest::CandidateStatus::Invalid {
+                return Err(CoreError::new(
+                    ErrorCode::InvalidCandidate,
+                    "the candidate won't decode",
+                )
+                .with_field("candidate_id"));
+            }
+            let path = p.resolve_image(input.candidate_id)?.path;
+            (p.manifest.project_id, path, p.manifest.image_size())
+        };
+        // The decode and the flatten run without the state lock.
+        crate::library::hydrate_if_needed(&core.ctx, &path)?;
+        let bytes = std::fs::read(&path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                CoreError::new(ErrorCode::NotFound, "the candidate's file is gone")
+            } else {
+                CoreError::io("reading the candidate", &e)
+            }
+        })?;
+        let info = pf_imaging::probe_bytes(&bytes).map_err(crate::project::probe_error)?;
+        let bytes = flattened_if_alpha(bytes)?;
+        let reg = crate::tiles::register_transient_image(core, project_id, bytes)?;
+        Ok(PreviewOutput {
+            key: reg.key,
+            url: reg.url,
+            rect: crate::region_edit::fit::RectPx {
+                x: 0,
+                y: 0,
+                w: info.width,
+                h: info.height,
+            },
+            same_size: working == Some((info.width, info.height)),
+        })
+    }
+}
+
+/// An image with alpha as an opaque PNG over the flatten colour `#808080` (FR-GEN-12); an
+/// opaque one as it is.
+pub(crate) fn flattened_if_alpha(bytes: Vec<u8>) -> CoreResult<Vec<u8>> {
+    let img = image::load_from_memory(&bytes).map_err(|e| {
+        CoreError::new(
+            ErrorCode::InvalidCandidate,
+            format!("the candidate won't decode: {e}"),
+        )
+        .with_field("candidate_id")
+    })?;
+    if !img.color().has_alpha() {
+        return Ok(bytes);
+    }
+    let rgb = pf_imaging::to_rgb8_flattened(img);
+    let mut out = Vec::new();
+    rgb.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .map_err(|e| CoreError::internal(format!("encoding the preview: {e}")))?;
+    Ok(out)
+}
+
+/// `gen_candidate_pick` (FR-GEN-27–30): PRJ's pick commit. The candidate becomes the base image
+/// (stack = `[base layer]`), from any generate iteration, no provider call, no spend; undo is
+/// `project_restore_revision(parent)` (FR-GEN-29).
+pub struct GenCandidatePick;
+
+impl Command for GenCandidatePick {
+    const NAME: &'static str = "gen_candidate_pick";
+    type Input = CandidateInput;
+    type Output = crate::project::store::BaseCommit;
+
+    fn run(core: &Core, input: CandidateInput) -> CoreResult<crate::project::store::BaseCommit> {
+        let mut state = core.state();
+        let install_id = state.settings.install_id;
+        let p = state.project.as_mut().ok_or_else(no_project)?;
+        crate::project::require_folder(p)?;
+        p.require_writable()?;
+        generate_job(p, input.job_id)?;
+        let out = crate::project::store::pick_base(
+            &core.ctx,
+            install_id,
+            p,
+            input.job_id,
+            input.candidate_id,
+        )
+        .map_err(|e| {
+            if e.code == ErrorCode::UnknownId {
+                CoreError::new(ErrorCode::NotFound, e.message).with_field("candidate_id")
+            } else {
+                e
+            }
+        })?;
+        if let Ok(j) = crate::project::store::job(p, input.job_id) {
+            crate::region_edit::runner::emit_state(&core.ctx, j, None);
+        }
+        Ok(out)
+    }
+}

@@ -19,6 +19,7 @@ import { editorStore, useEditor } from './store';
 import { editorBridge } from './bridge';
 import { CompareDivider } from './CompareDivider';
 import { CompareLayer } from './CompareLayer';
+import { PreviewAlone } from './PreviewAlone';
 import { PatchLayers } from './PatchLayers';
 import { useMaskTools } from './useMaskTools';
 import { konvaSink, TileManager, type TileStats } from './TileManager';
@@ -90,6 +91,9 @@ function buildError(e: unknown): BuildError {
     return { code: String(e.code), message: String(e.message) };
   return { code: 'error', message: e instanceof Error ? e.message : String(e) };
 }
+
+/** The project the canvas last mounted for (a remount for a new bottom image keeps state). */
+let lastCanvasProject: string | null = null;
 
 export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -175,7 +179,11 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   );
 
   useEffect(() => {
-    editorStore.reset();
+    // A remount for a new bottom image of the same project (a pick or its undo, FR-GEN-29)
+    // keeps the picker, the compare source and the undo summary (the panel owns undo).
+    const same = lastCanvasProject === project.project_id;
+    lastCanvasProject = project.project_id;
+    editorStore.reset(same ? ['picker', 'compare', 'compareMode', 'split', 'undo'] : ['undo']);
     editorStore.set({ image: { w: project.width, h: project.height } });
     return () => editorStore.set({ image: null });
   }, [project.project_id, project.width, project.height]);
@@ -225,14 +233,15 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
     const c = new CompareLayer(compareLayer, setCompareError);
     compareRef.current = c;
     const s = editorStore.get();
-    c.update(s.compare, s.compareMode, s.split, s.flipBefore);
+    c.update(s.compare?.alone ? null : s.compare, s.compareMode, s.split, s.flipBefore);
     return () => {
       c.destroy();
       if (compareRef.current === c) compareRef.current = null;
     };
   }, [compareLayer]);
   useEffect(() => {
-    compareRef.current?.update(compare, compareMode, split, flipBefore);
+    // FR-GEN-26: a whole image of another size is shown alone (below), not split or flipped.
+    compareRef.current?.update(compare?.alone ? null : compare, compareMode, split, flipBefore);
   }, [compare, compareMode, split, flipBefore]);
   useEffect(() => () => editorBridge.setCandidates(null), []);
 
@@ -484,7 +493,9 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
           </Stage>
         )}
         {tools.overlay}
-        {compare && compareMode === 'split' && (
+        {/* FR-GEN-26: alone, fit to view; holding \ shows the working image. */}
+        {compare?.alone && !flipBefore && <PreviewAlone url={compare.url} />}
+        {compare && !compare.alone && compareMode === 'split' && (
           <CompareDivider view={view} src={compare} split={split} container={containerRef} />
         )}
         {compareError && (

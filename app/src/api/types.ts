@@ -759,9 +759,11 @@ export interface Commands {
     { job_id: string; candidate_id: string },
     { key: string; url: string; rect: RectPx; same_size: boolean },
   ];
+  /** FR-GEN-27/28: `file` = `working/NNN <slug> NN.<ext>`; `patches_dropped` = patch layers of
+   *  the previous stack kept in history only. */
   gen_candidate_pick: [
     { job_id: string; candidate_id: string },
-    { layer_id: string; revision_id: string },
+    { layer_id: string; revision_id: string; file?: string; patches_dropped?: number },
   ];
   prm_helpers_list: [{ kind?: ProjectKind }, PromptHelper[]];
   prm_helpers_save: [{ helpers: PromptHelperInput[] }, PromptHelper[]];

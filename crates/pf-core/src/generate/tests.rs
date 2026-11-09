@@ -698,3 +698,265 @@ fn fr_gen_35_commands_need_an_open_project_and_valid_input() {
     bad["region"] = json!({});
     assert_eq!(code(g.estimate(&bad)), ErrorCode::InvalidInput);
 }
+
+// ---------------------------------------------------------------- slice 4: preview, pick, undo
+
+impl G {
+    fn cands(&self, job: Ulid) -> Vec<Ulid> {
+        self.lab.candidates(job).iter().map(|c| c.id).collect()
+    }
+
+    fn preview(&self, job: Ulid, cand: Ulid) -> Result<Value, CoreError> {
+        self.dispatch(
+            "gen_candidate_preview",
+            json!({"job_id": job, "candidate_id": cand}),
+        )
+    }
+
+    fn pick(&self, job: Ulid, cand: Ulid) -> Result<Value, CoreError> {
+        self.dispatch(
+            "gen_candidate_pick",
+            json!({"job_id": job, "candidate_id": cand}),
+        )
+    }
+
+    fn snapshot(&self) -> Value {
+        self.dispatch("project_get", json!({})).unwrap()
+    }
+
+    fn two(&self, prompt: &str) -> Value {
+        let mut d = self.draft(prompt);
+        d["size"] = json!({"mode": "ratio", "aspect": "4:3", "long_side": 256});
+        d["controls"] = json!({"num_samples": 2});
+        d
+    }
+}
+
+#[test]
+fn fr_gen_26_preview_registers_the_candidate_alone_or_for_compare() {
+    let g = G::empty("maps", "Crypt");
+    let job = g.run(&g.two("crypt"));
+    let c = g.cands(job);
+    let p = g.preview(job, c[0]).unwrap();
+    assert!(
+        p["url"]
+            .as_str()
+            .unwrap()
+            .contains(p["key"].as_str().unwrap())
+    );
+    assert_eq!(p["rect"], json!({"x": 0, "y": 0, "w": 256, "h": 192}));
+    assert_eq!(p["same_size"], false, "no image yet: shown alone");
+    g.pick(job, c[0]).unwrap();
+    let again = g.run(&g.two("crypt again"));
+    let p = g.preview(again, g.cands(again)[1]).unwrap();
+    assert_eq!(
+        p["same_size"], true,
+        "same size as the working image: compare"
+    );
+    // In a project whose image is another size: alone.
+    let g = G::new();
+    let job = g.run(&g.two("crypt"));
+    assert_eq!(g.preview(job, g.cands(job)[0]).unwrap()["same_size"], false);
+}
+
+#[test]
+fn fr_gen_12_a_transparent_candidate_previews_over_the_flatten_colour() {
+    let rgba = image::RgbaImage::from_fn(4, 4, |x, _| {
+        if x < 2 {
+            image::Rgba([0, 0, 0, 0])
+        } else {
+            image::Rgba([200, 10, 10, 255])
+        }
+    });
+    let mut png = Vec::new();
+    rgba.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+    let out = super::commands::flattened_if_alpha(png).unwrap();
+    let img = image::load_from_memory(&out).unwrap();
+    assert!(!img.color().has_alpha(), "an opaque preview");
+    let rgb = img.into_rgb8();
+    assert_eq!(rgb.get_pixel(0, 0).0, [0x80, 0x80, 0x80]);
+    assert_eq!(rgb.get_pixel(3, 0).0, [200, 10, 10]);
+    let opaque = png_bytes(4, 4, 7);
+    assert_eq!(
+        super::commands::flattened_if_alpha(opaque.clone()).unwrap(),
+        opaque,
+        "an opaque candidate is registered as is"
+    );
+}
+
+#[test]
+fn fr_gen_27_pick_command_makes_the_base_image_in_one_accept_revision() {
+    use crate::manifest::CandidateStatus::{Accepted, Dismissed};
+    let g = G::empty("maps", "Crypt");
+    let job = g.run(&g.two("Flooded crypt"));
+    let c = g.cands(job);
+    let out = g.pick(job, c[1]).unwrap();
+    assert!(out["layer_id"].is_string() && out["revision_id"].is_string());
+    assert_eq!(out["file"], "working/001 flooded crypt 02.png");
+    let s = g.snapshot();
+    assert_eq!(s["has_image"], true);
+    assert_eq!(s["layers"].as_array().unwrap().len(), 1);
+    assert_eq!(s["layers"][0]["kind"], "base");
+    assert_eq!(
+        (s["width"].clone(), s["height"].clone()),
+        (json!(256), json!(192))
+    );
+    assert_eq!(s["head_revision"], out["revision_id"]);
+    assert!(
+        g.lab
+            .project_dir
+            .join("working/001 flooded crypt 02.png")
+            .is_file()
+    );
+    assert_eq!(g.lab.job(job).state, JobState::Closed);
+    let statuses: Vec<_> = g.lab.candidates(job).iter().map(|c| c.status).collect();
+    assert_eq!(
+        statuses,
+        vec![Dismissed, Accepted],
+        "the other one is kept (#56)"
+    );
+    // FR-GEN-25: the tracker's tick.
+    let rows = g.dispatch("rgn_iterations_list", json!({})).unwrap();
+    assert_eq!(rows[0]["accepted_in_stack"], true);
+}
+
+#[test]
+fn fr_gen_29_undo_of_the_first_pick_returns_to_no_image_and_redo_brings_it_back() {
+    let g = G::empty("maps", "Crypt");
+    let parent = g.snapshot()["head_revision"].clone();
+    let job = g.run(&g.two("crypt"));
+    let picked = g.pick(job, g.cands(job)[0]).unwrap();
+    g.dispatch("project_restore_revision", json!({ "rev_id": parent }))
+        .unwrap();
+    let s = g.snapshot();
+    assert_eq!(s["has_image"], false);
+    assert_eq!(s["image_path"], Value::Null);
+    assert!(s["layers"].as_array().unwrap().is_empty());
+    g.dispatch(
+        "project_restore_revision",
+        json!({ "rev_id": picked["revision_id"] }),
+    )
+    .unwrap();
+    assert_eq!(g.snapshot()["has_image"], true);
+}
+
+#[test]
+fn fr_gen_30_pick_from_an_older_iteration_without_spend() {
+    use crate::manifest::CandidateStatus::Accepted;
+    let g = G::empty("maps", "Crypt");
+    let first = g.run(&g.two("crypt"));
+    g.pick(first, g.cands(first)[0]).unwrap();
+    let second = g.run(&g.two("another crypt"));
+    let spent = g.dispatch("rgn_spend_get", json!({})).unwrap()["spend"].clone();
+    // Re-pick #2 of the older 001, with a newer iteration in the project.
+    let out = g.pick(first, g.cands(first)[1]).unwrap();
+    assert_eq!(out["file"], "working/001 crypt 02.png");
+    assert_eq!(g.lab.job(first).state, JobState::Closed, "stays closed");
+    assert_eq!(
+        g.dispatch("rgn_spend_get", json!({})).unwrap()["spend"],
+        spent,
+        "no spend"
+    );
+    // The newer one can be picked too; the earlier accepted ones keep their status.
+    g.pick(second, g.cands(second)[0]).unwrap();
+    assert!(g.lab.candidates(first).iter().all(|c| c.status == Accepted));
+}
+
+#[test]
+fn fr_gen_31_star_discard_and_discard_the_rest_on_generate_candidates() {
+    let g = G::empty("maps", "Crypt");
+    let mut d = g.two("crypt");
+    d["controls"] = json!({"num_samples": 4});
+    let job = g.run(&d);
+    let c = g.cands(job);
+    g.dispatch(
+        "rgn_candidate_star",
+        json!({"job_id": job, "candidate_id": c[3], "starred": true}),
+    )
+    .unwrap();
+    g.dispatch(
+        "rgn_candidate_discard",
+        json!({"job_id": job, "candidate_id": c[2]}),
+    )
+    .unwrap();
+    g.pick(job, c[0]).unwrap();
+    let out = g
+        .dispatch("rgn_job_discard_rest", json!({ "job_id": job }))
+        .unwrap();
+    assert_eq!(
+        out["trashed"], 1,
+        "only #2: #1 is accepted, #4 starred, #3 already discarded"
+    );
+    assert_eq!(code(g.pick(job, c[2])), ErrorCode::InvalidCandidate);
+}
+
+#[test]
+fn fr_gen_27_pick_and_preview_errors() {
+    let g = G::new();
+    let rgn = g.lab.run("a kitchen");
+    let rc = g.lab.candidates(rgn)[0].id;
+    let job = g.run(&g.two("crypt"));
+    let c = g.cands(job);
+    g.pick(job, c[0]).unwrap();
+    assert_eq!(code(g.pick(rgn, rc)), ErrorCode::WrongOperation);
+    assert_eq!(code(g.preview(rgn, rc)), ErrorCode::WrongOperation);
+    // RGN's candidate commands refuse a generate job.
+    for cmd in ["rgn_candidate_preview", "rgn_candidate_accept"] {
+        let e = g.dispatch(cmd, json!({"job_id": job, "candidate_id": c[1]}));
+        assert_eq!(code(e), ErrorCode::WrongOperation, "{cmd}");
+    }
+    assert_eq!(
+        code(g.pick(Ulid::from_parts(1, 1), c[0])),
+        ErrorCode::NotFound
+    );
+    assert_eq!(
+        code(g.pick(job, rc)),
+        ErrorCode::InvalidCandidate,
+        "another job's"
+    );
+    assert_eq!(
+        code(g.preview(job, Ulid::from_parts(1, 2))),
+        ErrorCode::NotFound
+    );
+    g.lab.core.state().project.as_mut().unwrap().read_only = Some(ReadOnlyReason::NewerVersion);
+    assert_eq!(code(g.pick(job, c[1])), ErrorCode::ReadOnly);
+    assert!(
+        g.preview(job, c[1]).is_ok(),
+        "preview still works read-only"
+    );
+}
+
+#[test]
+fn fr_gen_06_the_ui_fixture_matches_the_fake_generate_capabilities() {
+    // `fixtures/gen/capabilities-generate.json` is the UI's copy (Vitest, e2e): it must equal
+    // what `provider_get_capabilities{operation: generate}` serves for the fake models.
+    let g = G::new();
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/gen/capabilities-generate.json"
+    );
+    let mut served = serde_json::Map::new();
+    for model in [WH, ASPECT] {
+        let caps = g
+            .dispatch(
+                "provider_get_capabilities",
+                json!({"model_id": model, "operation": "generate"}),
+            )
+            .unwrap();
+        served.insert(model.to_owned(), caps);
+    }
+    // `PF_REGEN_FIXTURES=1 cargo test -p pf-core fr_gen_06_the_ui_fixture` rewrites it.
+    if std::env::var_os("PF_REGEN_FIXTURES").is_some() {
+        let mut text = serde_json::to_string_pretty(&Value::Object(served.clone())).unwrap();
+        text.push('\n');
+        std::fs::write(path, text).unwrap();
+    }
+    let fixture: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    for model in [WH, ASPECT] {
+        assert_eq!(
+            fixture[model], served[model],
+            "{model}: regenerate the fixture"
+        );
+    }
+}

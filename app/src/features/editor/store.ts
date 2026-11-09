@@ -36,6 +36,10 @@ export interface UndoSummary {
 export interface CompareSource {
   url: string;
   rect: Rect;
+  /** GEN (FR-GEN-26, OQ-GEN-13): a whole image of another size than the working image (or with
+   *  no image): shown alone, fit to view, instead of split / flip; holding `\` shows the
+   *  working image. */
+  alone?: boolean;
 }
 
 export type CompareMode = 'split' | 'flip';
@@ -142,9 +146,11 @@ export const editorStore = {
     listeners.add(l);
     return () => listeners.delete(l);
   },
-  /** Back to defaults (project closed / tests). Keeps the DPR and export values. */
-  reset(): void {
-    editorStore.set({ ...initial, dpr: state.dpr, pxPerSquare: state.pxPerSquare });
+  /** Back to defaults (project closed / tests). Keeps the DPR and export values, and `keep`
+   *  (a canvas remount for a new bottom image keeps the picker, compare and undo summary). */
+  reset(keep: (keyof EditorState)[] = []): void {
+    const kept = Object.fromEntries(keep.map((k) => [k, state[k]])) as Partial<EditorState>;
+    editorStore.set({ ...initial, dpr: state.dpr, pxPerSquare: state.pxPerSquare, ...kept });
   },
 };
 
