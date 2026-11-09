@@ -1502,3 +1502,118 @@ fn fr_prm_42_43_31_chat_on_both_hosts_without_a_provider_call() {
         "the chat made no provider call (FR-PRM-31)"
     );
 }
+
+// ---------------------------------------------------------------- FR-RGN-04 on a picked base (#60)
+
+impl G {
+    /// A region-edit draft on the open project with a fresh full-strength mask on `inner`.
+    fn rgn_draft(&self, inner: crate::manifest::Rect, margin: u32) -> Value {
+        let mask = self
+            .lab
+            .put_mask(inner, &vec![255; (inner.w * inner.h) as usize]);
+        json!({
+            "region": {"inner": {"x": inner.x, "y": inner.y, "w": inner.w, "h": inner.h}, "margin": margin},
+            "mask_id": mask,
+            "model_id": "fake-white-edit",
+            "final_prompt": "a barrel",
+            "controls": {},
+            "seed": null,
+        })
+    }
+}
+
+#[test]
+fn fr_rgn_04_owner_60_region_pixels_come_from_the_picked_base_alpha_over_the_flatten_colour() {
+    let g = G::empty("tokens", "Goblin archer");
+    let mut d = g.draft("goblin archer");
+    d["controls"] = json!({"background": "transparent", "num_samples": 1});
+    d["size"] = json!({"mode": "ratio", "aspect": "1:1", "long_side": 256});
+    let job = g.run(&d);
+    let cand = g.cands(job)[0];
+    g.pick(job, cand).unwrap();
+    // A region over the transparent corner and the disc's edge.
+    let inner = crate::manifest::Rect {
+        x: 16,
+        y: 16,
+        w: 128,
+        h: 128,
+    };
+    let rd = g.rgn_draft(inner, 16);
+    let est = g
+        .dispatch("rgn_job_estimate", json!({"draft": rd}))
+        .unwrap();
+    let id: Ulid = g
+        .dispatch(
+            "rgn_job_submit",
+            json!({"draft": rd, "estimate_id": est["estimate_id"], "confirmations": est["needs"]}),
+        )
+        .unwrap()["job_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let rjob = g.lab.job(id);
+    let region_file = g.lab.project_dir.join(&rjob.input_files()[0]);
+    let sent = image::open(&region_file).unwrap();
+    assert!(!sent.color().has_alpha(), "the sent region is RGB");
+    let sent = sent.to_rgb8();
+    // The outer rect at its own resolution, from the decoded base (`layers[0]`).
+    let base = {
+        let st = g.lab.core.state();
+        crate::project::store::decoded_original(&g.lab.core.ctx, st.project.as_ref().unwrap())
+            .unwrap()
+    };
+    assert_eq!(
+        base.dimensions(),
+        (256, 256),
+        "the picked image, not an original"
+    );
+    let outer: crate::region_edit::fit::RectPx =
+        serde_json::from_value(rjob.region["outer"].clone()).unwrap();
+    assert_eq!((outer.x, outer.y), (0, 0));
+    let crop = image::imageops::crop_imm(&*base, outer.x, outer.y, outer.w, outer.h).to_image();
+    assert_eq!(sent.dimensions(), crop.dimensions(), "160 px, no resample");
+    assert_eq!(sent, crop, "bit-exact crop of the picked base");
+    assert_eq!(
+        sent.get_pixel(0, 0).0,
+        pf_imaging::FLATTEN_BG,
+        "alpha 0 → the flatten colour"
+    );
+    let (sw, sh) = sent.dimensions();
+    assert_ne!(
+        sent.get_pixel(sw - 1, sh - 1).0,
+        pf_imaging::FLATTEN_BG,
+        "the disc is opaque"
+    );
+}
+
+#[test]
+fn fr_rgn_04_owner_60_estimate_and_submit_with_no_image_are_no_image() {
+    let g = G::empty("maps", "Crypt");
+    let inner = crate::manifest::Rect {
+        x: 0,
+        y: 0,
+        w: 64,
+        h: 64,
+    };
+    let rd = json!({
+        "region": {"inner": {"x": inner.x, "y": inner.y, "w": inner.w, "h": inner.h}, "margin": 0},
+        "mask_id": Ulid::from_parts(1, 999),
+        "model_id": "fake-white-edit",
+        "final_prompt": "a barrel",
+        "controls": {},
+        "seed": null,
+    });
+    assert_eq!(
+        code(g.dispatch("rgn_job_estimate", json!({"draft": rd}))),
+        ErrorCode::NoImage
+    );
+    assert_eq!(
+        code(g.dispatch(
+            "rgn_job_submit",
+            json!({"draft": rd, "estimate_id": "e", "confirmations": []}),
+        )),
+        ErrorCode::NoImage
+    );
+    assert!(g.lab.manifest()["jobs"].as_array().unwrap().is_empty());
+}
