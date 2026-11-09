@@ -27,7 +27,7 @@ use crate::prompt::context::{
     chat_jpeg, value_type,
 };
 use crate::prompt::{self, helpers};
-use crate::references::prepare::{self as ref_prepare, STRUCTURE_DIR, STRUCTURE_KEY};
+use crate::references::prepare::{self as ref_prepare, STRUCTURE_KEY};
 use crate::references::resolve::{self, DraftReferences, Source};
 use crate::region_edit::controls;
 
