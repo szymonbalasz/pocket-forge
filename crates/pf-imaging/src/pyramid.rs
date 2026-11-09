@@ -221,19 +221,9 @@ fn write_band(dir: &Path, s: &LevelSpec, rows: &[u8], row: u32) -> Result<(), Bu
             tile.extend_from_slice(&r[x0 as usize * 3..(x0 + tw) as usize * 3]);
         }
         let bytes = encode_tile(s, &tile, tw, th)?;
-        write_tile(&tile_path(dir, s, col, row), &bytes)
+        std::fs::write(tile_path(dir, s, col, row), bytes)?;
+        Ok(())
     })
-}
-
-/// Writes one tile and flushes it to disk: the caller's `pyramid.json` `complete` flag is
-/// fsynced, so its tiles must be on disk first, or a power cut could leave a level marked
-/// complete with empty tiles (FR-EDT-10, review #17).
-fn write_tile(path: &Path, bytes: &[u8]) -> Result<(), BuildError> {
-    use std::io::Write;
-    let mut f = std::fs::File::create(path)?;
-    f.write_all(bytes)?;
-    f.sync_data()?;
-    Ok(())
 }
 
 fn encode_tile(s: &LevelSpec, rgb: &[u8], w: u32, h: u32) -> Result<Vec<u8>, BuildError> {
