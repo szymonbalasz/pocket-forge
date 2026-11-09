@@ -640,15 +640,22 @@ async function refreshIterations(): Promise<void> {
 }
 
 async function loadModels(remembered: Values | null): Promise<void> {
+  // A late list of the previous project (or an older load) must not select a model with its
+  // remembered controls in this one (the RGN twin of GEN's FR-GEN-19 guard).
+  const pid = state.projectId;
+  const t = nextToken('models');
+  const stale = () => !isCurrent('models', t) || state.projectId !== pid;
   set({ modelsLoading: true, modelsError: null });
   try {
-    const { models, stale } = await api.provider.listModels('edit_masked');
-    set({ models, modelsStale: stale, modelsLoading: false });
+    const { models, stale: cached } = await api.provider.listModels('edit_masked');
+    if (stale()) return;
+    set({ models, modelsStale: cached, modelsLoading: false });
     const keep = state.modelId && models.some((m) => m.id === state.modelId) ? state.modelId : null;
     const id = keep ?? models[0]?.id ?? null;
     if (id) await selectModel(id, remembered);
     else set({ modelId: null, caps: null, evaluation: null });
   } catch (e) {
+    if (stale()) return;
     set({ modelsLoading: false, modelsError: uiError(e) });
   }
   probeSoon();

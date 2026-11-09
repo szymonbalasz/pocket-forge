@@ -982,3 +982,41 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(screen.queryByTestId('edt-picker-discard-rest')).toBeNull();
   });
 });
+
+test('FR-RGN-07 a late model list of the previous project never lands in the next one', async () => {
+  polyfillRadix();
+  fake = mockCore();
+  const w = window as unknown as {
+    __pfMockHandlers: Record<string, (i: unknown) => unknown>;
+    __pfMockSnapshot: Record<string, unknown>;
+  };
+  const list = w.__pfMockHandlers.provider_list_models!;
+  let release: () => void = () => undefined;
+  let first = true;
+  w.__pfMockHandlers.provider_list_models = (i) => {
+    if (!first) return list(i);
+    first = false;
+    // Project A's answer comes late.
+    return new Promise<void>((r) => (release = r)).then(() => list(i));
+  };
+  w.__pfMockSnapshot.draft = { model_id: 'fake-all-types', controls: { guidance: 15 } };
+  projectStore.reset();
+  await act(() => projectStore.open('C:/pf-test/library/Maps/map'));
+  render(
+    <Tooltip.Provider>
+      <GeneratePanel />
+    </Tooltip.Provider>,
+  );
+  await waitFor(() => expect(rgn.get().modelsLoading).toBe(true));
+  // Project B (no draft) opens and loads its own list.
+  w.__pfMockSnapshot.project_id = '01JPROJECTB000000000000000';
+  w.__pfMockSnapshot.draft = null;
+  await act(() => projectStore.open('C:/pf-test/library/Maps/other'));
+  await waitFor(() => expect(rgn.get().projectId).toBe('01JPROJECTB000000000000000'));
+  await waitFor(() => expect(rgn.get().evaluation).not.toBeNull());
+  expect(rgn.get().values.guidance).toBe(7.5);
+  await act(async () => release());
+  await wait(100);
+  expect(rgn.get().values.guidance).toBe(7.5);
+  expect(rgn.get().touched).not.toContain('guidance');
+});
