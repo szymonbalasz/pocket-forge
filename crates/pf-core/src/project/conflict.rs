@@ -478,6 +478,10 @@ pub fn resolve_conflict(
     }
     p.warnings.retain(|w| w.code != "conflict");
     p.pending_draft = None;
+    // EDT resubmits its mask after the resolve on Keep this, and reloads the kept one on Keep
+    // other (BL-31); a waiting copy here would undo Keep other.
+    p.pending_mask = None;
+    p.retried_mask = None;
     p.request_thumbnail(ctx);
     let entry = p
         .manifest

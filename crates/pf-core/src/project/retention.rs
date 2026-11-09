@@ -273,7 +273,9 @@ pub fn purge_expired(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> Co
         // Nothing could be deleted (kept files, locks): the manifest stays as it is.
         return Ok(out);
     }
-    commit(ctx, install_id, p, |_, _, m, _| {
+    commit(ctx, install_id, p, |_, _, m, plan| {
+        // Housekeeping: the last-edited time stays (FR-PRJ-49, R108).
+        plan.keep_at = true;
         for t in m.trash.iter_mut() {
             if let Some(stays) = left.get(&t.id) {
                 t.files.clone_from(stays);

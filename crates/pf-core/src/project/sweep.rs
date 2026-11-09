@@ -195,12 +195,23 @@ pub(super) fn on_open(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> C
             // R102: with a revision or job file unreadable, nothing is called an orphan.
             let orphans = find_orphans(p).unwrap_or_default();
             if !orphans.is_empty() || !super::conflict::side_copies(p).is_empty() {
-                commit(ctx, install_id, p, |ctx, _, m, _| {
+                let swept = commit(ctx, install_id, p, |ctx, _, m, plan| {
+                    plan.keep_at = true;
                     if !orphans.is_empty() {
                         super::store::trash_files(ctx, m, TrashKind::Orphan, orphans, "orphan");
                     }
                     Ok(())
-                })?;
+                });
+                match swept {
+                    Ok(_) => {}
+                    // R108: a locked project.json doesn't fail the open; the sweep waits for
+                    // the next open (nothing moved: the trash moves follow the commit).
+                    Err(e) if e.code == ErrorCode::Locked => {
+                        tracing::warn!("open sweep deferred: project.json is locked");
+                        return finish(p, lost);
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             // FR-PRJ-32: items older than 30 days are deleted. Not fatal: retried next open.
             if let Err(e) = super::retention::purge_expired(ctx, install_id, p) {
@@ -208,6 +219,11 @@ pub(super) fn on_open(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> C
             }
         }
     }
+    finish(p, lost)
+}
+
+/// The open's job warnings: interrupted submits marked lost, and jobs that can resume.
+fn finish(p: &mut OpenProject, lost: Vec<Ulid>) -> CoreResult<()> {
     if !lost.is_empty() {
         p.warnings.push(Warning {
             code: "lost",

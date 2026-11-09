@@ -119,6 +119,10 @@ pub struct OpenProject {
     /// A draft save that failed with `locked` (retried every 10 s, FR-PRJ-21) or `conflict` (saved
     /// by the resolve).
     pub pending_draft: Option<PendingDraft>,
+    /// A mask write that failed like a pending draft (R108): retried with it, and closing asks.
+    pub pending_mask: Option<PendingMask>,
+    /// The mask the retry wrote last, so EDT's own retry of the same bytes doesn't write it twice.
+    pub(crate) retried_mask: Option<(PendingMask, Mask)>,
     /// Set while a sync conflict is open: every commit is refused with `conflict` until
     /// `project_resolve_conflict` (FR-PRJ-34 … 36).
     pub conflict: Option<conflict::ConflictSource>,
@@ -129,6 +133,13 @@ pub struct OpenProject {
 pub struct PendingDraft {
     pub draft: DraftInput,
     pub export: Option<serde_json::Map<String, Value>>,
+}
+
+/// A mask write kept in memory after `locked`, a moved folder or a conflict (R108).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingMask {
+    pub rect: Rect,
+    pub grey: Vec<u8>,
 }
 
 /// How often a save that failed with `locked` is retried (FR-PRJ-21).
@@ -466,6 +477,8 @@ pub fn open(
         refs: RevisionRefs::default(),
         thumbs,
         pending_draft: None,
+        pending_mask: None,
+        retried_mask: None,
         conflict: None,
     };
     check_original(ctx, &mut p)?;
@@ -699,6 +712,9 @@ pub struct CommitPlan {
     pub jobs_before: Vec<JobFile>,
     /// Job files written after the manifest (follow-ups rolled forward on open).
     pub jobs_after: Vec<JobFile>,
+    /// Housekeeping (the open sweep, the trash purge): `commit.at` stays, so opening a project
+    /// doesn't move it in the last-edited order (FR-PRJ-49, R108).
+    pub keep_at: bool,
 }
 
 /// One commit (FR-PRJ-18). `change` edits a copy of the manifest and fills the plan; on any
@@ -752,27 +768,46 @@ pub(crate) fn commit_with(
         return Err(folder_moved());
     }
 
-    for (rel, bytes) in &plan.files {
-        let target = p.path(rel);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| CoreError::io(format!("creating {}", parent.display()), &e))?;
-        }
-        fsx::write_atomic(ctx, &target, bytes)?;
-    }
-    for rev in &plan.revisions {
-        fsx::write_json_atomic(ctx, &p.path(&revision_file(rev.id)), rev)?;
-    }
-    for job in &plan.jobs_before {
-        write_job(ctx, p, job)?;
-    }
+    // R108: the write-once files this commit adds are removed again if it fails before the
+    // commit point, so a refused save never turns into history after a restart.
+    let mut added: Vec<PathBuf> = Vec::new();
     let seq = p.last_commit.map_or(0, |c| c.0) + 1;
-    next.commit = Commit {
-        seq,
-        install_id,
-        at: ctx.now(),
-    };
-    fsx::write_json_atomic(ctx, &p.manifest_path(), &next)?;
+    let written = (|| {
+        for (rel, bytes) in &plan.files {
+            let target = p.path(rel);
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| CoreError::io(format!("creating {}", parent.display()), &e))?;
+            }
+            write_new(&mut added, &target, |t| fsx::write_atomic(ctx, t, bytes))?;
+        }
+        for rev in &plan.revisions {
+            let target = p.path(&revision_file(rev.id));
+            write_new(&mut added, &target, |t| fsx::write_json_atomic(ctx, t, rev))?;
+        }
+        for job in &plan.jobs_before {
+            write_job(ctx, p, job)?;
+        }
+        next.commit = Commit {
+            seq,
+            install_id,
+            at: if plan.keep_at {
+                p.manifest.commit.at
+            } else {
+                ctx.now()
+            },
+        };
+        fsx::write_json_atomic(ctx, &p.manifest_path(), &next)
+    })();
+    if let Err(e) = written {
+        for path in &added {
+            if let Err(err) = std::fs::remove_file(path) {
+                // Unreferenced: the next open's sweep trashes it (FR-PRJ-20).
+                tracing::warn!(error = %err, "a failed commit's file stays for the sweep");
+            }
+        }
+        return Err(e);
+    }
 
     // Committed. Everything below is rolled forward on open if it fails.
     let layers_changed = next.layers != p.manifest.layers;
@@ -802,6 +837,21 @@ pub(crate) fn commit_with(
         p.request_thumbnail(ctx);
     }
     Ok(seq)
+}
+
+/// Writes a write-once file and notes it in `added` if it didn't exist before (R108: only a
+/// file this commit created is removed when the commit fails).
+fn write_new(
+    added: &mut Vec<PathBuf>,
+    target: &Path,
+    write: impl FnOnce(&Path) -> CoreResult<()>,
+) -> CoreResult<()> {
+    let existed = target.exists();
+    write(target)?;
+    if !existed {
+        added.push(target.to_path_buf());
+    }
+    Ok(())
 }
 
 pub(crate) fn write_job(ctx: &Context, p: &OpenProject, job: &JobFile) -> CoreResult<()> {
@@ -978,6 +1028,9 @@ pub fn restore_revision(
 /// region-edit draft, so the waiting one's region-edit fields are dropped and only what restore
 /// keeps survives: the New image draft (R98) and EXP's settings. Its retry can't undo the restore.
 fn rebase_pending_on_restore(p: &mut OpenProject) {
+    // The restore replaced the draft's mask too.
+    p.pending_mask = None;
+    p.retried_mask = None;
     let Some(pending) = p.pending_draft.take() else {
         return;
     };
@@ -1133,8 +1186,69 @@ pub fn put_draft(
 pub fn retry_pending(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> bool {
     if p.conflict.is_some() {
         // Waits for the resolve (walk 2 N1).
-        return p.pending_draft.is_some();
+        return has_unsaved(p);
     }
+    let draft_waits = retry_pending_draft(ctx, install_id, p);
+    retry_pending_mask(ctx, install_id, p) || draft_waits
+}
+
+/// The waiting mask (R108), after the draft: one commit writes it and points the draft at it.
+fn retry_pending_mask(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> bool {
+    let Some(pending) = p.pending_mask.take() else {
+        return false;
+    };
+    match store::put_mask(ctx, install_id, p, pending.rect, pending.grey.clone()) {
+        Ok(mask) => {
+            p.warnings.retain(|w| w.code != FOLDER_MOVED);
+            p.retried_mask = Some((pending, mask));
+            false
+        }
+        Err(e) if keeps_draft(&e) || e.code == ErrorCode::Conflict => {
+            if e.code != ErrorCode::Conflict {
+                emit_save_failed(ctx, save_failed_reason(&e), true);
+            }
+            p.pending_mask = Some(pending);
+            true
+        }
+        Err(e) => {
+            tracing::warn!(code = %e.code, "pending mask dropped: {}", e.message);
+            false
+        }
+    }
+}
+
+/// EDT's mask write (`put_mask`, FR-EDT-28). A failure that keeps a draft keeps the mask too, so
+/// closing asks first (R108); any later write replaces it. The same bytes the 10 s retry wrote
+/// already answer with that mask, without a second write.
+pub fn submit_mask(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    rect: Rect,
+    grey: Vec<u8>,
+) -> CoreResult<Mask> {
+    let pending = PendingMask { rect, grey };
+    if let Some((done, mask)) = p.retried_mask.take()
+        && done == pending
+        && p.manifest.draft.as_ref().and_then(|d| d.mask_id) == Some(mask.id)
+        && p.pending_mask.is_none()
+    {
+        p.retried_mask = Some((done, mask.clone()));
+        return Ok(mask);
+    }
+    let result = store::put_mask(ctx, install_id, p, pending.rect, pending.grey.clone());
+    match &result {
+        Ok(_) => p.pending_mask = None,
+        Err(e) if keeps_draft(e) || e.code == ErrorCode::Conflict => {
+            p.pending_mask = Some(pending);
+        }
+        Err(_) => {}
+    }
+    result
+}
+
+/// The waiting draft's retry (FR-PRJ-21); true while it still waits.
+fn retry_pending_draft(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> bool {
     if let Some(pending) = p.pending_draft.take() {
         match put_draft_once(
             ctx,
@@ -1180,7 +1294,7 @@ fn save_failed_reason(e: &CoreError) -> &'static str {
 
 /// True if closing would lose state that only lives in memory (FR-PRJ-21: closing asks first).
 pub fn has_unsaved(p: &OpenProject) -> bool {
-    p.pending_draft.is_some()
+    p.pending_draft.is_some() || p.pending_mask.is_some()
 }
 
 fn put_draft_once(

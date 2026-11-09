@@ -683,3 +683,73 @@ fn fr_prj_42_decoded_original_is_owned_by_the_project() {
     let img = store::decoded_original(&e.ctx, &p).unwrap();
     assert_eq!((img.width(), img.height()), (40, 30));
 }
+
+#[test]
+fn fr_prj_23_r108_a_save_refused_as_locked_never_becomes_history() {
+    let mut e = env();
+    let dir = e.project("Crypt");
+    let mut p = e.open(&dir);
+    draft(&e, &mut p, "moss").unwrap();
+    let revisions = |dir: &Path| {
+        std::fs::read_dir(dir.join(".pforge/revisions"))
+            .map(|d| d.count())
+            .unwrap_or(0)
+    };
+    let files_before = revisions(&dir);
+    e.ctx.faults = Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap();
+    for label in ["locked save", "again"] {
+        let err = save_revision(&e.ctx, e.install(), &mut p, Some(label.into())).unwrap_err();
+        assert_eq!(err.code, ErrorCode::Locked);
+    }
+    assert_eq!(
+        revisions(&dir),
+        files_before,
+        "no revision file left behind"
+    );
+    // After a restart and once the lock lifts, the history is r0 only; the next commit
+    // doesn't bring the refused saves back.
+    e.ctx.faults = Faults::none();
+    drop(p);
+    let mut p = e.open(&dir);
+    assert_eq!(p.manifest.revisions.len(), 1);
+    draft(&e, &mut p, "fern").unwrap();
+    let p = e.open(&dir);
+    assert_eq!(p.manifest.revisions.len(), 1);
+    assert!(p.manifest.revisions.iter().all(|r| r.label.is_none()));
+}
+
+#[test]
+fn fr_prj_49_r108_an_open_sweep_commit_keeps_the_last_edited_time() {
+    let mut e = env();
+    let dir = e.project("Crypt");
+    let at = e.open(&dir).manifest.commit.at;
+    let stray = format!("{LAYERS_DIR}/{}.png", Ulid::from_parts(9, 9));
+    std::fs::write(dir.join(&stray), b"x").unwrap();
+    e.ctx.clock = Box::new(crate::context::ManualClock::new(Timestamp(T0 + 86_400_000)));
+    let p = e.open(&dir);
+    assert!(!dir.join(&stray).exists(), "swept");
+    assert!(p.manifest.trash.iter().any(|t| t.kind == TrashKind::Orphan));
+    assert_eq!(p.manifest.commit.at, at, "last edited stays (FR-PRJ-49)");
+    let disk: Manifest = read_json(&dir.join("project.json")).unwrap();
+    assert_eq!(disk.commit.at, at);
+}
+
+#[test]
+fn fr_prj_20_r108_a_locked_project_json_defers_the_open_sweep() {
+    let mut e = env();
+    let dir = e.project("Crypt");
+    let stray = format!("{LAYERS_DIR}/{}.png", Ulid::from_parts(9, 9));
+    std::fs::write(dir.join(&stray), b"x").unwrap();
+    e.ctx.faults = Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap();
+    let p = open(&e.ctx, &e.settings, &dir, None).expect("a lock doesn't fail the open");
+    assert!(
+        dir.join(&stray).exists(),
+        "the sweep waits for the next open"
+    );
+    assert!(p.manifest.trash.is_empty());
+    e.ctx.faults = Faults::none();
+    drop(p);
+    let p = e.open(&dir);
+    assert!(!dir.join(&stray).exists());
+    assert!(p.manifest.trash.iter().any(|t| t.kind == TrashKind::Orphan));
+}

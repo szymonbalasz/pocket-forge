@@ -10,7 +10,7 @@ use ulid::Ulid;
 use crate::core::Core;
 use crate::error::{CoreError, CoreResult, ErrorCode};
 use crate::manifest::Rect;
-use crate::project::{OpenProject, store};
+use crate::project::OpenProject;
 
 /// FR-EDT-14 / OQ-CNV-04: a mask is at most 4096 px per side.
 pub const MASK_MAX_SIDE: u32 = 4096;
@@ -61,7 +61,8 @@ fn open_project(
 
 /// `edt_mask_submit`: validates, then PRJ `put_mask` writes the PNG and points the draft at it in
 /// one commit (R7). A read-only project fails fast with `read_only` before the body is decoded
-/// (FR-EDT-29). `locked` / `conflict` / `io` come from the store; the UI keeps the mask and retries.
+/// (FR-EDT-29). `locked` / `conflict` / `io` come from the store; the UI keeps the mask and retries,
+/// and PRJ keeps a `locked` one waiting so closing asks first (R108).
 pub fn submit(core: &Core, project_id: Ulid, rect: Rect, data_b64: &str) -> CoreResult<MaskRef> {
     check_rect_size(&rect)?;
     {
@@ -87,7 +88,7 @@ pub fn submit(core: &Core, project_id: Ulid, rect: Rect, data_b64: &str) -> Core
     let mut state = core.state();
     let install_id = state.settings.install_id;
     let p = open_project(state.project.as_mut(), project_id)?;
-    let mask = store::put_mask(&core.ctx, install_id, p, rect, bytes)?;
+    let mask = crate::project::submit_mask(&core.ctx, install_id, p, rect, bytes)?;
     Ok(MaskRef {
         mask_id: mask.id,
         rect: mask.rect,
