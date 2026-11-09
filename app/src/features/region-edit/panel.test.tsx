@@ -958,6 +958,39 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     );
   });
 
+  test('FR-RGN-30 night review 12b a second accept of another candidate while one runs is refused visibly', async () => {
+    await submitted();
+    act(() => mockControls().finish(2));
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(2));
+    const [a, b] = rgn.get().candidates.map((c) => c.id);
+    // The first accept stays in flight until the gate opens.
+    const handlers = (
+      window as unknown as { __pfMockHandlers: Record<string, (i: unknown) => unknown> }
+    ).__pfMockHandlers;
+    const accept = handlers.rgn_candidate_accept!;
+    let open!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    handlers.rgn_candidate_accept = async (i) => {
+      await gate;
+      return accept(i);
+    };
+    let first!: Promise<void>;
+    act(() => {
+      first = rgn.accept(a!);
+    });
+    await act(() => rgn.accept(b!));
+    expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(
+      /Another patch is still being accepted/,
+    );
+    open();
+    await act(() => first);
+    expect(fake.callsOf('rgn_candidate_accept').map((c) => c.candidate_id)).toEqual([a]);
+    // The first's notice keeps saying the second wasn't done.
+    expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(
+      /^Patch accepted\. The other candidate wasn’t accepted/,
+    );
+  });
+
   test('FR-RGN-26 a preview without enough context says colour match was skipped', async () => {
     await submitted();
     const handlers = (
