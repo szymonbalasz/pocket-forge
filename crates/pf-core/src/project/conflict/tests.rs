@@ -466,6 +466,82 @@ fn fr_prj_34_oq_prj_10_a_job_copy_with_the_later_state_wins() {
     assert!(s.p.conflict.is_none(), "job copies never need the user");
 }
 
+/// Review item 9 / R102: a `lost` or `failed` copy (e.g. another machine's sweep) never beats
+/// a copy that kept the job handle or candidates, however late it was written.
+#[test]
+fn fr_prj_34_oq_prj_10_a_copy_with_a_handle_or_candidates_beats_a_lost_or_failed_one() {
+    let mut s = setup();
+    let job = succeeded(&mut s);
+    update_job(
+        &s.e.ctx,
+        &mut s.p,
+        job.id,
+        JobUpdate {
+            provider: Some(serde_json::json!({"job_handle": "h-paid"})),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    add_candidates(
+        &s.e.ctx,
+        s.e.install(),
+        &mut s.p,
+        job.id,
+        vec![cand(1), cand(2)],
+    )
+    .unwrap();
+    let ours = s.p.jobs[&job.id].clone();
+    assert_eq!(ours.state, JobState::Fetched);
+    for state in ["lost", "failed"] {
+        let dir = s.dir.join(job_dir(job.id));
+        let mut v = read_value(&dir.join("job.json"));
+        v["state"] = Value::from(state);
+        v["provider"] = Value::Null;
+        v["candidate_ids"] = serde_json::json!([]);
+        v["updated_at"] = Value::from("2099-01-01T00:00:00Z");
+        write_value(&dir.join("job-OTHERPC.json"), &v);
+        s.reopen();
+        let now = &s.p.jobs[&job.id];
+        assert_eq!(now.state, JobState::Fetched, "{state} copy lost");
+        assert_eq!(now.provider["job_handle"], "h-paid");
+        assert_eq!(now.candidate_ids, ours.candidate_ids);
+        let disk: crate::job::JobFile = read_json(&dir.join("job.json")).unwrap();
+        assert_eq!(disk.state, JobState::Fetched);
+        let _ = std::fs::remove_file(dir.join("job-OTHERPC.json"));
+    }
+
+    // Unit rows: a handle alone (submitted) beats `failed`; without a handle or candidates the
+    // later state still wins; `canceled` (the user's) stays later than a running copy.
+    let at = |state, handle: bool, t: i64| {
+        let mut j = ours.clone();
+        j.state = state;
+        j.candidate_ids.clear();
+        j.provider = if handle {
+            serde_json::json!({"job_handle": "h"})
+        } else {
+            Value::Null
+        };
+        j.updated_at = crate::time::Timestamp(t);
+        j
+    };
+    assert!(later(
+        &at(JobState::Submitted, true, 1),
+        &at(JobState::Failed, false, 9)
+    ));
+    assert!(!later(
+        &at(JobState::Lost, false, 9),
+        &at(JobState::Running, true, 1)
+    ));
+    assert!(later(
+        &at(JobState::Lost, false, 9),
+        &at(JobState::Requested, false, 1)
+    ));
+    assert!(later(
+        &at(JobState::Canceled, true, 9),
+        &at(JobState::Running, true, 1)
+    ));
+}
+
 #[test]
 fn fr_prj_34_a_thumbnail_copy_goes_to_the_trash() {
     let mut s = setup();

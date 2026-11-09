@@ -151,8 +151,11 @@ pub(super) fn on_open(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> C
                 .filter(|c| c.job_id == id)
                 .collect();
             let target = match job.state {
-                // FR-PRJ-29: no handle was saved before the crash.
-                JobState::Requested => Some(JobState::Lost),
+                // FR-PRJ-29 / R102: no handle was saved before the crash. Not while this process
+                // is submitting it, nor while it's young (another machine may be).
+                JobState::Requested if job.requested_gone(&ctx.submitting, now) => {
+                    Some(JobState::Lost)
+                }
                 // Candidates committed, the `fetched` follow-up wasn't.
                 JobState::Succeeded if !mine.is_empty() => Some(JobState::Fetched),
                 _ => None,
@@ -160,6 +163,9 @@ pub(super) fn on_open(ctx: &Context, install_id: Ulid, p: &mut OpenProject) -> C
             if let Some(t) = target {
                 if t == JobState::Fetched {
                     next.candidate_ids = mine.iter().map(|c| c.id).collect();
+                }
+                if t == JobState::Lost {
+                    next.error = Some(crate::job::lost_before_handle_error());
                 }
                 let _ = next.transition(t, now);
             }

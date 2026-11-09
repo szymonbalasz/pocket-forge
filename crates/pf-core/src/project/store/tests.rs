@@ -203,8 +203,15 @@ fn fr_prj_29_requested_job_reopened_is_lost_and_others_are_resumable() {
     let a = s.job("one");
     let b = s.job("two");
     s.to(b.id, JobState::Submitted);
+    // R102: only once it's older than the submit timeout + 60 s.
+    s.reopen();
+    assert_eq!(s.p.jobs[&a.id].state, JobState::Requested, "young: kept");
+    assert!(s.p.warnings.iter().all(|w| w.code != "lost"));
+    let later = s.e.ctx.now().plus(crate::job::LOST_AFTER);
+    s.e.ctx.clock = Box::new(crate::context::ManualClock::new(later));
     s.reopen();
     assert_eq!(s.p.jobs[&a.id].state, JobState::Lost);
+    assert_eq!(s.p.jobs[&a.id].error.as_ref().unwrap()["code"], "lost");
     let lost = s.p.warnings.iter().find(|w| w.code == "lost").unwrap();
     assert_eq!(lost.detail["job_ids"][0], a.id.to_string());
     let res = s.p.warnings.iter().find(|w| w.code == "resumable").unwrap();

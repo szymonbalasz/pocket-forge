@@ -89,7 +89,8 @@ impl Api {
     }
 
     /// Sends one request with the retry policy and returns the raw response (any status).
-    /// Transport failures that survive the retries become `offline` / `timeout`.
+    /// Transport failures that survive the retries become `offline` / `timeout`. A [`Retry::Once`]
+    /// call whose connection broke after sending is `timeout`: it may have been acted on (R102).
     pub async fn send(
         &self,
         creds: Option<&Credentials>,
@@ -153,7 +154,10 @@ impl Api {
                 self.note(url, &out);
                 return out.map_err(|e| match e {
                     TransportError::Timeout => ProviderError::Timeout,
-                    TransportError::Offline(_) => ProviderError::Offline,
+                    TransportError::Interrupted if retry == Retry::Once => ProviderError::Timeout,
+                    TransportError::Interrupted | TransportError::Offline(_) => {
+                        ProviderError::Offline
+                    }
                 });
             }
             let backoff = Duration::from_secs(BACKOFF_SECS[attempt - 1]);
@@ -197,12 +201,13 @@ pub fn parse_json(body: &[u8]) -> ProviderResult<Value> {
     })
 }
 
-/// `Retry-After` in seconds (the HTTP-date form is treated as absent).
+/// `Retry-After` in seconds, capped at [`RETRY_AFTER_CAP`] (FR-PRV-24) so a huge value can't
+/// panic or stall a caller (FR-PRV-23). The HTTP-date form is treated as absent.
 pub fn retry_after(resp: &HttpResponse) -> Option<Duration> {
     resp.header("retry-after")
         .and_then(|v| v.trim().parse::<f64>().ok())
         .filter(|s| s.is_finite() && *s >= 0.0)
-        .map(Duration::from_secs_f64)
+        .map(|s| Duration::from_secs_f64(s.min(RETRY_AFTER_CAP.as_secs_f64())))
 }
 
 /// The human part of a Scenario error body: `reason`, else gateway `message`, plus `hint`.
@@ -292,7 +297,8 @@ pub fn map_error(
     match resp.status {
         401 | 403 if api_route => ProviderError::Auth,
         402 => ProviderError::InsufficientBalance,
-        _ if mentions_credits(&text) && (400..500).contains(&resp.status) => {
+        // A 429 stays a rate limit whatever its text says (it is retried, not a top-up).
+        _ if mentions_credits(&text) && (400..500).contains(&resp.status) && resp.status != 429 => {
             ProviderError::InsufficientBalance
         }
         429 => ProviderError::RateLimited {
@@ -580,6 +586,41 @@ mod tests {
         assert_eq!(e.code(), "provider_failure");
         assert!(s.delays().is_empty());
         assert_eq!(t.remaining(), 0);
+    }
+
+    /// Review item 17: a 429 is a rate limit even when its text mentions credits.
+    #[test]
+    fn fr_prv_23_a_429_mentioning_credits_is_rate_limited() {
+        let c = Credentials::new("k", "s");
+        let mut r = resp(429, json!({"message": "Too many credit checks, slow down"}));
+        r.headers.push(("retry-after".into(), "3".into()));
+        assert_eq!(
+            map_error(&r, Some(&c), true),
+            ProviderError::RateLimited {
+                retry_after_ms: 3000
+            }
+        );
+    }
+
+    /// Review item 15: a finite but huge `Retry-After` used to panic in `from_secs_f64`.
+    #[test]
+    fn fr_prv_23_a_huge_retry_after_never_panics() {
+        let c = Credentials::new("k", "s");
+        for value in ["1e30", "1.8e19", "99999999999999999999", "inf", "-5"] {
+            let mut r = resp(429, json!({}));
+            r.headers.push(("retry-after".into(), value.into()));
+            let wait = retry_after(&r);
+            assert!(
+                wait.is_none_or(|w| w <= RETRY_AFTER_CAP),
+                "{value}: {wait:?}"
+            );
+            match map_error(&r, Some(&c), true) {
+                ProviderError::RateLimited { retry_after_ms } => {
+                    assert!(retry_after_ms <= 30_000, "{value}: {retry_after_ms}")
+                }
+                other => panic!("{value}: {other:?}"),
+            }
+        }
     }
 
     #[test]

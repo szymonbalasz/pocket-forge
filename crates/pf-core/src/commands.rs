@@ -1112,7 +1112,9 @@ pub use crate::region_edit::commands::{
     RgnControlsEvaluate, RgnJobEstimate, RgnRegionFit, RgnSpendGet, RgnSpendSet,
 };
 pub use crate::region_edit::instruction::{RgnBlendInstructionGet, RgnBlendInstructionSet};
-pub use crate::region_edit::jobs::{RgnJobCancel, RgnJobDismiss, RgnJobRetryDraft, RgnJobSubmit};
+pub use crate::region_edit::jobs::{
+    RgnJobCancel, RgnJobDismiss, RgnJobFetchAgain, RgnJobRetryDraft, RgnJobSubmit,
+};
 
 // ---------------------------------------------------------------- reference packs
 
@@ -1270,6 +1272,7 @@ registry![
     PrmChatInsert,
     PrmChatFakeSetCase,
     PrmChatPreview,
+    RgnJobFetchAgain,
 ];
 
 #[cfg(test)]
