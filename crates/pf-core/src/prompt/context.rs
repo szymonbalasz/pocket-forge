@@ -107,3 +107,69 @@ pub fn value_type(v: &Value) -> &'static str {
         Value::Object(_) => "object",
     }
 }
+
+// ---------------------------------------------------------------- image limits (FR-PRM-25)
+
+/// Long side of a context image, after Lanczos3 (FR-PRM-25).
+pub const CHAT_IMAGE_MAX_SIDE: u32 = 1568;
+/// JPEG quality of a context image.
+pub const CHAT_IMAGE_QUALITY: u8 = 85;
+/// Images one turn carries at most.
+pub const CHAT_MAX_IMAGES: usize = 6;
+/// Encoded bytes one turn carries at most.
+pub const CHAT_MAX_BYTES: usize = 4 * 1024 * 1024;
+
+/// FR-PRM-25: an image as a context image: decoded (alpha over the flatten colour, FR-GEN-12),
+/// downscaled with Lanczos3 to a long side ≤ 1568 px, encoded as JPEG q85. Returns the JPEG and
+/// its size.
+pub fn chat_jpeg(bytes: &[u8]) -> CoreResult<(Vec<u8>, u32, u32)> {
+    use image::ImageEncoder;
+    let img = image::load_from_memory(bytes).map_err(|e| {
+        crate::error::CoreError::new(
+            crate::error::ErrorCode::Corrupt,
+            format!("the image won't decode: {e}"),
+        )
+    })?;
+    let rgb = pf_imaging::to_rgb8_flattened(img);
+    let (w, h) = rgb.dimensions();
+    let long = w.max(h);
+    let rgb = if long > CHAT_IMAGE_MAX_SIDE {
+        let scale = f64::from(CHAT_IMAGE_MAX_SIDE) / f64::from(long);
+        let nw = ((f64::from(w) * scale).round() as u32).max(1);
+        let nh = ((f64::from(h) * scale).round() as u32).max(1);
+        pf_imaging::resize_lanczos3(&rgb, nw, nh)
+            .map_err(|e| crate::error::CoreError::internal(format!("resizing: {e}")))?
+    } else {
+        rgb
+    };
+    let (w, h) = rgb.dimensions();
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, CHAT_IMAGE_QUALITY)
+        .write_image(rgb.as_raw(), w, h, image::ExtendedColorType::Rgb8)
+        .map_err(|e| crate::error::CoreError::internal(format!("encoding: {e}")))?;
+    Ok((out, w, h))
+}
+
+/// FR-PRM-25: keeps `images` in order up to 6 images and 4 MiB encoded; the tail is dropped and
+/// returned, so the context strip and the facts can name it. The chat core calls it after its
+/// per-session "already received" filter.
+pub fn limit_images(images: &mut Vec<ChatImage>) -> Vec<ChatImage> {
+    let mut bytes = 0usize;
+    let mut keep = images.len();
+    for (i, img) in images.iter().enumerate() {
+        if i >= CHAT_MAX_IMAGES || bytes + img.jpeg.len() > CHAT_MAX_BYTES {
+            keep = i;
+            break;
+        }
+        bytes += img.jpeg.len();
+    }
+    images.split_off(keep)
+}
+
+/// The fact naming dropped images ("not sent (turn limit): a.png, b.png").
+pub fn dropped_fact(dropped: &[ChatImage]) -> Option<String> {
+    (!dropped.is_empty()).then(|| {
+        let names: Vec<&str> = dropped.iter().map(|i| i.label.as_str()).collect();
+        format!("not sent (turn limit): {}", names.join(", "))
+    })
+}

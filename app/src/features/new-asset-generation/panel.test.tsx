@@ -32,6 +32,9 @@ const tabIds = () => screen.queryAllByTestId('gen-tab').map((e) => e.dataset.rec
 const selectedTab = () =>
   screen.queryAllByTestId('gen-tab').find((e) => e.getAttribute('aria-selected') === 'true')
     ?.dataset.recordId;
+/** The prompt block of a host (both tabs host PRM's block, FR-GEN-36). */
+const blockOf = (host: 'rgn' | 'gen') =>
+  document.querySelector(`[data-testid="prm-block"][data-host="${host}"]`);
 const controlIds = () =>
   screen.queryAllByTestId('gen-control-input').map((e) => e.dataset.recordId);
 const control = (name: string) =>
@@ -83,7 +86,7 @@ async function estimated() {
 }
 
 async function generate(prompt = 'flooded crypt, torchlight') {
-  fireEvent.change(screen.getByTestId('gen-panel-prompt'), { target: { value: prompt } });
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: prompt } });
   await estimated();
   await waitFor(() =>
     expect(screen.getByTestId<HTMLButtonElement>('gen-panel-submit').disabled).toBe(false),
@@ -106,13 +109,15 @@ test('FR-GEN-04 OQ-GEN-09 the tab strip is Region edit | New image; each tab mou
   await setup({ tab: null });
   await waitFor(() => expect(tabIds()).toEqual(['region', 'new-image']));
   expect(selectedTab()).toBe('region');
-  expect(screen.getByTestId('prm-block-prompt')).toBeTruthy();
+  expect(blockOf('rgn')).toBeTruthy();
   expect(screen.queryByTestId('gen-panel')).toBeNull();
 
   fireEvent.click(screen.getAllByTestId('gen-tab')[1]!);
   expect(selectedTab()).toBe('new-image');
   await screen.findByTestId('gen-panel');
-  expect(screen.queryByTestId('prm-block-prompt')).toBeNull();
+  // Only the visible tab's prompt block is mounted (FR-GEN-36).
+  expect(blockOf('rgn')).toBeNull();
+  expect(blockOf('gen')).toBeTruthy();
   // Arrow keys move along the strip.
   fireEvent.keyDown(screen.getAllByTestId('gen-tab')[1]!, { key: 'ArrowLeft' });
   expect(selectedTab()).toBe('region');
@@ -124,7 +129,7 @@ test('FR-GEN-03 FR-GEN-04 a project with no image shows only the New image tab',
   await waitFor(() => expect(tabIds()).toEqual(['new-image']));
   expect(selectedTab()).toBe('new-image');
   expect(screen.getByTestId('gen-panel')).toBeTruthy();
-  expect(screen.queryByTestId('prm-block-prompt')).toBeNull();
+  expect(blockOf('rgn')).toBeNull();
 });
 
 test('FR-GEN-01 a project opened from Generate new… starts on the New image tab', async () => {
@@ -298,7 +303,7 @@ test('FR-GEN-20 FR-GEN-21 FR-GEN-22 FR-GEN-25 estimate, confirm "New image · W 
   await estimated();
   const est = fake.callsOf('gen_job_estimate').length;
   // The prompt never re-estimates (FR-GEN-20).
-  fireEvent.change(screen.getByTestId('gen-panel-prompt'), { target: { value: 'flooded crypt' } });
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'flooded crypt' } });
   await act(() => new Promise((r) => setTimeout(r, 700)));
   expect(fake.callsOf('gen_job_estimate').length).toBe(est);
   // fake-gen-wh's default count is 1 (the fixture is the fake's own, R80).
@@ -343,7 +348,7 @@ test('FR-GEN-32 Retry from the tracker fills the New image tab, flags a changed 
   await screen.findByTestId('gen-tracker-badge');
 
   // Somewhere else meanwhile: Region edit, another prompt, the sketch edited in Explorer.
-  fireEvent.change(screen.getByTestId('gen-panel-prompt'), { target: { value: 'other' } });
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'other' } });
   fireEvent.click(screen.getByTestId('gen-sketch-none'));
   fireEvent.click(screen.getAllByTestId('gen-tab')[0]!);
   genControls().changeSketch('a-room.png');
@@ -351,7 +356,7 @@ test('FR-GEN-32 Retry from the tracker fills the New image tab, flags a changed 
   await act(async () => fireEvent.click(await screen.findByTestId('rgn-job-retry')));
   await waitFor(() => expect(selectedTab()).toBe('new-image'));
   await waitFor(() =>
-    expect(screen.getByTestId<HTMLTextAreaElement>('gen-panel-prompt').value).toBe('crypt'),
+    expect(screen.getByTestId<HTMLTextAreaElement>('prm-block-prompt').value).toBe('crypt'),
   );
   expect(fake.callsOf('gen_job_retry_draft')).toHaveLength(1);
   expect(fake.callsOf('rgn_job_retry_draft')).toHaveLength(0);
@@ -376,7 +381,7 @@ test('FR-GEN-19 draft.generate is saved after an edit and restored on open', asy
   });
   expect(gen.get().modelId).toBe('fake-gen-aspect');
   expect(screen.getByTestId<HTMLInputElement>('gen-size-cols').value).toBe('12');
-  expect(screen.getByTestId<HTMLTextAreaElement>('gen-panel-prompt').value).toBe('swamp');
+  expect(screen.getByTestId<HTMLTextAreaElement>('prm-block-prompt').value).toBe('swamp');
   expect(screen.getByTestId<HTMLInputElement>('gen-panel-seed-value').value).toBe('7');
 
   setInt('gen-size-rows', 18);

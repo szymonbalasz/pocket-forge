@@ -46,6 +46,8 @@ pub struct State {
     pub rgn: crate::region_edit::RgnState,
     /// Export's session settings and running export (EXP §8).
     pub exp: crate::export::ExpState,
+    /// New image's session memory (the chat context reads it without a provider call).
+    pub generate: crate::generate::GenState,
 }
 
 /// The core: seams plus state. One per app process.
@@ -88,6 +90,7 @@ impl Core {
                 project: None,
                 rgn: Default::default(),
                 exp: Default::default(),
+                generate: Default::default(),
             })),
             served: Arc::default(),
             create_cancel: AtomicBool::new(false),

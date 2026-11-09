@@ -36,7 +36,13 @@ const MAX_HELPER_TICKS: usize = 200;
 
 /// The model's `generate` capabilities (R76). A model without a generate row → `unknown_model`.
 pub fn capabilities(core: &Core, model_id: &str) -> CoreResult<Capabilities> {
-    capabilities_for(core, model_id, Operation::Generate)
+    let caps = capabilities_for(core, model_id, Operation::Generate)?;
+    // The chat context reads these later without a provider call (FR-GEN-17).
+    core.state()
+        .generate
+        .caps
+        .insert(model_id.trim().to_owned(), caps.clone());
+    Ok(caps)
 }
 
 fn output_size(caps: &Capabilities) -> CoreResult<&pf_provider::OutputSize> {
@@ -483,6 +489,10 @@ pub struct RetryDraft {
     pub prompt_helpers_changed: Vec<String>,
     /// Recorded helpers that can't be sent any more (listed, unticked).
     pub prompt_helpers_missing: Vec<prompt::SentHelper>,
+    /// FR-PRM-10: the prompt block's badges (`since` = the job's `NNN`), as RGN's retry draft has
+    /// them; absent when nothing changed and nothing is missing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_retry: Option<prompt::helpers::PromptRetry>,
 }
 
 /// `NNN` of the job's iteration, or "the job" before it has one.
@@ -570,6 +580,7 @@ impl Command for GenJobRetryDraft {
         let pinned = job.extra.get("seed_pinned").and_then(Value::as_bool) == Some(true);
         let ticks =
             helpers::retry_ticks(kind, &job.prompt_helpers(), &helpers::effective(&settings));
+        let prompt_retry = ticks.badges(&label(&job));
         Ok(RetryDraft {
             model_id: job.model_id.clone(),
             controls: retry_controls(&job),
@@ -585,6 +596,7 @@ impl Command for GenJobRetryDraft {
             prompt_helpers: ticks.ticks,
             prompt_helpers_changed: ticks.changed,
             prompt_helpers_missing: ticks.missing,
+            prompt_retry,
         })
     }
 }

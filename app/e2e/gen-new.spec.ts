@@ -62,7 +62,7 @@ test('FR-GEN-01 FR-GEN-04 FR-GEN-08 FR-GEN-21 FR-GEN-25 + New → Generate new�
   );
   await expect(page.getByTestId('gen-size-notices')).toContainText('Model limit');
 
-  await page.getByTestId('gen-panel-prompt').fill('flooded crypt, torchlight');
+  await page.getByTestId('prm-block-prompt').fill('flooded crypt, torchlight');
   await expect(page.getByTestId('gen-panel-estimate')).toHaveAttribute('data-status', 'ready');
   await page.getByTestId('gen-panel-submit').click();
   await expect(page.getByTestId('gen-confirm-summary')).toHaveText('New image · 1520 × 2032');
@@ -91,7 +91,7 @@ async function newProject(page: import('@playwright/test').Page, name: string) {
 }
 
 async function generate(page: import('@playwright/test').Page, prompt: string) {
-  await page.getByTestId('gen-panel-prompt').fill(prompt);
+  await page.getByTestId('prm-block-prompt').fill(prompt);
   await expect(page.getByTestId('gen-panel-estimate')).toHaveAttribute('data-status', 'ready');
   await expect(page.getByTestId('gen-panel-submit')).toBeEnabled();
   await page.getByTestId('gen-panel-submit').click();

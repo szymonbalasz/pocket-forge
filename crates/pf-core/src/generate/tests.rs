@@ -960,3 +960,301 @@ fn fr_gen_06_the_ui_fixture_matches_the_fake_generate_capabilities() {
         );
     }
 }
+
+// ---------------------------------------------------------------- slice 6: chat context
+
+use crate::prompt::context::{
+    CHAT_IMAGE_MAX_SIDE, CHAT_MAX_BYTES, CHAT_MAX_IMAGES, ChatContextSource, ChatHost, ChatImage,
+    ChatImageRole, dropped_fact, limit_images,
+};
+
+const NO_PEOPLE: &str = "builtin:no-people";
+
+impl G {
+    fn project_id(&self) -> Ulid {
+        self.lab
+            .core
+            .state()
+            .project
+            .as_ref()
+            .unwrap()
+            .manifest
+            .project_id
+    }
+
+    fn reference(&self, file: &str, bytes: &[u8]) {
+        std::fs::write(self.lab.project_dir.join("references").join(file), bytes).unwrap();
+    }
+
+    /// The tab's usual calls this session: models (names) and an estimate (capabilities).
+    fn warm(&self, draft: &Value) {
+        self.dispatch("provider_list_models", json!({"operation": "generate"}))
+            .unwrap();
+        self.estimate(draft).unwrap();
+    }
+
+    fn context(&self, draft: &Value) -> crate::prompt::context::ChatContext {
+        super::chat::GenContextSource
+            .build(&self.lab.core, self.project_id(), draft)
+            .unwrap()
+    }
+}
+
+fn facts_text(ctx: &crate::prompt::context::ChatContext) -> String {
+    ctx.facts.join(" | ")
+}
+
+#[test]
+fn fr_gen_17_fr_prm_42_context_text_side_of_the_new_image_job() {
+    let g = G::new();
+    g.sketch("rooms.png", &layout());
+    let mut d = g.draft("Flooded crypt, torchlight");
+    d["structure"] = json!({"file": "rooms.png"});
+    d["controls"] = json!({"num_samples": 3, "background": "transparent"});
+    d["prompt_helpers"] = json!([NO_PEOPLE]);
+    g.warm(&d);
+    let ctx = g.context(&d);
+    assert_eq!(super::chat::GenContextSource.host(), ChatHost::Gen);
+    assert_eq!(ctx.host, ChatHost::Gen);
+    assert_eq!(ctx.kind, crate::manifest::Kind::Map);
+    assert_eq!(ctx.typed_prompt, "Flooded crypt, torchlight");
+    assert_eq!(
+        ctx.final_prompt,
+        "Flooded crypt, torchlight\n\nNo people, creatures or tokens."
+    );
+    assert_eq!(ctx.helpers.len(), 1);
+    assert_eq!(ctx.blend_instruction, None, "never the blend instruction");
+    assert_eq!(ctx.model.id, WH);
+    assert_ne!(ctx.model.name, WH, "the display name from the model list");
+    let names: Vec<&str> = ctx.controls.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["num_samples", "background"],
+        "no prompt, seed or image inputs"
+    );
+    let count = &ctx.controls[0];
+    assert_eq!(
+        (count.value.clone(), count.min, count.max),
+        (json!(3), Some(1.0), Some(4.0))
+    );
+    assert_eq!(
+        ctx.controls[1].allowed,
+        Some(vec![json!("opaque"), json!("transparent")])
+    );
+    let f = facts_text(&ctx);
+    assert!(
+        f.contains("size: grid 30 × 40 at 70 px per square; sent 1520 × 2032 (51 px per square, model limit)"),
+        "{f}"
+    );
+    assert!(f.contains("3 images per job"), "{f}");
+    assert!(f.contains("sketch: rooms.png"), "{f}");
+    // The final prompt is exactly what submit sends.
+    let id = g.submit(&d).unwrap();
+    assert_eq!(json!(ctx.final_prompt), g.job_json(id)["final_prompt"]);
+}
+
+#[test]
+fn fr_gen_17_fr_prm_42_images_are_the_sketch_then_the_on_references_in_send_order() {
+    let g = G::new();
+    g.sketch("rooms.png", &layout());
+    g.reference("a.png", &png_bytes(32, 24, 10));
+    g.reference("big.png", &png_bytes(2000, 1000, 20));
+    let mut d = g.draft("crypt");
+    d["structure"] = json!({"file": "rooms.png"});
+    g.warm(&d);
+    let ctx = g.context(&d);
+    let ids: Vec<&str> = ctx.images.iter().map(|i| i.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![
+            "structure:structure/rooms.png",
+            "ref:project:a.png",
+            "ref:project:big.png"
+        ]
+    );
+    assert_eq!(ctx.images[0].role, ChatImageRole::Structure);
+    assert_eq!(ctx.images[0].label, "sketch rooms.png");
+    assert_eq!(ctx.images[1].role, ChatImageRole::Reference);
+    assert_eq!(ctx.images[1].label, "a.png (project)");
+    // FR-PRM-25: JPEG, long side ≤ 1568.
+    let big = &ctx.images[2];
+    assert_eq!((big.w, big.h), (CHAT_IMAGE_MAX_SIDE, 784));
+    assert_eq!(&big.jpeg[..2], &[0xFF, 0xD8], "JPEG");
+    assert!(big.content_hash.starts_with("sha256:"));
+    // The hash is the file's, as REF's prepare reads it (the job row has the same).
+    let id = g.submit(&d).unwrap();
+    assert_eq!(
+        json!(ctx.images[0].content_hash),
+        g.job_json(id)["references"][0]["content_hash"]
+    );
+}
+
+#[test]
+fn fr_gen_17_fr_prm_25_the_turn_limit_drops_the_tail_so_the_sketch_goes_last() {
+    let g = G::new();
+    g.sketch("rooms.png", &layout());
+    let files: Vec<String> = (0..16).map(|i| format!("r{i:02}.png")).collect();
+    for (i, f) in files.iter().enumerate() {
+        g.reference(f, &png_bytes(32, 24, i as u8 * 9 + 1));
+    }
+    let mut d = g.draft("crypt");
+    d["structure"] = json!({"file": "rooms.png"});
+    g.warm(&d);
+    // A model that takes 16 references besides the sketch (as GPT Image 2.5 Flare).
+    {
+        let mut st = g.lab.core.state();
+        let caps = st.generate.caps.get_mut(WH).unwrap();
+        caps.slots[0].max = 17;
+    }
+    let mut ctx = g.context(&d);
+    assert_eq!(ctx.images.len(), 17);
+    let dropped = limit_images(&mut ctx.images);
+    assert_eq!(ctx.images.len(), CHAT_MAX_IMAGES);
+    assert_eq!(
+        ctx.images[0].role,
+        ChatImageRole::Structure,
+        "the sketch is kept"
+    );
+    let kept: Vec<&str> = ctx.images[1..].iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(
+        kept,
+        files[..5]
+            .iter()
+            .map(|f| format!("{f} (project)"))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(dropped.len(), 11);
+    assert_eq!(dropped[0].label, "r05.png (project)");
+    let fact = dropped_fact(&dropped).unwrap();
+    assert!(fact.starts_with("not sent (turn limit): r05.png (project), r06.png"));
+    assert!(fact.ends_with("r15.png (project)"));
+}
+
+#[test]
+fn fr_prm_25_the_byte_limit_drops_from_the_tail_too() {
+    let img = |n: usize, mib: usize| ChatImage {
+        id: format!("ref:{n}"),
+        role: ChatImageRole::Reference,
+        label: format!("{n}"),
+        w: 1,
+        h: 1,
+        content_hash: String::new(),
+        jpeg: vec![0; mib * 1024 * 1024],
+    };
+    let mut images = vec![img(0, 1), img(1, 2), img(2, 1), img(3, 1)];
+    let dropped = limit_images(&mut images);
+    assert_eq!(images.len(), 3, "1 + 2 + 1 MiB = 4 MiB fits");
+    assert_eq!(dropped.len(), 1);
+    assert!(images.iter().map(|i| i.jpeg.len()).sum::<usize>() <= CHAT_MAX_BYTES);
+    assert_eq!(dropped_fact(&[]), None);
+}
+
+#[test]
+fn fr_gen_17_fr_prm_41_an_image_that_cannot_be_sent_is_dropped_and_named() {
+    let g = G::new();
+    g.reference("a.png", &png_bytes(32, 24, 10));
+    g.reference("b.png", &png_bytes(32, 24, 20));
+    let mut d = g.draft("crypt");
+    d["structure"] = json!({"file": "gone.png"});
+    g.warm(&g.draft("crypt"));
+    let ctx = g.context(&d);
+    let ids: Vec<&str> = ctx.images.iter().map(|i| i.id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec!["ref:project:a.png", "ref:project:b.png"],
+        "the turn still has the rest"
+    );
+    let f = facts_text(&ctx);
+    assert!(
+        f.contains("The sketch gone.png can't be sent: it can't be found (not sent)"),
+        "{f}"
+    );
+    // A reference that went corrupt after it was ticked: off, and named.
+    g.reference("b.png", b"not an image");
+    let mut ticked = g.draft("crypt");
+    ticked["references"] = json!({"packs": [], "items": [
+        {"key": "project:a.png", "on": true, "role": null},
+        {"key": "project:b.png", "on": true, "role": null},
+    ]});
+    let ctx = g.context(&ticked);
+    let ids: Vec<&str> = ctx.images.iter().map(|i| i.id.as_str()).collect();
+    assert_eq!(ids, vec!["ref:project:a.png"]);
+    assert!(
+        facts_text(&ctx).contains("reference b.png not sent (corrupt)"),
+        "{}",
+        facts_text(&ctx)
+    );
+}
+
+#[test]
+fn fr_gen_17_aspect_models_without_a_sketch_slot_and_no_cached_capabilities() {
+    let g = G::new();
+    g.sketch("rooms.png", &layout());
+    let mut d = g.draft("crypt");
+    d["model_id"] = json!(ASPECT);
+    d["size"] = json!({"mode": "grid", "cols": 25, "rows": 40, "pps": 70});
+    d["structure"] = json!({"file": "rooms.png"});
+    // Nothing fetched yet this session: text only, no provider call, the id as the name.
+    let ctx = g.context(&d);
+    assert!(ctx.images.is_empty());
+    assert_eq!(ctx.model.name, ASPECT);
+    assert!(facts_text(&ctx).contains("aren't loaded yet"));
+    g.warm(&d);
+    let ctx = g.context(&d);
+    assert!(
+        ctx.images.is_empty(),
+        "the sketch is never sent to a model that takes none"
+    );
+    let f = facts_text(&ctx);
+    assert!(f.contains("this model takes no structural sketch"), "{f}");
+    assert!(
+        f.contains(
+            "size: grid 25 × 40 at 70 px per square; sent ratio 2:3 (cells won't be square)"
+        ),
+        "{f}"
+    );
+    assert!(f.contains("1 image per job"), "{f}");
+    let mut none = g.draft("crypt");
+    none["model_id"] = json!(WH);
+    g.warm(&none);
+    assert!(facts_text(&g.context(&none)).contains("no sketch"));
+}
+
+#[test]
+fn fr_prm_41_build_refuses_another_project_and_a_bad_input() {
+    let g = G::new();
+    let d = g.draft("crypt");
+    let e = super::chat::GenContextSource
+        .build(&g.lab.core, Ulid::from_parts(9, 9), &d)
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::NoProject);
+    let e = super::chat::GenContextSource
+        .build(&g.lab.core, g.project_id(), &json!({"model_id": WH}))
+        .unwrap_err();
+    assert_eq!(e.code, ErrorCode::InvalidInput);
+}
+
+#[test]
+fn fr_gen_32_fr_prm_10_retry_badges_for_changed_and_missing_helpers() {
+    let g = G::new();
+    let mut d = g.draft("crypt");
+    d["prompt_helpers"] = json!([NO_PEOPLE]);
+    let id = g.run(&d);
+    let r = g.retry(id).unwrap();
+    assert_eq!(r["prompt_helpers"], json!([NO_PEOPLE]));
+    assert!(r.get("prompt_retry").is_none(), "nothing to badge");
+    let mut list = g.dispatch("prm_helpers_list", json!({})).unwrap();
+    for h in list.as_array_mut().unwrap() {
+        if h["id"] == NO_PEOPLE {
+            h["text"] = json!("Empty rooms.");
+        }
+    }
+    g.dispatch("prm_helpers_save", json!({ "helpers": list }))
+        .unwrap();
+    let r = g.retry(id).unwrap();
+    assert_eq!(
+        r["prompt_retry"],
+        json!({"since": "001", "changed": [NO_PEOPLE], "missing": []})
+    );
+    assert_eq!(r["prompt_helpers_changed"], json!([NO_PEOPLE]));
+}
