@@ -4,18 +4,23 @@
 //! the uploaded assets, the role and fallback count of each reference slot (FR-PRV-31), the
 //! inputs the adapter fills itself (fixed values, the sent size), and where it was checked.
 //! Masked edit is offered only for a model with a row **and** a mask input in its
-//! capabilities (FR-PRV-11).
+//! capabilities (FR-PRV-11). Rows are per operation (GEN OQ-GEN-01): a model may have an
+//! `edit_masked` row and a `generate` row with different roles, filled inputs and slots.
+//! `generate` is offered for a model with a generate row whose `capabilities[]` lists
+//! `txt2img`.
 //!
 //! Model ids and input names follow Scenario's model docs (checked 2026-11-08). The owner's
 //! free `get-model` and dry-run recordings (PRV slice 5) confirm them, plus `dry_run_assets`
 //! and the `soft` picks.
 
-use crate::{ControlRole, InputPx, MaskConvention, ReferenceRole, SoftRule};
+use crate::{ControlRole, InputPx, MaskConvention, Operation, ReferenceRole, SoftRule};
 
 /// One overlay row (spec Appendix C).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OverlayRow {
     pub model_id: &'static str,
+    /// The operation this row describes (one row per model and operation).
+    pub operation: Operation,
     pub convention: MaskConvention,
     pub soft: SoftRule,
     /// Input name → role, for roles Scenario doesn't mark (source, mask, prompt, count).
@@ -37,6 +42,12 @@ pub struct OverlayRow {
     /// `(width, height)` inputs set to the sent image's size and never shown as controls, so
     /// the candidate comes back at the sent size (GPT Image).
     pub size_inputs: Option<(&'static str, &'static str)>,
+    /// `generate`: the input that takes the output ratio (`output_size.mode = aspect`); never
+    /// a control. With `size_inputs` instead, the output is exact width × height (`wh`).
+    pub aspect_input: Option<&'static str>,
+    /// `generate`: the reference slot that takes the structural sketch (FR-GEN-15). `None` on
+    /// every real model until a paid check confirms one (OQ-GEN-05).
+    pub structure_slot: Option<&'static str>,
     pub doc_url: &'static str,
     pub checked: &'static str,
 }
@@ -89,6 +100,7 @@ const CHECKED: &str = "2026-11-08";
 const fn gpt(model_id: &'static str) -> OverlayRow {
     OverlayRow {
         model_id,
+        operation: Operation::EditMasked,
         convention: MaskConvention::AlphaTransparentEdit,
         soft: SoftRule::PassThrough,
         roles: GPT_ROLES,
@@ -104,6 +116,8 @@ const fn gpt(model_id: &'static str) -> OverlayRow {
         slot_max: &[],
         fixed: &[],
         size_inputs: Some(("width", "height")),
+        aspect_input: None,
+        structure_slot: None,
         doc_url: OPENAI_DOC,
         checked: CHECKED,
     }
@@ -113,6 +127,7 @@ const fn gpt(model_id: &'static str) -> OverlayRow {
 const fn ideogram(model_id: &'static str, convention: MaskConvention, max: u32) -> OverlayRow {
     OverlayRow {
         model_id,
+        operation: Operation::EditMasked,
         convention,
         soft: SoftRule::Threshold(128),
         roles: IDEOGRAM_ROLES,
@@ -127,13 +142,65 @@ const fn ideogram(model_id: &'static str, convention: MaskConvention, max: u32) 
         slot_max: &[],
         fixed: &[],
         size_inputs: None,
+        aspect_input: None,
+        structure_slot: None,
         doc_url: IDEOGRAM_DOC,
         checked: CHECKED,
     }
 }
 
-/// The Scenario rows (spec Appendix C).
-pub static SCENARIO_ROWS: [OverlayRow; 9] = [
+/// GPT Image generate (GEN §10): no source; `referenceImages` are plain references (no role,
+/// cost-affecting); the output is exact `width` × `height`; `background` has the background
+/// role. The mask is listed only so it is dropped.
+const GPT_GEN_ROLES: &[(&str, ControlRole)] = &[
+    ("mask", ControlRole::Mask),
+    ("prompt", ControlRole::Prompt),
+    ("numOutputs", ControlRole::CandidateCount),
+    ("background", ControlRole::Background),
+];
+
+/// Ideogram generate: the edit inputs (`image`, `mask`) are listed only so they are dropped.
+const IDEOGRAM_GEN_ROLES: &[(&str, ControlRole)] = &[
+    ("image", ControlRole::Source),
+    ("mask", ControlRole::Mask),
+    ("prompt", ControlRole::Prompt),
+    ("numOutputs", ControlRole::CandidateCount),
+    ("seed", ControlRole::Seed),
+];
+
+/// The `generate` row from a model's edit row: same model and limits (the mask convention is
+/// unused: a generate job sends no mask).
+const fn generate(edit: OverlayRow) -> OverlayRow {
+    OverlayRow {
+        operation: Operation::Generate,
+        fixed: &[],
+        size_inputs: None,
+        aspect_input: None,
+        structure_slot: None,
+        ..edit
+    }
+}
+
+/// GPT Image generate rows: `wh` 16–3840, step 16, from `width` / `height` (recorded).
+const fn gpt_generate(model_id: &'static str) -> OverlayRow {
+    OverlayRow {
+        roles: GPT_GEN_ROLES,
+        size_inputs: Some(("width", "height")),
+        ..generate(gpt(model_id))
+    }
+}
+
+/// Ideogram generate rows: `aspect` from `aspectRatio` (recorded).
+const fn ideogram_generate(edit: OverlayRow) -> OverlayRow {
+    OverlayRow {
+        roles: IDEOGRAM_GEN_ROLES,
+        aspect_input: Some("aspectRatio"),
+        ..generate(edit)
+    }
+}
+
+/// The Scenario rows (spec Appendix C; generate rows GEN §10). Edit rows first.
+pub static SCENARIO_ROWS: [OverlayRow; 16] = [
     gpt("model_openai-gpt-image-2"),
     gpt("model_openai-gpt-image-2-5-flare"),
     gpt("model_openai-gpt-image-2-5-sunburst"),
@@ -161,11 +228,55 @@ pub static SCENARIO_ROWS: [OverlayRow; 9] = [
     ideogram("model_ideogram-v3-quality", MaskConvention::BlackEdit, 4096),
     ideogram("model_ideogram-v3-turbo", MaskConvention::BlackEdit, 4096),
     ideogram("model_ideogram-character", MaskConvention::BlackEdit, 4096),
+    // Generate (GEN §10, from the recorded get-model files of 2026-11-08). Character and
+    // 4.5 Precise Edit list only `img2img`: no generate row.
+    gpt_generate("model_openai-gpt-image-2"),
+    gpt_generate("model_openai-gpt-image-2-5-flare"),
+    gpt_generate("model_openai-gpt-image-2-5-sunburst"),
+    // 4.5's `referenceImages` are plain references when generating (no role).
+    ideogram_generate(OverlayRow {
+        slot_roles: &[],
+        ..ideogram("model_ideogram-v4-5", MaskConvention::WhiteEdit, 4096)
+    }),
+    ideogram_generate(ideogram(
+        "model_ideogram-v3-balanced",
+        MaskConvention::BlackEdit,
+        4096,
+    )),
+    ideogram_generate(ideogram(
+        "model_ideogram-v3-quality",
+        MaskConvention::BlackEdit,
+        4096,
+    )),
+    ideogram_generate(ideogram(
+        "model_ideogram-v3-turbo",
+        MaskConvention::BlackEdit,
+        4096,
+    )),
 ];
 
-/// The Scenario model ids with an overlay row (the recorder's `--model all`).
+/// The Scenario model ids with an overlay row, each once (the recorder's `--model all`).
 pub fn scenario_model_ids() -> impl Iterator<Item = &'static str> {
-    SCENARIO_ROWS.iter().map(|r| r.model_id)
+    unique_ids(&SCENARIO_ROWS).into_iter()
+}
+
+/// The Scenario model ids with a row for one operation (the recorder's generate dry runs).
+pub fn scenario_model_ids_for(operation: Operation) -> impl Iterator<Item = &'static str> {
+    SCENARIO_ROWS
+        .iter()
+        .filter(move |r| r.operation == operation)
+        .map(|r| r.model_id)
+}
+
+/// The model ids of a table, each once, in table order.
+pub fn unique_ids(rows: &[OverlayRow]) -> Vec<&'static str> {
+    let mut ids: Vec<&'static str> = vec![];
+    for r in rows {
+        if !ids.contains(&r.model_id) {
+            ids.push(r.model_id);
+        }
+    }
+    ids
 }
 
 const FAKE_ROLES: &[(&str, ControlRole)] = &[
@@ -184,6 +295,7 @@ const FAKE_SLOTS: &[(&str, ReferenceRole)] = &[
 const fn fake(model_id: &'static str, convention: MaskConvention, soft: SoftRule) -> OverlayRow {
     OverlayRow {
         model_id,
+        operation: Operation::EditMasked,
         convention,
         soft,
         roles: FAKE_ROLES,
@@ -198,13 +310,45 @@ const fn fake(model_id: &'static str, convention: MaskConvention, soft: SoftRule
         slot_max: &[],
         fixed: &[],
         size_inputs: None,
+        aspect_input: None,
+        structure_slot: None,
         doc_url: "docs/specs/provider.md#appendix-d-fake-cases",
         checked: CHECKED,
     }
 }
 
-/// The fake provider's rows: one model per mask convention (FR-PRV-03).
-pub static FAKE_ROWS: [OverlayRow; 3] = [
+const FAKE_GEN_ROLES: &[(&str, ControlRole)] = &[
+    ("prompt", ControlRole::Prompt),
+    ("num_samples", ControlRole::CandidateCount),
+    ("background", ControlRole::Background),
+];
+
+/// `fake-gen-wh`'s `refs` slot (no role) also takes the sketch; `fake-gen-aspect` has a style
+/// slot.
+const FAKE_GEN_SLOTS: &[(&str, ReferenceRole)] = &[("style_refs", ReferenceRole::Style)];
+
+/// A fake generate model (GEN §10): `wh` 64–2048 step 16, or a few ratios.
+const fn fake_generate(model_id: &'static str, wh: bool) -> OverlayRow {
+    OverlayRow {
+        operation: Operation::Generate,
+        roles: FAKE_GEN_ROLES,
+        input_px: InputPx {
+            min: 64,
+            max: 2048,
+            multiple_of: 16,
+        },
+        slot_roles: FAKE_GEN_SLOTS,
+        size_inputs: if wh { Some(("width", "height")) } else { None },
+        aspect_input: if wh { None } else { Some("aspect_ratio") },
+        structure_slot: if wh { Some("refs") } else { None },
+        doc_url: "docs/specs/new-asset-generation.md#10-provider-interaction",
+        ..fake(model_id, MaskConvention::WhiteEdit, SoftRule::PassThrough)
+    }
+}
+
+/// The fake provider's rows: one edit model per mask convention (FR-PRV-03), then the two
+/// generate models (GEN §10).
+pub static FAKE_ROWS: [OverlayRow; 5] = [
     fake(
         "fake-white-edit",
         MaskConvention::WhiteEdit,
@@ -220,11 +364,24 @@ pub static FAKE_ROWS: [OverlayRow; 3] = [
         MaskConvention::AlphaTransparentEdit,
         SoftRule::PassThrough,
     ),
+    fake_generate("fake-gen-wh", true),
+    fake_generate("fake-gen-aspect", false),
 ];
 
-/// The row for a model, from a table.
+/// The masked-edit row for a model, from a table.
+#[cfg(test)]
 pub fn row_in<'a>(rows: &'a [OverlayRow], model_id: &str) -> Option<&'a OverlayRow> {
-    rows.iter().find(|r| r.model_id == model_id)
+    row_for(rows, model_id, Operation::EditMasked)
+}
+
+/// The row for a model and an operation, from a table.
+pub fn row_for<'a>(
+    rows: &'a [OverlayRow],
+    model_id: &str,
+    operation: Operation,
+) -> Option<&'a OverlayRow> {
+    rows.iter()
+        .find(|r| r.model_id == model_id && r.operation == operation)
 }
 
 impl OverlayRow {
@@ -255,6 +412,7 @@ impl OverlayRow {
     /// True if the adapter fills this input itself (never a control).
     pub fn fills(&self, input: &str) -> bool {
         self.fixed.iter().any(|(n, _)| *n == input)
+            || self.aspect_input == Some(input)
             || self
                 .size_inputs
                 .is_some_and(|(w, h)| w == input || h == input)

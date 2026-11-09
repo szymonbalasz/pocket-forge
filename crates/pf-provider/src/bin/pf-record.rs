@@ -4,12 +4,16 @@
 //!
 //! ```text
 //! cargo run -p pf-provider --features real-call --bin pf-record -- [--model <id>|all]
-//!     [--case free|get-model|dry-run|masked-edit] [--allow-spend <CU>]
+//!     [--case free|get-model|dry-run|dry-run-generate|masked-edit] [--allow-spend <CU>]
 //!     [--out fixtures/provider] [--candidates .pf-dev/real-call]
 //! ```
 //!
 //! - `free` (default; `--model all` by default): `get-model` + `dry-run` for every overlay
-//!   model. Spends nothing (`?dryRun=true`, never `ipDetection`).
+//!   model, plus `dry-run-generate` for every model with a generate row. Spends nothing
+//!   (`?dryRun=true`, never `ipDetection`).
+//! - `dry-run-generate` (free, GEN §10): one `generate` dry run per model with a generate row:
+//!   the prompt, 1024 × 1024 (`wh`) or `1:1` (`aspect`), one result, no sketch, no references
+//!   unless a slot is required. Recorded as `dry-run-generate.json`.
 //! - `masked-edit` spends credits: it needs one `--model` and `--allow-spend <CU>`. The dry
 //!   run's estimate must be known and ≤ the cap, or nothing is submitted. Candidates go to
 //!   `--candidates/<model>/` (outside the repo's tracked files), with a polarity verdict.
@@ -27,7 +31,9 @@ use pf_provider::fixtures;
 use pf_provider::real_call::{self, ModelCheck};
 use pf_provider::scenario::record::{FixtureNames, RecordingTransport, content_hash};
 use pf_provider::transport::{HttpTransport, RuntimeSleeper};
-use pf_provider::{KeyringStore, ProviderAccount, ScenarioConfig, ScenarioProvider, block_on};
+use pf_provider::{
+    KeyringStore, Operation, ProviderAccount, ScenarioConfig, ScenarioProvider, block_on,
+};
 
 /// The longest the paid edit is polled before giving up (the job may still finish).
 const MAX_WAIT: Duration = Duration::from_secs(15 * 60);
@@ -133,14 +139,25 @@ fn run() -> Result<bool, String> {
     };
 
     match case.as_str() {
-        "free" | "get-model" | "dry-run" => {
+        "free" | "get-model" | "dry-run" | "dry-run-generate" => {
             if arg(&args, "--allow-spend").is_some() {
                 return Err(format!("{case:?} is free; --allow-spend is not used"));
             }
             println!("pf-record: free calls only (no credits are spent)");
             let mut all_ok = true;
+            let generate: Vec<&str> =
+                pf_provider::scenario::scenario_model_ids_for(Operation::Generate).collect();
             for m in &models {
-                all_ok &= free(&ctx, m, &case);
+                if case != "dry-run-generate" {
+                    all_ok &= free(&ctx, m, &case);
+                }
+                if matches!(case.as_str(), "free" | "dry-run-generate") {
+                    if generate.contains(&m.as_str()) {
+                        all_ok &= free_generate(&ctx, m);
+                    } else if case == "dry-run-generate" {
+                        println!("  {m:<40} no generate row (not offered for generate)");
+                    }
+                }
             }
             println!("Run `bash scripts/check-hygiene.sh` before committing the recordings.");
             Ok(all_ok)
@@ -163,7 +180,7 @@ fn run() -> Result<bool, String> {
             paid(&ctx, &model, cap, &dir)
         }
         other => Err(format!(
-            "unknown --case {other:?} (free, get-model, dry-run, masked-edit)"
+            "unknown --case {other:?} (free, get-model, dry-run, dry-run-generate, masked-edit)"
         )),
     }
 }
@@ -173,13 +190,23 @@ fn free(ctx: &Ctx, model: &str, case: &str) -> bool {
     let mut check: Option<ModelCheck> = None;
     if case != "dry-run" {
         let (p, rec) = ctx.session();
-        let c = block_on(real_call::check_model(&p, model, false));
+        let c = block_on(real_call::check_model(
+            &p,
+            model,
+            Operation::EditMasked,
+            false,
+        ));
         ctx.save(&rec, model, "get-model", c.found);
         check = Some(c);
     }
     if case != "get-model" && check.as_ref().is_none_or(ModelCheck::offered) {
         let (p, rec) = ctx.session();
-        let c = block_on(real_call::check_model(&p, model, true));
+        let c = block_on(real_call::check_model(
+            &p,
+            model,
+            Operation::EditMasked,
+            true,
+        ));
         let ok = matches!(c.estimate, Some(Ok(_)));
         if c.estimate.is_some() {
             ctx.save(&rec, model, "dry-run", ok);
@@ -189,6 +216,18 @@ fn free(ctx: &Ctx, model: &str, case: &str) -> bool {
     let c = check.expect("one case ran");
     println!("  {}", c.summary());
     c.found && c.offered() && c.estimate.as_ref().is_none_or(Result::is_ok)
+}
+
+/// One free `generate` dry run for one model (`dry-run-generate`); prints a summary line.
+fn free_generate(ctx: &Ctx, model: &str) -> bool {
+    let (p, rec) = ctx.session();
+    let c = block_on(real_call::check_model(&p, model, Operation::Generate, true));
+    let ok = matches!(c.estimate, Some(Ok(_)));
+    if c.estimate.is_some() {
+        ctx.save(&rec, model, "dry-run-generate", ok);
+    }
+    println!("  generate: {}", c.summary());
+    c.found && c.offered() && ok
 }
 
 /// One paid masked edit under `cap`, recorded; candidates and the sent files go to `dir`.

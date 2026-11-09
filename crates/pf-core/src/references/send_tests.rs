@@ -701,8 +701,12 @@ fn fr_ref_21_fr_ref_24_fake_provider_receives_the_sent_hashes() {
     assert!(face["thumb_url"].as_str().unwrap().contains("/i/l-"));
 
     let fake = core.ctx.provider.as_fake().unwrap();
-    let caps =
-        pf_provider::block_on(core.ctx.provider.get_capabilities("fake-black-edit")).unwrap();
+    let caps = pf_provider::block_on(
+        core.ctx
+            .provider
+            .get_capabilities("fake-black-edit", pf_provider::Operation::EditMasked),
+    )
+    .unwrap();
     let refs: DraftReferences = serde_json::from_value(r["references"].clone()).unwrap();
     let prepared = super::prepare_for_send(&core, &caps, Some(&refs)).unwrap();
     assert_eq!(prepared.sent.len(), 3);
@@ -726,6 +730,7 @@ fn fr_ref_21_fr_ref_24_fake_provider_receives_the_sent_hashes() {
         mask_png: mask.clone(),
         candidate_count: 3,
         seed: Some(7),
+        output: None,
     };
     let with = pf_provider::block_on(
         core.ctx

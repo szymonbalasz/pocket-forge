@@ -9,6 +9,12 @@
 //!   (one, optional); `fake-alpha-edit` has none. Candidates mix the ordered reference hashes
 //!   into the pattern; with none they are byte-identical to before. Tests read the last
 //!   request's references with [`FakeProvider::last_reference_hashes`].
+//! - Two `generate` models (GEN §10): `fake-gen-wh` (`wh` 64–2048 step 16, count 1–4, a
+//!   `background` with `transparent`, one `refs` slot ≤ 4 that also takes the sketch, +1 unit
+//!   per image) and `fake-gen-aspect` (ratios 1:1, 3:4, 4:3, 2:3; no count; `style_refs` ≤ 2).
+//!   Candidates are a deterministic pattern from the seed, the final prompt and the ordered
+//!   reference hashes (sketch included), at the asked size (`aspect`: long side 1024);
+//!   `transparent` → RGBA with an opaque disc and alpha 0 around it.
 //!
 //! Like a provider's server, it keeps jobs and uploads in memory; job progress lives in the
 //! opaque record (`fake.polls`), so RGN's persisted record drives the state machine. With a
@@ -27,11 +33,12 @@ use sha2::{Digest, Sha256};
 use crate::pixels::{Grey8, Rgb8, decode_grey8, decode_rgb8, encode_png};
 use crate::scenario::fixture_recording;
 use crate::scenario::normalise::normalise;
-use crate::scenario::overlay::{FAKE_ROWS, row_in};
+use crate::scenario::overlay::{FAKE_ROWS, row_for};
 use crate::{
-    AssetRef, Balance, CancelAck, CandidateImage, Candidates, Capabilities, ConnectivityCell, Cost,
-    CostAmount, Estimate, JobRequest, JobStatus, ModelFilter, ModelSummary, Operation, Provider,
-    ProviderError, ProviderJobState, ProviderRecord, ProviderResult, UploadPurpose,
+    AssetRef, Balance, CancelAck, CandidateImage, Candidates, Capabilities, ConnectivityCell,
+    ControlRole, Cost, CostAmount, Estimate, JobRequest, JobStatus, ModelFilter, ModelSummary,
+    Operation, OutputRequest, Provider, ProviderError, ProviderJobState, ProviderRecord,
+    ProviderResult, UploadPurpose,
 };
 
 /// The unit the fake reports costs in.
@@ -39,6 +46,12 @@ pub const FAKE_UNIT: &str = "fake";
 
 /// The fake models (FR-PRV-03).
 pub const FAKE_MODEL_IDS: [&str; 3] = ["fake-white-edit", "fake-black-edit", "fake-alpha-edit"];
+
+/// The fake `generate` models (GEN §10).
+pub const FAKE_GENERATE_MODEL_IDS: [&str; 2] = ["fake-gen-wh", "fake-gen-aspect"];
+
+/// The long side of a fake `aspect` candidate.
+pub const FAKE_ASPECT_LONG_SIDE: u32 = 1024;
 
 /// `retry_after` of the `rate_limited_once` case.
 pub const FAKE_RETRY_AFTER_MS: u64 = 2000;
@@ -164,6 +177,18 @@ struct FakeJob {
     /// Content hashes of the references, in request order (FR-PRV-35).
     reference_hashes: Vec<String>,
     case: FakeCase,
+    /// `generate` jobs: what to draw instead of editing a region.
+    generate: Option<GenOutput>,
+}
+
+/// A fake `generate` job's output: its size, background and the prompt's hash (the pattern
+/// depends on it).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct GenOutput {
+    w: u32,
+    h: u32,
+    transparent: bool,
+    prompt_hash: String,
 }
 
 #[derive(Debug, Default)]
@@ -198,6 +223,9 @@ struct JobCopy {
     v: u32,
     /// Content hashes of the references, in request order.
     reference_hashes: Vec<String>,
+    /// `generate` jobs only.
+    #[serde(default)]
+    generate: Option<GenOutput>,
 }
 
 /// A handle is a safe single path segment (it names the copy's folder).
@@ -256,6 +284,7 @@ impl FakeProvider {
             let copy = JobCopy {
                 v: 1,
                 reference_hashes: job.reference_hashes.clone(),
+                generate: job.generate.clone(),
             };
             std::fs::write(
                 tmp.join("job.json"),
@@ -292,6 +321,7 @@ impl FakeProvider {
                 .as_str()
                 .and_then(FakeCase::parse)
                 .unwrap_or_default(),
+            generate: copy.generate,
         };
         let mut s = self.lock();
         if dir.join("canceled").exists() {
@@ -375,32 +405,83 @@ impl FakeProvider {
         Ok(())
     }
 
-    /// Capabilities: the committed fixture through the real normaliser (FR-PRV-03).
-    fn capabilities_for(model_id: &str) -> Option<(String, Capabilities)> {
-        let row = row_in(&FAKE_ROWS, model_id)?;
+    /// Capabilities for one operation: the committed fixture through the real normaliser
+    /// (FR-PRV-03).
+    fn capabilities_for(model_id: &str, operation: Operation) -> Option<(String, Capabilities)> {
+        let row = row_for(&FAKE_ROWS, model_id, operation)?;
         let rec = fixture_recording(model_id, "get-model")?;
         let n = normalise(model_id, &rec.exchanges.first()?.response.body, Some(row)).ok()?;
         Some((n.name, n.capabilities))
     }
 
-    /// Checks a request against the model (incl. the FR-PRV-13 backstop) and decodes it.
-    fn validate(request: &JobRequest) -> ProviderResult<(Capabilities, Rgb8, Grey8)> {
-        let (_, caps) =
-            Self::capabilities_for(&request.model_id).ok_or_else(|| invalid("model_id"))?;
+    /// Checks a request against the model (incl. the FR-PRV-13 backstop, or the output size
+    /// for `generate`) and decodes it.
+    fn validate(request: &JobRequest) -> ProviderResult<Capabilities> {
+        let (_, caps) = Self::capabilities_for(&request.model_id, request.operation)
+            .ok_or_else(|| invalid("model_id"))?;
         if !caps.operations.contains(&request.operation) {
             return Err(invalid("operation"));
         }
         if request.final_prompt.trim().is_empty() {
             return Err(invalid("prompt"));
         }
-        if !(1..=4).contains(&request.candidate_count) {
-            return Err(invalid("num_samples"));
+        // No count input → one result per job (GEN R72).
+        let count = caps
+            .controls
+            .iter()
+            .find(|c| c.role == ControlRole::CandidateCount);
+        let max = count.and_then(|c| c.max).map_or(1, |m| m as u32);
+        if !(1..=max).contains(&request.candidate_count) {
+            return Err(invalid(count.map_or("candidate_count", |c| &c.name)));
+        }
+        if request.operation == Operation::Generate {
+            crate::limits::check_output(&caps, request)?;
+            crate::limits::check_references(&caps, request)?;
+            return Ok(caps);
         }
         crate::limits::check(&caps, request)?;
         crate::limits::check_references(&caps, request)?;
-        let region = decode_rgb8(&request.region_png).ok_or_else(|| invalid("image"))?;
-        let mask = decode_grey8(&request.mask_png).ok_or_else(|| invalid("mask"))?;
-        Ok((caps, region, mask))
+        decode_rgb8(&request.region_png).ok_or_else(|| invalid("image"))?;
+        decode_grey8(&request.mask_png).ok_or_else(|| invalid("mask"))?;
+        Ok(caps)
+    }
+
+    /// A `generate` request's output: the asked size (`aspect`: long side 1024) and whether
+    /// the `background` control asks for transparency.
+    fn gen_output(caps: &Capabilities, request: &JobRequest) -> GenOutput {
+        let (w, h) = match &request.output {
+            Some(OutputRequest::Wh { w, h }) => (*w, *h),
+            Some(OutputRequest::Aspect { aspect }) => {
+                let (a, b) = aspect
+                    .split_once(':')
+                    .and_then(|(a, b)| Some((a.parse::<f64>().ok()?, b.parse::<f64>().ok()?)))
+                    .unwrap_or((1.0, 1.0));
+                let long = f64::from(FAKE_ASPECT_LONG_SIDE);
+                if a >= b {
+                    (
+                        FAKE_ASPECT_LONG_SIDE,
+                        (long * b / a).round().max(1.0) as u32,
+                    )
+                } else {
+                    (
+                        (long * a / b).round().max(1.0) as u32,
+                        FAKE_ASPECT_LONG_SIDE,
+                    )
+                }
+            }
+            None => (FAKE_ASPECT_LONG_SIDE, FAKE_ASPECT_LONG_SIDE),
+        };
+        let transparent = caps
+            .controls
+            .iter()
+            .filter(|c| c.role == ControlRole::Background)
+            .any(|c| request.controls.get(&c.name) == Some(&json!("transparent")));
+        GenOutput {
+            w,
+            h,
+            transparent,
+            prompt_hash: sha256_hex(request.final_prompt.as_bytes()),
+        }
     }
 
     /// One unit per candidate, plus one per reference in a cost-affecting slot (FR-PRV-35).
@@ -456,6 +537,7 @@ impl FakeProvider {
                 "num_samples": request.candidate_count,
                 "seed": request.seed,
                 "controls": request.controls,
+                "output": request.output,
             },
             "fake": {"case": case.name(), "polls": 0},
         });
@@ -489,7 +571,7 @@ impl FakeProvider {
 
     fn do_submit(&self, request: &JobRequest) -> ProviderResult<ProviderRecord> {
         self.gate()?;
-        let (caps, _, _) = Self::validate(request)?;
+        let caps = Self::validate(request)?;
         self.note_references(request);
         let case = self.case();
         // FR-RGN-23: refused before the provider accepted it, or no answer at all.
@@ -501,6 +583,9 @@ impl FakeProvider {
             }
             FakeCase::SubmitTimeout => return Err(ProviderError::Timeout),
             _ => {}
+        }
+        if request.operation == Operation::Generate {
+            return self.submit_generate(request, &caps, case);
         }
         let (mut image, mut hash_image) = self.upload_once(&request.region_png, false);
         let (mut mask, mut hash_mask) = self.upload_once(&request.mask_png, false);
@@ -538,6 +623,7 @@ impl FakeProvider {
                 .map(|r| sha256_hex(&r.bytes))
                 .collect(),
             case,
+            generate: None,
         };
         let mut s = self.lock();
         let handle = self.new_handle(&mut s, &hash_image);
@@ -554,6 +640,71 @@ impl FakeProvider {
             rec.0["asset_refs"]["references"] = Value::Array(references);
         }
         rec.0["fake"]["reuploads"] = json!(reuploads);
+        Ok(rec)
+    }
+
+    /// `generate`: no source or mask to upload; references only (the sketch first in its
+    /// slot, as sent). The seed defaults to one derived from prompt, output and references.
+    fn submit_generate(
+        &self,
+        request: &JobRequest,
+        caps: &Capabilities,
+        case: FakeCase,
+    ) -> ProviderResult<ProviderRecord> {
+        let mut references = self.upload_references(request, false);
+        let mut reuploads = 0;
+        {
+            let mut s = self.lock();
+            if s.case == FakeCase::AssetMissingOnce
+                && !s.asset_missing_fired
+                && !references.is_empty()
+            {
+                s.asset_missing_fired = true;
+                drop(s);
+                references = self.upload_references(request, true);
+                reuploads = 1;
+            }
+        }
+        let output = Self::gen_output(caps, request);
+        let reference_hashes: Vec<String> = request
+            .references
+            .iter()
+            .map(|r| sha256_hex(&r.bytes))
+            .collect();
+        let seed = request.seed.unwrap_or_else(|| {
+            let mut h = Sha256::new();
+            h.update(output.prompt_hash.as_bytes());
+            h.update(output.w.to_le_bytes());
+            h.update(output.h.to_le_bytes());
+            for r in &reference_hashes {
+                h.update(r.as_bytes());
+            }
+            let d = h.finalize();
+            u64::from_le_bytes([d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]])
+        });
+        let job = FakeJob {
+            region_png: vec![],
+            mask_png: vec![],
+            candidate_count: request.candidate_count,
+            seed,
+            reference_hashes,
+            case,
+            generate: Some(output.clone()),
+        };
+        let mut s = self.lock();
+        let handle = self.new_handle(&mut s, &output.prompt_hash);
+        s.jobs.insert(handle.clone(), job.clone());
+        drop(s);
+        self.save_job(&handle, &job);
+        let ref_units = Self::ref_units(caps, request);
+        let mut rec = self.record(request, Some(&handle), case, ref_units);
+        rec.0["request"]["seed"] = json!(seed);
+        if !references.is_empty() {
+            rec.0["asset_refs"]["references"] = Value::Array(references);
+        }
+        rec.0["fake"]["reuploads"] = json!(reuploads);
+        rec.0["fake"]["output"] =
+            json!({"w": output.w, "h": output.h, "transparent": output.transparent});
         Ok(rec)
     }
 
@@ -627,6 +778,12 @@ impl FakeProvider {
                 .ok_or_else(|| ProviderError::ProviderFailure {
                     hint: "the fake provider has no copy of this job".into(),
                 })?;
+        if let Some(out) = &fake_job.generate {
+            return Ok(Candidates {
+                images: generated_candidates(&handle, &fake_job, out),
+                provider: job.clone(),
+            });
+        }
         let region = decode_rgb8(&fake_job.region_png).ok_or_else(|| invalid("image"))?;
         let mask = decode_grey8(&fake_job.mask_png).ok_or_else(|| invalid("mask"))?;
         let images = (0..fake_job.candidate_count)
@@ -666,13 +823,27 @@ impl Provider for FakeProvider {
         let out = self.gate().map(|()| {
             FAKE_MODEL_IDS
                 .iter()
-                .filter(|_| matches!(filter.operation, None | Some(Operation::EditMasked)))
-                .filter_map(|id| Self::capabilities_for(id))
-                .filter(|(_, c)| c.operations.contains(&Operation::EditMasked))
-                .map(|(name, c)| ModelSummary {
-                    id: c.model_id,
-                    name,
-                    operations: c.operations,
+                .chain(FAKE_GENERATE_MODEL_IDS.iter())
+                .filter_map(|id| {
+                    let found: Vec<(String, Capabilities)> =
+                        [Operation::EditMasked, Operation::Generate]
+                            .into_iter()
+                            .filter_map(|op| Self::capabilities_for(id, op))
+                            .collect();
+                    let name = found.first()?.0.clone();
+                    let mut operations: Vec<Operation> =
+                        found.into_iter().flat_map(|(_, c)| c.operations).collect();
+                    operations.sort();
+                    operations.dedup();
+                    Some(ModelSummary {
+                        id: (*id).to_owned(),
+                        name,
+                        operations,
+                    })
+                })
+                .filter(|m| match filter.operation {
+                    Some(op) => m.operations.contains(&op),
+                    None => !m.operations.is_empty(),
                 })
                 .collect()
         });
@@ -682,9 +853,10 @@ impl Provider for FakeProvider {
     fn get_capabilities(
         &self,
         model_id: &str,
+        operation: Operation,
     ) -> impl Future<Output = ProviderResult<Capabilities>> + Send {
         let out = self.gate().and_then(|()| {
-            Self::capabilities_for(model_id)
+            Self::capabilities_for(model_id, operation)
                 .map(|(_, c)| c)
                 .ok_or_else(|| invalid("model_id"))
         });
@@ -707,7 +879,7 @@ impl Provider for FakeProvider {
         let out = self
             .gate()
             .and_then(|()| Self::validate(request))
-            .map(|(caps, _, _)| {
+            .map(|caps| {
                 self.note_references(request);
                 let case = self.case();
                 let ref_units = Self::ref_units(&caps, request);
@@ -857,6 +1029,94 @@ fn render_candidate(region: &Rgb8, mask: &Grey8, seed: u64, levels: i32) -> Rgb8
     }
 }
 
+/// A fake `generate` job's candidates: a seeded pattern at the asked size, RGBA with an
+/// opaque disc when transparent. Appendix D cases apply as for edits.
+fn generated_candidates(handle: &str, job: &FakeJob, out: &GenOutput) -> Vec<CandidateImage> {
+    (0..job.candidate_count)
+        .map(|i| {
+            let seed = job.seed.wrapping_add(u64::from(i));
+            let mut hashes = vec![out.prompt_hash.clone()];
+            hashes.extend(job.reference_hashes.iter().cloned());
+            let pattern = pattern_seed(seed, &hashes);
+            let levels = match job.case {
+                FakeCase::Offset(l) => l,
+                _ => 0,
+            };
+            let (channels, data) = render_generated(out, pattern, levels);
+            let bytes = match job.case {
+                FakeCase::BadCandidate if i == 0 => b"this is not an image".to_vec(),
+                FakeCase::AspectMismatch(pct) => {
+                    let (w, data) = widen_px(out.w, out.h, channels, &data, pct);
+                    encode_px(w, out.h, channels, &data)
+                }
+                _ => encode_px(out.w, out.h, channels, &data),
+            };
+            CandidateImage {
+                bytes,
+                seed: Some(seed),
+                provider_meta: json!({"asset_id": format!("{handle}-c{i}"), "seed": seed}),
+            }
+        })
+        .collect()
+}
+
+/// A seeded 32 px checker of two tints with per-pixel noise (+ `levels`, clamped), and with
+/// `transparent` an alpha channel: 255 inside a centred disc (radius 45 % of the short side),
+/// 0 outside. Returns `(channels, pixels)`.
+fn render_generated(out: &GenOutput, seed: u64, levels: i32) -> (usize, Vec<u8>) {
+    let base = splitmix(seed);
+    let tint = |k: u32| {
+        [
+            ((base >> k) & 0xFF) as i32,
+            ((base >> (k + 8)) & 0xFF) as i32,
+            ((base >> (k + 16)) & 0xFF) as i32,
+        ]
+    };
+    let (a, b) = (tint(0), tint(24));
+    let channels = if out.transparent { 4 } else { 3 };
+    let (w, h) = (u64::from(out.w), u64::from(out.h));
+    let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
+    let r = w.min(h) as f64 * 0.45;
+    let mut data = Vec::with_capacity((w * h) as usize * channels);
+    for y in 0..h {
+        for x in 0..w {
+            let t = if (x / 32 + y / 32) % 2 == 0 { a } else { b };
+            let noise = (splitmix(base ^ (y * w + x)) & 0x1F) as i32;
+            for c in t {
+                data.push((c + noise + levels).clamp(0, 255) as u8);
+            }
+            if out.transparent {
+                let (dx, dy) = (x as f64 + 0.5 - cx, y as f64 + 0.5 - cy);
+                data.push(if dx * dx + dy * dy <= r * r { 255 } else { 0 });
+            }
+        }
+    }
+    (channels, data)
+}
+
+fn encode_px(w: u32, h: u32, channels: usize, data: &[u8]) -> Vec<u8> {
+    let color = if channels == 4 {
+        png::ColorType::Rgba
+    } else {
+        png::ColorType::Rgb
+    };
+    encode_png(w, h, color, data)
+}
+
+/// Nearest-neighbour horizontal stretch by `pct` % of RGB or RGBA pixels.
+fn widen_px(width: u32, height: u32, channels: usize, data: &[u8], pct: u32) -> (u32, Vec<u8>) {
+    let w = (u64::from(width) * u64::from(100 + pct)).div_ceil(100) as u32;
+    let mut out = Vec::with_capacity(w as usize * height as usize * channels);
+    for y in 0..height {
+        for x in 0..w {
+            let sx = (u64::from(x) * u64::from(width) / u64::from(w)) as u32;
+            let i = (y * width + sx) as usize * channels;
+            out.extend_from_slice(&data[i..i + channels]);
+        }
+    }
+    (w, out)
+}
+
 fn encode(img: &Rgb8) -> Vec<u8> {
     encode_png(img.width, img.height, png::ColorType::Rgb, &img.data)
 }
@@ -880,6 +1140,9 @@ fn widen(img: &Rgb8, pct: u32) -> Vec<u8> {
 pub fn no_controls() -> BTreeMap<String, Value> {
     BTreeMap::new()
 }
+
+#[cfg(test)]
+mod generate_tests;
 
 #[cfg(test)]
 mod tests {
@@ -906,6 +1169,7 @@ mod tests {
             mask_png: encode_png(w, h, png::ColorType::Grayscale, &mask),
             candidate_count: 3,
             seed,
+            output: None,
         }
     }
 
@@ -939,12 +1203,15 @@ mod tests {
     #[test]
     fn fr_prv_03_three_models_one_per_mask_convention_from_fixtures() {
         let p = FakeProvider::default();
-        let models = run(p.list_models(&ModelFilter::default())).unwrap();
+        let models = run(p.list_models(&ModelFilter {
+            operation: Some(Operation::EditMasked),
+        }))
+        .unwrap();
         assert_eq!(models.len(), 3);
         let conventions: HashSet<_> = models
             .iter()
             .map(|m| {
-                let caps = run(p.get_capabilities(&m.id)).unwrap();
+                let caps = run(p.get_capabilities(&m.id, Operation::EditMasked)).unwrap();
                 assert!(caps.warnings.is_empty(), "{:?}", caps.warnings);
                 format!("{:?}", caps.mask.unwrap().convention)
             })
@@ -1011,7 +1278,7 @@ mod tests {
         use crate::ReferenceRole::{Identity, Style};
         let p = FakeProvider::default();
         let slots = |id: &str| -> Vec<_> {
-            run(p.get_capabilities(id))
+            run(p.get_capabilities(id, Operation::EditMasked))
                 .unwrap()
                 .slots
                 .into_iter()
@@ -1031,7 +1298,11 @@ mod tests {
         );
         assert!(slots("fake-alpha-edit").is_empty());
         assert_eq!(
-            run(p.list_models(&ModelFilter::default())).unwrap().len(),
+            run(p.list_models(&ModelFilter {
+                operation: Some(Operation::EditMasked)
+            }))
+            .unwrap()
+            .len(),
             3
         );
     }
@@ -1362,7 +1633,7 @@ mod tests {
                 code
             );
             assert_eq!(
-                run(p.get_capabilities("fake-white-edit"))
+                run(p.get_capabilities("fake-white-edit", Operation::EditMasked))
                     .unwrap_err()
                     .code(),
                 code
