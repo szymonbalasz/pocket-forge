@@ -229,7 +229,7 @@ pub(crate) fn submit_job(core: &Core, job: SubmitJob<'_>) -> CoreResult<JobSubmi
     } = job;
     let now = core.ctx.now();
     // Spend guard, active-job check and the `requested` record: one lock (FR-RGN-14–17).
-    let (job, project_id, project_dir, estimate) = {
+    let in_flight = {
         let mut state = core.state();
         let estimate = state.rgn.estimates.get(estimate_id, now).ok_or_else(|| {
             CoreError::new(
@@ -260,12 +260,35 @@ pub(crate) fn submit_job(core: &Core, job: SubmitJob<'_>) -> CoreResult<JobSubmi
             }
             None => store::record_job_without_inputs(&core.ctx, install_id, p, new)?,
         };
-        (job, p.manifest.project_id, p.dir.clone(), estimate)
+        // R102: in flight until its answer is committed; no sweep calls it lost meanwhile.
+        (
+            core.ctx.submitting.begin(job.id),
+            job,
+            p.manifest.project_id,
+            p.dir.clone(),
+            estimate,
+        )
     };
+    let (_in_flight, job, project_id, project_dir, estimate) = in_flight;
     emit_state(&core.ctx, &job, None);
 
     // The provider call, without the lock. Submit is never retried (ADR 0001).
     let result = provider_raw(core, core.ctx.provider.submit(&request));
+    finish_submit(core, job, project_id, project_dir, estimate.amount, result)
+}
+
+/// The second half of [`submit_job`], under the lock: commits the provider's answer to the
+/// `requested` job (`submitted` with the handle, `failed` or `lost`), records the spend,
+/// resolves the earlier jobs and hands a submitted job to the runner. A handle for a job the
+/// open sweep already marked `lost` revives it (R102).
+pub(crate) fn finish_submit(
+    core: &Core,
+    job: JobFile,
+    project_id: Ulid,
+    project_dir: std::path::PathBuf,
+    estimate: CostAmount,
+    result: Result<ProviderRecord, ProviderError>,
+) -> CoreResult<JobSubmitOutput> {
     let ctx = &core.ctx;
     let mut state = core.state();
     let (update, err, charged) = match &result {
@@ -273,6 +296,8 @@ pub(crate) fn submit_job(core: &Core, job: SubmitJob<'_>) -> CoreResult<JobSubmi
             SpoolUpdate {
                 state: Some(JobState::Submitted),
                 provider: Some(record.0.clone()),
+                // Clears a `lost` notice the open sweep may have set meanwhile (R102).
+                error: Some(Value::Null),
                 ..Default::default()
             },
             None,
@@ -313,7 +338,7 @@ pub(crate) fn submit_job(core: &Core, job: SubmitJob<'_>) -> CoreResult<JobSubmi
     .unwrap_or(job);
     if charged {
         // A lost job counts its estimate (FR-RGN-14).
-        state.rgn.ledger.record_submit(job.id, estimate.amount);
+        state.rgn.ledger.record_submit(job.id, estimate);
     }
     if job.state == JobState::Submitted {
         // The next submit resolves the earlier jobs (FR-RGN-28).

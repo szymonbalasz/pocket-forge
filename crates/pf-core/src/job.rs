@@ -2,7 +2,9 @@
 //! authoritative; manifest `jobs[]` is an index rebuilt on open. RGN's job runner drives the
 //! transitions (R14); PRJ persists them. Fields whose meaning RGN or PRV owns stay raw JSON.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Mutex;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -19,6 +21,56 @@ pub const MASK_INPUT: &str = "mask.png";
 pub const OPERATION_GENERATE: &str = "generate";
 /// `operation` of a region edit job.
 pub const OPERATION_EDIT: &str = "edit_masked";
+
+/// R102: a `requested` job (no handle saved) counts as `lost` only once it's older than the
+/// submit timeout plus 60 s, and only if this process isn't submitting it.
+pub const LOST_AFTER: Duration = Duration::from_secs(pf_provider::SUBMIT_TIMEOUT.as_secs() + 60);
+
+/// The jobs this process is submitting right now (R102): between the `requested` commit and the
+/// commit of the provider's answer. The open sweep and the runner never call them `lost`.
+#[derive(Debug, Default)]
+pub struct Submitting(Mutex<BTreeSet<Ulid>>);
+
+impl Submitting {
+    /// Marks `id` as being submitted until the guard drops.
+    pub fn begin(&self, id: Ulid) -> SubmittingGuard<'_> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).insert(id);
+        SubmittingGuard { set: self, id }
+    }
+
+    pub fn contains(&self, id: Ulid) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&id)
+    }
+}
+
+/// Ends a [`Submitting`] entry when dropped (also on an early return or a panic).
+#[derive(Debug)]
+pub struct SubmittingGuard<'a> {
+    set: &'a Submitting,
+    id: Ulid,
+}
+
+impl Drop for SubmittingGuard<'_> {
+    fn drop(&mut self) {
+        self.set
+            .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.id);
+    }
+}
+
+/// The `error` of a job lost before its handle was saved: the possible-charge notice
+/// (FR-PRJ-29, FR-RGN-23).
+pub fn lost_before_handle_error() -> Value {
+    serde_json::json!({
+        "code": "lost",
+        "hint": "The provider never confirmed this job. It may still run and be charged; check the provider before retrying.",
+    })
+}
 
 /// Job states (schema §4.6 state diagram).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -221,12 +273,36 @@ impl JobFile {
         }
     }
 
-    /// True once the provider's job handle is saved (`provider.job_handle`, PRV Appendix B): the
-    /// job can be polled and fetched without a new submit.
+    /// True once the provider's job handle is saved (PRV Appendix B): the job can be polled and
+    /// fetched without a new submit.
     pub fn has_handle(&self) -> bool {
-        self.provider
-            .get("job_handle")
-            .is_some_and(|h| !h.is_null())
+        pf_provider::has_job_handle(&self.provider)
+    }
+
+    /// When the job was recorded (`requested`).
+    pub fn requested_at(&self) -> Timestamp {
+        self.state_times
+            .get(JobState::Requested.as_str())
+            .copied()
+            .unwrap_or(self.created_at)
+    }
+
+    /// R102: a `requested` job is lost only if `submitting` doesn't hold it and it's older than
+    /// [`LOST_AFTER`]. Any other state: false.
+    pub fn requested_gone(&self, submitting: &Submitting, now: Timestamp) -> bool {
+        self.state == JobState::Requested
+            && !submitting.contains(self.id)
+            && now.millis().saturating_sub(self.requested_at().millis())
+                >= LOST_AFTER.as_millis() as i64
+    }
+
+    /// R102: a submit that returns a handle for a job already marked `lost` before any handle was
+    /// saved (the open sweep, another machine) revives it: `lost -> submitted`, only then.
+    fn revivable(&self, next: JobState) -> bool {
+        self.state == JobState::Lost
+            && next == JobState::Submitted
+            && !self.has_handle()
+            && !self.state_times.contains_key(JobState::Submitted.as_str())
     }
 
     /// True if this copy holds paid work: a job handle or candidates (R102).
@@ -245,7 +321,7 @@ impl JobFile {
             self.updated_at = now;
             return Ok(());
         }
-        if !self.state.can_become(next) {
+        if !self.state.can_become(next) && !self.revivable(next) {
             return Err(format!(
                 "a {} job can't become {}",
                 self.state.as_str(),

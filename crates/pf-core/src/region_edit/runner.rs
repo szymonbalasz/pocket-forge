@@ -119,6 +119,13 @@ impl Runner {
             .entry(job.id)
             .and_modify(|t| {
                 t.project_dir = project_dir.clone();
+                if t.job.state == JobState::Requested && job.state != JobState::Requested {
+                    // A `requested` job watched since the open got its submit answer (R102):
+                    // drive the new copy; a tick in flight discards its stale answer.
+                    t.job = job.clone();
+                    t.generation = generation;
+                    t.next_at = now;
+                }
             })
             .or_insert(Tracked {
                 project_id,
@@ -388,6 +395,8 @@ enum Outcome {
     FetchError(ProviderError),
     /// Not a state the runner drives.
     Done,
+    /// Nothing to commit; look again after this long (a watched `requested` job).
+    Wait(Duration),
 }
 
 fn job_state_of(s: ProviderJobState) -> JobState {
@@ -487,6 +496,39 @@ fn poll_gave_up(e: &ProviderError) -> SpoolUpdate {
         })),
         ..Default::default()
     }
+}
+
+/// R102: a `requested` job seen at open (another machine, or this process, may be submitting
+/// it). It becomes `lost` with the possible-charge notice once [`JobFile::requested_gone`]; if
+/// its file moved on meanwhile (the submitter saved the handle), the runner lets go.
+fn watch_requested(core: &Core, t: &Tracked) -> Outcome {
+    let ctx = &core.ctx;
+    let now = ctx.now();
+    if ctx.submitting.contains(t.job.id) {
+        return Outcome::Wait(Duration::from_secs(5));
+    }
+    let path = t.project_dir.join(job_dir(t.job.id)).join(JOB_FILE);
+    if let Ok(bytes) = std::fs::read(&path)
+        && let Ok(disk) = serde_json::from_slice::<JobFile>(&bytes)
+        && disk.state != JobState::Requested
+    {
+        return Outcome::Done;
+    }
+    if t.job.requested_gone(&ctx.submitting, now) {
+        return Outcome::Updates(
+            vec![SpoolUpdate {
+                state: Some(JobState::Lost),
+                error: Some(crate::job::lost_before_handle_error()),
+                ..Default::default()
+            }],
+            0.0,
+            None,
+        );
+    }
+    let due = t.job.requested_at().plus(crate::job::LOST_AFTER);
+    Outcome::Wait(Duration::from_millis(
+        due.millis().saturating_sub(now.millis()).max(0) as u64,
+    ))
 }
 
 fn decodes(bytes: &[u8]) -> Option<(u32, u32)> {
@@ -672,6 +714,7 @@ fn step(core: &Core, t: Tracked) {
             poll(core, &t)
         }
         JobState::Succeeded => fetch(core, &t),
+        JobState::Requested => watch_requested(core, &t),
         _ => Outcome::Done,
     };
     let ctx = &core.ctx;
@@ -699,6 +742,7 @@ fn step(core: &Core, t: Tracked) {
             return;
         }
         Outcome::Retry(e) => delay_error = Some(e),
+        Outcome::Wait(d) => delay = Some(d),
         Outcome::PollError(e) => {
             cur.poll_errors += 1;
             tracing::warn!(job = %cur.job.id, errors = cur.poll_errors, error = %e, "poll failed");
@@ -877,8 +921,8 @@ fn replay_open(ctx: &Context, state: &mut State) {
 
 /// FR-RGN-22, called by `project_open` before its snapshot: replays the spool, then resumes
 /// every non-terminal job from its job file (`submitted`, `queued`, `running`, `unknown` →
-/// poll; `succeeded` → fetch). PRJ's open sweep already turned `requested` into `lost` with
-/// the possible-charge warning.
+/// poll; `succeeded` → fetch). PRJ's open sweep already turned an old `requested` job into
+/// `lost` with the possible-charge warning; a young one is watched until it ages out (R102).
 pub fn on_project_open(
     ctx: &Context,
     install_id: Ulid,
@@ -898,7 +942,8 @@ pub fn on_project_open(
         .filter(|j| {
             matches!(
                 j.state,
-                JobState::Submitted
+                JobState::Requested
+                    | JobState::Submitted
                     | JobState::Queued
                     | JobState::Running
                     | JobState::Unknown
