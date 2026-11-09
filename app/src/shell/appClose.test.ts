@@ -22,7 +22,7 @@ async function start(patch: Partial<PrjMockProject> | null): Promise<void> {
     ...prjMock(seed, { emit: core.emit }).handlers,
     app_close_guard: () => null,
     app_close_unguard: () => null,
-    app_close_ack: () => null,
+    app_close_ack: () => true,
     app_exit: () => null,
   });
   projectStore.reset();
@@ -133,11 +133,19 @@ test('R101 R109 FR-PRJ-21 several close requests share one pending close', async
 
 test('R109 FR-PRJ-21 every close request is acked at once, also while a quit waits', async () => {
   await start({});
-  offs.push(projectStore.addCloseGuard(() => false));
+  let cancel!: () => void;
+  offs.push(
+    projectStore.addCloseGuard((_, c) => {
+      cancel = c;
+      return false;
+    }),
+  );
   await pressX();
   await pressX();
   expect(core.names().filter((n) => n === 'app_close_ack')).toHaveLength(2);
   expect(names()).toEqual([]);
+  cancel(); // the quit settles: nothing carries over to the next test
+  await flush();
 });
 
 test('R109 FR-PRJ-21 removing the listener (an unmount) un-guards, so X closes', async () => {
@@ -147,4 +155,12 @@ test('R109 FR-PRJ-21 removing the listener (an unmount) un-guards, so X closes',
   expect(names()).toEqual(['app_close_unguard']);
   await pressX();
   expect(core.names()).toEqual(['app_close_unguard']);
+});
+
+test('R109 R101 a close request not sent by the app (another window) is ignored', async () => {
+  await start({});
+  core.useHandlers({ ...core.handlersSnapshot(), app_close_ack: () => false });
+  await pressX();
+  expect(core.names()).toEqual(['app_close_ack']);
+  expect(projectStore.get().project).not.toBeNull();
 });

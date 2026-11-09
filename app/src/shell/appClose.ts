@@ -47,9 +47,9 @@ function follow(): void {
 export function installAppClose(): () => void {
   const unsubscribe = projectStore.subscribe(follow);
   const listening = onEvent('app:close-requested', () => {
-    // R109: acked at once; the app closes anyway if no ack comes within 3 s.
-    void appCloseAck();
-    void quit();
+    // R109: acked at once (the app closes anyway if no ack comes within 3 s), and run only if
+    // the app sent it: another window's copy is ignored.
+    void appCloseAck().then((asked) => (asked ? quit() : undefined));
   });
   const guarded = listening.then(
     () => appCloseGuard().then(() => true),

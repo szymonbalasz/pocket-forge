@@ -144,10 +144,11 @@ mod quit {
             self.asked.fetch_add(1, Ordering::SeqCst) + 1
         }
 
-        /// The UI got the close requests sent so far.
-        pub fn ack(&self) {
+        /// The UI got the close requests sent so far. False if none was waiting: the event
+        /// didn't come from here (R109: only Rust asks), so the UI ignores it.
+        pub fn ack(&self) -> bool {
             let asked = self.asked.load(Ordering::SeqCst);
-            self.acked.fetch_max(asked, Ordering::SeqCst);
+            self.acked.fetch_max(asked, Ordering::SeqCst) < asked
         }
 
         /// True if request `seq` is still unacked (and nothing else is exiting the app).
@@ -185,6 +186,23 @@ mod quit {
         }
 
         #[test]
+        fn r109_r101_only_a_close_rust_asked_for_is_acked() {
+            let q = Quit::new();
+            q.guard();
+            assert!(
+                !q.ack(),
+                "an event from elsewhere (the chat window): ignored"
+            );
+            q.ask();
+            assert!(q.ack(), "the X asked: the UI runs the close");
+            assert!(!q.ack(), "a copy of the same event: ignored");
+            q.ask();
+            q.ask();
+            assert!(q.ack(), "two X presses, one ack covers both");
+            assert!(!q.ack());
+        }
+
+        #[test]
         fn r109_fr_prj_21_a_close_the_ui_doesnt_ack_is_unanswered() {
             let q = Quit::new();
             q.guard();
@@ -215,10 +233,12 @@ fn app_close_unguard() {
     quit::QUIT.unguard();
 }
 
-/// The UI got `app:close-requested` (R109): the held close is its guards' to decide.
+/// The UI got `app:close-requested` (R109): the held close is its guards' to decide. False if
+/// Rust sent no close request since the last ack: the event came from elsewhere (the chat
+/// window may emit events, and can't call this command), and the UI ignores it.
 #[tauri::command]
-fn app_close_ack() {
-    quit::QUIT.ack();
+fn app_close_ack() -> bool {
+    quit::QUIT.ack()
 }
 
 /// The UI closed the project (or none was open): the app exits (R101). Off the main thread:

@@ -174,12 +174,14 @@ export async function appCloseUnguard(): Promise<void> {
   }
 }
 
-/** R109: the UI got `app:close-requested`; one not acked within 3 s closes the app anyway. */
-export async function appCloseAck(): Promise<void> {
+/** R109: the UI got `app:close-requested`; one not acked within 3 s closes the app anyway.
+ *  True if the app really asked (only Rust sends it); false: ignore the event. */
+export async function appCloseAck(): Promise<boolean> {
   try {
-    await invoke('app_close_ack');
+    return (await invoke<boolean>('app_close_ack')) === true;
   } catch {
     // Outside the app there is no close to ack.
+    return false;
   }
 }
 
