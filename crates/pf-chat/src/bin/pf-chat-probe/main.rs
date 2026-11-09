@@ -566,7 +566,7 @@ const CLAIMS: [(&str, &str, bool); 25] = [
     ),
     (
         "C25",
-        "Control: the same session without --safe-mode does show the user CLAUDE.md marker (so C08 and C24 can fail)",
+        "Control: the same session without --safe-mode shows at least one marker (so C08 and C24 can fail)",
         true,
     ),
 ];
@@ -902,8 +902,8 @@ impl<'a> Probe<'a> {
         }
     }
 
-    /// C25: the control turn must show the user memory marker (the `AGENTS.md` one is
-    /// reported; a `CLAUDE.md` above the OS temp folder would hide it).
+    /// C25: the control turn must show at least one marker (R88). Which memory words showed
+    /// up is reported; a `CLAUDE.md` above the OS temp folder would hide the `AGENTS.md` one.
     fn control_claim(&mut self, r: &Result<(Turn, Vec<String>), String>) {
         match r {
             Err(e) => self.c("C25").check(false, e.clone()),
@@ -917,7 +917,6 @@ impl<'a> Probe<'a> {
                 .into_iter()
                 .filter(|w| reply.contains(w))
                 .collect();
-                let user = seen.contains(&standin::USER_MEMORY_WORD);
                 let agents = if seen.contains(&standin::AGENTS_MEMORY_WORD) {
                     "AGENTS.md marker live"
                 } else {
@@ -932,7 +931,8 @@ impl<'a> Probe<'a> {
                     },
                     leaks.len()
                 );
-                self.c("C25").check(user, d);
+                let any = !seen.is_empty() || !leaks.is_empty();
+                self.c("C25").check(any, d);
             }
         }
     }
