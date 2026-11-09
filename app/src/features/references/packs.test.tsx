@@ -208,6 +208,36 @@ test('FR-REF-08 dropping images on the pack view copies them in; duplicates and 
   });
 });
 
+test('FR-REF-08 a second drop while one copies waits its turn; the first keeps its progress', async () => {
+  setup();
+  await openWeapons();
+  const h = core.handlersSnapshot();
+  const add = h.ref_pack_add_images!;
+  let release: () => void = () => undefined;
+  let first = true;
+  core.useHandlers({
+    ...h,
+    ref_pack_add_images: (input) => {
+      if (!first) return add(input);
+      first = false;
+      return new Promise<void>((r) => (release = r)).then(() => add(input));
+    },
+  });
+  await drop(['D:/art/a1.png', 'D:/art/a2.png', 'D:/art/a3.png']);
+  await drop(['D:/art/b1.png']);
+  await act(() => new Promise((r) => setTimeout(r, 30)));
+  const adds = () => core.calls.filter((c) => c.cmd === 'ref_pack_add_images');
+  expect(adds()).toHaveLength(1);
+  act(() => core.emit('ref:add-progress', { done: 2, total: 3 }));
+  expect(screen.getByTestId('ref-add-progress').textContent).toBe('Copying 2 / 3');
+  await act(async () => release());
+  await waitFor(() => expect(adds()).toHaveLength(2));
+  expect(adds()[1]!.input.paths).toEqual(['D:/art/b1.png']);
+  await waitFor(() => expect(images()).toContain('b1.png'));
+  expect(images()).toContain('a3.png');
+  expect(screen.queryByTestId('ref-add-progress')).toBeNull();
+});
+
 test('FR-REF-08 a taken file name gets (2)', async () => {
   setup();
   await openWeapons();
