@@ -815,6 +815,39 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     );
   });
 
+  test('FR-RGN-30 a double accept is one accept; quick re-tunes each take the previous result', async () => {
+    await submitted();
+    act(() => mockControls().finish(2));
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(2));
+    fireEvent.click(screen.getAllByTestId('edt-picker-item')[0]!);
+    await waitFor(() => expect(fake.callsOf('rgn_candidate_preview')).toHaveLength(1));
+    fireEvent.click(screen.getByTestId('edt-picker-accept'));
+    fireEvent.click(screen.getByTestId('edt-picker-accept'));
+    await waitFor(() => expect(screen.getByTestId('rgn-blend-retune')).toBeTruthy());
+    await wait(300);
+    expect(fake.callsOf('rgn_candidate_accept')).toHaveLength(1);
+    expect(screen.getByTestId('rgn-tracker-notice').textContent).toBe('Patch accepted.×');
+
+    const retuneResults: string[] = [];
+    const handlers = (
+      window as unknown as { __pfMockHandlers: Record<string, (i: unknown) => unknown> }
+    ).__pfMockHandlers;
+    const retune = handlers.rgn_patch_retune!;
+    handlers.rgn_patch_retune = (i) => {
+      const r = retune(i) as { layer_id: string };
+      retuneResults.push(r.layer_id);
+      return r;
+    };
+    fireEvent.click(screen.getByTestId('rgn-blend-retune'));
+    fireEvent.click(screen.getByTestId('rgn-blend-retune'));
+    await waitFor(() => expect(fake.callsOf('rgn_patch_retune')).toHaveLength(2));
+    // The second re-tunes the first's layer (so its undo parent is the first's revision).
+    expect(fake.callsOf('rgn_patch_retune')[1]!.layer_id).toBe(retuneResults[0]);
+    await waitFor(() =>
+      expect(screen.getByTestId('rgn-tracker-notice').textContent).toBe('Patch re-tuned.×'),
+    );
+  });
+
   test('FR-RGN-26 a preview without enough context says colour match was skipped', async () => {
     await submitted();
     const handlers = (

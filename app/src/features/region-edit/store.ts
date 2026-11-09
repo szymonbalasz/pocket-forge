@@ -845,6 +845,47 @@ async function pickNow(pid: string | null, jobId: string, candidateId: string): 
   await Promise.all([refreshProject(), refreshIterations()]);
 }
 
+/** The accept in flight (FR-RGN-30): a second one while it runs joins it. */
+let accepting: Promise<void> | null = null;
+/** Re-tunes run one after another (FR-RGN-30). */
+let retuning: Promise<void> = Promise.resolve();
+
+async function acceptNow(jobId: string, candidateId: string): Promise<void> {
+  const s = state;
+  const parent = s.headRevision;
+  try {
+    const r = await api.region.accept({
+      job_id: jobId,
+      candidate_id: candidateId,
+      blend: s.blend,
+    });
+    if (parent) pushUndo(revisionUndoEntry('Accept patch', parent, r.revision_id));
+    set({ prompt: '', trackerNotice: { kind: 'info', text: 'Patch accepted.' }, preview: null });
+    editorBridge.setCompare(null);
+    saveDraftSoon();
+  } catch (e) {
+    const err = uiError(e);
+    set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
+  }
+  await Promise.all([refreshProject(), refreshIterations()]);
+}
+
+async function retuneNow(): Promise<void> {
+  const s = state;
+  const layer = s.selectedCandidateId ? layerOf(s, s.selectedCandidateId) : undefined;
+  if (!layer) return;
+  const parent = s.headRevision;
+  try {
+    const r = await api.region.retune(layer.id, s.blend);
+    if (parent) pushUndo(revisionUndoEntry('Re-tune patch', parent, r.revision_id));
+    set({ trackerNotice: { kind: 'info', text: 'Patch re-tuned.' } });
+  } catch (e) {
+    const err = uiError(e);
+    set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
+  }
+  await refreshProject();
+}
+
 async function previewSelected(): Promise<void> {
   const s = state;
   const jobId = s.selectedJobId;
@@ -1044,6 +1085,8 @@ export const rgn = {
     editorInner = null;
     regionTaken = false;
     thumbsInFlight.clear();
+    accepting = null; // another project's accept doesn't hold this one's
+    retuning = Promise.resolve();
     for (const k of Object.keys(tokens)) nextToken(k);
     if (state.projectId) editorBridge.setCandidates(null);
     state = { ...initial, maskPainted: state.maskPainted }; // EDT's, not the project's
@@ -1342,44 +1385,27 @@ export const rgn = {
     }, PREVIEW_DEBOUNCE_MS);
   },
 
-  async accept(candidateId: string): Promise<void> {
+  accept(candidateId: string): Promise<void> {
     const s = state;
     const jobId = s.selectedJobId;
-    if (!jobId) return;
+    if (!jobId) return Promise.resolve();
     if (isGenerateJob(s, jobId)) return pickNewImage(jobId, candidateId);
-    const parent = s.headRevision;
-    try {
-      const r = await api.region.accept({
-        job_id: jobId,
-        candidate_id: candidateId,
-        blend: s.blend,
-      });
-      if (parent) pushUndo(revisionUndoEntry('Accept patch', parent, r.revision_id));
-      set({ prompt: '', trackerNotice: { kind: 'info', text: 'Patch accepted.' }, preview: null });
-      editorBridge.setCompare(null);
-      saveDraftSoon();
-    } catch (e) {
-      const err = uiError(e);
-      set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
-    }
-    await Promise.all([refreshProject(), refreshIterations()]);
+    // FR-RGN-30: a second Enter while the accept runs is the same accept, not a refused one.
+    if (accepting) return accepting;
+    const run = acceptNow(jobId, candidateId).finally(() => {
+      if (accepting === run) accepting = null;
+    });
+    accepting = run;
+    return run;
   },
 
-  /** FR-RGN-29: re-bake the accepted patch of the selected candidate with the current blend. */
-  async retune(): Promise<void> {
-    const s = state;
-    const layer = s.selectedCandidateId ? layerOf(s, s.selectedCandidateId) : undefined;
-    if (!layer) return;
-    const parent = s.headRevision;
-    try {
-      const r = await api.region.retune(layer.id, s.blend);
-      if (parent) pushUndo(revisionUndoEntry('Re-tune patch', parent, r.revision_id));
-      set({ trackerNotice: { kind: 'info', text: 'Patch re-tuned.' } });
-    } catch (e) {
-      const err = uiError(e);
-      set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
-    }
-    await refreshProject();
+  /** FR-RGN-29: re-bake the accepted patch of the selected candidate with the current blend.
+   *  Re-tunes run one at a time, so each takes its layer and undo parent after the one before
+   *  it refreshed the head (FR-RGN-30). */
+  retune(): Promise<void> {
+    const run = retuning.then(retuneNow);
+    retuning = run.catch(() => undefined);
+    return run;
   },
 
   async star(candidateId: string, starred: boolean): Promise<void> {
