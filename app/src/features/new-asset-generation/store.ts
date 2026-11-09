@@ -595,6 +595,8 @@ export const gen = {
 
   pickModel(id: string): Promise<void> {
     const keep = Object.fromEntries(state.touched.map((n) => [n, state.values[n]]));
+    // Walk-gen L4: notices were about the previous model; this one's come with its evaluation.
+    set({ notices: [] });
     saveDraftSoon();
     return selectModel(id, keep);
   },
@@ -726,8 +728,11 @@ export const gen = {
         confirmOpen: false,
         sketchFlag: null,
         promptRetry: null,
+        // Walk-gen L4: earlier notices (Retry's, a dropped control's, a discard's) are done.
         info: null,
+        notices: [],
       });
+      projectStore.setTrashNotice(null);
       settleReferences('gen');
       await Promise.all([refreshJobs(), loadSpend()]);
     } catch (e) {
@@ -756,6 +761,7 @@ export const gen = {
       const d = await api.gen.retryDraft(jobId);
       const flag = d.structure?.changed_since || d.structure?.missing ? d.structure : null;
       set({
+        notices: [],
         prompt: d.typed_prompt,
         promptHelpers: d.prompt_helpers ?? [],
         promptRetry: d.prompt_retry ?? null,

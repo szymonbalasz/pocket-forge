@@ -4,7 +4,7 @@ import { useEffect, useState, type KeyboardEvent } from 'react';
 import { Select, Slider, Switch } from 'radix-ui';
 
 import type { ControlState } from '../../api';
-import { controlKind, snap, type Control } from './controls';
+import { controlKind, controlLabel, snap, type Control } from './controls';
 
 const NONE = '__none__';
 const keyOf = (v: unknown) => JSON.stringify(v);
@@ -114,7 +114,7 @@ export function ControlField({
 }) {
   const kind = controlKind(c);
   const required = state?.required ?? c.required;
-  const label = c.name.replace(/_/g, ' ');
+  const label = controlLabel(c.name);
   const allowed = state && state.allowed.length ? state.allowed : c.allowed;
   const id = `${prefix}-control-${c.name}`;
 

@@ -20,6 +20,7 @@ import {
 } from './controls';
 import { EstimateDebouncer, ESTIMATE_DEBOUNCE_MS } from './estimate';
 import { costLabel, errorText, fitLabel, jobErrorText } from './format';
+import { PATCHES_KEPT } from './store';
 import { ALL_TYPES } from './testUtils';
 import {
   canCancel,
@@ -110,7 +111,8 @@ describe('capability-driven controls (Appendix A)', () => {
     const f = fromEvaluation(ALL_TYPES, r.values, r.touched, evaluation(ev(), ['other_model']));
     expect(f.values).not.toHaveProperty('other_model');
     expect(f.touched).toEqual(['guidance', 'mode']);
-    expect(f.notices).toEqual(['other_model: not a setting of this model; dropped.']);
+    // Walk-gen L4: the label, never the raw input name.
+    expect(f.notices).toEqual(['“other model” isn’t a setting of this model, so it was dropped.']);
   });
 
   test('FR-RGN-33 a value the core reset (outside the effective allowed set) takes its value, with a notice', () => {
@@ -479,4 +481,9 @@ describe('iteration tracker logic', () => {
     ];
     expect(iterationCandidates(all, 'J1').map((c) => c.id)).toEqual(['A', 'B']);
   });
+});
+
+test('walk-gen L4 FR-GEN-28 the patches-kept notice agrees with its count', () => {
+  expect(PATCHES_KEPT(1)).toBe('1 patch layer kept in history (undo restores it).');
+  expect(PATCHES_KEPT(3)).toBe('3 patch layers kept in history (undo restores them).');
 });

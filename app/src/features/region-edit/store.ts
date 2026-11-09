@@ -766,8 +766,11 @@ function pickUndoEntry(parent: string, later: string): UndoEntry {
   };
 }
 
-const PATCHES_KEPT = (n: number): string =>
-  `${n} patch layer${n === 1 ? '' : 's'} kept in history (undo restores them).`;
+/** FR-GEN-28's pick notice (walk-gen L4: "1 patch layer … restores it"). */
+export const PATCHES_KEPT = (n: number): string =>
+  n === 1
+    ? '1 patch layer kept in history (undo restores it).'
+    : `${n} patch layers kept in history (undo restores them).`;
 
 /** FR-GEN-27/28/30: picks a generate candidate as the new bottom image (one revision, undoable),
  *  from any generate iteration (no spend). */

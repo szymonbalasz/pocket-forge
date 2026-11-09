@@ -439,3 +439,21 @@ test('walk L2 FR-GEN-14 the sketch list follows structure/ changes (the project 
   await act(() => new Promise((r) => setTimeout(r, 50)));
   expect(fake.callsOf('project_folder_list').length).toBe(lists);
 });
+
+test('walk L4 FR-GEN-19 notices name the control, and a model switch or a submit clears stale ones', async () => {
+  await setup();
+  act(() => gen.setValue('num_samples', 3));
+  await pickModel('Fake gen (aspect)');
+  await waitFor(() =>
+    expect(gen.get().notices).toContain(
+      '“num samples” isn’t a setting of this model, so it was dropped.',
+    ),
+  );
+  await pickModel('Fake gen (wh)');
+  expect(gen.get().notices).toEqual([]);
+  act(() => projectStore.setTrashNotice({ at: 'tracker', text: '2 candidates discarded' }));
+  await generate('crypt');
+  expect(gen.get().notices).toEqual([]);
+  expect(gen.get().info).toBeNull();
+  expect(projectStore.get().trashNotice).toBeNull();
+});
