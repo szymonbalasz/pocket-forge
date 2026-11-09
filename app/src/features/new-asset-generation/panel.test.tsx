@@ -457,3 +457,12 @@ test('walk L4 FR-GEN-19 notices name the control, and a model switch or a submit
   expect(gen.get().info).toBeNull();
   expect(projectStore.get().trashNotice).toBeNull();
 });
+
+test('walk L7 Radix tips (no native title) and a sketch hint that fits the kind', async () => {
+  await setup({ kind: 'token' });
+  const panel = screen.getByTestId('gen-panel');
+  expect(panel.querySelectorAll('[title]')).toHaveLength(0);
+  expect(screen.getByTestId('gen-panel-submit').closest('[data-tooltip]')).toBeTruthy();
+  if (screen.queryByTestId('gen-sketch-hint'))
+    expect(screen.getByTestId('gen-sketch-hint').textContent).not.toContain('map');
+});

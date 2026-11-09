@@ -5,6 +5,7 @@ import { Select, Slider, Switch } from 'radix-ui';
 
 import type { ControlState } from '../../api';
 import { controlKind, controlLabel, snap, type Control } from './controls';
+import { Hint } from './Hint';
 
 const NONE = '__none__';
 const keyOf = (v: unknown) => JSON.stringify(v);
@@ -214,14 +215,18 @@ export function ControlField({
       <label className="rgn-control-label" htmlFor={id}>
         {label}
         {required && (
-          <span className="rgn-required" title="Required">
-            *
-          </span>
+          <Hint text="Required">
+            <span className="rgn-required" aria-label="Required">
+              *
+            </span>
+          </Hint>
         )}
         {c.cost_affecting && (
-          <span className="rgn-costly" title="Changes the cost">
-            ¤
-          </span>
+          <Hint text="Changes the cost">
+            <span className="rgn-costly" aria-label="Changes the cost">
+              ¤
+            </span>
+          </Hint>
         )}
       </label>
       {field}

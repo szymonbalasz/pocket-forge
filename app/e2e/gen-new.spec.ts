@@ -112,6 +112,8 @@ test('FR-GEN-26 FR-GEN-27 FR-GEN-29 FR-GEN-30 generate → pick → undo → re-
   await page.getByTestId('edt-picker-item').nth(1).click();
   await expect(page.getByTestId('edt-preview-alone')).toBeVisible();
   expect(await inputsOf(page, 'rgn_candidate_preview')).toHaveLength(0);
+  // Walk L7: no split / flip toggle while the candidate is shown alone.
+  await expect(page.getByTestId('edt-compare-mode')).toHaveCount(0);
 
   // FR-GEN-27: Pick (Enter) makes it the bottom image; the canvas replaces "No image yet".
   await page.keyboard.press('Enter');

@@ -16,6 +16,7 @@ import {
   amountLabel,
   ControlField,
   costLabel,
+  Hint,
   errorText,
   isValueControl,
   SpendConfirm,
@@ -120,9 +121,11 @@ function ModelSection({ s }: { s: GenState }) {
       <label className="rgn-control-label" htmlFor="gen-model">
         Model
         {s.modelsStale && (
-          <span className="pf-chip" data-testid="gen-panel-stale" title="Offline: cached list">
-            cached
-          </span>
+          <Hint text="Offline: the cached model list">
+            <span className="pf-chip" data-testid="gen-panel-stale">
+              cached
+            </span>
+          </Hint>
         )}
       </label>
       <Select.Root value={s.modelId ?? ''} onValueChange={(id) => void gen.pickModel(id)}>
@@ -387,7 +390,11 @@ function SketchSection({ s }: { s: GenState }) {
         )}
       </RadioGroup.Root>
       {files.length === 0 && (
-        <p className="muted small">Add a rough layout image to guide the map’s structure.</p>
+        <p className="muted small" data-testid="gen-sketch-hint">
+          {s.kind === 'map'
+            ? 'Add a rough layout image to guide the map’s structure.'
+            : 'Add a rough layout image to guide the composition.'}
+        </p>
       )}
       {s.sketchError && (
         <p className="error small" data-testid="gen-sketch-error">
@@ -603,16 +610,18 @@ function SubmitSection({ s }: { s: GenState }) {
           Set up provider
         </button>
       ) : (
-        <button
-          type="button"
-          className="primary rgn-submit"
-          data-testid="gen-panel-submit"
-          disabled={blocker !== null}
-          title={blocker ?? 'Estimate, confirm and generate'}
-          onClick={() => void gen.openConfirm(activeJob)}
-        >
-          Generate
-        </button>
+        // The reason is shown under the button; the tip says what it does (ui-guidelines).
+        <Hint text="Estimate, confirm and generate">
+          <button
+            type="button"
+            className="primary rgn-submit"
+            data-testid="gen-panel-submit"
+            disabled={blocker !== null}
+            onClick={() => void gen.openConfirm(activeJob)}
+          >
+            Generate
+          </button>
+        </Hint>
       )}
       {blocker && (
         <p className="muted small" data-testid="gen-panel-submit-reason">

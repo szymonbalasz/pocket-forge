@@ -24,6 +24,7 @@ registerSettingsSection({
 // (Appendix A), its pure helpers, the estimate debounce, the spend confirm and the job runner's
 // state (one active job per project, FR-GEN-22).
 export { ControlField } from './ControlField';
+export { Hint } from './Hint';
 export {
   controlKind,
   costSignature,
