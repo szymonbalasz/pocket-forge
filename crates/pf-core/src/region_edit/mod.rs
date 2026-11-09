@@ -6,13 +6,16 @@
 //! with the interim write spool ([`spool`]). Slices 4–5: candidate preview, accept / re-pick,
 //! star, discard, re-tune and the iteration list ([`candidates`]) over the patch bake
 //! ([`blend`]). Slice 7 (REF slice 6): references in estimate, submit, the job record and Retry
-//! through REF's `prepare_for_send` and `retry`. Commands are re-exported from [`crate::commands`].
+//! through REF's `prepare_for_send` and `retry`. PRM slice 3: the final prompt is PRM's compose
+//! ([`instruction::final_prompt`]), the job records the helpers sent, Retry restores the ticks,
+//! and [`chat`] is the chat context source (a stub until PRM slice 5). Commands are re-exported from [`crate::commands`].
 //!
 //! RGN reads pixels through [`pixels::PixelSource`] (PRJ's decoded original and mask store) and
 //! writes only through PRJ's store API (R4).
 
 pub mod blend;
 pub mod candidates;
+pub mod chat;
 pub mod commands;
 pub mod controls;
 pub mod estimate;
@@ -27,6 +30,8 @@ pub mod spool;
 
 #[cfg(test)]
 pub(crate) mod job_tests;
+#[cfg(test)]
+mod prm_tests;
 #[cfg(test)]
 mod ref_tests;
 #[cfg(test)]

@@ -52,6 +52,8 @@ export function installRgnMock(seed: RgnMockSeed): void {
     /** The other-role controls sent and the count with its control name, as the capability
      *  snapshot at submit had them (pf-core's job `controls` / `candidate_count`). */
     sent: { controls: Rec; count: { name: string; n: number } | null };
+    /** FR-PRM-09: the job's `prompt_helpers[]` (from the PRM mock's compose hook). */
+    helpers: Rec[];
   }
   interface Cand {
     id: string;
@@ -501,6 +503,14 @@ export function installRgnMock(seed: RgnMockSeed): void {
           return row;
         }),
         sent: sentOf(ok.c, draft.controls ?? {}),
+        // FR-PRM-09: the helpers sent, as PRM's compose picks them.
+        helpers: handlers.__prm_sent
+          ? ((await handlers.__prm_sent({
+              kind: seed.kind ?? 'map',
+              helper_ids: (draft.prompt_helpers as string[] | null | undefined) ?? null,
+              blend_instruction: draft.blend_instruction === false ? null : blendOut().for_project,
+            })) as Rec[])
+          : [],
       };
       s.jobs.push(j);
       s.spend += amount;
@@ -534,11 +544,21 @@ export function installRgnMock(seed: RgnMockSeed): void {
       // name (walk owner-UX M1: the count is sent apart from `controls`).
       const controls: Rec = { ...j.sent.controls };
       if (j.sent.count) controls[j.sent.count.name] = j.sent.count.n;
+      // FR-PRM-10: the job's helpers ticked again; changed / missing badged.
+      const prm = handlers.__prm_retry
+        ? ((await handlers.__prm_retry({
+            kind: seed.kind ?? 'map',
+            recorded: j.helpers,
+            since: j.n === null ? 'the job' : String(j.n).padStart(3, '0'),
+          })) as { ticks: string[]; prompt_retry?: Rec })
+        : { ticks: (j.draft.prompt_helpers as string[] | null | undefined) ?? [] };
       return {
         ...JSON.parse(JSON.stringify(j.draft)),
         controls,
         seed: j.draft.seed ?? null,
         references,
+        prompt_helpers: prm.ticks,
+        ...(prm.prompt_retry ? { prompt_retry: prm.prompt_retry } : {}),
       };
     },
     rgn_job_dismiss: (input: Rec) => {

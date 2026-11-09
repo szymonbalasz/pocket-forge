@@ -25,7 +25,7 @@ async function regionAndFill(page: Page, from: [number, number], to: [number, nu
 /** Region, mask, prompt → submit → 3 candidates → accept #1 (r1 `accept`). */
 async function acceptOne(page: Page) {
   await regionAndFill(page, [400, 500], [800, 900]);
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-estimate')).toContainText('CU');
   await page.getByTestId('rgn-panel-submit').click();
   await page.getByTestId('rgn-confirm-ok').click();
@@ -95,7 +95,7 @@ test('FR-RGN-01 a region drawn after Delete reaches the Generate panel (walk D2)
   await expect(page.getByTestId('rgn-panel-empty')).toBeVisible();
   await regionAndFill(page, [1000, 500], [1300, 800]);
   await expect(page.getByTestId('rgn-panel-size')).toHaveText('300 × 300 px');
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-submit')).toBeEnabled();
 });
 
@@ -106,11 +106,11 @@ test('FR-RGN-01 a region drawn after a restore reaches the Generate panel (walk 
   await acceptOne(page);
   await page.keyboard.press('Control+z');
   await expect.poll(async () => (await inputsOf(page, 'project_restore_revision')).length).toBe(1);
-  await expect(page.getByTestId('rgn-panel-prompt')).toHaveValue('');
+  await expect(page.getByTestId('prm-block-prompt')).toHaveValue('');
   await page.keyboard.press('Delete');
   await expect(page.getByTestId('rgn-panel-empty')).toBeVisible();
   await regionAndFill(page, [1000, 500], [1300, 800]);
   await expect(page.getByTestId('rgn-panel-size')).toHaveText('300 × 300 px');
-  await page.getByTestId('rgn-panel-prompt').fill('A stone well');
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
   await expect(page.getByTestId('rgn-panel-submit')).toBeEnabled();
 });

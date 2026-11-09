@@ -60,4 +60,4 @@
 | PRM 0: `pf-chat` crate + probe | `prm-0` (kept for the probe) | merged | done; pf-chat in CI | **owner runs the probe** (docs/guides/prompt-chat-probe.md) |
 | PRM 1: helpers core | — | merged | done (R78) | — |
 | PRM 2: prompt block + Settings UI (mocked) | — | merged | done | — |
-| PRM 3: prompt block in Region edit | `prm-1` | building | — | — |
+| PRM 3: prompt block in Region edit | — | merged | done (R81) | PRM 4 waits on the owner's probe |

@@ -37,7 +37,7 @@ test('FR-PRJ-21 a failed draft save shows in the save state; the next commit cle
 
   // BL-28: drive the debounce with fake timers instead of waiting two real 2 s debounces.
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-  fireEvent.change(screen.getByTestId('rgn-panel-prompt'), { target: { value: 'flooded crypt' } });
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'flooded crypt' } });
   await act(() => vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS - 1));
   expect(fake.callsOf('project_put_draft')).toHaveLength(0);
   await act(() => vi.advanceTimersByTimeAsync(1));
@@ -45,7 +45,7 @@ test('FR-PRJ-21 a failed draft save shows in the save state; the next commit cle
   expect(projectStore.get().save).toMatchObject({ kind: 'failed', code: 'not_found' });
 
   // The next change saves again (the mock fails once); its commit sets the segment back.
-  fireEvent.change(screen.getByTestId('rgn-panel-prompt'), { target: { value: 'flooded hall' } });
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'flooded hall' } });
   await act(() => vi.advanceTimersByTimeAsync(DRAFT_SAVE_MS));
   expect(fake.callsOf('project_put_draft')).toHaveLength(2);
   act(() => fake.emit('project:committed', { seq: 2 }));

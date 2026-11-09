@@ -32,7 +32,7 @@ test('FR-PRJ-23 Restore r0 shows r0 draft in the panel: empty prompt, random see
   );
   await waitFor(() => expect(rgn.get().evaluation).not.toBeNull());
   act(() => rgn.setRegion({ x: 400, y: 400, w: 512, h: 512 }));
-  fireEvent.change(screen.getByTestId('rgn-panel-prompt'), { target: { value: 'flooded crypt' } });
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'flooded crypt' } });
   act(() => rgn.setSeedMode('pinned'));
   act(() => rgn.setSeed(42));
   expect(rgn.get().seed).toBe(42);
@@ -40,7 +40,7 @@ test('FR-PRJ-23 Restore r0 shows r0 draft in the panel: empty prompt, random see
   await act(() => projectStore.restore('r0'));
 
   await waitFor(() =>
-    expect((screen.getByTestId('rgn-panel-prompt') as HTMLTextAreaElement).value).toBe(''),
+    expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).value).toBe(''),
   );
   expect(rgn.get().seedMode).toBe('random');
   expect(rgn.get().seed).toBeNull();

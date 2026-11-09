@@ -677,15 +677,10 @@ impl Validate for ProjectPutDraftInput {
             {
                 return Err(CoreError::invalid("draft.model_id", "not a valid model id"));
             }
-            if let Some(ticks) = &d.prompt_helpers
-                && (ticks.len() > crate::prompt::helpers::MAX_HELPERS
-                    || ticks.iter().any(|t| t.is_empty() || t.len() > 100))
-            {
-                return Err(CoreError::invalid(
-                    "draft.prompt_helpers",
-                    "not a list of prompt helper ids",
-                ));
-            }
+            crate::prompt::helpers::check_ticks(
+                "draft.prompt_helpers",
+                d.prompt_helpers.as_deref(),
+            )?;
         }
         if let Some(e) = &self.export
             && let Some(k) = e

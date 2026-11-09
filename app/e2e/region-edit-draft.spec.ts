@@ -65,7 +65,7 @@ test('FR-PRJ-22 FR-RGN-11 reopening keeps the saved prompt and region and writes
 }) => {
   await openRgnMaps(page, ['crypt']);
   await drawRegion(page, [400, 500], [800, 900]);
-  await page.getByTestId('rgn-panel-prompt').fill('flooded crypt');
+  await page.getByTestId('prm-block-prompt').fill('flooded crypt');
   await expect
     .poll(async () => (await drafts(page)).at(-1)?.draft, { timeout: DRAFT_SAVE_MS + 3000 })
     .toMatchObject({ final_prompt: 'flooded crypt', region: { inner: { w: 400, h: 400 } } });
@@ -74,11 +74,11 @@ test('FR-PRJ-22 FR-RGN-11 reopening keeps the saved prompt and region and writes
   const before = (await drafts(page)).length;
   await openFirstCard(page);
   await expect(page.getByTestId('edt-canvas-stage')).toHaveAttribute('data-image-loaded', 'true');
-  await expect(page.getByTestId('rgn-panel-prompt')).toHaveValue('flooded crypt');
+  await expect(page.getByTestId('prm-block-prompt')).toHaveValue('flooded crypt');
   await expect(page.getByTestId('rgn-panel-size')).toHaveText('400 × 400 px');
   await page.waitForTimeout(DRAFT_SAVE_MS + 500);
   expect((await drafts(page)).slice(before)).toEqual([]);
-  await expect(page.getByTestId('rgn-panel-prompt')).toHaveValue('flooded crypt');
+  await expect(page.getByTestId('prm-block-prompt')).toHaveValue('flooded crypt');
 });
 
 test("FR-PRJ-22 opening another project never copies the previous project's region (D2b)", async ({

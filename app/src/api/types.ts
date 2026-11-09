@@ -483,6 +483,14 @@ export interface JobDraft {
   references?: DraftReferences | null;
   /** #55: append the blend instruction at submit; absent = on (the default). */
   blend_instruction?: boolean;
+  /** PRM's helper ticks (FR-PRM-05); absent/null = the defaults. */
+  prompt_helpers?: string[] | null;
+}
+
+/** `rgn_job_retry_draft` (FR-RGN-21, FR-PRM-10): the job's draft, its helper ids as the ticks,
+ *  and the prompt block's badges (absent = nothing changed or missing). */
+export interface RgnRetryDraft extends JobDraft {
+  prompt_retry?: PromptRetryBadges;
 }
 
 /** `rgn_blend_instruction_get` / `_set` result (#55). */
@@ -665,7 +673,7 @@ export interface Commands {
     { job_id: string },
   ];
   rgn_job_cancel: [{ job_id: string }, { result: 'canceled' | 'not_cancellable' }];
-  rgn_job_retry_draft: [{ job_id: string }, JobDraft];
+  rgn_job_retry_draft: [{ job_id: string }, RgnRetryDraft];
   rgn_blend_instruction_get: [Record<string, never>, BlendInstruction];
   /** null resets to the default. */
   rgn_blend_instruction_set: [{ text: string | null }, BlendInstruction];
@@ -1101,4 +1109,14 @@ export interface SentHelper {
   id: string;
   label: string;
   text: string;
+}
+
+/** FR-PRM-10: what a Retry badges in the prompt block (pf-core `PromptRetry`). */
+export interface PromptRetryBadges {
+  /** The job's iteration `NNN`, or "the job". */
+  since: string;
+  /** Ticked ids whose text changed since that job (the current text is sent). */
+  changed: string[];
+  /** Recorded helpers that are deleted, hidden or not for this kind: unticked, not sent. */
+  missing: SentHelper[];
 }

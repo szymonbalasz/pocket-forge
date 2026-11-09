@@ -232,7 +232,7 @@ test('OQ-EDT-14 FR-EDT-23 a History restore keeps EDT’s live region and mask; 
     };
     w.__pfMock.emit('project:committed', { seq: 99 });
   });
-  await expect(page.getByTestId('rgn-panel-prompt')).toHaveValue('old prompt');
+  await expect(page.getByTestId('prm-block-prompt')).toHaveValue('old prompt');
   // The live region and mask stay; no editor undo entry for the restore.
   expect(await region()).toEqual({
     inner: { x: 400, y: 500, w: 400, h: 400 },
