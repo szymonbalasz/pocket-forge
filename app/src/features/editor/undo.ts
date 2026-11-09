@@ -31,8 +31,8 @@ function errorCode(e: unknown): string {
 }
 
 export class UndoStack {
-  private done: UndoEntry[] = [];
-  private undone: UndoEntry[] = [];
+  private readonly done: UndoEntry[] = [];
+  private readonly undone: UndoEntry[] = [];
   private total = 0;
   private busy = false;
   private error: string | null = null;
@@ -60,7 +60,8 @@ export class UndoStack {
   /** A new action: clears redo; drops the oldest entries over budget but keeps the newest. */
   push(e: UndoEntry): void {
     for (const u of this.undone) this.total -= u.bytes;
-    this.undone = [];
+    // In place: a step in progress holds these arrays (walk-gen L1).
+    this.undone.length = 0;
     this.done.push(e);
     this.total += e.bytes;
     while (this.total > this.budget && this.done.length > 1) {
@@ -91,8 +92,8 @@ export class UndoStack {
   }
 
   clear(): void {
-    this.done = [];
-    this.undone = [];
+    this.done.length = 0;
+    this.undone.length = 0;
     this.total = 0;
     this.error = null;
     this.busy = false;
@@ -107,7 +108,9 @@ export class UndoStack {
     this.emit();
     try {
       await e[op]();
-      from.pop();
+      // The exact entry: a push or a canvas drop may have changed the stacks meanwhile.
+      const i = from.lastIndexOf(e);
+      if (i >= 0) from.splice(i, 1);
       to.push(e);
       return true;
     } catch (err) {

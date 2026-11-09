@@ -21,6 +21,48 @@ import { noMouseFocus } from './shortcuts';
 import { useEditor, type Tool } from './store';
 import { Tip } from './Tip';
 
+/** FR-EDT-21/22: Undo and Redo, also in "No image yet" (an undone first pick redoes from there,
+ *  FR-GEN-29). */
+function UndoRedo() {
+  const undo = useEditor((s) => s.undo);
+  return (
+    <>
+      <Tip
+        text={
+          undo.depth
+            ? `Undo ${undo.label ?? ''} (Ctrl+Z) · ${undo.depth} step${undo.depth === 1 ? '' : 's'} left`
+            : 'Nothing to undo (Ctrl+Z)'
+        }
+      >
+        <button
+          type="button"
+          className="edt-tool"
+          data-testid="edt-toolbar-undo"
+          aria-label="Undo"
+          data-depth={undo.depth}
+          disabled={!undo.depth || undo.busy}
+          onClick={actions.undo}
+        >
+          <IconUndo />
+        </button>
+      </Tip>
+      <Tip text="Redo (Ctrl+Shift+Z)">
+        <button
+          type="button"
+          className="edt-tool"
+          data-testid="edt-toolbar-redo"
+          aria-label="Redo"
+          data-depth={undo.redo}
+          disabled={!undo.redo || undo.busy}
+          onClick={actions.redo}
+        >
+          <IconRedo />
+        </button>
+      </Tip>
+    </>
+  );
+}
+
 /** FR-GEN-03: the tools are there but disabled, with the reason `no_image`. */
 function NoImageToolbar() {
   return (
@@ -40,6 +82,8 @@ function NoImageToolbar() {
           </button>
         </Tip>
       ))}
+      <hr />
+      <UndoRedo />
     </div>
   );
 }
@@ -55,8 +99,9 @@ const TOOLS: { tool: Tool; label: string; key: string; Icon: ComponentType }[] =
 export const NO_IMAGE_REASON = 'No image yet. Generate one in New image.';
 
 export function EditorToolbar() {
-  const { tool, brushSize, hardness, maskVisible, image, region, undo, originalMissing } =
-    useEditor((s) => s);
+  const { tool, brushSize, hardness, maskVisible, image, region, originalMissing } = useEditor(
+    (s) => s,
+  );
   const { project } = useProjectState();
   if (project && !projectHasImage(project)) return <NoImageToolbar />;
   if (!image) return null;
@@ -126,38 +171,7 @@ export function EditorToolbar() {
           <IconClear />
         </button>
       </Tip>
-      <Tip
-        text={
-          undo.depth
-            ? `Undo ${undo.label ?? ''} (Ctrl+Z) · ${undo.depth} step${undo.depth === 1 ? '' : 's'} left`
-            : 'Nothing to undo (Ctrl+Z)'
-        }
-      >
-        <button
-          type="button"
-          className="edt-tool"
-          data-testid="edt-toolbar-undo"
-          aria-label="Undo"
-          data-depth={undo.depth}
-          disabled={!undo.depth || undo.busy}
-          onClick={actions.undo}
-        >
-          <IconUndo />
-        </button>
-      </Tip>
-      <Tip text="Redo (Ctrl+Shift+Z)">
-        <button
-          type="button"
-          className="edt-tool"
-          data-testid="edt-toolbar-redo"
-          aria-label="Redo"
-          data-depth={undo.redo}
-          disabled={!undo.redo || undo.busy}
-          onClick={actions.redo}
-        >
-          <IconRedo />
-        </button>
-      </Tip>
+      <UndoRedo />
       <hr />
       <Tip text="Show mask (M)">
         <button

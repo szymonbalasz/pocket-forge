@@ -202,6 +202,42 @@ describe('undo stack across a canvas remount', () => {
     expect(u.snapshot()).toMatchObject({ depth: 0, redo: 1, label: null });
   });
 
+  test('walk L1 an echoed region on a fresh canvas is not an undo step (Redo survives)', async () => {
+    const u = new UndoStack();
+    const ctl = () =>
+      new MaskController({
+        undo: u,
+        view: { reset: () => undefined, update: () => undefined },
+        setRegion: () => undefined,
+      });
+    const r = (x: number) => ({ inner: { x, y: 0, w: 4, h: 4 }, outer: { x, y: 0, w: 4, h: 4 } });
+    u.push({ label: 'Pick new image', bytes: 0, undo: () => undefined, redo: () => undefined });
+    await u.undo();
+    const fresh = ctl();
+    fresh.applyValidated(r(0));
+    expect(u.snapshot()).toMatchObject({ depth: 0, redo: 1 });
+    // Once the DM changed something here, an external new region is one undo step (BL-14).
+    fresh.changeRegion(r(1));
+    fresh.applyValidated(r(2));
+    expect(u.snapshot()).toMatchObject({ depth: 2, redo: 0 });
+  });
+
+  test('walk L1 a step moves the entry it ran even when the stack changed meanwhile', async () => {
+    const u = new UndoStack();
+    const later = { label: 'region', bytes: 1, undo: () => undefined, redo: () => undefined };
+    u.push({
+      label: 'pick',
+      bytes: 0,
+      undo: async () => {
+        await Promise.resolve();
+        u.push(later);
+      },
+      redo: () => undefined,
+    });
+    expect(await u.undo()).toBe(true);
+    expect(u.snapshot()).toMatchObject({ depth: 1, label: 'region', redo: 1 });
+  });
+
   test('FR-GEN-29 the mask controller marks its entries as the canvas’s', () => {
     const u = new UndoStack();
     const c = new MaskController({
