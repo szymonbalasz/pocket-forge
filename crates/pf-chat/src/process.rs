@@ -17,9 +17,51 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::invocation::{ExeKind, Executable};
+use crate::stream::MAX_LINE;
 
 /// The last bytes of stderr kept for an error's detail (FR-PRM-37).
 pub const STDERR_TAIL: usize = 2048;
+
+/// Stdout lines buffered between the reader thread and the turn (backpressure: a child
+/// that floods stdout waits instead of filling memory; review-sec 7).
+const LINE_QUEUE: usize = 16;
+
+/// Reads `r` line by line (without the line end) into `emit` until EOF, an error, or `emit`
+/// returns `false`. A line keeps at most [`MAX_LINE`] + 1 bytes and the rest up to its
+/// newline is skipped, so an endless line can't fill memory; the turn sees it longer than
+/// [`MAX_LINE`] and ends with `stream_malformed` (review-sec 7).
+pub fn read_lines(r: impl Read, mut emit: impl FnMut(String) -> bool) {
+    let mut r = BufReader::new(r);
+    let mut buf = Vec::new();
+    loop {
+        let (used, done) = match r.fill_buf() {
+            Ok([]) | Err(_) => break,
+            Ok(chunk) => {
+                let end = chunk.iter().position(|&b| b == b'\n');
+                let take = end.map_or(chunk.len(), |i| i + 1);
+                let room = (MAX_LINE + 1).saturating_sub(buf.len());
+                buf.extend_from_slice(&chunk[..take.min(room)]);
+                (take, end.is_some())
+            }
+        };
+        r.consume(used);
+        if done {
+            if !emit(line_of(&buf)) {
+                return;
+            }
+            buf.clear();
+        }
+    }
+    if !buf.is_empty() {
+        emit(line_of(&buf));
+    }
+}
+
+fn line_of(buf: &[u8]) -> String {
+    String::from_utf8_lossy(buf)
+        .trim_end_matches(['\r', '\n'])
+        .to_owned()
+}
 
 /// One process to start. `args` are the CLI's own arguments; an npm shim
 /// ([`ExeKind::CmdShim`]) is started through std's batch-file handling (see `os_command`).
@@ -289,24 +331,9 @@ impl OsChild {
             .stdout
             .take()
             .ok_or_else(|| io::Error::other("no stdout"))?;
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(LINE_QUEUE);
         thread::spawn(move || {
-            let mut r = BufReader::new(stdout);
-            let mut buf = Vec::new();
-            loop {
-                buf.clear();
-                match r.read_until(b'\n', &mut buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {
-                        let line = String::from_utf8_lossy(&buf)
-                            .trim_end_matches(['\r', '\n'])
-                            .to_owned();
-                        if tx.send(Some(line)).is_err() {
-                            return;
-                        }
-                    }
-                }
-            }
+            read_lines(stdout, |line| tx.send(Some(line)).is_ok());
             let _ = tx.send(None);
         });
         let stderr = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL)));
@@ -400,6 +427,33 @@ impl Drop for OsChild {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// review-sec 7 (R96): an endless stdout line keeps at most MAX_LINE + 1 bytes, the
+    /// rest is skipped up to its newline, and the next line still arrives.
+    #[test]
+    fn prm_s10_read_lines_bounds_a_long_line() {
+        let mut input = b"first\r\n".to_vec();
+        input.extend(std::iter::repeat_n(b'x', 3 * MAX_LINE));
+        input.extend_from_slice(b"\nnext\nlast without newline");
+        let mut lines = Vec::new();
+        read_lines(io::Cursor::new(input), |l| {
+            lines.push(l);
+            true
+        });
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[0], "first");
+        assert_eq!(lines[1].len(), MAX_LINE + 1);
+        assert_eq!(lines[2], "next");
+        assert_eq!(lines[3], "last without newline");
+
+        // A receiver that hangs up stops the reader.
+        let mut n = 0;
+        read_lines(io::Cursor::new(b"a\nb\nc\n".to_vec()), |_| {
+            n += 1;
+            false
+        });
+        assert_eq!(n, 1);
+    }
 
     /// The real spawner and the job object, on a harmless system command (never the CLI).
     #[cfg(windows)]

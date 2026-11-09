@@ -8,7 +8,7 @@ use crate::backend::{CancelHandle, TurnEvent, TurnOutcome, Usage};
 use crate::clock::{Clock, TurnBudget, TurnTimer};
 use crate::error::{ChatError, ChatErrorKind};
 use crate::process::ChildProcess;
-use crate::stream::{LineOutcome, LineParser, StreamEvent, TurnResult};
+use crate::stream::{LineOutcome, LineParser, MAX_LINE, MAX_REPLY, StreamEvent, TurnResult};
 
 /// How long a crashed child gets to report its exit code.
 const EXIT_WAIT: Duration = Duration::from_secs(5);
@@ -73,29 +73,32 @@ pub fn run_turn(
             }
             crate::process::Next::Line(line) => {
                 timer.event(clock.now());
-                match parser.push(&line) {
+                if line.len() > MAX_LINE {
+                    child.killer().kill();
+                    let error = ChatError::new(ChatErrorKind::StreamMalformed)
+                        .with_detail("a stdout line was longer than 1 MiB");
+                    return (TurnOutcome::Failed { error, partial }, false);
+                }
+                let fits = match parser.push(&line) {
                     LineOutcome::Event(StreamEvent::AssistantText(t)) => {
-                        if !streaming {
-                            push_message(&t, &mut partial, on_event);
-                        }
+                        streaming || push_message(&t, &mut partial, on_event)
                     }
                     LineOutcome::Event(StreamEvent::TextDelta(t)) => {
                         // Only with --include-partial-messages; the whole messages that
                         // follow repeat the deltas and are skipped.
                         streaming = true;
-                        if !t.is_empty() {
-                            partial.push_str(&t);
-                            on_event(TurnEvent::Delta(t));
-                        }
+                        append(&t, &mut partial, on_event)
                     }
                     LineOutcome::Event(StreamEvent::AssistantError { error, text }) => {
                         signals.assistant_error = Some(error);
                         signals.assistant_error_text = Some(text);
+                        true
                     }
                     LineOutcome::Event(StreamEvent::RateLimit { status }) => {
                         if status.as_deref() == Some("rejected") {
                             signals.rate_limited = true;
                         }
+                        true
                     }
                     LineOutcome::Event(StreamEvent::Result(r)) => {
                         return (finish(r, &signals, partial), true);
@@ -106,7 +109,13 @@ pub fn run_turn(
                             .with_detail("three lines in a row weren't JSON");
                         return (TurnOutcome::Failed { error, partial }, false);
                     }
-                    _ => {}
+                    _ => true,
+                };
+                if !fits {
+                    child.killer().kill();
+                    let error = ChatError::new(ChatErrorKind::StreamMalformed)
+                        .with_detail("the reply was longer than 1 MiB");
+                    return (TurnOutcome::Failed { error, partial }, false);
                 }
             }
         }
@@ -114,17 +123,27 @@ pub fn run_turn(
 }
 
 /// Appends one whole assistant message, separated from the previous one by a blank line.
-fn push_message(text: &str, partial: &mut String, on_event: &mut dyn FnMut(TurnEvent)) {
+/// `false` when the reply passed [`MAX_REPLY`] (what fits is kept).
+fn push_message(text: &str, partial: &mut String, on_event: &mut dyn FnMut(TurnEvent)) -> bool {
     if text.is_empty() {
-        return;
-    }
-    let piece = if partial.is_empty() {
-        text.to_owned()
+        true
+    } else if partial.is_empty() {
+        append(text, partial, on_event)
     } else {
-        format!("\n\n{text}")
-    };
-    partial.push_str(&piece);
-    on_event(TurnEvent::Delta(piece));
+        append(&format!("\n\n{text}"), partial, on_event)
+    }
+}
+
+/// Appends `piece` to the reply and streams it, up to [`MAX_REPLY`] bytes in all (cut at a
+/// character boundary); `false` when it didn't all fit (review-sec 7).
+fn append(piece: &str, partial: &mut String, on_event: &mut dyn FnMut(TurnEvent)) -> bool {
+    let room = MAX_REPLY.saturating_sub(partial.len());
+    let kept = &piece[..piece.floor_char_boundary(room)];
+    if !kept.is_empty() {
+        partial.push_str(kept);
+        on_event(TurnEvent::Delta(kept.to_owned()));
+    }
+    kept.len() == piece.len()
 }
 
 fn crashed(

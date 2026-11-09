@@ -770,3 +770,52 @@ fn fr_prm_45_login_copy_text_round_trips_through_powershell() {
         dir
     );
 }
+
+// ---------------------------------------------------------------- size caps
+
+/// review-sec 7 (R96): a stdout line over 1 MiB is `stream_malformed`; the child is killed.
+#[test]
+fn fr_prm_37_a_stdout_line_over_1_mib_is_malformed() {
+    let big = "x".repeat(pf_chat::stream::MAX_LINE);
+    let line =
+        serde_json::json!({"type":"assistant","message":{"content":[{"type":"text","text":big}]}})
+            .to_string();
+    assert!(line.len() > pf_chat::stream::MAX_LINE);
+    let (out, alive) = outcome_of(vec![init(), assistant("before"), Step::Line(line)], "");
+    let TurnOutcome::Failed { error, partial } = out else {
+        panic!("{out:?}")
+    };
+    assert_eq!(error.code(), "stream_malformed");
+    assert_eq!(partial, "before");
+    assert!(!alive);
+}
+
+/// review-sec 7 (R96): the reply is capped at 1 MiB; what fits is kept and streamed, cut at
+/// a character boundary, then the turn ends with `stream_malformed`.
+#[test]
+fn fr_prm_37_the_reply_is_capped() {
+    let cap = pf_chat::stream::MAX_REPLY;
+    // Each message is under the line cap; together they pass the reply cap.
+    let chunk = "é".repeat(cap / 6);
+    let steps: Vec<Step> = std::iter::once(init())
+        .chain((0..4).map(|_| assistant(&chunk)))
+        .chain(std::iter::once(result_line(false, "x")))
+        .collect();
+    let r = rig();
+    let mut s = r.open(Script {
+        turns: vec![steps],
+        stderr: String::new(),
+    });
+    let (out, deltas) = turn(s.as_mut(), &input("hi"));
+    let TurnOutcome::Failed { error, partial } = out else {
+        panic!("{out:?}")
+    };
+    assert_eq!(error.code(), "stream_malformed");
+    assert!(
+        partial.len() <= cap && partial.len() > cap - 4,
+        "{}",
+        partial.len()
+    );
+    assert_eq!(deltas.concat(), partial, "the UI saw exactly what is kept");
+    assert!(!s.is_alive());
+}
