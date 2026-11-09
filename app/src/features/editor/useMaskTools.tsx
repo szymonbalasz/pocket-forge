@@ -170,6 +170,7 @@ export function useMaskTools({
 
   useEffect(
     () => () => {
+      ctl.current?.dispose();
       ctl.current = null;
       sync.current?.dispose();
       sync.current = null;
@@ -274,8 +275,14 @@ export function useMaskTools({
       drag.current = null;
       const rect = applyDrag(g.d, imagePoint(e), image);
       setPreview(null);
-      // A click without a drag doesn't make a region.
-      const moved = g.d.kind !== 'new' || rect.w > 1 || rect.h > 1;
+      // A click without a drag doesn't make a region, nor move or resize one (no fit call).
+      const moved =
+        g.d.kind === 'new'
+          ? rect.w > 1 || rect.h > 1
+          : rect.x !== g.d.rect.x ||
+            rect.y !== g.d.rect.y ||
+            rect.w !== g.d.rect.w ||
+            rect.h !== g.d.rect.h;
       if (moved) void commitRegion(rect);
     }
     if (stroking.current === e.pointerId) {

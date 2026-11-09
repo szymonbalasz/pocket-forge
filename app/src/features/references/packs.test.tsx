@@ -208,6 +208,36 @@ test('FR-REF-08 dropping images on the pack view copies them in; duplicates and 
   });
 });
 
+test('FR-REF-08 a second drop while one copies waits its turn; the first keeps its progress', async () => {
+  setup();
+  await openWeapons();
+  const h = core.handlersSnapshot();
+  const add = h.ref_pack_add_images!;
+  let release: () => void = () => undefined;
+  let first = true;
+  core.useHandlers({
+    ...h,
+    ref_pack_add_images: (input) => {
+      if (!first) return add(input);
+      first = false;
+      return new Promise<void>((r) => (release = r)).then(() => add(input));
+    },
+  });
+  await drop(['D:/art/a1.png', 'D:/art/a2.png', 'D:/art/a3.png']);
+  await drop(['D:/art/b1.png']);
+  await act(() => new Promise((r) => setTimeout(r, 30)));
+  const adds = () => core.calls.filter((c) => c.cmd === 'ref_pack_add_images');
+  expect(adds()).toHaveLength(1);
+  act(() => core.emit('ref:add-progress', { done: 2, total: 3 }));
+  expect(screen.getByTestId('ref-add-progress').textContent).toBe('Copying 2 / 3');
+  await act(async () => release());
+  await waitFor(() => expect(adds()).toHaveLength(2));
+  expect(adds()[1]!.input.paths).toEqual(['D:/art/b1.png']);
+  await waitFor(() => expect(images()).toContain('b1.png'));
+  expect(images()).toContain('a3.png');
+  expect(screen.queryByTestId('ref-add-progress')).toBeNull();
+});
+
 test('FR-REF-08 a taken file name gets (2)', async () => {
   setup();
   await openWeapons();
@@ -253,6 +283,29 @@ test('FR-REF-09 the pack view re-lists on window focus and on Refresh, so Explor
   await waitFor(() => expect(images()).toContain('again.png'));
 });
 
+test('FR-REF-14 a pack thumbnail that failed to load is tried again after a refresh gives a new one', async () => {
+  setup();
+  await openWeapons();
+  const first = () => screen.getAllByTestId('ref-pack-image')[0]!;
+  const img = first().querySelector('img')!;
+  fireEvent.error(img);
+  expect(first().querySelector('img')).toBeNull();
+  const h = core.handlersSnapshot();
+  const get = h.ref_pack_get!;
+  core.useHandlers({
+    ...h,
+    ref_pack_get: async (input) => {
+      const p = (await get(input)) as { images: { thumb_url?: string | null }[] };
+      return {
+        ...p,
+        images: p.images.map((i) => ({ ...i, thumb_url: i.thumb_url && `${i.thumb_url}?v=2` })),
+      };
+    },
+  });
+  fireEvent.click(screen.getByTestId('ref-pack-refresh'));
+  await waitFor(() => expect(first().querySelector('img')?.getAttribute('src')).toMatch(/\?v=2$/));
+});
+
 test('FR-REF-10 renaming from the pack view and from the card menu; a taken name is refused', async () => {
   setup();
   await openWeapons();
@@ -271,6 +324,20 @@ test('FR-REF-10 renaming from the pack view and from the card menu; a taken name
   fireEvent.keyDown(within(card('armour')).getByRole('button'), { key: 'F2' });
   await nameDialog('Armour set');
   await waitFor(() => expect(cardNames()).toEqual(['Armour set', 'Blades']));
+});
+
+test('FR-REF-11 notes changed outside the app show after Refresh; a blur doesn’t write the old text back', async () => {
+  setup();
+  await openWeapons();
+  const notes = () => screen.getByTestId('ref-pack-notes') as HTMLTextAreaElement;
+  mock.packs.get(WEAPONS)!.notes = 'Edited in Explorer';
+  fireEvent.click(screen.getByTestId('ref-pack-refresh'));
+  await waitFor(() => expect(notes().value).toBe('Edited in Explorer'));
+  fireEvent.focus(notes());
+  fireEvent.blur(notes());
+  await act(() => new Promise((r) => setTimeout(r, 50)));
+  expect(core.calls.filter((c) => c.cmd === 'ref_pack_update')).toHaveLength(0);
+  expect(mock.packs.get(WEAPONS)!.notes).toBe('Edited in Explorer');
 });
 
 test('FR-REF-11 notes and per-image roles are saved with ref_pack_update', async () => {

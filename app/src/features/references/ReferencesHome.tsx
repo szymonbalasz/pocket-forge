@@ -157,7 +157,9 @@ function PacksHome() {
 }
 
 function PackCardView({ card }: { card: PackCard }) {
-  const [thumbFailed, setThumbFailed] = useState(false);
+  // The URL that failed, not a flag: a new thumbnail (a new URL) is tried again.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const thumbFailed = !!card.thumb_url && failedUrl === card.thumb_url;
   const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   // No `pack.json` yet (FR-REF-04): listed, but it can't be opened, renamed or deleted until a
@@ -197,7 +199,7 @@ function PackCardView({ card }: { card: PackCard }) {
                   alt=""
                   loading="lazy"
                   data-testid="ref-home-card-thumb"
-                  onError={() => setThumbFailed(true)}
+                  onError={() => setFailedUrl(card.thumb_url)}
                 />
               ) : (
                 <span className="ref-thumb ref-thumb-empty" data-testid="ref-home-card-thumb">
@@ -413,6 +415,13 @@ function BackButton() {
 /** Notes (≤ 2000 chars, never sent, #9): saved on blur in one `pack.json` write (FR-REF-11). */
 function Notes({ notes }: { notes: string }) {
   const [text, setText] = useState(notes);
+  // The notes as last shown: a change from outside (Explorer, another machine, then Refresh)
+  // replaces the text unless the DM has unsaved typing, so a blur never writes stale text back.
+  const [shown, setShown] = useState(notes);
+  if (notes !== shown) {
+    setShown(notes);
+    if (text === shown) setText(notes);
+  }
   return (
     <textarea
       className="ref-notes"
@@ -437,7 +446,9 @@ const STATE_BADGE: Record<string, string | null> = {
 };
 
 function ImageCard({ img }: { img: PackImage }) {
-  const [failed, setFailed] = useState(false);
+  // The URL that failed, not a flag: a refreshed file (a new URL) is tried again.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const failed = !!img.thumb_url && failedUrl === img.thumb_url;
   const badge = STATE_BADGE[img.state] ?? null;
   return (
     <li
@@ -453,7 +464,7 @@ function ImageCard({ img }: { img: PackImage }) {
           src={img.thumb_url}
           alt=""
           loading="lazy"
-          onError={() => setFailed(true)}
+          onError={() => setFailedUrl(img.thumb_url ?? null)}
         />
       ) : (
         <span className="ref-thumb ref-thumb-empty">

@@ -760,6 +760,12 @@ pub fn save_revision(
     // Before reading the head revision file, so the error is `folder_moved`, not OS text
     // with an absolute path (walkthrough D3).
     require_folder(p)?;
+    // A draft save waiting after `locked` (FR-PRJ-21) goes first: its failure is the answer,
+    // never `unchanged` (the manifest doesn't hold the waiting draft yet).
+    if let Some(pending) = p.pending_draft.clone() {
+        put_draft_once(ctx, install_id, p, pending.draft, pending.export)?;
+        p.pending_draft = None;
+    }
     let head = read_revision(p, p.manifest.head_revision)?;
     if head.layers == p.manifest.layers && head.draft == p.manifest.draft {
         return Err(CoreError::new(

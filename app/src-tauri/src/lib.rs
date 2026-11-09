@@ -85,6 +85,60 @@ fn app_ready(app: AppHandle, ok: bool, detail: String) -> Option<String> {
     None
 }
 
+/// R101: the main window's X (or quitting the app) is a project close. Once the UI said it runs
+/// the close guards (`app_close_guard`), a close request is held and handed to it as
+/// `app:close-requested`; the UI closes the project through its guards and then calls
+/// `app_exit`. Before that (the UI never loaded), X closes as it always did.
+mod quit {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static GUARDED: AtomicBool = AtomicBool::new(false);
+    static EXITING: AtomicBool = AtomicBool::new(false);
+
+    pub fn guard() {
+        GUARDED.store(true, Ordering::SeqCst);
+    }
+
+    pub fn exiting() {
+        EXITING.store(true, Ordering::SeqCst);
+    }
+
+    /// True if a close request must wait for the UI.
+    pub fn hold() -> bool {
+        held(
+            GUARDED.load(Ordering::SeqCst),
+            EXITING.load(Ordering::SeqCst),
+        )
+    }
+
+    pub(crate) fn held(guarded: bool, exiting: bool) -> bool {
+        guarded && !exiting
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn r101_a_close_waits_for_the_ui_only_while_it_guards_and_not_once_it_exits() {
+            assert!(!super::held(false, false), "no UI yet: X closes");
+            assert!(super::held(true, false), "the UI runs the close guards");
+            assert!(!super::held(true, true), "the UI said exit");
+        }
+    }
+}
+
+/// The UI's close guards are listening for `app:close-requested` (R101).
+#[tauri::command]
+fn app_close_guard() {
+    quit::guard();
+}
+
+/// The UI closed the project (or none was open): the app exits (R101).
+#[tauri::command]
+fn app_exit(app: AppHandle) {
+    quit::exiting();
+    app.exit(0);
+}
+
 fn scheme_response(core: &Core, path: &str) -> Response<Vec<u8>> {
     let res = core.serve_scheme(path);
     let mut b = Response::builder()
@@ -140,13 +194,19 @@ pub fn run() {
                     let core = handle.state::<Core>();
                     pf_core::region_edit::runner::run_pump(&core)
                 })?;
-            // PRM FR-PRM-21: the chat window closes with the main window.
+            // R101: X asks the UI's close guards first. PRM FR-PRM-21: the chat window closes
+            // with the main window (its own X is not held).
             if let Some(main) = app.get_webview_window("main") {
                 let handle = app.handle().clone();
-                main.on_window_event(move |ev| {
-                    if matches!(ev, tauri::WindowEvent::Destroyed) {
-                        chat_window::close_with_main(&handle);
+                main.on_window_event(move |ev| match ev {
+                    tauri::WindowEvent::CloseRequested { api, .. } if quit::hold() => {
+                        api.prevent_close();
+                        if let Err(e) = handle.emit_to("main", "app:close-requested", ()) {
+                            tracing::warn!(error = %e, "close request not delivered");
+                        }
                     }
+                    tauri::WindowEvent::Destroyed => chat_window::close_with_main(&handle),
+                    _ => {}
                 });
             }
             // FR-PRJ-21/40: retry saves that failed with `locked` and replay the spool.

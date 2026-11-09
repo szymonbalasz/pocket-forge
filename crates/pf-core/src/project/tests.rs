@@ -133,6 +133,27 @@ fn fr_prj_23_save_only_if_changed_since_the_head() {
 }
 
 #[test]
+fn fr_prj_23_fr_prj_21_save_with_a_pending_draft_saves_it_or_says_why() {
+    let mut e = env();
+    let mut p = e.open(&e.project("Crypt"));
+    e.ctx.faults = Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap();
+    assert_eq!(
+        draft(&e, &mut p, "moss").unwrap_err().code,
+        ErrorCode::Locked
+    );
+    // The head equals the manifest, but the draft waits in memory: never `unchanged`.
+    let err = save_revision(&e.ctx, e.install(), &mut p, None).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Locked);
+    assert!(has_unsaved(&p));
+    // Unlocked: Ctrl+S writes the waiting draft and the revision with it.
+    e.ctx.faults = Faults::none();
+    let r1 = save_revision(&e.ctx, e.install(), &mut p, None).unwrap();
+    assert!(!has_unsaved(&p));
+    let rev = read_revision(&p, r1.id).unwrap();
+    assert_eq!(rev.draft.unwrap().final_prompt, "moss");
+}
+
+#[test]
 fn fr_prj_43_restore_writes_a_new_restore_revision() {
     let e = env();
     let mut p = e.open(&e.project("Crypt"));
