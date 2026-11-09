@@ -36,6 +36,10 @@ export class UndoStack {
   private total = 0;
   private busy = false;
   private error: string | null = null;
+  /** Bumped by every push (a new action) and every clear (a project switch), so a step in
+   *  progress can tell that the stack moved on while its call ran (FR-EDT-21/23). */
+  private pushes = 0;
+  private epoch = 0;
   private readonly listeners = new Set<(s: UndoSnapshot) => void>();
 
   constructor(readonly budget = UNDO_BYTES) {}
@@ -63,6 +67,7 @@ export class UndoStack {
     // In place: a step in progress holds these arrays (walk-gen L1).
     this.undone.length = 0;
     this.done.push(e);
+    this.pushes += 1;
     this.total += e.bytes;
     while (this.total > this.budget && this.done.length > 1) {
       this.total -= this.done.shift()!.bytes;
@@ -94,6 +99,7 @@ export class UndoStack {
   clear(): void {
     this.done.length = 0;
     this.undone.length = 0;
+    this.epoch += 1;
     this.total = 0;
     this.error = null;
     this.busy = false;
@@ -106,12 +112,28 @@ export class UndoStack {
     this.busy = true;
     this.error = null;
     this.emit();
+    const epoch = this.epoch;
+    const pushes = this.pushes;
     try {
       await e[op]();
+      // The stack was cleared (another project opened): this entry belongs to none of it.
+      if (this.epoch !== epoch) return false;
       // The exact entry: a push or a canvas drop may have changed the stacks meanwhile.
       const i = from.lastIndexOf(e);
       if (i >= 0) from.splice(i, 1);
-      to.push(e);
+      const newer = this.pushes - pushes;
+      if (newer === 0) {
+        if (i >= 0) to.push(e);
+        // else a canvas drop or the budget removed it: it stays gone.
+      } else if (op === 'undo') {
+        // A new action came in while the undo ran: it clears redo (FR-EDT-21), this entry too.
+        if (i >= 0) this.total -= e.bytes;
+      } else {
+        // The redo is applied, then the new actions: it goes under them (the push already
+        // cleared it from redo and uncounted it).
+        this.done.splice(Math.max(0, this.done.length - newer), 0, e);
+        if (i < 0) this.total += e.bytes;
+      }
       return true;
     } catch (err) {
       this.error = errorCode(err);

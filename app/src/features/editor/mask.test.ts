@@ -222,7 +222,7 @@ describe('undo stack across a canvas remount', () => {
     expect(u.snapshot()).toMatchObject({ depth: 2, redo: 0 });
   });
 
-  test('walk L1 a step moves the entry it ran even when the stack changed meanwhile', async () => {
+  test('walk L1 FR-EDT-21 a step moves the entry it ran; a push meanwhile clears its redo', async () => {
     const u = new UndoStack();
     const later = { label: 'region', bytes: 1, undo: () => undefined, redo: () => undefined };
     u.push({
@@ -235,7 +235,61 @@ describe('undo stack across a canvas remount', () => {
       redo: () => undefined,
     });
     expect(await u.undo()).toBe(true);
-    expect(u.snapshot()).toMatchObject({ depth: 1, label: 'region', redo: 1 });
+    expect(u.snapshot()).toMatchObject({ depth: 1, label: 'region', redo: 0 });
+  });
+
+  test('FR-EDT-21 a stroke during an accept undo clears redo: Ctrl+Y can’t restore over it', async () => {
+    const u = new UndoStack();
+    const log: string[] = [];
+    let release!: () => void;
+    u.push({
+      label: 'Accept patch',
+      bytes: 0,
+      undo: () => new Promise<void>((r) => (release = r)).then(() => void log.push('-accept')),
+      redo: () => void log.push('+accept'),
+    });
+    const step = u.undo();
+    u.push({ label: 'stroke', bytes: 4, undo: () => undefined, redo: () => undefined });
+    release();
+    expect(await step).toBe(true);
+    expect(u.snapshot()).toMatchObject({ depth: 1, redo: 0, label: 'stroke', bytes: 4 });
+    expect(await u.redo()).toBe(false);
+    expect(log).toEqual(['-accept']);
+  });
+
+  test('FR-EDT-23 a redo that a push overtook stays under the new action', async () => {
+    const u = new UndoStack();
+    let release!: () => void;
+    u.push({
+      label: 'Accept patch',
+      bytes: 0,
+      undo: () => undefined,
+      redo: () => new Promise<void>((r) => (release = r)),
+    });
+    await u.undo();
+    const step = u.redo();
+    u.push({ label: 'stroke', bytes: 4, undo: () => undefined, redo: () => undefined });
+    release();
+    expect(await step).toBe(true);
+    expect(u.snapshot()).toMatchObject({ depth: 2, redo: 0, label: 'stroke', bytes: 4 });
+    await u.undo();
+    expect(u.snapshot()).toMatchObject({ depth: 1, label: 'Accept patch' });
+  });
+
+  test('FR-EDT-23 a step that outlives a project switch pushes nothing into the new stack', async () => {
+    const u = new UndoStack();
+    let release!: () => void;
+    u.push({
+      label: 'Accept patch',
+      bytes: 0,
+      undo: () => new Promise<void>((r) => (release = r)),
+      redo: () => undefined,
+    });
+    const step = u.undo();
+    u.clear();
+    release();
+    await step;
+    expect(u.snapshot()).toMatchObject({ depth: 0, redo: 0 });
   });
 
   test('FR-GEN-29 the mask controller marks its entries as the canvas’s', () => {
