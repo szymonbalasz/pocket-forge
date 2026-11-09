@@ -1,0 +1,89 @@
+{
+  "format_version": 1,
+  "provider": "fake",
+  "model": "fake-gen-wh",
+  "case": "get-model",
+  "recorded_on": "2026-11-09",
+  "source": "synthetic",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/fake-gen-wh"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "id": "fake-gen-wh",
+            "name": "Fake generate (width × height)",
+            "type": "custom",
+            "capabilities": [
+              "txt2img"
+            ],
+            "inputs": [
+              {
+                "name": "prompt",
+                "type": "string",
+                "required": {
+                  "always": true
+                }
+              },
+              {
+                "name": "width",
+                "type": "number",
+                "min": 64,
+                "max": 2048,
+                "step": 16,
+                "costImpact": true
+              },
+              {
+                "name": "height",
+                "type": "number",
+                "min": 64,
+                "max": 2048,
+                "step": 16,
+                "costImpact": true
+              },
+              {
+                "name": "num_samples",
+                "type": "number",
+                "min": 1,
+                "max": 4,
+                "step": 1,
+                "default": 1,
+                "costImpact": true
+              },
+              {
+                "name": "seed",
+                "type": "number",
+                "min": 0,
+                "max": 18446744073709551615,
+                "step": 1
+              },
+              {
+                "name": "background",
+                "type": "string",
+                "allowedValues": [
+                  "opaque",
+                  "transparent"
+                ],
+                "default": "opaque"
+              },
+              {
+                "name": "refs",
+                "type": "file_array",
+                "kind": "image",
+                "max": 4,
+                "costImpact": true
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
