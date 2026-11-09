@@ -509,6 +509,10 @@ fn next_iteration(p: &OpenProject, prompt: &str, empty_slug: &str) -> Iteration 
     }
 }
 
+/// `detail.reason` of `add_candidates`' `conflict` when a candidate file already belongs to a
+/// candidate record: retrying never helps (R102), unlike a sync conflict.
+pub const FILE_TAKEN: &str = "file_taken";
+
 /// `add_candidates` (FR-PRJ-30, schema §3): `job.json` with `iteration` set → the candidate files
 /// in `results/NNN <slug>/NN.<ext>` → the manifest → `job.json` `fetched`. A re-fetch after a
 /// crash reuses the job's folder and replaces only files no candidate record references.
@@ -568,7 +572,8 @@ pub fn add_candidates(
             return Err(CoreError::new(
                 ErrorCode::Conflict,
                 format!("{file} already belongs to a candidate"),
-            ));
+            )
+            .with_detail(serde_json::json!({ "reason": FILE_TAKEN })));
         }
         records.push(Candidate {
             id: ctx.new_id(),
