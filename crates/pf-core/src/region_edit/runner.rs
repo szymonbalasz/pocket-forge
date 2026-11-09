@@ -438,18 +438,49 @@ fn decodes(bytes: &[u8]) -> Option<(u32, u32)> {
         .map(|i| (i.width(), i.height()))
 }
 
-/// The sent size from the job's `fit{sent_w, sent_h}`.
-fn sent_size(job: &JobFile) -> Option<(f64, f64)> {
-    let w = job.fit.get("sent_w")?.as_f64()?;
-    let h = job.fit.get("sent_h")?.as_f64()?;
-    (w > 0.0 && h > 0.0).then_some((w, h))
+/// What a returned candidate is checked against (FR-RGN-24, FR-GEN-24).
+#[derive(Debug, Clone, Copy)]
+enum SentSize {
+    /// A region edit's `fit{sent_w, sent_h}`: the aspect must match.
+    Aspect(f64),
+    /// A generate job's exact `output{w, h}`: both sides must match.
+    Exact(f64, f64),
+}
+
+impl SentSize {
+    fn of(job: &JobFile) -> Option<SentSize> {
+        if job.is_generate() {
+            let o = job.extra.get("output")?;
+            return match o.get("mode")?.as_str()? {
+                "wh" => {
+                    let (w, h) = (o.get("w")?.as_f64()?, o.get("h")?.as_f64()?);
+                    (w > 0.0 && h > 0.0).then_some(SentSize::Exact(w, h))
+                }
+                _ => crate::generate::size::ratio_value(o.get("aspect")?.as_str()?)
+                    .map(SentSize::Aspect),
+            };
+        }
+        let w = job.fit.get("sent_w")?.as_f64()?;
+        let h = job.fit.get("sent_h")?.as_f64()?;
+        (w > 0.0 && h > 0.0).then_some(SentSize::Aspect(w / h))
+    }
+
+    /// Off by more than [`ASPECT_TOLERANCE`].
+    fn differs(self, w: u32, h: u32) -> bool {
+        let off = |a: f64, b: f64| (a / b - 1.0).abs() > ASPECT_TOLERANCE;
+        let (w, h) = (f64::from(w), f64::from(h));
+        match self {
+            SentSize::Aspect(a) => off(w / h, a),
+            SentSize::Exact(sw, sh) => off(w, sw) || off(h, sh),
+        }
+    }
 }
 
 fn fetch(core: &Core, t: &Tracked) -> Outcome {
     let record = ProviderRecord(t.job.provider.clone());
     match provider_raw(core, core.ctx.provider.fetch_candidates(&record)) {
         Ok(c) => {
-            let sent = sent_size(&t.job);
+            let sent = SentSize::of(&t.job);
             let mut seed_returned = None;
             let cands: Vec<NewCandidate> = c
                 .images
@@ -457,12 +488,11 @@ fn fetch(core: &Core, t: &Tracked) -> Outcome {
                 .map(|img| {
                     let size = decodes(&img.bytes);
                     let mut extra = Extra::new();
-                    if let (Some((w, h)), Some((sw, sh))) = (size, sent) {
-                        let aspect = f64::from(w) / f64::from(h);
-                        let sent_aspect = sw / sh;
-                        if (aspect / sent_aspect - 1.0).abs() > ASPECT_TOLERANCE {
-                            extra.insert("aspect_warning".into(), json!(true));
-                        }
+                    if let (Some((w, h)), Some(sent)) = (size, sent)
+                        && sent.differs(w, h)
+                    {
+                        // Kept as returned, never resized (FR-RGN-24, FR-GEN-24).
+                        extra.insert("aspect_warning".into(), json!(true));
                     }
                     let seed = img.seed.map(|s| s as i64);
                     seed_returned = seed_returned.or(seed);

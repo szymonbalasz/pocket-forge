@@ -205,7 +205,7 @@ fn reason_of(code: ControlErrorCode) -> &'static str {
 /// What a job sends, after the boundary check (FR-RGN-33/34).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SentControls {
-    /// Visible `other`-role controls that are required or were set by the user; untouched
+    /// Visible `other`- (and `background`-) role controls that are required or were set by the user; untouched
     /// optional ones are omitted so the provider applies its default (FR-RGN-34).
     pub controls: BTreeMap<String, Value>,
     pub candidate_count: u32,
@@ -309,7 +309,8 @@ pub fn check_controls(
         {
             cost_inputs.insert(c.name.clone(), v.clone());
         }
-        if c.role == ControlRole::Other
+        // `background` (GEN, OQ-GEN-07) is an ordinary control (FR-GEN-12).
+        if matches!(c.role, ControlRole::Other | ControlRole::Background)
             && let Some(v) = (if c.required { effective } else { user.cloned() })
         {
             sent.insert(c.name.clone(), v);

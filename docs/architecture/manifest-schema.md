@@ -118,17 +118,19 @@
 | `schema_version`, `id`, `created_at`, `updated_at` | | |
 | `state`, `state_times{}` | enum, `{<state>: time}` | written on **every** transition (R2) |
 | `resolved_at` | time \| null | set when the job is resolved: accept, dismiss or the next submit ([region-edit](../specs/region-edit.md) FR-RGN-28); resolving trashes no candidate; inputs go to the trash only once every candidate is discarded, or on resolve when the job has none (#56, R66) |
-| `operation`, `model_id` | string | `edit_masked` |
+| `operation`, `model_id` | string | `edit_masked`, or `generate` for a New image job ([new-asset-generation](../specs/new-asset-generation.md) FR-GEN-22, #60) |
 | `capability_snapshot` | object | KQ-17 |
 | `final_prompt`, `controls{}`, `candidate_count` | | as submitted; `final_prompt` is the prompt as sent, blend instruction included (#55) |
-| `typed_prompt`, `blend_instruction` | string, bool; optional | #55, R73: the prompt as typed and whether the instruction was appended. `typed_prompt` drives Retry, the iteration slug and the accept label. Absent on jobs from before #55 (typed = `final_prompt`) |
+| `typed_prompt`, `blend_instruction` | string, bool; optional | #55, R73: the prompt as typed and whether the instruction was appended. `typed_prompt` drives Retry, the iteration slug and the accept label. Absent on jobs from before #55 (typed = `final_prompt`). Always `false` on a `generate` job |
+| `output` | `{mode: wh\|aspect, w?, h?, aspect?, grid?{cols, rows, pps}}`; `generate` only | FR-GEN-22: the size as sent (`pps` after a model-limit lowering). A candidate more than 1 % off it is badged, never resized (FR-GEN-24) |
+| `size` | `{mode: grid, cols, rows, pps}` \| `{mode: ratio, aspect, long_side}`; `generate` only | the size as asked (`draft.generate.size`); Retry restores it |
 | `prompt_helpers[]` | `{id, label, text}` | [prompt-helper](../specs/prompt-helper.md) FR-PRM-09: each helper actually sent, in order (skipped ones excluded). Written with `requested`, never changed. Absent on jobs from before PRM (reads as `[]`) |
 | `seed` | `{requested, returned}` | int \| null each |
-| `region` | `{inner, outer, margin}` | |
-| `fit` | `{sent_w, sent_h, scale}` | |
-| `mask_id` | ULID | the draft mask the job was built from |
-| `inputs` | `{region: "region.png", mask: "mask.png"}` | as sent (R2) |
-| `references[]` | `{source: project\|pack, pack_id \| null, pack_name \| null, path, content_hash, slot, role \| null, sent: {w, h, bytes, hash, resized}}` | #51, FR-REF-25: the files sent, in request order; `path` = `references/<file>` or `References/<pack>/<file>`; hashes only, no copies (OQ-REF-02). `[]` when none. Written with `requested`, never changed |
+| `region` | `{inner, outer, margin}` \| null | null for `generate` (FR-GEN-22) |
+| `fit` | `{sent_w, sent_h, scale}` \| null | null for `generate` |
+| `mask_id` | ULID \| null | the draft mask the job was built from; null for `generate` |
+| `inputs` | `{region: "region.png", mask: "mask.png"}` \| null | as sent (R2); null for `generate`, which writes no input files (absent = the default names) |
+| `references[]` | `{source: project\|pack\|structure, pack_id \| null, pack_name \| null, path, content_hash, slot, role \| null, sent: {w, h, bytes, hash, resized}}` | #51, FR-REF-25: the files sent, in request order; `path` = `references/<file>` or `References/<pack>/<file>`; hashes only, no copies (OQ-REF-02). `[]` when none. A `generate` job's sketch is the first row, `source: structure`, `path` = `structure/<file>` (FR-GEN-15). Written with `requested`, never changed |
 | `estimate`, `cost` | `{amount \| unknown, unit}` | PRV's generic `Cost` |
 | `provider` | object | **opaque**; shape in [provider](../specs/provider.md) Appendix B (incl. the job handle, OQ-PRV-22 pick A). Persisted verbatim on every transition |
 | `iteration` | `{n, dir}` \| null | set by `add_candidates` before any candidate file is written: `n` = 1 + the highest `n` in the project, `dir` = `results/NNN <slug>` ([region-edit](../specs/region-edit.md) FR-RGN-39) |

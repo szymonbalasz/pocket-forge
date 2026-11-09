@@ -1020,4 +1020,8 @@ export interface GenEstimate extends Omit<JobEstimate, 'fit'> {
  *  changed since that job (`changed_since` = `NNN`) or it is gone (`missing`). */
 export interface GenRetryDraft extends GenDraft {
   structure: { file: string; changed_since?: string | null; missing?: boolean } | null;
+  /** FR-PRM-10: ticked helpers whose text changed since the job (`changed since NNN`). */
+  prompt_helpers_changed?: string[];
+  /** FR-PRM-10: recorded helpers that can't be sent any more (listed, unticked). */
+  prompt_helpers_missing?: { id: string; label: string; text: string }[];
 }

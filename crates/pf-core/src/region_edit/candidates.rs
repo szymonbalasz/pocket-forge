@@ -472,6 +472,10 @@ pub struct IterationRow {
     /// The chip's tooltip (FR-RGN-45): each file sent, with its pack (null = the project) and
     /// role, in request order.
     pub reference_files: Vec<ReferenceFile>,
+    /// `edit_masked` or `generate` (FR-GEN-25: generate rows get the `new image` badge, R77).
+    pub operation: String,
+    /// A generate job's sent size (`output{}`, FR-GEN-22); `null` for a region edit.
+    pub output: Value,
 }
 
 /// One sent reference as the tracker tooltip lists it (FR-RGN-45).
@@ -482,10 +486,14 @@ pub struct ReferenceFile {
     pub role: Option<String>,
 }
 
+/// A job's sent references for the chip: the sketch is not one (FR-GEN-25).
+fn chip_references(job: &JobFile) -> impl Iterator<Item = &Value> {
+    job.references.iter().filter(|r| r["source"] != "structure")
+}
+
 /// The tooltip rows of a job's `references[]` (schema §4.6).
 fn reference_files(job: &JobFile) -> Vec<ReferenceFile> {
-    job.references
-        .iter()
+    chip_references(job)
         .map(|r| {
             let path = r["path"].as_str().unwrap_or_default();
             ReferenceFile {
@@ -526,8 +534,14 @@ impl Command for RgnIterationsList {
                 returned: j.candidate_ids.len(),
                 cost: shown_cost(live),
                 accepted_in_stack: p.manifest.layers.iter().any(|l| l.job_id == Some(j.id)),
-                references: j.references.len(),
+                references: chip_references(j).count(),
                 reference_files: reference_files(j),
+                operation: if j.operation.is_empty() {
+                    crate::job::OPERATION_EDIT.to_owned()
+                } else {
+                    j.operation.clone()
+                },
+                output: j.extra.get("output").cloned().unwrap_or(Value::Null),
             }
         };
         let mut rows: Vec<IterationRow> = p

@@ -122,6 +122,8 @@ pub enum ErrorCode {
     TooMany,
     /// The project has no image yet (Generate new, FR-GEN-03): region edit and export wait.
     NoImage,
+    /// A GEN command was given a region edit job, or the reverse (FR-GEN-32, GEN §9).
+    WrongOperation,
 }
 
 impl ErrorCode {
@@ -191,6 +193,7 @@ impl ErrorCode {
             ErrorCode::EncodeFailed => "encode_failed",
             ErrorCode::TooMany => "too_many",
             ErrorCode::NoImage => "no_image",
+            ErrorCode::WrongOperation => "wrong_operation",
         }
     }
 }

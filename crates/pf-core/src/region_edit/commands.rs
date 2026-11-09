@@ -20,10 +20,10 @@ use crate::provider_commands::provider_call;
 use crate::references::{self, DraftReferences, Prepared, resolve::Notice};
 use crate::settings;
 
-const MAX_PROMPT_CHARS: usize = 20_000;
+pub(crate) const MAX_PROMPT_CHARS: usize = 20_000;
 const MAX_CONTROLS: usize = 64;
 
-fn check_model_id(field: &str, m: &str) -> CoreResult<()> {
+pub(crate) fn check_model_id(field: &str, m: &str) -> CoreResult<()> {
     let m = m.trim();
     if m.is_empty() || m.len() > 200 || m.contains(['/', '\\', '\0']) {
         return Err(CoreError::invalid(field, "not a valid model id"));
@@ -48,7 +48,7 @@ fn check_margin(m: u32) -> CoreResult<()> {
     Ok(())
 }
 
-fn check_controls_map(field: &str, c: &BTreeMap<String, Value>) -> CoreResult<()> {
+pub(crate) fn check_controls_map(field: &str, c: &BTreeMap<String, Value>) -> CoreResult<()> {
     if c.len() > MAX_CONTROLS || c.keys().any(|k| k.is_empty() || k.len() > 200) {
         return Err(CoreError::invalid(
             field,
@@ -60,17 +60,21 @@ fn check_controls_map(field: &str, c: &BTreeMap<String, Value>) -> CoreResult<()
 
 /// The model's capabilities through PRV; a model the provider doesn't know → `unknown_model`.
 pub fn capabilities(core: &Core, model_id: &str) -> CoreResult<Capabilities> {
+    capabilities_for(core, model_id, Operation::EditMasked)
+}
+
+/// [`capabilities`] for an operation (GEN passes `generate`, R76). A model with no row for
+/// the operation → `unknown_model`.
+pub fn capabilities_for(core: &Core, model_id: &str, op: Operation) -> CoreResult<Capabilities> {
     provider_call(
         core,
-        core.ctx
-            .provider
-            .get_capabilities(model_id.trim(), Operation::EditMasked),
+        core.ctx.provider.get_capabilities(model_id.trim(), op),
     )
     .map_err(|e| {
         let p = &e.detail["provider"];
         if e.code == ErrorCode::Provider
             && p["code"] == "invalid_request"
-            && p["field"] == "model_id"
+            && (p["field"] == "model_id" || p["field"] == "operation")
         {
             CoreError::new(
                 ErrorCode::UnknownModel,
@@ -365,30 +369,8 @@ impl Command for RgnJobEstimate {
 
     fn run(core: &Core, input: JobEstimateInput) -> CoreResult<JobEstimateOutput> {
         let job = prepare_job(core, input.project_id, &input.draft, false)?;
-        let now = core.ctx.now();
-        let cached = core.state().rgn.estimates.get(&job.estimate_id, now);
-        let cost = match cached {
-            Some(c) => c,
-            None => {
-                let request = job.request(&input.draft.model_id, &input.draft.final_prompt);
-                let request = if request.final_prompt.is_empty() {
-                    JobRequest {
-                        final_prompt: controls::ESTIMATE_PROMPT.to_owned(),
-                        ..request
-                    }
-                } else {
-                    request
-                };
-                let est = provider_call(core, core.ctx.provider.estimate(&request))?;
-                core.state()
-                    .rgn
-                    .estimates
-                    .put(job.estimate_id.clone(), est.cost.clone(), now);
-                est.cost
-            }
-        };
-        let state = core.state();
-        let view = spend::assess(state.rgn.ledger.total(), &state.settings.spend, cost.amount);
+        let request = job.request(&input.draft.model_id, &input.draft.final_prompt);
+        let (cost, view) = estimate_cost(core, &job.estimate_id, request)?;
         Ok(JobEstimateOutput {
             estimate_id: job.estimate_id,
             cost,
@@ -399,6 +381,40 @@ impl Command for RgnJobEstimate {
             spend: view,
         })
     }
+}
+
+/// FR-RGN-12 / FR-GEN-20: the cost for `estimate_id`: the session's cached estimate, else the
+/// provider's dry run (an empty prompt is sent as a placeholder; cost never depends on it),
+/// cached. Plus the spend view for the panel. Runs without the state lock.
+pub fn estimate_cost(
+    core: &Core,
+    estimate_id: &str,
+    request: JobRequest,
+) -> CoreResult<(Cost, SpendView)> {
+    let now = core.ctx.now();
+    let cached = core.state().rgn.estimates.get(estimate_id, now);
+    let cost = match cached {
+        Some(c) => c,
+        None => {
+            let request = if request.final_prompt.is_empty() {
+                JobRequest {
+                    final_prompt: controls::ESTIMATE_PROMPT.to_owned(),
+                    ..request
+                }
+            } else {
+                request
+            };
+            let est = provider_call(core, core.ctx.provider.estimate(&request))?;
+            core.state()
+                .rgn
+                .estimates
+                .put(estimate_id.to_owned(), est.cost.clone(), now);
+            est.cost
+        }
+    };
+    let state = core.state();
+    let view = spend::assess(state.rgn.ledger.total(), &state.settings.spend, cost.amount);
+    Ok((cost, view))
 }
 
 // ---------------------------------------------------------------- rgn_spend_get / _set

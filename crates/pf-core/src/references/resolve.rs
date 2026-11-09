@@ -113,6 +113,9 @@ pub struct DraftReferences {
 pub enum Source {
     Project,
     Pack,
+    /// The structural sketch from the project's `structure/` (GEN, FR-GEN-15): a job row only,
+    /// never an item of the References block.
+    Structure,
 }
 
 /// An item's state for the block.

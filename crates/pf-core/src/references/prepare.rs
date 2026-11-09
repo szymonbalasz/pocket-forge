@@ -17,6 +17,11 @@ use ulid::Ulid;
 use super::resolve::{self, DraftReferences, ItemState, Notice, ProbeCache, Slot, Source};
 use super::*;
 
+/// The project folder of structural sketches (FR-GEN-14).
+pub const STRUCTURE_DIR: &str = "structure";
+/// Item-key prefix of the sketch (`structure:<file>`), for `reference_unavailable`.
+pub const STRUCTURE_KEY: &str = "structure:";
+
 /// Long-side cap for sent references (OQ-REF-04 A).
 pub const SENT_MAX_SIDE: u32 = 2048;
 /// Prepared-bytes cache cap (FR-REF-23).
@@ -202,7 +207,7 @@ pub struct RefSession {
 // ---------------------------------------------------------------- errors
 
 /// Why an item can't be sent (FR-REF-21).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnavailableReason {
     Missing,
@@ -377,6 +382,7 @@ pub fn prepare(
                     item.pack_name.as_deref().unwrap_or_default(),
                     item.file
                 ),
+                Source::Structure => format!("{STRUCTURE_DIR}/{}", item.file),
             },
             content_hash: entry.content_hash.clone(),
             slot: item.slot.clone(),
@@ -445,6 +451,181 @@ fn prepare_one(
     // Keyed by what was read: a file that changed during the read is re-read next time.
     session.prepared.put(cache_key, entry.clone());
     Ok(entry)
+}
+
+// ---------------------------------------------------------------- structural sketch (GEN)
+
+/// FR-GEN-13: the slots REF shows and checks for a generate draft. With a sketch chosen and a
+/// model that takes one, the sketch's slot gives up one place (`max` − 1; `min` − 1, as the
+/// sketch counts toward it). Without a sketch (or a model that takes none) they are unchanged.
+pub fn slots_for(caps: &Capabilities, structure: Option<&str>) -> Vec<Slot> {
+    let mut slots = caps.slots.clone();
+    if let (Some(_), Some(st)) = (structure, &caps.structure)
+        && let Some(s) = slots.iter_mut().find(|s| s.name == st.slot)
+    {
+        s.max = s.max.saturating_sub(1);
+        s.min = s.min.saturating_sub(1);
+    }
+    slots
+}
+
+/// A sketch is a plain file name in `structure/` (no folders).
+pub fn check_structure_file(field: &str, file: &str) -> CoreResult<()> {
+    if file.trim().is_empty()
+        || file.chars().count() > 400
+        || file.contains(['/', '\\', '\0', ':'])
+        || file.starts_with('.')
+    {
+        return Err(CoreError::invalid(field, "not a file name in structure/"));
+    }
+    Ok(())
+}
+
+fn sketch_unavailable(file: &str, reason: UnavailableReason) -> CoreError {
+    let why = match reason {
+        UnavailableReason::Missing => "it can't be found",
+        UnavailableReason::NotAvailableOffline => "it isn't available offline",
+        UnavailableReason::Corrupt => "it can't be read",
+        UnavailableReason::Locked => "another app is using it",
+    };
+    CoreError::new(
+        ErrorCode::ReferenceUnavailable,
+        format!("The sketch {file} can't be sent: {why}"),
+    )
+    .with_detail(serde_json::json!({ "key": format!("{STRUCTURE_KEY}{file}"), "reason": reason }))
+}
+
+/// FR-GEN-15: the sketch as one more prepared item (`source: structure`): hydrate, hash, the
+/// FR-REF-22 size rule, `reference_unavailable` before any provider call.
+fn prepare_structure(
+    ctx: &Context,
+    session: &RefSession,
+    project_dir: &Path,
+    file: &str,
+    slot: &Slot,
+    max_side: u32,
+    max_bytes: u64,
+) -> CoreResult<SentReference> {
+    let path = project_dir.join(STRUCTURE_DIR).join(file);
+    let key = format!("{STRUCTURE_KEY}{file}");
+    if std::fs::symlink_metadata(&path).is_err() || !pf_imaging::has_image_extension(&path) {
+        return Err(sketch_unavailable(file, UnavailableReason::Missing));
+    }
+    if ctx.fs.is_cloud_only(&path) && ctx.fs.hydrate(&path).is_err() {
+        return Err(sketch_unavailable(
+            file,
+            UnavailableReason::NotAvailableOffline,
+        ));
+    }
+    let entry = prepare_one(session, &key, &path, max_side, max_bytes).map_err(|e| {
+        let reason = serde_json::from_value(e.detail["reason"].clone())
+            .unwrap_or(UnavailableReason::Corrupt);
+        sketch_unavailable(file, reason)
+    })?;
+    let row = JobReference {
+        source: Source::Structure,
+        pack_id: None,
+        pack_name: None,
+        path: format!("{STRUCTURE_DIR}/{file}"),
+        content_hash: entry.content_hash.clone(),
+        slot: slot.name.clone(),
+        role: None,
+        sent: SentInfo {
+            w: entry.w,
+            h: entry.h,
+            bytes: entry.sent.len() as u64,
+            hash: entry.sent_hash.clone(),
+            resized: entry.resized,
+        },
+    };
+    Ok(SentReference {
+        key,
+        slot: slot.name.clone(),
+        role: None,
+        bytes: entry.sent,
+        hash: entry.sent_hash,
+        row,
+    })
+}
+
+/// FR-GEN-13/15 with explicit inputs: the references against [`slots_for`], then the sketch
+/// (when chosen and the model takes one) **first** in the request, so it is first in its slot.
+/// A reference with the sketch's bytes is sent once (a `duplicate` notice).
+pub fn prepare_with_structure(
+    ctx: &Context,
+    session: &RefSession,
+    settings: &Settings,
+    project_dir: &Path,
+    caps: &Capabilities,
+    refs: Option<&DraftReferences>,
+    structure: Option<&str>,
+) -> CoreResult<Prepared> {
+    let (side, bytes) = send_limits(caps);
+    let structure = structure.filter(|_| caps.structure.is_some());
+    let slots = slots_for(caps, structure);
+    let mut out = prepare(
+        ctx,
+        session,
+        settings,
+        project_dir,
+        &slots,
+        side,
+        bytes,
+        refs,
+    )?;
+    let (Some(file), Some(st)) = (structure, &caps.structure) else {
+        return Ok(out);
+    };
+    let slot = caps
+        .slots
+        .iter()
+        .find(|s| s.name == st.slot)
+        .ok_or_else(|| CoreError::internal(format!("no slot {} for the sketch", st.slot)))?;
+    let sketch = prepare_structure(ctx, session, project_dir, file, slot, side, bytes)?;
+    let hash = sketch.row.content_hash.clone();
+    let mut sent = vec![sketch];
+    for r in out.sent.drain(..) {
+        if r.row.content_hash == hash {
+            let name = r.row.path.rsplit('/').next().unwrap_or(&r.row.path);
+            out.notices.push(Notice {
+                code: "duplicate",
+                message: format!("{name} is the same image as the sketch {file}; it is sent once"),
+                key: Some(r.key.clone()),
+            });
+            continue;
+        }
+        sent.push(r);
+    }
+    out.sent = sent;
+    for s in &caps.slots {
+        let n = out.sent.iter().filter(|r| r.slot == s.name).count() as u32;
+        if n < s.min {
+            return Err(required(s));
+        }
+    }
+    Ok(out)
+}
+
+/// [`prepare_with_structure`] for the open project (GEN estimate and submit). Takes the state
+/// lock briefly; don't call it while holding it.
+pub fn prepare_for_send_generate(
+    core: &crate::Core,
+    caps: &Capabilities,
+    refs: Option<&DraftReferences>,
+    structure: Option<&str>,
+) -> CoreResult<Prepared> {
+    let (dir, settings) = {
+        let st = core.state();
+        let dir = st
+            .project
+            .as_ref()
+            .map(|p| p.dir.clone())
+            .ok_or_else(|| CoreError::new(ErrorCode::NoProject, "no asset project is open"))?;
+        (dir, st.settings.clone())
+    };
+    prepare_with_structure(
+        &core.ctx, &core.refs, &settings, &dir, caps, refs, structure,
+    )
 }
 
 /// `references::prepare_for_send(core, caps, &draft.references)` (§9): the open project's

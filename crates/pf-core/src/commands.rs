@@ -1131,6 +1131,13 @@ pub use crate::prompt::commands::{
     PrmComposePreview, PrmHelpersList, PrmHelpersReset, PrmHelpersSave,
 };
 
+// ---------------------------------------------------------------- new-asset generation
+
+/// GEN slice 3 commands live in their own module (new-asset-generation §9).
+pub use crate::generate::commands::{
+    GenControlsEvaluate, GenJobEstimate, GenJobRetryDraft, GenJobSubmit, GenSizeFitCmd,
+};
+
 // ---------------------------------------------------------------- registry (append-only)
 
 /// A registry row: command name → JSON adapter.
@@ -1224,6 +1231,11 @@ registry![
     PrmComposePreview,
     GenProjectCreate,
     GenProjectSuggestName,
+    GenSizeFitCmd,
+    GenControlsEvaluate,
+    GenJobEstimate,
+    GenJobSubmit,
+    GenJobRetryDraft,
 ];
 
 #[cfg(test)]

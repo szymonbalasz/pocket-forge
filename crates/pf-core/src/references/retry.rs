@@ -63,7 +63,8 @@ pub fn retry_references(
                     .map_or(id, |l| l.json.pack_id);
                 resolve::pack_key(now, file)
             }
-            (Source::Pack, None) => continue,
+            // The sketch is GEN's (FR-GEN-32), not a References item.
+            (Source::Pack, None) | (Source::Structure, _) => continue,
         };
         if !sent.insert(key.clone()) {
             continue;

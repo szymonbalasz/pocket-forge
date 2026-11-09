@@ -64,7 +64,7 @@ impl Clock for SharedClock {
     }
 }
 
-fn context(
+pub(crate) fn context(
     root: &Path,
     events: Arc<RecordedEvents>,
     clock: Arc<ManualClock>,
