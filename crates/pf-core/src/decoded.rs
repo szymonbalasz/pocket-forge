@@ -85,7 +85,8 @@ impl DecodedOriginal {
     }
 
     /// The pixels, or `original_unavailable` while the decode runs (starting it if needed), or
-    /// the decode's error (`corrupt`, `not_found`, …).
+    /// the decode's error (`corrupt`, `io`, …). A failed decode isn't run again until
+    /// [`release`](Self::release) (project close).
     pub fn get(&self, ctx: &Context) -> CoreResult<Arc<RgbImage>> {
         if self.path.is_none() {
             return Err(no_image());
@@ -101,15 +102,17 @@ impl DecodedOriginal {
         }
     }
 
-    /// Starts the decode unless it's running or done (`project_prefetch_original`). A failed
-    /// decode is retried. Emits `project:original-ready` when the pixels are in memory.
+    /// Starts the decode unless it's running, done or failed (`project_prefetch_original`).
+    /// A failed decode keeps its error until [`release`](Self::release); re-running it on every
+    /// use would hide the error and redo a full 16k decode each time (review #10). Emits
+    /// `project:original-ready` when the pixels are in memory.
     pub fn start(&self, ctx: &Context) {
         if self.path.is_none() {
             return;
         }
         {
             let mut s = self.lock();
-            if matches!(*s, State::Decoding | State::Ready(_)) {
+            if !matches!(*s, State::Idle) {
                 return;
             }
             *s = State::Decoding;
@@ -249,6 +252,51 @@ mod tests {
             d.get(&ctx).unwrap().get_pixel(2, 2).0,
             pf_imaging::FLATTEN_BG
         );
+    }
+
+    /// Review #10: on the production background thread, a failed decode stays `Failed`: the
+    /// next `get()` reports `corrupt` and doesn't start the decode again.
+    #[test]
+    fn fr_prj_42_background_decode_failure_is_reported_and_not_rerun() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("o.png");
+        std::fs::write(&path, truncated_png()).unwrap();
+        let mut ctx = Context::deterministic(dir.path().into(), Timestamp(0));
+        ctx.inline_background = false;
+        let d = DecodedOriginal::new(Ulid::from_parts(0, 1), path);
+        let first = d.get(&ctx);
+        assert!(first.is_err(), "{first:?}");
+        let mut settled = false;
+        for _ in 0..500 {
+            if matches!(*d.lock(), State::Failed(_)) {
+                settled = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(settled, "the background decode never failed");
+        for _ in 0..3 {
+            assert_eq!(d.get(&ctx).unwrap_err().code, ErrorCode::Corrupt);
+            assert!(
+                matches!(*d.lock(), State::Failed(_)),
+                "get() must not start the decode again"
+            );
+        }
+        // A close releases the handle; the next use decodes again.
+        d.release();
+        assert!(matches!(*d.lock(), State::Idle));
+    }
+
+    fn truncated_png() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::RgbImage::new(64, 64)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        bytes.truncate(bytes.len() / 2);
+        bytes
     }
 
     #[test]
