@@ -619,7 +619,8 @@ async function refreshIterations(): Promise<void> {
           state: r.state,
           progress: null,
           cost: r.cost,
-          error: null,
+          // R108: the row keeps a fetch error across a reopen (the strip's hint, Fetch again).
+          error: r.error ?? null,
           longRunning: false,
           startedAt: Date.now(),
         };

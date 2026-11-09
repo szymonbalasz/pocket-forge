@@ -677,6 +677,21 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(fake.callsOf('rgn_job_submit')).toHaveLength(1);
   });
 
+  test('FR-RGN-24 R108 after a reopen a fetch error and Fetch again come back from the row', async () => {
+    await submitted();
+    act(() => mockControls().fetchError('provider_failure', 'Download failed.'));
+    await waitFor(() => expect(screen.getByTestId('rgn-job-fetch-again')).toBeTruthy());
+    // A reopen: the session's live state is gone, only the iterations row carries the error.
+    const project = projectStore.get().project!;
+    act(() => rgn.detach());
+    await act(() => rgn.attach(project));
+    await waitFor(() => expect(screen.getAllByTestId('rgn-tracker-item')).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getByTestId('rgn-job-fetch-error').dataset.code).toBe('provider_failure'),
+    );
+    expect(screen.getByTestId('rgn-job-fetch-again')).toBeTruthy();
+  });
+
   test('FR-RGN-23 R108 a lost job without a handle says its result can’t be recovered, with the hint', async () => {
     await submitted();
     act(() =>
