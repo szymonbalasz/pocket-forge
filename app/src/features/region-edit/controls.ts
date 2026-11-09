@@ -91,6 +91,10 @@ export function withRemembered(
   return { values, touched: Object.keys(remembered ?? {}), notices: [] };
 }
 
+/** A control's label as the panel shows it (`num_samples` → "num samples"), for notices too
+ *  (walk-gen L4: never the raw input name). */
+export const controlLabel = (name: string): string => name.replace(/_/g, ' ');
+
 /** FR-RGN-11/33: applies `rgn_controls_evaluate`: a reset value (outside the effective allowed
  *  set, wrong type, out of range) takes the core's value with a notice; names this model has no
  *  control for are dropped with a notice. */
@@ -107,7 +111,7 @@ export function fromEvaluation(
     if (!(name in next)) continue;
     delete next[name];
     t = t.filter((n) => n !== name);
-    notices.push(`${name}: not a setting of this model; dropped.`);
+    notices.push(`“${controlLabel(name)}” isn’t a setting of this model, so it was dropped.`);
   }
   for (const c of ev.controls) {
     const ctl = caps.controls.find((x) => x.name === c.name);
@@ -116,7 +120,7 @@ export function fromEvaluation(
     next[c.name] = c.value ?? null;
     t = t.filter((n) => n !== c.name);
     notices.push(
-      `${c.name}: “${String(old)}” isn’t available with these settings; reset to the default.`,
+      `${controlLabel(c.name)}: “${String(old)}” isn’t available with these settings; reset to the default.`,
     );
   }
   return { values: next, touched: t, notices };

@@ -23,12 +23,14 @@ const Canvas = editorFeature.slots.canvas!;
 const Picker = editorFeature.slots.bottom!;
 let fake: FakeTauri;
 
-async function setup() {
+async function setup(fromHome = false) {
   polyfillRadix();
   expect(newAssetGenerationFeature.prefix).toBe('gen');
   fake = mockGenCore({ noImage: true });
   projectStore.reset();
-  generateTab.openNextWith('new-image');
+  // From home (not + New → Generate new…) the remembered tab is Region edit.
+  if (fromHome) generateTab.select('region');
+  else generateTab.openNextWith('new-image');
   await act(() => projectStore.open(PROJECT_DIR));
   render(
     <Tooltip.Provider>
@@ -131,4 +133,22 @@ test('FR-GEN-30 FR-GEN-31 any generate iteration can be picked; discard goes thr
   await waitFor(() =>
     expect(projectStore.get().project?.image_path).toBe('working/001 crypt 02.png'),
   );
+});
+
+test('R84 after a pick the panel stays on the New image tab (also when opened from home)', async () => {
+  await setup(true);
+  expect(
+    screen.getAllByTestId('gen-tab').find((t) => t.getAttribute('aria-selected') === 'true')
+      ?.dataset.recordId,
+  ).toBe('new-image');
+  await generate('crypt');
+  await act(async () => fireEvent.click(screen.getAllByTestId('edt-picker-item')[0]!));
+  await key('Enter');
+  await waitFor(() => expect(projectStore.get().project?.has_image).toBe(true));
+  await waitFor(() => expect(screen.getAllByTestId('gen-tab')).toHaveLength(2));
+  expect(
+    screen.getAllByTestId('gen-tab').find((t) => t.getAttribute('aria-selected') === 'true')
+      ?.dataset.recordId,
+  ).toBe('new-image');
+  expect(screen.getByTestId('gen-panel')).toBeTruthy();
 });

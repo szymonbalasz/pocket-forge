@@ -1,7 +1,7 @@
 // The Size block's pure helpers (FR-GEN-07..10).
 import { expect, test } from 'vitest';
 
-import type { Capabilities } from '../../api';
+import type { Capabilities, GenSizeFit } from '../../api';
 import {
   clampGrid,
   clampLongSide,
@@ -53,4 +53,16 @@ test('FR-GEN-08 FR-GEN-09 the result line: sent w × h with px per square (1 dec
   expect(resultLabel(ratio, { mode: 'wh', w: 1024, h: 1024, pps: null, notices: [] })).toBe(
     '1024 × 1024',
   );
+});
+
+test('FR-GEN-09 on aspect models the px per square shows once a result of that ratio is in', () => {
+  const grid = { mode: 'grid', cols: 25, rows: 40, pps: 70 } as const;
+  const fit: GenSizeFit = { mode: 'aspect', aspect: '2:3', pps: 70, notices: [] };
+  const result = { aspect: '2:3', w: 683, h: 1024 };
+  expect(resultLabel(grid, fit, result)).toBe(
+    'ratio 2:3 · result 683 × 1024 · 27.3 × 25.6 px per square',
+  );
+  expect(resultLabel(grid, fit, { ...result, aspect: '3:4' })).toBe('ratio 2:3');
+  const ratio = { mode: 'ratio', aspect: '2:3', long_side: 1024 } as const;
+  expect(resultLabel(ratio, { ...fit, pps: null }, result)).toBe('ratio 2:3 · result 683 × 1024');
 });

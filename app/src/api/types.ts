@@ -170,7 +170,9 @@ export interface RevisionEntry {
   label?: string;
 }
 
-export type ReadOnlyReason = 'newer_version' | 'original_changed' | 'original_missing';
+/** `base_changed`: a picked base image's file no longer matches its hash (R84, as FR-PRJ-15). */
+export type ReadOnlyReason =
+  'newer_version' | 'original_changed' | 'original_missing' | 'base_changed';
 
 /** `project_resolve_conflict` `keep` (FR-PRJ-36). */
 export type ConflictKeep = 'this' | 'other';

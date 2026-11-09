@@ -95,3 +95,9 @@
   gap: var(--pf-space-2);
   margin-top: var(--pf-space-2);
 }
+
+/* FR-GEN-09: in place of the px per square field on aspect models. */
+.gen-field-note {
+  align-self: end;
+  max-width: 14em;
+}

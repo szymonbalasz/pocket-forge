@@ -20,6 +20,8 @@ import {
 } from './controls';
 import { EstimateDebouncer, ESTIMATE_DEBOUNCE_MS } from './estimate';
 import { costLabel, errorText, fitLabel, jobErrorText } from './format';
+import { sentWith } from './ConfirmDialog';
+import { PATCHES_KEPT } from './store';
 import { ALL_TYPES } from './testUtils';
 import {
   canCancel,
@@ -29,7 +31,7 @@ import {
   iterationCandidates,
   orderRows,
   refsTooltip,
-  retryJobId,
+  offersRetry,
   shownState,
   stripJobId,
 } from './tracker';
@@ -110,7 +112,8 @@ describe('capability-driven controls (Appendix A)', () => {
     const f = fromEvaluation(ALL_TYPES, r.values, r.touched, evaluation(ev(), ['other_model']));
     expect(f.values).not.toHaveProperty('other_model');
     expect(f.touched).toEqual(['guidance', 'mode']);
-    expect(f.notices).toEqual(['other_model: not a setting of this model; dropped.']);
+    // Walk-gen L4: the label, never the raw input name.
+    expect(f.notices).toEqual(['“other model” isn’t a setting of this model, so it was dropped.']);
   });
 
   test('FR-RGN-33 a value the core reset (outside the effective allowed set) takes its value, with a notice', () => {
@@ -408,11 +411,25 @@ describe('iteration tracker logic', () => {
   });
 
   test('FR-RGN-21 R62 Retry on the newest job in any final state, closed included; never an older one', () => {
-    expect(retryJobId([row('J1', 1, 'closed', true), row('J2', 2, 'closed')])).toBe('J2');
+    const retryIds = (rows: RgnIteration[]) =>
+      rows.filter((r) => offersRetry(rows, r)).map((r) => r.job_id);
+    expect(retryIds([row('J1', 1, 'closed', true), row('J2', 2, 'closed')])).toEqual(['J2']);
     for (const st of ['failed', 'canceled', 'lost', 'fetched'] as const)
-      expect(retryJobId([row('J1', 1, 'closed'), row('J2', 2, st)])).toBe('J2');
-    expect(retryJobId([row('J1', 1, 'closed'), row('J3', null, 'running')])).toBeNull();
-    expect(retryJobId([])).toBeNull();
+      expect(retryIds([row('J1', 1, 'closed'), row('J2', 2, st)])).toEqual(['J2']);
+    expect(retryIds([row('J1', 1, 'closed'), row('J3', null, 'running')])).toEqual([]);
+    expect(retryIds([])).toEqual([]);
+  });
+
+  test('R84 FR-GEN-32 every final generate iteration offers Retry; region edit rows stay newest-only', () => {
+    const gen = (r: RgnIteration): RgnIteration => ({ ...r, operation: 'generate' });
+    const rows = [
+      gen(row('G1', 1, 'closed', true)),
+      row('E2', 2, 'closed'),
+      gen(row('G3', 3, 'failed')),
+      row('E4', 4, 'closed'),
+      gen(row('G5', null, 'running')),
+    ];
+    expect(rows.filter((r) => offersRetry(rows, r)).map((r) => r.job_id)).toEqual(['G1', 'G3']);
   });
 
   test('FR-RGN-40 the picker gets the iteration’s non-trashed candidates in provider order', () => {
@@ -465,4 +482,15 @@ describe('iteration tracker logic', () => {
     ];
     expect(iterationCandidates(all, 'J1').map((c) => c.id)).toEqual(['A', 'B']);
   });
+});
+
+test('walk-gen L4 FR-GEN-28 the patches-kept notice agrees with its count', () => {
+  expect(PATCHES_KEPT(1)).toBe('1 patch layer kept in history (undo restores it).');
+  expect(PATCHES_KEPT(3)).toBe('3 patch layers kept in history (undo restores them).');
+});
+
+test('R84 FR-RGN-45 FR-GEN-21 the confirm names what is sent besides the prompt', () => {
+  expect(sentWith(2, false)).toBe('with 2 references');
+  expect(sentWith(1, true)).toBe('with a sketch and 1 reference');
+  expect(sentWith(0, true)).toBe('with a sketch');
 });

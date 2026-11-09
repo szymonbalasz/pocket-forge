@@ -209,6 +209,12 @@
   font-size: var(--pf-font-size-meta);
 }
 
+/* Walk-gen L7: a notice list in the box itself, no bullets outside it. */
+ul.rgn-warning {
+  list-style: none;
+  margin: 0;
+}
+
 .rgn-warning ul {
   margin: 0;
   padding-left: var(--pf-space-4);

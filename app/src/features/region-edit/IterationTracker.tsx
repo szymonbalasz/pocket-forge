@@ -17,11 +17,11 @@ import {
   orderRows,
   outputLabel,
   refsTooltip,
-  retryJobId,
+  offersRetry,
   shownState,
   stripJobId,
 } from './tracker';
-import type { RgnIteration } from '../../api';
+import type { CandidateRecord, RgnIteration } from '../../api';
 
 /** Ticks once a second while `on` (the elapsed time of a running job). */
 export function useNow(on: boolean): number {
@@ -145,8 +145,13 @@ function RefsChip({ row }: { row: RgnIteration }) {
 }
 
 /** FR-GEN-25: a generate iteration's `new image` badge and its sent size. */
-function NewImageBadge({ row }: { row: RgnIteration }) {
-  const size = outputLabel(row.output);
+/** FR-GEN-25: the sent size; on an aspect model the real W × H once a candidate is in
+ *  (FR-GEN-09). */
+function NewImageBadge({ row, result }: { row: RgnIteration; result: CandidateRecord | null }) {
+  const size =
+    row.output?.mode === 'aspect' && result?.width && result.height
+      ? `${result.width} × ${result.height}`
+      : outputLabel(row.output);
   return (
     <span className="pf-chip rgn-tracker-new" data-testid="gen-tracker-badge">
       new image
@@ -161,7 +166,6 @@ export function IterationTracker() {
   if (!s.projectId || s.iterations.length === 0) return null;
   const rows = orderRows(s.iterations);
   const strip = stripJobId(rows);
-  const retryable = retryJobId(rows);
   const select = (id: string) => rgn.selectIteration(id);
   return (
     <div className="rgn-tracker" data-testid="rgn-tracker">
@@ -201,7 +205,16 @@ export function IterationTracker() {
                 <span className="rgn-tracker-slug" title={r.dir ?? undefined}>
                   {r.slug ?? 'job'}
                 </span>
-                {r.operation === 'generate' && <NewImageBadge row={r} />}
+                {r.operation === 'generate' && (
+                  <NewImageBadge
+                    row={r}
+                    result={
+                      s.candidates.find(
+                        (c) => c.job_id === r.job_id && c.status !== 'invalid' && !!c.width,
+                      ) ?? null
+                    }
+                  />
+                )}
                 {(r.references ?? 0) > 0 && <RefsChip row={r} />}
                 {r.accepted_in_stack && (
                   <span
@@ -224,11 +237,12 @@ export function IterationTracker() {
                     </span>
                   )}
                   <span>{costLabel(r.cost)}</span>
-                  {r.job_id === retryable && (
+                  {offersRetry(rows, r) && (
                     <button
                       type="button"
                       className="small"
                       data-testid="rgn-job-retry"
+                      data-record-id={r.job_id}
                       onClick={(e) => {
                         e.stopPropagation();
                         void rgn.retry(r.job_id);

@@ -10,9 +10,8 @@ import { expect, test } from '@playwright/test';
 import type { Capabilities } from '../src/api';
 import { installGenMock } from '../src/api/mocks/gen';
 import { installRgnMock } from '../src/api/mocks/rgn';
-import { MAP } from './edt-mock';
-import { defaultSeed, mockCore } from './mock-core';
-import { drive, inputsOf, rgnSeed } from './rgn-mock';
+import { drawRegion, drive, inputsOf, rgnSeed } from './rgn-mock';
+import { hook, installMap } from './edt-mock';
 
 const GEN = JSON.parse(
   readFileSync(
@@ -32,7 +31,8 @@ test.beforeEach(async ({ page }) => {
     capabilities: GEN,
     costPerImage: 1,
   });
-  await mockCore(page, { ...defaultSeed, image: MAP });
+  // The map mocks (tiles, mask store, test hooks) on mock-core: region edit after a pick.
+  await installMap(page);
   await page.goto('/');
 });
 
@@ -112,6 +112,8 @@ test('FR-GEN-26 FR-GEN-27 FR-GEN-29 FR-GEN-30 generate → pick → undo → re-
   await page.getByTestId('edt-picker-item').nth(1).click();
   await expect(page.getByTestId('edt-preview-alone')).toBeVisible();
   expect(await inputsOf(page, 'rgn_candidate_preview')).toHaveLength(0);
+  // Walk L7: no split / flip toggle while the candidate is shown alone.
+  await expect(page.getByTestId('edt-compare-mode')).toHaveCount(0);
 
   // FR-GEN-27: Pick (Enter) makes it the bottom image; the canvas replaces "No image yet".
   await page.keyboard.press('Enter');
@@ -128,7 +130,7 @@ test('FR-GEN-26 FR-GEN-27 FR-GEN-29 FR-GEN-30 generate → pick → undo → re-
 
   // A second iteration, then back to the older 001 and pick its other candidate (OQ-GEN-08).
   await generate(page, 'dry crypt');
-  await page.locator('[data-testid="rgn-tracker-item"][data-n="1"]').click();
+  await page.locator('[data-testid="rgn-tracker-item"][data-n="1"] .rgn-tracker-n').click();
   await expect(page.getByTestId('edt-picker-item')).toHaveCount(2);
   await page.getByTestId('edt-picker-item').nth(0).click();
   await expect(page.getByTestId('edt-preview-alone')).toBeVisible();
@@ -138,4 +140,63 @@ test('FR-GEN-26 FR-GEN-27 FR-GEN-29 FR-GEN-30 generate → pick → undo → re-
   expect(repick.job_id).toBe(first.job_id);
   expect(repick.candidate_id).not.toBe(first.candidate_id);
   expect(await inputsOf(page, 'gen_candidate_pick')).toHaveLength(2);
+});
+
+test('walk L1 FR-GEN-29 FR-EDT-23 keyboard undo and redo across pick → patch → re-pick', async ({
+  page,
+}) => {
+  type Undo = { depth: number; redo: number; label: string | null };
+  const undo = () => hook<Undo>(page, 'undoDepth');
+  const restores = async () => (await inputsOf(page, 'project_restore_revision')).length;
+  await newProject(page, 'Crypt');
+  await generate(page, 'flooded crypt');
+  await page.getByTestId('edt-picker-item').nth(0).click();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('edt-canvas-stage')).toBeVisible();
+
+  // Region edit on the picked image: region, whole mask, generate, accept #1.
+  await page.locator('[data-testid="gen-tab"][data-record-id="region"]').click();
+  await drawRegion(page, [400, 500], [800, 900]);
+  await page.getByTestId('edt-toolbar-mask-region').click();
+  await expect(page.getByTestId('edt-mask-status')).toHaveText('Mask saved', { timeout: 6000 });
+  await page.getByTestId('prm-block-prompt').fill('A stone well');
+  await expect(page.getByTestId('rgn-panel-estimate')).toContainText('CU');
+  await page.getByTestId('rgn-panel-submit').click();
+  await page.getByTestId('rgn-confirm-ok').click();
+  await drive(page, 'finish', 3);
+  await expect(page.getByTestId('edt-picker-item')).toHaveCount(3);
+  await page.keyboard.press('1');
+  await page.getByTestId('edt-picker-accept').click();
+  await expect(page.getByTestId('rgn-tracker-accepted')).toHaveCount(2);
+
+  // Re-pick #2 of 001.
+  await page.locator('[data-testid="rgn-tracker-item"][data-n="1"] .rgn-tracker-n').click();
+  await expect(page.getByTestId('edt-picker-item')).toHaveCount(2);
+  const previews = (await inputsOf(page, 'gen_candidate_preview')).length;
+  await page.getByTestId('edt-picker-item').nth(1).click();
+  await expect
+    .poll(async () => (await inputsOf(page, 'gen_candidate_preview')).length)
+    .toBe(previews + 1);
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await undo()).label).toBe('Pick new image');
+  const top = await undo();
+
+  // Ctrl+Z twice: the re-pick, then the patch.
+  await page.keyboard.press('Control+z');
+  await expect.poll(restores).toBe(1);
+  // No editor entry is pushed by the remount, so Redo stays (walk L1).
+  await expect.poll(async () => (await undo()).redo).toBe(1);
+  expect((await undo()).label).toBe('Accept patch');
+  await page.keyboard.press('Control+z');
+  await expect.poll(restores).toBe(2);
+  await expect.poll(async () => (await undo()).label).toBe('Pick new image');
+  expect((await undo()).redo).toBe(2);
+  // Redo both back, in order.
+  await page.keyboard.press('Control+Shift+z');
+  await expect.poll(restores).toBe(3);
+  await expect.poll(async () => (await undo()).redo).toBe(1);
+  await page.keyboard.press('Control+Shift+z');
+  await expect.poll(restores).toBe(4);
+  await expect.poll(async () => (await undo()).redo).toBe(0);
+  expect((await undo()).depth).toBe(top.depth);
 });

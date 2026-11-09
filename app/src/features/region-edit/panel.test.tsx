@@ -669,7 +669,7 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     all.controls = all.controls.filter((c) => c.role !== 'candidate_count');
     fireEvent.click(screen.getByTestId('rgn-job-retry'));
     await waitFor(() =>
-      expect(rgn.get().notices.some((n) => n.startsWith('num_samples:'))).toBe(true),
+      expect(rgn.get().notices.some((n) => n.includes('num samples'))).toBe(true),
     );
     expect(rgn.get().values.num_samples).toBeUndefined();
     expect(screen.getByTestId('rgn-panel-count-single')).toBeTruthy();

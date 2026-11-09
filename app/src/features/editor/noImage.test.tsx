@@ -10,6 +10,7 @@ import { projectStore } from '../../store/project';
 import { exportFeature } from '../export';
 import { EditorPanel } from './EditorPanel';
 import { EditorToolbar } from './EditorToolbar';
+import { undoStack } from './session';
 
 const ExportPanel = exportFeature.slots.right!;
 
@@ -66,6 +67,32 @@ test('FR-GEN-03 the tools are disabled with the reason no_image', async () => {
     expect(b.disabled).toBe(true);
     expect(b.dataset.reason).toBe('no_image');
   }
+});
+
+test('walk L1 FR-GEN-29 "No image yet" has Undo and Redo (an undone first pick redoes from here)', async () => {
+  await open(noImageSnapshot());
+  render(
+    <Tooltip.Provider>
+      <EditorPanel />
+      <EditorToolbar />
+    </Tooltip.Provider>,
+  );
+  const redo = screen.getByTestId('edt-toolbar-redo') as HTMLButtonElement;
+  expect(redo.disabled).toBe(true);
+  const log: string[] = [];
+  act(() =>
+    undoStack.push({
+      label: 'Pick new image',
+      bytes: 0,
+      undo: () => void log.push('undo'),
+      redo: () => void log.push('redo'),
+    }),
+  );
+  await act(() => undoStack.undo());
+  expect(redo.disabled).toBe(false);
+  await act(async () => fireEvent.click(redo));
+  expect(log).toEqual(['undo', 'redo']);
+  expect((screen.getByTestId('edt-toolbar-undo') as HTMLButtonElement).disabled).toBe(false);
 });
 
 test('FR-GEN-03 Export is disabled with no_image and prefetches nothing', async () => {

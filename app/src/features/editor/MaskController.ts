@@ -52,6 +52,8 @@ export class MaskController {
   private mask: MaskBuffer | null = null;
   private region: RegionState | null = null;
   private stroke: Stroke | null = null;
+  /** This canvas has pushed an undo entry (the DM changed something here). */
+  private edited = false;
   /** Bumped on every content change; slice 5 compares it with the last submitted version. */
   version = 0;
 
@@ -102,6 +104,7 @@ export class MaskController {
       this.changed();
     };
     apply(next, nextMask);
+    this.edited = true;
     this.deps.undo.push({
       label: next ? (prev.region ? 'region change' : 'new region') : 'remove region',
       bytes: (prev.mask?.data.length ?? 0) + (nextMask?.data.length ?? 0),
@@ -118,6 +121,12 @@ export class MaskController {
     const cur = this.region;
     if (!next) {
       if (cur) this.changeRegion(null);
+      return;
+    }
+    // Walk-gen L1: on a fresh canvas (a remount for a new bottom image, before its draft load)
+    // RGN's echo of its region is not an edit: no undo step, which would also clear Redo.
+    if (!cur && !this.edited) {
+      this.load({ inner: { ...next.inner }, outer: { ...next.outer } }, null);
       return;
     }
     const same = (a: Rect, b: Rect) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
@@ -205,6 +214,7 @@ export class MaskController {
       redo: () => set(after),
       canvas: true,
     };
+    this.edited = true;
     this.deps.undo.push(entry);
   }
 

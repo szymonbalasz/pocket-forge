@@ -18,8 +18,10 @@ import {
   type GenSizeFit,
   type ModelSummary,
   type ProjectKind,
+  type CandidateRecord,
   type ProjectSnapshot,
   type PromptRetryBadges,
+  type ProviderMode,
   type Spend,
 } from '../../api';
 import { isFolderMovedError, projectStore } from '../../store/project';
@@ -46,7 +48,7 @@ import {
   type UiError,
   type Values,
 } from '../region-edit';
-import { clampGrid, clampLongSide, longSideLimits, sizeFor, sizeKey } from './size';
+import { clampGrid, clampLongSide, longSideLimits, sizeFor, sizeKey, type GenResult } from './size';
 
 export type EstimateStatus = 'idle' | 'waiting' | 'loading' | 'ready' | 'error';
 
@@ -56,7 +58,7 @@ export interface GenState {
   readOnly: string | null;
   /** The New image tab is shown (FR-GEN-36); estimates run only then. */
   visible: boolean;
-  provider: { configured: boolean; connectivity: Connectivity } | null;
+  provider: { configured: boolean; connectivity: Connectivity; mode?: ProviderMode } | null;
   models: ModelSummary[];
   modelsStale: boolean;
   modelsLoading: boolean;
@@ -100,6 +102,8 @@ export interface GenState {
   submitError: UiError | null;
   /** One line under the tab's head (Retry filled it, a submit went through). */
   info: string | null;
+  /** FR-GEN-09: the newest generate result on an aspect model (its ratio and real size). */
+  lastResult: GenResult | null;
 }
 
 /** FR-PRJ-19: the draft is saved ≥ 2 s after the last change. */
@@ -142,6 +146,7 @@ const initial: GenState = {
   submitting: false,
   submitError: null,
   info: null,
+  lastResult: null,
 };
 
 let state: GenState = initial;
@@ -225,6 +230,12 @@ function storedDraft(s: GenState): GenDraft {
     typed_prompt: s.prompt,
     ...(s.promptHelpers ? { prompt_helpers: s.promptHelpers } : {}),
   };
+}
+
+/** Walk-gen L3 (as RGN's walk D7): one unit for every amount in the tab: the estimate's, else
+ *  the provider's (the fake reports "fake", Scenario "CU"), also with no estimate (read-only). */
+export function costUnit(s: GenState): string {
+  return s.estimate.result?.cost.unit ?? (s.provider?.mode === 'fake' ? 'fake' : 'CU');
 }
 
 /** The draft estimate and submit send (FR-GEN-22). The core composes the final prompt from the
@@ -317,7 +328,7 @@ function saveDraftSoon(): void {
 async function refreshProvider(): Promise<void> {
   try {
     const st = await api.provider.status();
-    set({ provider: { configured: st.configured, connectivity: st.connectivity } });
+    set({ provider: { configured: st.configured, connectivity: st.connectivity, mode: st.mode } });
   } catch {
     // Unknown status: the estimate's errors say what is wrong.
   }
@@ -458,9 +469,35 @@ async function onEventSafe<E extends Parameters<typeof onEvent>[0]>(
   }
 }
 
+/** FR-GEN-09: the newest aspect-model generate iteration and its first valid candidate's size. */
+async function loadLastResult(): Promise<void> {
+  const pid = state.projectId;
+  if (!pid) return;
+  try {
+    const rows = await api.region.iterations();
+    const row = rows
+      .filter((r) => r.operation === 'generate' && r.n !== null && r.output?.mode === 'aspect')
+      .sort((a, b) => (b.n ?? 0) - (a.n ?? 0))[0];
+    let result: GenResult | null = null;
+    if (row?.output?.aspect) {
+      const p = (await api.project.get()) as
+        (ProjectSnapshot & { candidates?: CandidateRecord[] }) | null;
+      const c = p?.candidates?.find(
+        (x) => x.job_id === row.job_id && x.status !== 'invalid' && (x.width ?? 0) > 0,
+      );
+      if (c?.width && c.height) result = { aspect: row.output.aspect, w: c.width, h: c.height };
+    }
+    if (state.projectId === pid) set({ lastResult: result });
+  } catch {
+    // Keep the last one; the next commit retries.
+  }
+}
+
 function subscribe(): void {
   if (unsubscribe) return;
   const subs = [
+    // Candidates are stored by a commit (FR-RGN-24): the result size may be in.
+    onEventSafe('project:committed', () => void loadLastResult()),
     onEventSafe('provider:status-changed', () => void refreshProvider()),
     onEventSafe('rgn:spend', (p) =>
       set((cur) => ({
@@ -469,9 +506,16 @@ function subscribe(): void {
     ),
   ];
   // The project closed or another one opened, maybe while this tab was hidden: let it go.
+  // `structure/` changed (⟳, focus, an Add in the project panel): the sketch list follows.
+  let structureSeq = projectStore.get().folders.structure ?? 0;
   const offProject = projectStore.subscribe(() => {
-    const p = projectStore.get().project;
-    if (state.projectId && p?.project_id !== state.projectId) gen.detach();
+    const ps = projectStore.get();
+    if (state.projectId && ps.project?.project_id !== state.projectId) return gen.detach();
+    const seq = ps.folders.structure ?? 0;
+    if (seq !== structureSeq) {
+      structureSeq = seq;
+      void loadSketches();
+    }
   });
   unsubscribe = () => {
     offProject();
@@ -518,6 +562,7 @@ export const gen = {
       loadSpend(),
       loadSketches(),
       loadModels(d?.controls ?? null),
+      loadLastResult(),
     ]);
   },
 
@@ -550,6 +595,8 @@ export const gen = {
 
   pickModel(id: string): Promise<void> {
     const keep = Object.fromEntries(state.touched.map((n) => [n, state.values[n]]));
+    // Walk-gen L4: notices were about the previous model; this one's come with its evaluation.
+    set({ notices: [] });
     saveDraftSoon();
     return selectModel(id, keep);
   },
@@ -621,6 +668,7 @@ export const gen = {
     try {
       await api.project.folderAdd('structure', paths);
       set({ sketchError: null });
+      projectStore.folderChanged('structure'); // the project panel's list too (walk-gen L2)
     } catch (e) {
       set({ sketchError: uiError(e) });
     }
@@ -680,8 +728,11 @@ export const gen = {
         confirmOpen: false,
         sketchFlag: null,
         promptRetry: null,
+        // Walk-gen L4: earlier notices (Retry's, a dropped control's, a discard's) are done.
         info: null,
+        notices: [],
       });
+      projectStore.setTrashNotice(null);
       settleReferences('gen');
       await Promise.all([refreshJobs(), loadSpend()]);
     } catch (e) {
@@ -710,6 +761,7 @@ export const gen = {
       const d = await api.gen.retryDraft(jobId);
       const flag = d.structure?.changed_since || d.structure?.missing ? d.structure : null;
       set({
+        notices: [],
         prompt: d.typed_prompt,
         promptHelpers: d.prompt_helpers ?? [],
         promptRetry: d.prompt_retry ?? null,

@@ -16,6 +16,7 @@ import {
   amountLabel,
   ControlField,
   costLabel,
+  Hint,
   errorText,
   isValueControl,
   SpendConfirm,
@@ -32,6 +33,7 @@ import {
   resultLabel,
 } from './size';
 import {
+  costUnit,
   currentDraft,
   gen,
   isOffline,
@@ -119,9 +121,11 @@ function ModelSection({ s }: { s: GenState }) {
       <label className="rgn-control-label" htmlFor="gen-model">
         Model
         {s.modelsStale && (
-          <span className="pf-chip" data-testid="gen-panel-stale" title="Offline: cached list">
-            cached
-          </span>
+          <Hint text="Offline: the cached model list">
+            <span className="pf-chip" data-testid="gen-panel-stale">
+              cached
+            </span>
+          </Hint>
         )}
       </label>
       <Select.Root value={s.modelId ?? ''} onValueChange={(id) => void gen.pickModel(id)}>
@@ -239,25 +243,32 @@ function SizeSection({ s }: { s: GenState }) {
               onCommit={(rows) => gen.setGrid({ rows })}
             />
           </label>
-          <label className="gen-field">
-            <span className="muted small">px per square</span>
-            <IntField
-              id="gen-size-pps"
-              testId="gen-size-pps"
-              label="Pixels per square"
-              value={size.pps}
-              min={PPS.min}
-              max={PPS.max}
-              onCommit={(pps) => gen.setGrid({ pps })}
-            />
-          </label>
+          {s.caps?.output_size?.mode === 'aspect' ? (
+            // FR-GEN-09: an aspect model sets the size by ratio; px per square follows the result.
+            <span className="muted small gen-field-note" data-testid="gen-size-pps-note">
+              px per square: set by the model’s ratio, shown once a result is in
+            </span>
+          ) : (
+            <label className="gen-field">
+              <span className="muted small">px per square</span>
+              <IntField
+                id="gen-size-pps"
+                testId="gen-size-pps"
+                label="Pixels per square"
+                value={size.pps}
+                min={PPS.min}
+                max={PPS.max}
+                onCommit={(pps) => gen.setGrid({ pps })}
+              />
+            </label>
+          )}
         </div>
       ) : (
         <RatioFields s={s} aspect={size.aspect} longSide={size.long_side} />
       )}
       {s.fit && (
         <div className="muted small tabular" data-testid="gen-size-result">
-          sent {resultLabel(size, s.fit)}
+          sent {resultLabel(size, s.fit, s.lastResult)}
         </div>
       )}
       {s.fitError && (
@@ -379,7 +390,11 @@ function SketchSection({ s }: { s: GenState }) {
         )}
       </RadioGroup.Root>
       {files.length === 0 && (
-        <p className="muted small">Add a rough layout image to guide the map’s structure.</p>
+        <p className="muted small" data-testid="gen-sketch-hint">
+          {s.kind === 'map'
+            ? 'Add a rough layout image to guide the map’s structure.'
+            : 'Add a rough layout image to guide the composition.'}
+        </p>
       )}
       {s.sketchError && (
         <p className="error small" data-testid="gen-sketch-error">
@@ -543,7 +558,7 @@ function PromptSection({ s }: { s: GenState }) {
 
 function CostSection({ s }: { s: GenState }) {
   const e = s.estimate;
-  const unit = e.result?.cost.unit ?? 'CU';
+  const unit = costUnit(s);
   let line: React.ReactNode;
   if (s.readOnly) line = <span className="muted">No estimate: the project is read-only.</span>;
   else if (isOffline(s)) line = <span className="muted">No estimate while offline.</span>;
@@ -595,16 +610,18 @@ function SubmitSection({ s }: { s: GenState }) {
           Set up provider
         </button>
       ) : (
-        <button
-          type="button"
-          className="primary rgn-submit"
-          data-testid="gen-panel-submit"
-          disabled={blocker !== null}
-          title={blocker ?? 'Estimate, confirm and generate'}
-          onClick={() => void gen.openConfirm(activeJob)}
-        >
-          Generate
-        </button>
+        // The reason is shown under the button; the tip says what it does (ui-guidelines).
+        <Hint text="Estimate, confirm and generate">
+          <button
+            type="button"
+            className="primary rgn-submit"
+            data-testid="gen-panel-submit"
+            disabled={blocker !== null}
+            onClick={() => void gen.openConfirm(activeJob)}
+          >
+            Generate
+          </button>
+        </Hint>
       )}
       {blocker && (
         <p className="muted small" data-testid="gen-panel-submit-reason">
@@ -667,6 +684,7 @@ export function NewImageTab() {
             </p>
           )
         }
+        withSketch={takesSketch(s) && !!s.sketch}
         onClose={() => gen.closeConfirm()}
         onConfirm={(plan) => void gen.confirm(plan)}
       />

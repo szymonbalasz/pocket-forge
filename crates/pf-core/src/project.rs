@@ -41,6 +41,9 @@ pub enum ReadOnlyReason {
     OriginalChanged,
     /// "Original missing": Relink clears it (FR-PRJ-16).
     OriginalMissing,
+    /// "Base image changed": a picked base image (GEN) no longer matches its `content_hash`,
+    /// exactly like a changed original (FR-PRJ-15, R84).
+    BaseChanged,
 }
 
 /// A non-fatal note from `project_open`: `newer_version`, `original_changed`,
@@ -409,6 +412,7 @@ pub fn open(
         conflict: None,
     };
     check_original(ctx, &mut p)?;
+    check_base(ctx, &mut p)?;
     if let Some(kind) = library::kind_of_folder(&p.dir)
         && kind != p.manifest.kind
     {
@@ -481,6 +485,38 @@ fn check_original(ctx: &Context, p: &mut OpenProject) -> CoreResult<()> {
                 "Original changed outside Pocket Forge. The project opens read-only.",
             ));
         }
+    }
+    Ok(())
+}
+
+/// R84 (FR-PRJ-15 for a picked base image): `layers[0]`'s `working/` file is write-once, so a
+/// file that is gone or whose hash differs from the base layer's `content_hash` was changed
+/// outside the app: the project opens read-only, and region edit and export never use the wrong
+/// pixels. The base layer keeps no size or mtime, so the file is hashed on every open.
+fn check_base(ctx: &Context, p: &mut OpenProject) -> CoreResult<()> {
+    let Some(layer) = p
+        .manifest
+        .base_layer()
+        .filter(|l| l.kind == LayerKind::Base)
+    else {
+        return Ok(());
+    };
+    let (Some(file), Some(want)) = (layer.file.clone(), layer.content_hash.clone()) else {
+        return Ok(());
+    };
+    let path = p.path(&file);
+    let changed = if std::fs::symlink_metadata(&path).is_err() {
+        true
+    } else {
+        library::hydrate_if_needed(ctx, &path)?;
+        fsx::hash_file(&path).map_err(|e| CoreError::io("hashing the base image", &e))? != want
+    };
+    if changed {
+        p.read_only.get_or_insert(ReadOnlyReason::BaseChanged);
+        p.warnings.push(Warning::new(
+            "base_changed",
+            "Base image changed or missing outside Pocket Forge. The project opens read-only.",
+        ));
     }
     Ok(())
 }

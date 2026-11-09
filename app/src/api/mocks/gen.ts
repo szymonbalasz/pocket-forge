@@ -511,6 +511,10 @@ export function installGenMock(seed: GenMockSeed): void {
         visible: true,
       };
       s.layers = [layer];
+      // R84: only the current base candidate stays accepted (the previous one is kept, dismissed).
+      const genJobs = new Set(s.jobs.filter((x) => x.operation === 'generate').map((x) => x.id));
+      for (const o of s.cands as GenCand[])
+        if (o !== c && o.status === 'accepted' && genJobs.has(o.job_id)) o.status = 'dismissed';
       c.status = 'accepted';
       c.trash_id = null;
       if (j.state === 'fetched') {

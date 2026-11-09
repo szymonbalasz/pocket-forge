@@ -71,9 +71,20 @@ export function PromptBlock(props: PromptBlockProps) {
         <label className="rgn-control-label" htmlFor={id}>
           Prompt
           {props.required && (
-            <span className="rgn-required" title="Required">
-              *
-            </span>
+            <Tooltip.Provider delayDuration={400}>
+              <Tooltip.Root>
+                <Tooltip.Trigger asChild data-tooltip="Required">
+                  <span className="rgn-required" aria-label="Required">
+                    *
+                  </span>
+                </Tooltip.Trigger>
+                <Tooltip.Portal>
+                  <Tooltip.Content className="pf-tooltip" side="top" sideOffset={6}>
+                    Required
+                  </Tooltip.Content>
+                </Tooltip.Portal>
+              </Tooltip.Root>
+            </Tooltip.Provider>
           )}
         </label>
         <span className="pf-spacer" />

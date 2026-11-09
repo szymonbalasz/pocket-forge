@@ -186,6 +186,7 @@ const READ_ONLY_TEXT: Record<ReadOnlyReason, string> = {
   newer_version: 'Read-only: made by a newer Pocket Forge',
   original_changed: 'Read-only: the original image changed',
   original_missing: 'Read-only: the original image is missing',
+  base_changed: 'Read-only: the base image changed',
 };
 
 export type OriginalState =

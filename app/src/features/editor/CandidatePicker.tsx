@@ -70,6 +70,8 @@ const COMPARE_TIP = 'Compare mode: split or flip (C). In flip, hold \\ to see be
 export function EditorPicker() {
   const picker = useEditor((s) => s.picker);
   const mode = useEditor((s) => s.compareMode);
+  // FR-GEN-26: a candidate shown alone has no split or flip (walk-gen L7).
+  const alone = useEditor((s) => !!s.compare?.alone);
   const active = !!picker;
 
   useEffect(() => {
@@ -192,18 +194,22 @@ export function EditorPicker() {
           </button>
         </Tip>
       )}
-      <Tip text={COMPARE_TIP} side="top">
-        <button
-          type="button"
-          data-testid="edt-compare-mode"
-          data-mode={mode}
-          onClick={() =>
-            editorStore.set((s) => ({ compareMode: s.compareMode === 'split' ? 'flip' : 'split' }))
-          }
-        >
-          <IconCompare size={14} /> {mode === 'split' ? 'Split' : 'Flip'}
-        </button>
-      </Tip>
+      {!alone && (
+        <Tip text={COMPARE_TIP} side="top">
+          <button
+            type="button"
+            data-testid="edt-compare-mode"
+            data-mode={mode}
+            onClick={() =>
+              editorStore.set((s) => ({
+                compareMode: s.compareMode === 'split' ? 'flip' : 'split',
+              }))
+            }
+          >
+            <IconCompare size={14} /> {mode === 'split' ? 'Split' : 'Flip'}
+          </button>
+        </Tip>
+      )}
       <Tip text="Accept the selected candidate (Enter)" side="top">
         <button
           type="button"

@@ -5,6 +5,7 @@ const READ_ONLY: Record<ReadOnlyReason, string> = {
   newer_version: 'Read-only (made by a newer Pocket Forge)',
   original_changed: 'Read-only (original changed)',
   original_missing: 'Read-only (original missing)',
+  base_changed: 'Read-only (base image changed)',
 };
 
 /** Why a save failed, by `project:save-failed` reason / error code. */

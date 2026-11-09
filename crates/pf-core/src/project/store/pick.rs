@@ -2,7 +2,8 @@
 //! project's base image in one PRJ commit. The candidate file is copied write-once to
 //! `working/NNN <slug> NN.<ext>` (before the manifest, schema §3); the stack becomes
 //! `[base layer]`; the candidate is `accepted`, its job `closed` and the job's other `new`
-//! candidates `dismissed` (kept, #56); one `accept` revision labelled `New: <typed prompt>`.
+//! candidates `dismissed` (kept, #56); the previous base candidate goes back to `dismissed`
+//! (R84); one `accept` revision labelled `New: <typed prompt>`.
 //! The original file, if any, is untouched. Undo = `project_restore_revision(parent)` (FR-GEN-29).
 
 use serde::Serialize;
@@ -165,8 +166,23 @@ pub fn pick_base(
         .count();
     let label = pick_label(job.typed_prompt());
     let now = ctx.now();
+    // R84: only the current base candidate stays `accepted`; earlier picks (base candidates of
+    // generate jobs) become ordinary kept results again, so they can be discarded (#56).
+    let generate_jobs: std::collections::HashSet<Ulid> = p
+        .jobs
+        .values()
+        .filter(|j| j.is_generate())
+        .map(|j| j.id)
+        .collect();
     commit(ctx, install_id, p, |ctx, _, m, plan| {
         m.layers = vec![layer];
+        for c in m.candidates.iter_mut().filter(|c| {
+            c.id != candidate_id
+                && c.status == CandidateStatus::Accepted
+                && generate_jobs.contains(&c.job_id)
+        }) {
+            c.status = CandidateStatus::Dismissed;
+        }
         m.candidates[idx].status = CandidateStatus::Accepted;
         untrash_candidate(m, idx);
         if first {

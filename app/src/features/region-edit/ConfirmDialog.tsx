@@ -37,8 +37,17 @@ export interface SpendConfirmProps {
   error: UiError | null;
   /** What is being submitted (GEN: "New image · W × H"), above the table. */
   summary?: ReactNode;
+  /** GEN: a structural sketch is sent too (R84: "with a sketch and N references"). */
+  withSketch?: boolean;
   onClose(): void;
   onConfirm(plan: ConfirmPlan): void;
+}
+
+/** "with 2 references", "with a sketch", "with a sketch and 2 references" (FR-RGN-45, R84). */
+export function sentWith(references: number, sketch: boolean): string {
+  const refs = `${references} reference${references === 1 ? '' : 's'}`;
+  if (!sketch) return `with ${refs}`;
+  return references > 0 ? `with a sketch and ${refs}` : 'with a sketch';
 }
 
 /** The dialog for any job (RGN's region edit, GEN's new image). */
@@ -113,10 +122,10 @@ function ConfirmBody(props: SpendConfirmProps & { estimate: SpendEstimate }) {
             <dt>Estimate</dt>
             <dd data-testid="rgn-confirm-estimate">
               {plan.cost === 'unknown' ? 'unknown' : amountLabel(plan.cost, unit)}
-              {plan.references > 0 && (
+              {(plan.references > 0 || props.withSketch) && (
                 <span data-testid="rgn-confirm-references">
                   {' '}
-                  with {plan.references} reference{plan.references === 1 ? '' : 's'}
+                  {sentWith(plan.references, !!props.withSketch)}
                 </span>
               )}
             </dd>

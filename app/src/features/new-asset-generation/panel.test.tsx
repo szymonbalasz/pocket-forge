@@ -192,6 +192,17 @@ test('FR-GEN-09 aspect models: the nearest ratio, with "cells won’t be square"
     expect(screen.getByTestId('gen-size-result').textContent).toBe('sent ratio 2:3'),
   );
   expect(screen.getByTestId('gen-size-notices').textContent).toContain('won’t be square');
+  // px per square isn't an input on an aspect model; it follows the result (walk M3).
+  expect(screen.queryByTestId('gen-size-pps')).toBeNull();
+  expect(screen.getByTestId('gen-size-pps-note').textContent).toContain('shown once a result');
+  await generate('swamp');
+  act(() => rgnControls().finish(1));
+  await waitFor(() =>
+    expect(screen.getByTestId('gen-size-result').textContent).toBe(
+      'sent ratio 2:3 · result 683 × 1024 · 27.3 × 25.6 px per square',
+    ),
+  );
+  expect(screen.getByTestId('gen-tracker-badge').textContent).toBe('new image · 683 × 1024');
   setInt('gen-size-cols', 30);
   setInt('gen-size-rows', 40);
   await waitFor(() =>
@@ -410,4 +421,60 @@ test('FR-GEN-34 read-only: the tab is shown, no estimate, Generate disabled with
     'The project is read-only.',
   );
   expect(fake.callsOf('gen_job_estimate')).toHaveLength(0);
+  // Walk L3: with no estimate the unit is still the provider's ("fake"), never "CU".
+  await waitFor(() => expect(screen.getByTestId('gen-panel-spend').textContent).toContain('fake'));
+  expect(screen.getByTestId('gen-panel-spend').textContent).not.toContain('CU');
+});
+
+test('walk L2 FR-GEN-14 the sketch list follows structure/ changes (the project panel ⟳, focus, Add)', async () => {
+  await setup({ sketches: [sketch('a-room.png')] });
+  await waitFor(() => expect(screen.getAllByTestId('gen-sketch-item')).toHaveLength(1));
+  // Copied in with Explorer, then ⟳ on the project panel's Structure folder.
+  (fake.structure as unknown[]).push(sketch('b-hall.png'));
+  act(() => projectStore.folderChanged('structure'));
+  await waitFor(() => expect(screen.getAllByTestId('gen-sketch-item')).toHaveLength(2));
+  // Another folder changing doesn't reload the sketches.
+  const lists = fake.callsOf('project_folder_list').length;
+  act(() => projectStore.folderChanged('references'));
+  await act(() => new Promise((r) => setTimeout(r, 50)));
+  expect(fake.callsOf('project_folder_list').length).toBe(lists);
+});
+
+test('walk L4 FR-GEN-19 notices name the control, and a model switch or a submit clears stale ones', async () => {
+  await setup();
+  act(() => gen.setValue('num_samples', 3));
+  await pickModel('Fake gen (aspect)');
+  await waitFor(() =>
+    expect(gen.get().notices).toContain(
+      '“num samples” isn’t a setting of this model, so it was dropped.',
+    ),
+  );
+  await pickModel('Fake gen (wh)');
+  expect(gen.get().notices).toEqual([]);
+  act(() => projectStore.setTrashNotice({ at: 'tracker', text: '2 candidates discarded' }));
+  await generate('crypt');
+  expect(gen.get().notices).toEqual([]);
+  expect(gen.get().info).toBeNull();
+  expect(projectStore.get().trashNotice).toBeNull();
+});
+
+test('walk L7 Radix tips (no native title) and a sketch hint that fits the kind', async () => {
+  await setup({ kind: 'token' });
+  const panel = screen.getByTestId('gen-panel');
+  expect(panel.querySelectorAll('[title]')).toHaveLength(0);
+  expect(screen.getByTestId('gen-panel-submit').closest('[data-tooltip]')).toBeTruthy();
+  if (screen.queryByTestId('gen-sketch-hint'))
+    expect(screen.getByTestId('gen-sketch-hint').textContent).not.toContain('map');
+});
+
+test('R84 FR-GEN-21 the confirm dialog names the sketch: "with a sketch and N references"', async () => {
+  await setup({ sketches: [sketch('a-room.png')], projectRefs: ['look.png'] });
+  fireEvent.click(await screen.findByTestId('gen-sketch-item'));
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: 'crypt' } });
+  await estimated();
+  await act(async () => fireEvent.click(screen.getByTestId('gen-panel-submit')));
+  const dialog = await screen.findByTestId('rgn-confirm');
+  expect(within(dialog).getByTestId('rgn-confirm-references').textContent?.trim()).toBe(
+    'with a sketch and 1 reference',
+  );
 });

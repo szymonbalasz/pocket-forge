@@ -65,12 +65,27 @@ export function clampLongSide(v: number, lim: { min: number; max: number; step: 
 const one = (n: number) => n.toFixed(1);
 
 /** FR-GEN-08: what is sent and, for a grid, the px per square that results (1 decimal). */
-export function resultLabel(size: GenSize, fit: GenSizeFit): string {
-  if (fit.mode === 'aspect') return fit.aspect ? `ratio ${fit.aspect}` : '';
+export function resultLabel(size: GenSize, fit: GenSizeFit, result?: GenResult | null): string {
+  if (fit.mode === 'aspect') {
+    if (!fit.aspect) return '';
+    const sent = `ratio ${fit.aspect}`;
+    // FR-GEN-09: the px per square is known once a result of this ratio is in.
+    if (!result || result.aspect !== fit.aspect) return sent;
+    const got = `${sent} · result ${result.w} × ${result.h}`;
+    if (size.mode !== 'grid') return got;
+    return `${got} · ${one(result.w / size.cols)} × ${one(result.h / size.rows)} px per square`;
+  }
   if (!fit.w || !fit.h) return '';
   const sent = `${fit.w} × ${fit.h}`;
   if (size.mode !== 'grid') return sent;
   return `${sent} · ${one(fit.w / size.cols)} × ${one(fit.h / size.rows)} px per square`;
+}
+
+/** The latest generate result on an aspect model: its ratio and the real size returned. */
+export interface GenResult {
+  aspect: string;
+  w: number;
+  h: number;
 }
 
 /** The estimate's size key (FR-GEN-20): the sent w × h, or the ratio. */

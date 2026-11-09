@@ -26,7 +26,7 @@ import {
   useProjectState,
 } from '../../store/project';
 import { ConflictView } from './ConflictView';
-import { bytesLabel, CATEGORY_LABEL, dateLabel, revisionLabel, timeLabel } from './format';
+import { bytesLabel, dateLabel, revisionLabel, storageLabel, timeLabel } from './format';
 import './project.css';
 
 const USER_FOLDERS: { id: ProjectFolder; label: string }[] = [
@@ -150,6 +150,7 @@ function Section({
 const WARNING_TEXT: Record<string, string> = {
   original_changed: 'Original changed: it was saved over by another editor. Read-only.',
   original_missing: 'Original missing. Relink it to keep editing.',
+  base_changed: 'Base image changed: it was saved over or removed outside Pocket Forge. Read-only.',
   newer_version: 'Made by a newer Pocket Forge. Read-only.',
   recovered: 'The project file was rebuilt from its revisions.',
   conflict: 'This project was also changed on another machine.',
@@ -264,6 +265,7 @@ function Folder({
   const [files, setFiles] = useState<FolderFile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const seq = useProjectState().folders[id] ?? 0;
   const load = useCallback(() => {
     api.project.folderList(id).then(
       (f) => {
@@ -277,13 +279,16 @@ function Folder({
       },
     );
   }, [id]);
-  useEffect(load, [load, revision]);
-  useOnFocus(load);
+  useEffect(load, [load, revision, seq]);
+  // Every list of this folder reloads (New image's sketches too, walk-gen L2).
+  const changed = useCallback(() => projectStore.folderChanged(id), [id]);
+  useOnFocus(changed);
 
   const add = async (paths: string[]) => {
     try {
       setFiles(await api.project.folderAdd(id, paths));
       setError(null);
+      changed();
     } catch (e) {
       setError(errorOf(e).message);
     }
@@ -303,7 +308,7 @@ function Folder({
             data-testid={`prj-panel-${id}-refresh`}
             title={`Refresh ${label}`}
             aria-label={`Refresh ${label}`}
-            onClick={load}
+            onClick={changed}
           >
             ⟳
           </button>
@@ -690,7 +695,7 @@ function Storage({ revision, readOnly }: { revision: number; readOnly: boolean }
               .filter(([, b]) => b > 0)
               .map(([k, b]) => (
                 <div key={k} data-category={k}>
-                  <dt>{CATEGORY_LABEL[k] ?? k}</dt>
+                  <dt>{storageLabel(k, projectState.project)}</dt>
                   <dd>{bytesLabel(b)}</dd>
                 </div>
               ))}

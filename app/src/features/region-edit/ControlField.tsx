@@ -4,7 +4,8 @@ import { useEffect, useState, type KeyboardEvent } from 'react';
 import { Select, Slider, Switch } from 'radix-ui';
 
 import type { ControlState } from '../../api';
-import { controlKind, snap, type Control } from './controls';
+import { controlKind, controlLabel, snap, type Control } from './controls';
+import { Hint } from './Hint';
 
 const NONE = '__none__';
 const keyOf = (v: unknown) => JSON.stringify(v);
@@ -114,7 +115,7 @@ export function ControlField({
 }) {
   const kind = controlKind(c);
   const required = state?.required ?? c.required;
-  const label = c.name.replace(/_/g, ' ');
+  const label = controlLabel(c.name);
   const allowed = state && state.allowed.length ? state.allowed : c.allowed;
   const id = `${prefix}-control-${c.name}`;
 
@@ -214,14 +215,18 @@ export function ControlField({
       <label className="rgn-control-label" htmlFor={id}>
         {label}
         {required && (
-          <span className="rgn-required" title="Required">
-            *
-          </span>
+          <Hint text="Required">
+            <span className="rgn-required" aria-label="Required">
+              *
+            </span>
+          </Hint>
         )}
         {c.cost_affecting && (
-          <span className="rgn-costly" title="Changes the cost">
-            ¤
-          </span>
+          <Hint text="Changes the cost">
+            <span className="rgn-costly" aria-label="Changes the cost">
+              ¤
+            </span>
+          </Hint>
         )}
       </label>
       {field}

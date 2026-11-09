@@ -811,3 +811,35 @@ fn fr_gen_14_folder_files_carry_cloud_only_and_corrupt_states() {
             .is_none()
     );
 }
+
+#[test]
+fn r84_fr_prj_15_a_changed_or_missing_base_image_opens_read_only() {
+    let mut g = gen_env(Kind::Token, "Goblin archer");
+    let (job, c) = g.generate("goblin archer", &[10, 20]);
+    let out = g.pick(job.id, c[0].id).unwrap();
+    // Unchanged: writable, no warning.
+    let p = g.e.open(&g.dir);
+    assert_eq!(p.read_only, None);
+    assert!(!p.warnings.iter().any(|w| w.code == "base_changed"));
+    // Saved over by another editor (other bytes, another size).
+    let path = g.dir.join(&out.file);
+    let kept = std::fs::read(&path).unwrap();
+    std::fs::write(&path, crate::test_support::png_bytes(8, 8, 3)).unwrap();
+    let p = g.e.open(&g.dir);
+    assert_eq!(p.read_only, Some(ReadOnlyReason::BaseChanged));
+    let w = p
+        .warnings
+        .iter()
+        .find(|w| w.code == "base_changed")
+        .unwrap();
+    assert!(w.message.contains("read-only"), "{}", w.message);
+    // Gone.
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(
+        g.e.open(&g.dir).read_only,
+        Some(ReadOnlyReason::BaseChanged)
+    );
+    // Put back: writable again.
+    std::fs::write(&path, kept).unwrap();
+    assert_eq!(g.e.open(&g.dir).read_only, None);
+}
