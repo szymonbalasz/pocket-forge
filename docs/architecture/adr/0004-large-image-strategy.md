@@ -87,3 +87,7 @@ All picks below were accepted as written (#32, #33), except OQ-IMG-12, which is 
 | OQ-IMG-11 | Toolchain | **A. Pin stable Rust ≥ 1.90 in the stack ADR** / B. stay on 1.86 with older crates | A gets current `image`, `fast_image_resize` 6 and `quantette`. |
 | OQ-IMG-12 | Report the image-webp 16384 decode bug upstream? (outward-facing) | **A. Yes: the owner files it, or OKs an agent filing it** / B. no | A costs nothing. |
 | OQ-IMG-13 | Export at a different px per square (#26) | **A. Flatten at source resolution into one RGB8 buffer only when rescaling, then `fast_image_resize` Lanczos3, then encode** / B. compose directly at the output scale in strips (tiny-skia scales the base) | A is exact and simple, and costs ≤ 768 MiB extra at 16k (unmeasured, ~3 s). B stays streamed, but bicubic aliases beyond 2× downscale. |
+
+## Note (2026-11-09, #60)
+
+New-asset generation ([GEN](../../specs/new-asset-generation.md)) adds a **base image** layer: a picked generated image becomes layer 0 of the working image, in place of (or before) an imported original. Everything above still holds with "original" read as "the base image": it is decoded once, regions are cut from it, patches blend over it, and export flattens it. Generated images with alpha (transparent tokens) keep their alpha in their files. Where this ADR's RGB8 pipeline needs opaque pixels (canvas, thumbnails, region crops, export), they are flattened over neutral mid-grey (#60). The decision itself is unchanged.
