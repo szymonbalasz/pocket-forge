@@ -444,7 +444,7 @@ fn home_path_at(b: &[u8], i: usize) -> Option<usize> {
     None
 }
 
-/// `local@domain.tld` (TLD ≥ 2 letters).
+/// `<local>@<domain>.<tld>` (TLD ≥ 2 letters).
 fn email_at(b: &[u8], i: usize) -> Option<usize> {
     let local = |c: &u8| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'%' | b'+' | b'-');
     if !local(&b[i]) || (i > 0 && local(&b[i - 1])) {
