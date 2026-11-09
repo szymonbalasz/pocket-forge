@@ -213,6 +213,9 @@ pub struct Draft {
     /// #55: append the blend instruction at submit; absent = on (the default).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blend_instruction: Option<bool>,
+    /// PRM's helper ticks (FR-PRM-05): `[id]`; absent or `null` = the defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_helpers: Option<Vec<String>>,
     pub updated_at: Timestamp,
     #[serde(flatten)]
     pub extra: Extra,
