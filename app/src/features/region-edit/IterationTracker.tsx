@@ -17,7 +17,7 @@ import {
   orderRows,
   outputLabel,
   refsTooltip,
-  retryJobId,
+  offersRetry,
   shownState,
   stripJobId,
 } from './tracker';
@@ -161,7 +161,6 @@ export function IterationTracker() {
   if (!s.projectId || s.iterations.length === 0) return null;
   const rows = orderRows(s.iterations);
   const strip = stripJobId(rows);
-  const retryable = retryJobId(rows);
   const select = (id: string) => rgn.selectIteration(id);
   return (
     <div className="rgn-tracker" data-testid="rgn-tracker">
@@ -224,11 +223,12 @@ export function IterationTracker() {
                     </span>
                   )}
                   <span>{costLabel(r.cost)}</span>
-                  {r.job_id === retryable && (
+                  {offersRetry(rows, r) && (
                     <button
                       type="button"
                       className="small"
                       data-testid="rgn-job-retry"
+                      data-record-id={r.job_id}
                       onClick={(e) => {
                         e.stopPropagation();
                         void rgn.retry(r.job_id);

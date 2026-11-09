@@ -28,11 +28,11 @@ export const stripJobId = (rows: RgnIteration[]): string | null => {
 };
 
 /** R62: Retry is offered on the newest job once it is final (`closed` included, e.g. accepted);
- *  older iterations get none (R61). */
-export const retryJobId = (rows: RgnIteration[]): string | null => {
-  const first = orderRows(rows)[0];
-  return first && canRetry(first.state) ? first.job_id : null;
-};
+ *  older region edit iterations get none (R61). R84: a generate iteration offers it whenever it
+ *  is final, newest or not (as a re-pick works from any of them, OQ-GEN-08). */
+export const offersRetry = (rows: RgnIteration[], row: RgnIteration): boolean =>
+  canRetry(row.state) &&
+  (row.operation === 'generate' || orderRows(rows)[0]?.job_id === row.job_id);
 
 /** Keeps the current selection while it exists; else the newest row. */
 export function defaultSelection(rows: RgnIteration[], current: string | null): string | null {

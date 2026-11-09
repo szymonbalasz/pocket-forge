@@ -29,7 +29,7 @@ import {
   iterationCandidates,
   orderRows,
   refsTooltip,
-  retryJobId,
+  offersRetry,
   shownState,
   stripJobId,
 } from './tracker';
@@ -408,11 +408,25 @@ describe('iteration tracker logic', () => {
   });
 
   test('FR-RGN-21 R62 Retry on the newest job in any final state, closed included; never an older one', () => {
-    expect(retryJobId([row('J1', 1, 'closed', true), row('J2', 2, 'closed')])).toBe('J2');
+    const retryIds = (rows: RgnIteration[]) =>
+      rows.filter((r) => offersRetry(rows, r)).map((r) => r.job_id);
+    expect(retryIds([row('J1', 1, 'closed', true), row('J2', 2, 'closed')])).toEqual(['J2']);
     for (const st of ['failed', 'canceled', 'lost', 'fetched'] as const)
-      expect(retryJobId([row('J1', 1, 'closed'), row('J2', 2, st)])).toBe('J2');
-    expect(retryJobId([row('J1', 1, 'closed'), row('J3', null, 'running')])).toBeNull();
-    expect(retryJobId([])).toBeNull();
+      expect(retryIds([row('J1', 1, 'closed'), row('J2', 2, st)])).toEqual(['J2']);
+    expect(retryIds([row('J1', 1, 'closed'), row('J3', null, 'running')])).toEqual([]);
+    expect(retryIds([])).toEqual([]);
+  });
+
+  test('R84 FR-GEN-32 every final generate iteration offers Retry; region edit rows stay newest-only', () => {
+    const gen = (r: RgnIteration): RgnIteration => ({ ...r, operation: 'generate' });
+    const rows = [
+      gen(row('G1', 1, 'closed', true)),
+      row('E2', 2, 'closed'),
+      gen(row('G3', 3, 'failed')),
+      row('E4', 4, 'closed'),
+      gen(row('G5', null, 'running')),
+    ];
+    expect(rows.filter((r) => offersRetry(rows, r)).map((r) => r.job_id)).toEqual(['G1', 'G3']);
   });
 
   test('FR-RGN-40 the picker gets the iteration’s non-trashed candidates in provider order', () => {
