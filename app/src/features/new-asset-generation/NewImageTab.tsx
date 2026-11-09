@@ -1,13 +1,15 @@
 // The New image tab (new-asset-generation §7), top to bottom: Model (picker, capability controls,
 // warnings) · Size · Structural sketch (hidden when the model takes none) · References (REF's
-// block) · Prompt (PRM's block from slice 6; the typed prompt until then) · Seed · Cost ·
-// Generate. Rendered by RGN's Generate section as the "New image" tab (OQ-GEN-09); only mounted
-// while it is the visible tab (FR-GEN-36).
+// block) · Prompt (PRM's block, FR-GEN-16) · Seed · Cost · Generate. Rendered by RGN's Generate
+// section as the "New image" tab (OQ-GEN-09); only mounted while it is the visible tab, so it is
+// the prompt chat's host then (FR-GEN-36): it publishes its draft and clears it when unmounted.
 import { useEffect, useState } from 'react';
 import { RadioGroup, Select, Switch } from 'radix-ui';
 
 import { pickPaths } from '../../api';
+import { chatContext } from '../../shared/chatContext';
 import { useProjectState } from '../../store/project';
+import { PromptBlock } from '../prompt-helper';
 import { openProviderSettings } from '../provider';
 import { ReferencesBlock } from '../references';
 import {
@@ -30,6 +32,7 @@ import {
   resultLabel,
 } from './size';
 import {
+  currentDraft,
   gen,
   isOffline,
   singleResult,
@@ -54,6 +57,21 @@ function useGenSession(): void {
     gen.setVisible(true);
     return () => gen.setVisible(false);
   }, []);
+  useChatHost();
+}
+
+/** FR-GEN-36 / FR-PRM-23: while mounted (= the visible tab) the tab is the chat's host: it
+ *  publishes the draft its estimate takes (debounced by the seam) and clears it when it is
+ *  hidden or unmounted (a tab switch or closing the project). */
+function useChatHost(): void {
+  const input = useGen((x) => {
+    const d = currentDraft(x);
+    return x.projectId && d ? JSON.stringify(d) : null;
+  });
+  useEffect(() => {
+    if (input) chatContext.publish('gen', JSON.parse(input));
+  }, [input]);
+  useEffect(() => () => chatContext.clear('gen'), []);
 }
 
 /** An integer field that commits on Enter or blur (out-of-range values are clamped by the store). */
@@ -472,29 +490,22 @@ function AddSketch({ disabled }: { disabled: boolean }) {
   );
 }
 
-/** Placeholder for PRM's prompt block (slice 6): the typed prompt, which is the final prompt
- *  until the helpers join it (FR-GEN-16). */
+/** FR-GEN-16: PRM's prompt block (typed prompt, helpers, "Final prompt (as sent)", chat): the
+ *  final prompt is the typed prompt plus the ticked helpers, never the blend instruction. */
 function PromptSection({ s }: { s: GenState }) {
-  const required = !!s.caps?.prompt_required;
   const seedCtl = s.caps?.controls.find((c) => c.type === 'seed' || c.role === 'seed');
   return (
     <div className="rgn-section">
-      <label className="rgn-control-label" htmlFor="gen-prompt">
-        Prompt
-        {required && (
-          <span className="rgn-required" title="Required">
-            *
-          </span>
-        )}
-      </label>
-      <textarea
-        id="gen-prompt"
-        className="rgn-prompt"
-        data-testid="gen-panel-prompt"
-        rows={4}
-        value={s.prompt}
-        placeholder="Describe the image, e.g. flooded crypt, torchlight"
-        onChange={(e) => gen.setPrompt(e.target.value)}
+      <PromptBlock
+        host="gen"
+        kind={s.kind}
+        prompt={s.prompt}
+        onPromptChange={(t) => gen.setPrompt(t)}
+        helperIds={s.promptHelpers}
+        onHelperIdsChange={(ids) => gen.setPromptHelpers(ids)}
+        readOnly={!!s.readOnly}
+        required={!!s.caps?.prompt_required}
+        retry={s.promptRetry}
       />
       {s.caps?.seed && seedCtl && (
         <div className="rgn-row" data-testid="gen-panel-seed">

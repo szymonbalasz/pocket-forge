@@ -279,6 +279,13 @@ impl Command for ProviderListModels {
             operation: Some(input.operation),
         };
         let list = provider_call(core, core.ctx.provider.list_models_cached(&filter))?;
+        if input.operation == Operation::Generate {
+            // GEN's chat context names the model without a provider call (FR-GEN-17).
+            let names = &mut core.state().generate.model_names;
+            for m in &list.models {
+                names.insert(m.id.clone(), m.name.clone());
+            }
+        }
         Ok(ListModelsOutput {
             models: list.models,
             stale: list.stale,

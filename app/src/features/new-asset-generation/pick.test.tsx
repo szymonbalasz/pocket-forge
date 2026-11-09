@@ -42,7 +42,7 @@ async function setup() {
 }
 
 async function generate(prompt: string, count = 2) {
-  fireEvent.change(screen.getByTestId('gen-panel-prompt'), { target: { value: prompt } });
+  fireEvent.change(screen.getByTestId('prm-block-prompt'), { target: { value: prompt } });
   await waitFor(() => expect(gen.get().estimate.status).toBe('ready'), { timeout: 4000 });
   await act(async () => fireEvent.click(screen.getByTestId('gen-panel-submit')));
   await screen.findByTestId('rgn-confirm');

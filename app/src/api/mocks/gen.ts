@@ -41,7 +41,10 @@ export function installGenMock(seed: GenMockSeed): void {
     /** Sketch file → its content version; a test bumps it to flag `changed since NNN`. */
     sketchVersion: {} as Record<string, number>,
     /** Generate job id → its draft and the sketch version it sent. */
-    jobs: {} as Record<string, { draft: Rec; sketch: { file: string; v: number } | null }>,
+    jobs: {} as Record<
+      string,
+      { draft: Rec; sketch: { file: string; v: number } | null; helpers: Rec[] }
+    >,
   };
 
   // ── FR-GEN-08/09/10: size fit ──────────────────────────────────────────────────────────────
@@ -343,9 +346,19 @@ export function installGenMock(seed: GenMockSeed): void {
         },
       };
       s.jobs.push(job);
+      // FR-PRM-09: the helpers sent (the PRM mock's compose hook); never the blend instruction.
+      const kind = String((handlers.project_get?.({}) as Rec | undefined)?.kind ?? 'map');
+      const helpers = handlers.__prm_sent
+        ? ((await handlers.__prm_sent({
+            kind,
+            helper_ids: (draft.prompt_helpers as string[] | null | undefined) ?? null,
+            blend_instruction: null,
+          })) as Rec[])
+        : [];
       g.jobs[id] = {
         draft: JSON.parse(JSON.stringify(draft)),
         sketch: sketch ? { file: sketch, v: g.sketchVersion[sketch] ?? 0 } : null,
+        helpers,
       };
       s.spend = Number(s.spend) + amount;
       emit('rgn:spend', { spend: s.spend, cap: s.cap });
@@ -384,11 +397,21 @@ export function installGenMock(seed: GenMockSeed): void {
       const references = retry
         ? await retry({ rows, label: n, has_slots: !!caps(rec.draft.model_id)?.slots.length })
         : (rec.draft.references ?? null);
+      // FR-PRM-10: the job's helpers ticked again; changed / missing badged.
+      const kind = String((handlers.project_get?.({}) as Rec | undefined)?.kind ?? 'map');
+      const prm = handlers.__prm_retry
+        ? ((await handlers.__prm_retry({ kind, recorded: rec.helpers, since: n })) as {
+            ticks: string[];
+            prompt_retry?: Rec;
+          })
+        : { ticks: (rec.draft.prompt_helpers as string[] | null | undefined) ?? [] };
       return {
         ...JSON.parse(JSON.stringify(rec.draft)),
         seed: rec.draft.seed ?? null,
         structure,
         references,
+        prompt_helpers: prm.ticks,
+        ...(prm.prompt_retry ? { prompt_retry: prm.prompt_retry } : {}),
       };
     },
   });

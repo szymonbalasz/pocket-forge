@@ -5,9 +5,12 @@ import generateCaps from '../../../../fixtures/gen/capabilities-generate.json';
 import allTypes from '../../../../fixtures/rgn/capabilities-all-types.json';
 import type { Capabilities, FolderFile, ProjectKind } from '../../api';
 import { installGenMock, type GenMockSeed } from '../../api/mocks/gen';
+import { installPrmMock, type PrmMockSeed } from '../../api/mocks/prm';
 import { refMock, sampleRefSeed } from '../../api/mocks/ref';
 import { installRgnMock } from '../../api/mocks/rgn';
 import { baseSnapshot, installFakeTauri, type FakeTauri } from '../../api/mocks/tauri';
+import { chatContext } from '../../shared/chatContext';
+import { resetPromptHelpers } from '../prompt-helper';
 
 /** `fixtures/gen/capabilities-generate.json` (§13): PRV's fake generate models (R76) as
  *  `provider_get_capabilities{operation: generate}` returns them. `fake-gen-wh`: wh 64–2048 step
@@ -48,12 +51,16 @@ export interface GenSetup {
   gen?: Partial<GenMockSeed>;
   /** `draft.generate` saved in the project. */
   draft?: Record<string, unknown> | null;
+  /** The PRM mock's helper list (the prompt block, FR-GEN-16). */
+  prm?: PrmMockSeed;
 }
 
 export const PROJECT_DIR = 'C:/pf-test/library/Maps/map';
 
 /** Installs the mocked core; `project_open` returns the snapshot of the asked project. */
 export function mockGenCore(opts: GenSetup = {}): FakeTauri & { structure: FolderFile[] } {
+  resetPromptHelpers();
+  chatContext.reset();
   const snap = {
     ...baseSnapshot(),
     kind: opts.kind ?? 'map',
@@ -72,6 +79,7 @@ export function mockGenCore(opts: GenSetup = {}): FakeTauri & { structure: Folde
     readOnly: opts.readOnly,
     kind: opts.kind,
   });
+  installPrmMock(opts.prm ?? {});
   installGenMock({
     models: GEN_MODELS,
     capabilities: { 'fake-gen-wh': GEN_WH, 'fake-gen-aspect': GEN_ASPECT },

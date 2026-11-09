@@ -19,6 +19,7 @@ import {
   type ModelSummary,
   type ProjectKind,
   type ProjectSnapshot,
+  type PromptRetryBadges,
   type Spend,
 } from '../../api';
 import { isFolderMovedError, projectStore } from '../../store/project';
@@ -68,8 +69,12 @@ export interface GenState {
   touched: string[];
   evaluation: ControlState[] | null;
   notices: string[];
-  /** The typed prompt (PRM's prompt block replaces the textarea in slice 6). */
+  /** The typed prompt (PRM's prompt block, FR-GEN-16). */
   prompt: string;
+  /** PRM's helper ticks (`draft.generate.prompt_helpers`); null = the defaults (FR-PRM-05). */
+  promptHelpers: string[] | null;
+  /** FR-PRM-10 badges after a Retry (changed / missing helpers). */
+  promptRetry: PromptRetryBadges | null;
   seedMode: 'random' | 'pinned';
   seed: number | null;
   size: GenSize;
@@ -119,6 +124,8 @@ const initial: GenState = {
   evaluation: null,
   notices: [],
   prompt: '',
+  promptHelpers: null,
+  promptRetry: null,
   seedMode: 'random',
   seed: null,
   size: sizeFor('map', null),
@@ -216,11 +223,13 @@ function storedDraft(s: GenState): GenDraft {
     structure: s.sketch ? { file: s.sketch } : null,
     references: referencesDraft('gen').references ?? null,
     typed_prompt: s.prompt,
+    ...(s.promptHelpers ? { prompt_helpers: s.promptHelpers } : {}),
   };
 }
 
-/** The draft estimate and submit send (FR-GEN-22). The final prompt is the typed one until PRM's
- *  prompt block composes it (FR-GEN-16, slice 6). */
+/** The draft estimate and submit send (FR-GEN-22). The core composes the final prompt from the
+ *  typed prompt and the ticks (FR-GEN-16, R80); `final_prompt` is informational. This is also
+ *  what the tab publishes as its chat context input (FR-PRM-23). */
 export function currentDraft(s: GenState): GenJobDraft | null {
   if (!s.caps || !s.modelId) return null;
   return {
@@ -231,6 +240,7 @@ export function currentDraft(s: GenState): GenJobDraft | null {
     structure: s.sketch ? { file: s.sketch } : null,
     references: referencesForSend('gen'),
     typed_prompt: s.prompt,
+    ...(s.promptHelpers ? { prompt_helpers: s.promptHelpers } : {}),
     final_prompt: s.prompt,
   };
 }
@@ -495,6 +505,8 @@ export const gen = {
       readOnly: project.read_only,
       modelId: d?.model_id ?? null,
       prompt: d?.typed_prompt ?? '',
+      promptHelpers: d?.prompt_helpers ?? null,
+      promptRetry: null,
       seedMode: d?.seed !== null && d?.seed !== undefined ? 'pinned' : 'random',
       seed: d?.seed ?? null,
       size: sizeFor(project.kind, d?.size),
@@ -550,6 +562,13 @@ export const gen = {
     saveDraftSoon();
     schedule();
     void evaluate();
+  },
+
+  /** FR-PRM-05: a helper tick change (the explicit list): saved with the draft, never
+   *  re-estimates (FR-PRM-08). */
+  setPromptHelpers(ids: string[]): void {
+    set({ promptHelpers: ids });
+    saveDraftSoon();
   },
 
   setPrompt(prompt: string): void {
@@ -655,7 +674,14 @@ export const gen = {
         }
         await submit(fresh.estimate_id);
       }
-      set({ submitting: false, confirmOpen: false, sketchFlag: null, info: null });
+      // FR-PRM-10: the badges were about the retried job.
+      set({
+        submitting: false,
+        confirmOpen: false,
+        sketchFlag: null,
+        promptRetry: null,
+        info: null,
+      });
       settleReferences('gen');
       await Promise.all([refreshJobs(), loadSpend()]);
     } catch (e) {
@@ -685,6 +711,8 @@ export const gen = {
       const flag = d.structure?.changed_since || d.structure?.missing ? d.structure : null;
       set({
         prompt: d.typed_prompt,
+        promptHelpers: d.prompt_helpers ?? [],
+        promptRetry: d.prompt_retry ?? null,
         seedMode: d.seed === null ? 'random' : 'pinned',
         seed: d.seed,
         size: d.size ? sizeFor(state.kind, d.size) : state.size,
