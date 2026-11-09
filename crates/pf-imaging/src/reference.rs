@@ -47,7 +47,7 @@ pub fn mosaic_jpeg(sources: &[PathBuf], side: u32, quality: u8) -> Result<Vec<u8
     };
     let mut canvas = RgbImage::from_pixel(side, side, image::Rgb(EMPTY));
     for (img, (x, y, w, h)) in images.iter().zip(cells) {
-        let cell = img.resize_to_fill(w, h, FilterType::Triangle).into_rgb8();
+        let cell = fill_cell(img, w, h);
         image::imageops::replace(&mut canvas, &cell, i64::from(x), i64::from(y));
     }
     let mut out = Vec::new();
@@ -57,19 +57,33 @@ pub fn mosaic_jpeg(sources: &[PathBuf], side: u32, quality: u8) -> Result<Vec<u8
     Ok(out)
 }
 
-/// Decodes a file and shrinks it near `side` first, so a 16k source doesn't stay in memory.
+/// `img` centre-cropped to the `w × h` cell's aspect, then resized to it. Cropping first keeps
+/// every buffer at most the source or the cell size, whatever the aspect ratio
+/// (`resize_to_fill` resizes first: a 1024×1 source for a 256×512 cell made 524288×512).
+fn fill_cell(img: &DynamicImage, w: u32, h: u32) -> RgbImage {
+    let (sw, sh) = (u64::from(img.width()), u64::from(img.height()));
+    let (cw, ch) = if sw * u64::from(h) > sh * u64::from(w) {
+        ((sh * u64::from(w) + u64::from(h) / 2) / u64::from(h), sh)
+    } else {
+        (sw, (sw * u64::from(h) + u64::from(w) / 2) / u64::from(w))
+    };
+    // Both are ≤ the source side, so they fit in u32.
+    let (cw, ch) = (cw.clamp(1, sw) as u32, ch.clamp(1, sh) as u32);
+    let (x, y) = ((img.width() - cw) / 2, (img.height() - ch) / 2);
+    img.crop_imm(x, y, cw, ch)
+        .resize_exact(w, h, FilterType::Triangle)
+        .into_rgb8()
+}
+
+/// Decodes a file and shrinks it to fit `2 × side` on its long side, so a 16k source doesn't
+/// stay in memory and a long thin one never grows (review #11).
 fn decode_small(path: &Path, side: u32) -> Result<DynamicImage, ProbeError> {
     let img = decode_whole(path)?;
-    let (w, h) = (img.width(), img.height());
-    if w.max(h) <= side * 2 {
+    let (w, h) = fit_within(img.width(), img.height(), side.saturating_mul(2));
+    if (w, h) == (img.width(), img.height()) {
         return Ok(img);
     }
-    let f = f64::from(side * 2) / f64::from(w.min(h));
-    let (nw, nh) = (
-        ((f64::from(w) * f).round() as u32).max(1),
-        ((f64::from(h) * f).round() as u32).max(1),
-    );
-    Ok(img.resize_exact(nw, nh, FilterType::Triangle))
+    Ok(img.resize_exact(w, h, FilterType::Triangle))
 }
 
 /// A reference as it will be sent (FR-REF-22).
@@ -198,6 +212,40 @@ mod tests {
             mosaic_jpeg(&paths[1..2], 512, 80),
             Err(MosaicError::NoImage)
         ));
+    }
+
+    /// Review #11: a long thin source is shrunk by its long side, so neither the decode nor the
+    /// cell fill grows past the mosaic (a 16384×16 image once became 524288×512).
+    #[test]
+    fn fr_ref_13_long_thin_sources_stay_small() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut paths = vec![];
+        for (w, h) in [(16384, 16), (1, 16384), (16384, 1)] {
+            let p = dir.path().join(format!("{w}x{h}.png"));
+            RgbImage::from_pixel(w, h, image::Rgb([200, 30, 30]))
+                .save(&p)
+                .unwrap();
+            paths.push(p);
+        }
+        for p in &paths {
+            let small = decode_small(p, 512).unwrap();
+            assert!(
+                small.width() <= 1024 && small.height() <= 1024,
+                "{}: {}x{}",
+                p.display(),
+                small.width(),
+                small.height()
+            );
+        }
+        let cell = fill_cell(&decode_small(&paths[0], 512).unwrap(), 256, 512);
+        assert_eq!(cell.dimensions(), (256, 512));
+        assert_eq!(cell.get_pixel(128, 256).0, [200, 30, 30]);
+        let jpeg = mosaic_jpeg(&paths, 512, 80).unwrap();
+        let back = image::load_from_memory(&jpeg).unwrap().into_rgb8();
+        assert_eq!(back.dimensions(), (512, 512));
+        let near = |p: [u8; 3], c: [u8; 3]| p.iter().zip(c).all(|(a, b)| a.abs_diff(b) < 40);
+        assert!(near(back.get_pixel(128, 128).0, [200, 30, 30]));
+        assert!(near(back.get_pixel(128, 384).0, [200, 30, 30]));
     }
 
     #[test]
