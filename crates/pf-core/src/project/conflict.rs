@@ -103,8 +103,16 @@ fn state_rank(s: JobState) -> u8 {
     }
 }
 
-/// True if `a` is later than `b`: a later state, or the same rank written later.
+/// True if `a` is later than `b`: a later state, or the same rank written later. R102: a copy
+/// that kept a job handle or candidates beats a `lost` or `failed` one (e.g. another machine's
+/// open sweep marked it lost while this one saved the handle), so paid work is never dropped.
 pub(crate) fn later(a: &JobFile, b: &JobFile) -> bool {
+    let gave_up = |j: &JobFile| matches!(j.state, JobState::Lost | JobState::Failed);
+    match (gave_up(a), gave_up(b)) {
+        (false, true) if a.holds_paid_work() => return true,
+        (true, false) if b.holds_paid_work() => return false,
+        _ => {}
+    }
     (state_rank(a.state), a.updated_at) > (state_rank(b.state), b.updated_at)
 }
 

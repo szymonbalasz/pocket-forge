@@ -214,6 +214,19 @@ impl JobFile {
         }
     }
 
+    /// True once the provider's job handle is saved (`provider.job_handle`, PRV Appendix B): the
+    /// job can be polled and fetched without a new submit.
+    pub fn has_handle(&self) -> bool {
+        self.provider
+            .get("job_handle")
+            .is_some_and(|h| !h.is_null())
+    }
+
+    /// True if this copy holds paid work: a job handle or candidates (R102).
+    pub fn holds_paid_work(&self) -> bool {
+        self.has_handle() || !self.candidate_ids.is_empty()
+    }
+
     /// True for a New image job (FR-GEN-22).
     pub fn is_generate(&self) -> bool {
         self.operation == OPERATION_GENERATE
