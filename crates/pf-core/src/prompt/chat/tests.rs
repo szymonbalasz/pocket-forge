@@ -1197,3 +1197,34 @@ fn fr_prm_22_an_unwritable_thread_file_keeps_the_turn_in_memory() {
     lab.core.chat.on_project_close(pid(&lab));
     assert_eq!(thread_view(&lab)["thread"]["turns"], json!([]));
 }
+
+/// FR-PRM-23 / FR-PRM-35 (code review 12): a project that closes while a publish for it is
+/// on its way keeps no context, so its Send isn't enabled again on reopen.
+#[test]
+fn fr_prm_23_a_close_during_a_publish_leaves_no_context() {
+    let lab = lab();
+    let p = pid(&lab);
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    hook(&lab, "publish_checked", move |_| {
+        tx.send(()).unwrap();
+        // Room for the close to land between the check and the insert, if it can.
+        std::thread::sleep(Duration::from_millis(200));
+    });
+    let core = &lab.core;
+    let parked = std::thread::scope(|s| {
+        let closer = s.spawn(move || {
+            rx.recv().unwrap();
+            let mut st = core.state();
+            let old = st.project.take();
+            core.chat.on_project_close(p);
+            old
+        });
+        let _ = core.dispatch(
+            "prm_context_publish",
+            json!({"project_id": p, "host": "rgn", "input": lab.draft("a kitchen")}),
+        );
+        closer.join().unwrap()
+    });
+    lab.core.state().project = parked;
+    assert_eq!(thread_view(&lab)["current_host"], Value::Null);
+}

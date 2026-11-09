@@ -715,15 +715,32 @@ impl Command for PrmContextPublish {
     type Output = Empty;
 
     fn run(core: &Core, input: PublishInput) -> CoreResult<Empty> {
-        open_project(core, input.project_id)?;
         let (before, after) = {
+            // The project check and the insert under the state lock (code review 12): a close
+            // in between would otherwise leave the closed project's context behind. The order
+            // state → rt is `on_project_close`'s.
+            let state = core.state();
+            if !state
+                .project
+                .as_ref()
+                .is_some_and(|p| p.manifest.project_id == input.project_id)
+            {
+                return Err(CoreError::new(
+                    ErrorCode::NoProject,
+                    "that asset project is not open",
+                ));
+            }
+            test_hook(core, "publish_checked");
             let mut rt = lock(&core.chat.rt);
             let before = rt.current_host(input.project_id);
             rt.seq += 1;
             let seq = rt.seq;
             rt.contexts
                 .insert((input.project_id, input.host), (seq, input.input));
-            (before, rt.current_host(input.project_id))
+            let out = (before, rt.current_host(input.project_id));
+            drop(rt);
+            drop(state);
+            out
         };
         if before != after {
             emit_context(&core.ctx, Some(input.project_id), after);

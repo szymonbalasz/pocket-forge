@@ -54,6 +54,29 @@ test('BL-42 flush resolves once the sink has the input', async () => {
   expect(done).toBe(true);
 });
 
+test('FR-PRM-23 R97 flush waits for a debounced publish that is still on its way', async () => {
+  let release: () => void = () => undefined;
+  const s = {
+    publish: vi.fn(() => new Promise<void>((r) => (release = r))),
+    clear: vi.fn(),
+  };
+  chatContext.setSink(s);
+  chatContext.publish('rgn', { x: 3 });
+  vi.advanceTimersByTime(CHAT_PUBLISH_MS);
+  expect(s.publish).toHaveBeenCalledTimes(1);
+  let done = false;
+  const p = chatContext.flush().then(() => (done = true));
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(done).toBe(false);
+  expect(s.publish).toHaveBeenCalledTimes(1);
+  release();
+  await p;
+  expect(done).toBe(true);
+  // Once it has landed, a flush answers at once.
+  await chatContext.flush();
+});
+
 test('FR-GEN-36 FR-PRM-43 a hidden host clears its own context only; the new host publishes', () => {
   const s = sink();
   chatContext.setSink(s);

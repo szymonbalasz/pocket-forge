@@ -21,13 +21,20 @@ let sink: ChatContextSink | null = null;
 let current: { host: ChatHostId; input: unknown } | null = null;
 let pending: { host: ChatHostId; input: unknown; timer: ReturnType<typeof setTimeout> } | null =
   null;
+/** The last publish still on its way to the sink (R97: a flush waits for it). */
+let inflight: Promise<void> | null = null;
 
 function send(host: ChatHostId, input: unknown): Promise<void> {
   current = { host, input };
-  return Promise.resolve(sink?.publish(host, input)).then(
+  const p = Promise.resolve(sink?.publish(host, input)).then(
     () => undefined,
     () => undefined,
   );
+  inflight = p;
+  void p.then(() => {
+    if (inflight === p) inflight = null;
+  });
+  return p;
 }
 
 export const chatContext = {
@@ -42,13 +49,15 @@ export const chatContext = {
   },
 
   /** Publishes a pending input now (right before a chat send, FR-PRM-23). Resolves once the
-   *  sink has it (at once when nothing is pending); never rejects. */
+   *  sink has it, including a debounced publish already on its way (R97); at once when
+   *  nothing is pending or on its way. Never rejects. */
   flush(): Promise<void> {
-    if (!pending) return Promise.resolve();
+    const earlier = inflight ?? Promise.resolve();
+    if (!pending) return earlier;
     clearTimeout(pending.timer);
     const { host, input } = pending;
     pending = null;
-    return send(host, input);
+    return Promise.all([earlier, send(host, input)]).then(() => undefined);
   },
 
   /** `host`'s block was hidden or unmounted: its context goes (FR-GEN-36). */
@@ -69,7 +78,7 @@ export const chatContext = {
   /** PRM slice 5 installs the core sink (null removes it); the current input is sent at once. */
   setSink(next: ChatContextSink | null): void {
     sink = next;
-    if (next && current) void next.publish(current.host, current.input);
+    if (next && current) void send(current.host, current.input);
   },
 
   /** Test helper. */
@@ -77,6 +86,7 @@ export const chatContext = {
     if (pending) clearTimeout(pending.timer);
     pending = null;
     current = null;
+    inflight = null;
     sink = null;
   },
 };
