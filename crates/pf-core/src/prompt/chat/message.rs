@@ -138,8 +138,9 @@ pub fn compose(note: Option<String>, block: &str, user_text: &str) -> String {
 }
 
 /// FR-PRM-26: "crop 1024×768 + mask · prompt · Ideogram 4.5 · 4 controls". The image count is
-/// what the turn sends (or sent earlier in the session); images the turn limit drops are named
-/// on their own (FR-PRM-25), not counted (M4).
+/// what the turn sends; images the session already received are named apart ("3 images + 6
+/// already sent", R103), or "(already sent)" when none is new; images the turn limit drops are
+/// named on their own (FR-PRM-25), not counted (M4).
 pub fn summary(
     ctx: &ChatContext,
     sent: &[ChatImage],
@@ -153,17 +154,20 @@ pub fn summary(
         parts.push("no image".into());
     } else {
         let first = &ctx.images[0];
-        let n = ctx.images.len().saturating_sub(dropped.len());
-        let what = match first.role {
+        let already = ctx.images.len().saturating_sub(sent.len() + dropped.len());
+        let images = |n: usize| format!("{n} image{}", if n == 1 { "" } else { "s" });
+        parts.push(match first.role {
             crate::prompt::context::ChatImageRole::RegionOverlay => {
-                format!("crop {}×{} + mask", first.w, first.h)
+                let what = format!("crop {}×{} + mask", first.w, first.h);
+                if sent.is_empty() {
+                    format!("{what} (already sent)")
+                } else {
+                    what
+                }
             }
-            _ => format!("{n} image{}", if n == 1 { "" } else { "s" }),
-        };
-        parts.push(if sent.is_empty() {
-            format!("{what} (already sent)")
-        } else {
-            what
+            _ if sent.is_empty() => format!("{} (already sent)", images(already)),
+            _ if already > 0 => format!("{} + {already} already sent", images(sent.len())),
+            _ => images(sent.len()),
         });
     }
     if !ctx.typed_prompt.trim().is_empty() {
@@ -208,6 +212,51 @@ pub fn proposals(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prompt::context::{ChatImageRole, ChatModel};
+
+    fn gen_ctx(n: usize) -> ChatContext {
+        ChatContext {
+            host: ChatHost::Gen,
+            kind: Kind::Map,
+            images: (0..n)
+                .map(|i| ChatImage {
+                    id: format!("ref:{i}"),
+                    role: ChatImageRole::Reference,
+                    label: format!("ref {i}"),
+                    w: 64,
+                    h: 64,
+                    content_hash: format!("h{i}"),
+                    jpeg: Vec::new(),
+                })
+                .collect(),
+            typed_prompt: String::new(),
+            helpers: Vec::new(),
+            blend_instruction: None,
+            final_prompt: String::new(),
+            model: ChatModel {
+                id: "fake".into(),
+                name: String::new(),
+            },
+            controls: Vec::new(),
+            facts: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn fr_prm_26_r103_the_summary_counts_only_images_that_will_be_sent() {
+        let ctx = gen_ctx(9);
+        // walk-p4r L3: 6 received earlier in the session, 3 new ones go out.
+        let sent = &ctx.images[6..];
+        assert_eq!(summary(&ctx, sent, &[], true), "3 images + 6 already sent");
+        assert_eq!(summary(&ctx, &[], &[], true), "9 images (already sent)");
+        // Nothing received yet: 6 go out, the turn limit drops 3 (named apart, not counted).
+        let (sent, dropped) = ctx.images.split_at(6);
+        assert_eq!(summary(&ctx, sent, dropped, true), "6 images");
+        assert_eq!(
+            summary(&ctx, &ctx.images[..1], &[], true),
+            "1 image + 8 already sent"
+        );
+    }
 
     #[test]
     fn fr_prm_28_prompt_fences_max_three() {

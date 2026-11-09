@@ -1499,6 +1499,18 @@ fn fr_prm_42_43_31_chat_on_both_hosts_without_a_provider_call() {
     // M4: the summary counts the images sent, not the dropped ones.
     let summary = turns[2]["context"]["summary"].as_str().unwrap();
     assert!(summary.starts_with("6 images · "), "{summary}");
+    // R103 (walk-p4r L3): the next turn would send only the 3 dropped references.
+    let next = g
+        .dispatch(
+            "prm_chat_preview",
+            json!({"project_id": pid, "include_images": true}),
+        )
+        .unwrap();
+    let next_summary = next["summary"].as_str().unwrap();
+    assert!(
+        next_summary.starts_with("3 images + 6 already sent · "),
+        "{next_summary}"
+    );
     assert!(
         turns[3]["text"]
             .as_str()
