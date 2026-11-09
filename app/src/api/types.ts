@@ -1322,11 +1322,13 @@ export interface ComposePreview {
   chars: number;
 }
 
-/** A job's `prompt_helpers[]` entry (FR-PRM-09). */
+/** A job's `prompt_helpers[]` entry (FR-PRM-09): every ticked helper (R94). */
 export interface SentHelper {
   id: string;
   label: string;
   text: string;
+  /** Ticked but not sent (FR-PRM-07); Retry still restores the tick. */
+  skipped?: HelperSkipReason;
 }
 
 /** FR-PRM-10: what a Retry badges in the prompt block (pf-core `PromptRetry`). */

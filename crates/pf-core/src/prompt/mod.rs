@@ -41,16 +41,19 @@ pub struct PromptPart {
     pub text: String,
 }
 
-/// A helper as sent: the job's `prompt_helpers[]` entry (FR-PRM-09).
+/// A ticked helper: the job's `prompt_helpers[]` entry (FR-PRM-09 as amended by R94). `skipped`
+/// is set when the dedupe left it out (FR-PRM-07); Retry restores it ticked all the same.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SentHelper {
     pub id: String,
     pub label: String,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped: Option<SkipReason>,
 }
 
 /// Why a ticked helper wasn't sent (FR-PRM-07).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SkipReason {
     Duplicate,
@@ -74,6 +77,10 @@ pub struct FinalPrompt {
     pub sent: Vec<SentHelper>,
     /// Ticked helpers left out by the dedupe (FR-PRM-07).
     pub skipped: Vec<Skipped>,
+    /// Every ticked helper in helpers-row order, the skipped ones flagged: the job record
+    /// (FR-PRM-09, R94).
+    #[serde(skip)]
+    pub ticked: Vec<SentHelper>,
 }
 
 /// FR-PRM-07 normal form: trimmed, whitespace collapsed, lower case, one trailing `.` dropped.
@@ -119,6 +126,7 @@ pub fn compose(
 
     let mut sent = Vec::new();
     let mut skipped = Vec::new();
+    let mut ticked_out = Vec::new();
     let mut earlier: Vec<String> = Vec::new();
     for h in helpers
         .iter()
@@ -133,17 +141,20 @@ pub fn compose(
             None
         };
         earlier.push(norm);
+        let entry = SentHelper {
+            id: h.id.clone(),
+            label: h.label.clone(),
+            text: h.text.trim().to_owned(),
+            skipped: reason,
+        };
         match reason {
             Some(reason) => skipped.push(Skipped {
                 id: h.id.clone(),
                 reason,
             }),
-            None => sent.push(SentHelper {
-                id: h.id.clone(),
-                label: h.label.clone(),
-                text: h.text.trim().to_owned(),
-            }),
+            None => sent.push(entry.clone()),
         }
+        ticked_out.push(entry);
     }
 
     let mut parts = Vec::new();
@@ -195,14 +206,16 @@ pub fn compose(
         parts,
         sent,
         skipped,
+        ticked: ticked_out,
     }
 }
 
-/// FR-PRM-09: writes the job's `prompt_helpers[]` into the new job's fields (with the
-/// `requested` commit; never changed afterwards).
-pub fn record_on_job(extra: &mut Extra, sent: &[SentHelper]) {
+/// FR-PRM-09 (R94): writes the job's `prompt_helpers[]` into the new job's fields (with the
+/// `requested` commit; never changed afterwards): every ticked helper, in order, the skipped
+/// ones with `skipped` ([`FinalPrompt::ticked`]).
+pub fn record_on_job(extra: &mut Extra, ticked: &[SentHelper]) {
     extra.insert(
         JOB_FIELD.into(),
-        serde_json::to_value(sent).unwrap_or_else(|_| serde_json::json!([])),
+        serde_json::to_value(ticked).unwrap_or_else(|_| serde_json::json!([])),
     );
 }

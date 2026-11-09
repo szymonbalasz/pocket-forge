@@ -119,10 +119,18 @@ fn fr_prm_07_top_down_helper_is_skipped_while_the_maps_instruction_says_it() {
     );
     assert_eq!(
         job.extra["prompt_helpers"],
-        json!([]),
-        "skipped, not recorded"
+        json!([{"id": TOP_DOWN, "label": "Top-down battlemap", "text": "Top-down battlemap view.",
+                "skipped": "in_blend_instruction"}]),
+        "recorded as ticked, flagged skipped (R94)"
     );
     lab.drive();
+    // FR-PRM-10 (R94, L8): Retry restores the skipped tick too.
+    let r = lab
+        .core
+        .dispatch("rgn_job_retry_draft", json!({ "job_id": job.id }))
+        .unwrap();
+    assert_eq!(r["prompt_helpers"], json!([TOP_DOWN]));
+    assert!(r.get("prompt_retry").is_none());
 
     let mut d = ticked(&lab, "a well", &[TOP_DOWN]);
     d["blend_instruction"] = json!(false);
