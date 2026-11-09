@@ -262,6 +262,8 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     consent: seed.chat?.consent ?? false,
     enabled: seed.chat?.consent ?? false,
     fakeCase: seed.chat?.case ?? 'success',
+    claudePath: null as string | null,
+    windowOpens: 0,
     seq: 0,
     contexts: new Map<string, { seq: number; input: unknown }>(),
     threads: new Map<string, { id: string; turns: Turn[]; updated_at: string }>(),
@@ -306,6 +308,8 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       mode: 'fake',
       backend,
       fake_case: chat.fakeCase,
+      login_command: null,
+      claude_path: chat.claudePath,
     };
   };
   const hostLabel = (h: Host) => (h === 'rgn' ? 'Region edit' : 'New image');
@@ -319,6 +323,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
   };
   handlers.prm_chat_settings_put = (input) => {
     if (typeof input.enabled === 'boolean') chat.enabled = input.enabled;
+    if ('claude_path' in input) chat.claudePath = (input.claude_path as string | null) ?? null;
     if (!chat.enabled) chat.session = null;
     return statusOf();
   };
@@ -329,6 +334,13 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     chat.session = null;
     return {};
   };
+  // Tauri-layer commands (R91): e2e replaces `prm_window_open` with a popup page.
+  handlers.prm_window_open = () => {
+    chat.windowOpens += 1;
+    return null;
+  };
+  handlers.prm_chat_login = () =>
+    chat.consent ? null : fail('consent_required', 'accept the privacy notice first');
   handlers.prm_chat_fake_set_case = (input) => {
     chat.fakeCase = String(input.case);
     return {};
@@ -346,21 +358,36 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
   };
   handlers.prm_chat_thread_get = (input) => {
     const t = chat.threads.get(String(input.project_id));
-    return {
-      thread: t
-        ? {
-            schema_version: 1,
-            id: t.id,
-            created_at: t.updated_at,
-            updated_at: t.updated_at,
-            backend: 'fake',
-            turns: t.turns,
+    // A copy, as the real IPC would return (the window compares views).
+    return JSON.parse(
+      JSON.stringify({
+        thread: t
+          ? {
+              schema_version: 1,
+              id: t.id,
+              created_at: t.updated_at,
+              updated_at: t.updated_at,
+              backend: 'fake',
+              turns: t.turns,
+            }
+          : null,
+        running_turn_id: chat.running?.turnId ?? null,
+        corrupt_set_aside: false,
+        fresh_session_next: chat.session !== String(input.project_id),
+        current_host: (() => {
+          let host: Host | null = null;
+          let best = -1;
+          for (const h of ['rgn', 'gen'] as Host[]) {
+            const c = chat.contexts.get(`${String(input.project_id)}|${h}`);
+            if (c && c.seq > best) {
+              best = c.seq;
+              host = h;
+            }
           }
-        : null,
-      running_turn_id: chat.running?.turnId ?? null,
-      corrupt_set_aside: false,
-      fresh_session_next: chat.session !== String(input.project_id),
-    };
+          return host;
+        })(),
+      }),
+    );
   };
   handlers.prm_chat_send = (input) => {
     const pid = String(input.project_id);
@@ -428,6 +455,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     let canceled = false;
     const finish = (state: string, extra: Rec = {}) => {
       reply.state = state;
+      if (extra.error) reply.error = extra.error;
       t.turns.find((x) => x.id === userId)!.state = 'done';
       t.updated_at = now();
       chat.running = null;

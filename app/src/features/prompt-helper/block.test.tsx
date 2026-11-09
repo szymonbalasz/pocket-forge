@@ -248,10 +248,10 @@ describe('Prompt block', () => {
     expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).readOnly).toBe(true);
   });
 
-  test('PRM slice 2: the Chat button is there but disabled until the prompt chat ships', async () => {
+  test('PRM slice 6: the Chat button is enabled (it opens the chat window)', async () => {
     fake = mockPrm();
     render(<TestHost />);
-    expect((screen.getByTestId('prm-block-chat') as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId('prm-block-chat') as HTMLButtonElement).disabled).toBe(false);
   });
 
   test('PRM host rows render between the helpers row and the preview', async () => {

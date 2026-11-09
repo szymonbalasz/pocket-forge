@@ -795,6 +795,10 @@ export interface Commands {
     { proposal_id: string; host: ChatHostId; inserted_at: string },
   ];
   prm_chat_fake_set_case: [{ case: string }, Record<string, never>];
+  /** Tauri layer (FR-PRM-40, R91): opens or focuses the `prompt-chat` window. */
+  prm_window_open: [Record<string, never>, null];
+  /** Tauri layer (FR-PRM-45): a console running `claude auth login` for the chat's folder. */
+  prm_chat_login: [Record<string, never>, null];
 }
 
 export type CommandName = keyof Commands;
@@ -918,6 +922,10 @@ export interface ChatStatus {
   backend: ChatBackendStatus;
   /** Fake mode only (FR-PRM-39). */
   fake_case?: string;
+  /** The login command shown for copying (after consent; null in fake mode or not found). */
+  login_command: string | null;
+  /** The Claude Code path override (Settings → Prompt chat). */
+  claude_path: string | null;
 }
 
 export interface ChatWindowRect {
@@ -991,6 +999,8 @@ export interface ChatThreadView {
   corrupt_set_aside: boolean;
   /** The next turn starts a fresh session (FR-PRM-35). */
   fresh_session_next: boolean;
+  /** The host whose prompt block is attached (the visible tab), or null (FR-PRM-27/43). */
+  current_host: ChatHostId | null;
 }
 
 export interface ChatSendResult {
