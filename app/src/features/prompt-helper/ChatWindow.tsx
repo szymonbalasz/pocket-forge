@@ -76,6 +76,8 @@ export function ChatWindow() {
   const [declined, setDeclined] = useState(false);
   /** L2: what Log in… did ("A console opened…"). */
   const [loginSaid, setLoginSaid] = useState<string | null>(null);
+  /** L3: a failed turn's detail (stderr tail / message), from its event; never stored. */
+  const [details, setDetails] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<ChatPreview | null>(null);
   const [focusTick, setFocusTick] = useState(0);
   const [list, setList] = useState<HTMLOListElement | null>(null);
@@ -174,6 +176,8 @@ export function ChatWindow() {
         ended.current.add(t.turn_id);
         setLive((l) => (l && l.turnId === t.turn_id ? null : l));
         if (t.error?.code === 'offline') setOffline(true);
+        const detail = t.error?.detail;
+        if (detail) setDetails((d) => ({ ...d, [t.turn_id]: detail }));
         void loadThread(pidRef.current);
       }),
       // L2 / L6: detection, settings and consent changes are followed without a refocus.
@@ -390,6 +394,7 @@ export function ChatWindow() {
             liveText={t.id === live?.turnId ? live.text : null}
             running={t.id === running}
             unsaved={unsaved.has(t.id)}
+            detail={details[t.id]}
             readOnly={readOnly}
             onReplace={replace}
             retryBlocked={offline}
@@ -552,6 +557,8 @@ function TurnView(props: {
   unsaved: boolean;
   /** M5: offline: Retry and Resend wait for Recheck, as Send does. */
   retryBlocked: boolean;
+  /** L3: the error's detail while the window is open (FR-PRM-37: never written). */
+  detail?: string;
   readOnly: boolean;
   onReplace(p: ChatProposal): Promise<void>;
   onRetry(): void;
@@ -619,6 +626,12 @@ function TurnView(props: {
         <div className="prm-chat-error" role="alert">
           <p>{t.error.message}</p>
           {t.error.fix && <p className="muted small">{t.error.fix}</p>}
+          {props.detail && (
+            <details className="small" data-testid="prm-chat-error-detail">
+              <summary>Details</summary>
+              <pre className="prm-chat-detail">{props.detail}</pre>
+            </details>
+          )}
           <button
             type="button"
             data-testid="prm-chat-retry"

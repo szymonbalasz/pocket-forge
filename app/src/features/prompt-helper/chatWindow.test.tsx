@@ -182,6 +182,17 @@ test('FR-PRM-37 a failed turn shows its error with Retry, which resends the same
   expect(sends.map((s) => s.text)).toEqual(['ideas', 'ideas']);
 });
 
+test('FR-PRM-37 L3 a crashed turn shows the stderr tail under Details', async () => {
+  setup({ chat: { consent: true, case: 'crash' } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(screen.getByText(/stopped unexpectedly/)).toBeTruthy());
+  expect(id('prm-chat-error-detail').textContent).toContain('fake chat: simulated crash');
+});
+
 test('§7 §11 M5 an offline turn locks Send and Retry until Recheck succeeds', async () => {
   setup({ chat: { consent: true, case: 'offline' } });
   await api.chat.contextPublish(PID, 'rgn', {});

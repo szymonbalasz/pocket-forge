@@ -559,9 +559,10 @@ fn fr_prm_37_backend_errors_reach_send_and_the_thread() {
     assert_eq!(st["backend"]["code"], "not_installed");
 
     // Turn errors end the reply as failed, with the partial text.
-    for (case, err, fresh_after) in [
-        ("usage_limit", "usage_limit", false),
-        ("crash", "backend_crashed", true),
+    for (case, err, fresh_after, detail) in [
+        ("usage_limit", "usage_limit", false, None),
+        ("malformed", "stream_malformed", true, Some("weren't JSON")),
+        ("crash", "backend_crashed", true, Some("simulated crash")),
     ] {
         lab.core
             .dispatch("prm_chat_fake_set_case", json!({"case": case}))
@@ -570,6 +571,11 @@ fn fr_prm_37_backend_errors_reach_send_and_the_thread() {
         let end = events(&lab, super::EVENT_TURN).last().cloned().unwrap();
         assert_eq!(end["state"], "failed", "{case}");
         assert_eq!(end["error"]["code"], err, "{case}");
+        // L3: the event carries the detail (stderr tail / message) for the window only.
+        if let Some(d) = detail {
+            let got = end["error"]["detail"].as_str().unwrap_or_default();
+            assert!(got.contains(d), "{case}: {got}");
+        }
         let turns = thread_view(&lab)["thread"]["turns"]
             .as_array()
             .unwrap()

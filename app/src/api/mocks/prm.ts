@@ -547,6 +547,16 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
             fix: "You've hit your limit · resets 3pm",
           },
         });
+      if (chat.fakeCase === 'crash')
+        return finish('failed', {
+          error: {
+            code: 'backend_crashed',
+            message: 'Claude Code stopped unexpectedly (exit 1).',
+            fix: 'Retry; details show the stderr tail.',
+            detail: 'fake chat: simulated crash',
+            exit_code: 1,
+          },
+        });
       if (chat.fakeCase === 'offline')
         return finish('failed', {
           error: {
