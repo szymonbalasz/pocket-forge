@@ -62,16 +62,23 @@ impl JobState {
         )
     }
 
-    /// Every edge of the schema's state diagram.
+    /// Every edge of the schema's state diagram. R102 adds `→ lost` from the polled states
+    /// (polling gave up after repeated errors, the handle kept).
     pub fn can_become(self, next: JobState) -> bool {
         use JobState::*;
         matches!(
             (self, next),
             (Requested, Submitted | Failed | Lost)
-                | (Submitted, Queued | Running | Failed | Canceled | Unknown)
-                | (Queued, Running | Failed | Canceled | Unknown)
-                | (Running, Succeeded | Failed | Canceled | Unknown)
-                | (Unknown, Queued | Running | Succeeded | Failed | Canceled)
+                | (
+                    Submitted,
+                    Queued | Running | Failed | Canceled | Unknown | Lost
+                )
+                | (Queued, Running | Failed | Canceled | Unknown | Lost)
+                | (Running, Succeeded | Failed | Canceled | Unknown | Lost)
+                | (
+                    Unknown,
+                    Queued | Running | Succeeded | Failed | Canceled | Lost
+                )
                 | (Succeeded, Fetched | Failed)
                 | (Fetched, Closed)
         )
@@ -267,6 +274,14 @@ mod tests {
             assert!(all.iter().all(|n| !s.can_become(*n)), "{s:?} is terminal");
         }
         assert!(Requested.can_become(Lost));
+        // R102: polling gives up after repeated errors.
+        for s in [Submitted, Queued, Running, Unknown] {
+            assert!(s.can_become(Lost), "{s:?}");
+        }
+        assert!(
+            !Succeeded.can_become(Lost),
+            "a succeeded job keeps fetching"
+        );
         assert!(Unknown.can_become(Succeeded));
         assert!(Succeeded.can_become(Fetched));
         assert!(!Requested.can_become(Running));

@@ -43,6 +43,9 @@ pub const EVENT_CANDIDATE_READY: &str = "rgn:candidate-ready";
 /// How long the pump sleeps with nothing due (it also retries spool replays then).
 pub const IDLE: Duration = Duration::from_secs(30);
 
+/// Non-transient poll errors in a row before a job goes `lost` with its handle kept (R102).
+pub const MAX_POLL_ERRORS: u32 = 10;
+
 /// A candidate's aspect may differ from the sent one by this much before it gets a warning
 /// (FR-RGN-24).
 pub const ASPECT_TOLERANCE: f64 = 0.01;
@@ -88,6 +91,8 @@ struct Tracked {
     /// A tick is working on it without the lock.
     busy: bool,
     progress: f64,
+    /// Non-transient poll errors in a row (R102); a good answer resets it.
+    poll_errors: u32,
 }
 
 /// The runner's state, in [`super::RgnState`]. Memory only (spec §8).
@@ -117,6 +122,7 @@ impl Runner {
                 generation,
                 busy: false,
                 progress: 0.0,
+                poll_errors: 0,
             });
         self.wake.notify();
     }
@@ -291,6 +297,7 @@ pub(crate) fn commit_job_update(
         generation: 0,
         busy: false,
         progress: 0.0,
+        poll_errors: 0,
     };
     commit_update(ctx, state, &t, u)
 }
@@ -345,6 +352,9 @@ enum Outcome {
     Candidates(Vec<NewCandidate>, Option<i64>),
     /// Nothing to commit; retry after the delay.
     Retry(ProviderError),
+    /// A non-transient poll error (auth, a stale handle, a provider failure): counted, and the
+    /// job goes `lost` after [`MAX_POLL_ERRORS`] in a row (R102).
+    PollError(ProviderError),
     /// Not a state the runner drives.
     Done,
 }
@@ -428,7 +438,23 @@ fn poll(core: &Core, t: &Tracked) -> Outcome {
             let _ = e;
             Outcome::Updates(vec![u], t.progress, Some(ProviderError::Offline))
         }
-        Err(e) => Outcome::Retry(e),
+        Err(e @ ProviderError::RateLimited { .. }) => Outcome::Retry(e),
+        Err(e) => Outcome::PollError(e),
+    }
+}
+
+/// `lost` after [`MAX_POLL_ERRORS`] poll errors in a row: the handle stays in `provider{}`, the
+/// possible-charge notice applies (R102).
+fn poll_gave_up(e: &ProviderError) -> SpoolUpdate {
+    SpoolUpdate {
+        state: Some(JobState::Lost),
+        error: Some(json!({
+            "code": e.code(),
+            "hint": format!(
+                "Polling stopped after {MAX_POLL_ERRORS} errors in a row ({e}). The job may still run and be charged; check the provider before retrying."
+            ),
+        })),
+        ..Default::default()
     }
 }
 
@@ -629,7 +655,20 @@ fn step(core: &Core, t: Tracked) {
             return;
         }
         Outcome::Retry(e) => delay_error = Some(e),
+        Outcome::PollError(e) => {
+            cur.poll_errors += 1;
+            tracing::warn!(job = %cur.job.id, errors = cur.poll_errors, error = %e, "poll failed");
+            if cur.poll_errors >= MAX_POLL_ERRORS {
+                match commit_update(ctx, &mut state, &cur, poll_gave_up(&e)) {
+                    Ok(j) => cur.job = j,
+                    Err(e) => tracing::warn!(job = %cur.job.id, error = %e, "lost not committed"),
+                }
+                emit_state(ctx, &cur.job, Some(cur.progress));
+            }
+            delay_error = Some(e);
+        }
         Outcome::Updates(updates, progress, err) => {
+            cur.poll_errors = 0;
             cur.progress = progress;
             delay_error = err;
             for u in updates {

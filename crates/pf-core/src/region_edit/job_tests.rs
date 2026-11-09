@@ -900,6 +900,42 @@ fn fr_rgn_23_offline_mid_job_is_unknown_until_reconnect() {
     assert!(job.error.is_none(), "cleared on reconnect");
 }
 
+/// Review item 6 / R102: non-transient poll errors are counted; after 10 in a row the job goes
+/// `lost` with its handle kept (no endless loop that blocks the project). A good poll resets
+/// the count.
+#[test]
+fn fr_rgn_23_ten_poll_errors_in_a_row_end_the_job_as_lost_with_its_handle() {
+    let lab = Lab::new();
+    let id = lab.submit("kitchen");
+    runner::tick(&lab.core, true);
+    assert_eq!(lab.job(id).state, JobState::Queued);
+    lab.set_case("auth");
+    for _ in 0..9 {
+        runner::tick(&lab.core, true);
+    }
+    assert_eq!(
+        lab.job(id).state,
+        JobState::Queued,
+        "9 errors: still polling"
+    );
+    // One good poll resets the count.
+    lab.set_case("slow(30)");
+    runner::tick(&lab.core, true);
+    lab.set_case("auth");
+    for _ in 0..9 {
+        runner::tick(&lab.core, true);
+    }
+    assert!(lab.core.state().rgn.runner.tracked().contains(&id));
+    runner::tick(&lab.core, true);
+    let job = lab.job(id);
+    assert_eq!(job.state, JobState::Lost, "the 10th error in a row ends it");
+    assert!(job.has_handle(), "the handle is kept");
+    assert_eq!(job.error.as_ref().unwrap()["code"], "auth");
+    assert!(lab.core.state().rgn.runner.tracked().is_empty());
+    let last = lab.events_named(runner::EVENT_JOB_STATE).pop().unwrap();
+    assert_eq!(last["state"], "lost");
+}
+
 #[test]
 fn fr_rgn_21_retry_draft_prefills_with_a_new_seed_unless_pinned() {
     let lab = Lab::new();
