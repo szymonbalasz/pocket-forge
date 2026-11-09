@@ -91,7 +91,8 @@ fn place_base_file(
 /// `pick_base` (FR-GEN-27, 28, 30): the pick commit behind `gen_candidate_pick`. Any valid,
 /// non-discarded candidate of a `fetched` job (the first pick: the job is closed) or of a
 /// `closed` one (a re-pick from any iteration, no transition, no spend) can be picked; a file
-/// moved to the trash by a sweep is restored in the same commit. Fails with `invalid_candidate`
+/// moved to the trash by a sweep is restored in the same commit. Fails with `job_active` while any
+/// job of the project is active (R97), `invalid_candidate`
 /// (another job's, `invalid`, `discarded`), `not_found` (purged), `invalid_input` (a job with
 /// no candidates to pick) and the commit errors (`read_only`, `locked`, `conflict`). The job's
 /// `operation` is checked by the command (slice 4, `wrong_operation`).
@@ -103,6 +104,18 @@ pub fn pick_base(
     candidate_id: Ulid,
 ) -> CoreResult<BaseCommit> {
     p.require_writable()?;
+    // R97: never while a job runs (a region edit job would come back for another base image).
+    if let Some(active) = p
+        .jobs
+        .values()
+        .find(|j| !j.state.is_terminal() && j.state != JobState::Fetched)
+    {
+        return Err(CoreError::new(
+            ErrorCode::JobActive,
+            "a job is running in this project; pick when it has finished",
+        )
+        .with_detail(serde_json::json!({ "job_id": active.id })));
+    }
     let job = job(p, job_id)?.clone();
     let idx = candidate_index(&p.manifest, candidate_id)?;
     let cand = p.manifest.candidates[idx].clone();
@@ -211,4 +224,43 @@ pub fn pick_base(
         file,
         patches_dropped,
     })
+}
+
+/// R97 (R84 across undo/redo): after a restore, among generate candidates only the restored base
+/// image's is `accepted`; an earlier base's goes back to `dismissed`, and with no base image none
+/// is `accepted`. A restored base candidate in the trash comes back with it while its file can
+/// (else it stays as it is: the base image is its own copy in `working/`).
+pub(crate) fn statuses_follow_base(p: &OpenProject, m: &mut Manifest) {
+    let generate_jobs: std::collections::HashSet<Ulid> = p
+        .jobs
+        .values()
+        .filter(|j| j.is_generate())
+        .map(|j| j.id)
+        .collect();
+    let base = m
+        .layers
+        .first()
+        .filter(|l| l.kind == LayerKind::Base)
+        .and_then(|l| l.candidate_id);
+    for c in m.candidates.iter_mut().filter(|c| {
+        Some(c.id) != base
+            && c.status == CandidateStatus::Accepted
+            && generate_jobs.contains(&c.job_id)
+    }) {
+        c.status = CandidateStatus::Dismissed;
+    }
+    let Some(idx) = base.and_then(|id| m.candidates.iter().position(|c| c.id == id)) else {
+        return;
+    };
+    let c = m.candidates[idx].clone();
+    match c.status {
+        CandidateStatus::Accepted | CandidateStatus::Invalid => {}
+        _ if c.trash_id.is_some() => {
+            if restorable(p, &c) {
+                m.candidates[idx].status = CandidateStatus::Accepted;
+                untrash_candidate(m, idx);
+            }
+        }
+        _ => m.candidates[idx].status = CandidateStatus::Accepted,
+    }
 }
