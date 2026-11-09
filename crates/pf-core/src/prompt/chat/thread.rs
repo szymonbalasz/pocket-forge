@@ -153,11 +153,12 @@ impl Thread {
     }
 
     /// §11: a turn still `pending` when the file is read (the app stopped mid-turn) is
-    /// `interrupted`; the window offers Resend. Returns true if any changed.
-    pub fn mark_interrupted(&mut self) -> bool {
+    /// `interrupted`; the window offers Resend. Turns in `live` belong to the running turn and
+    /// stay `pending` (M2). Returns true if any changed.
+    pub fn mark_interrupted(&mut self, live: &[Ulid]) -> bool {
         let mut changed = false;
         for t in &mut self.turns {
-            if t.state == TurnState::Pending {
+            if t.state == TurnState::Pending && !live.contains(&t.id) {
                 t.state = TurnState::Interrupted;
                 changed = true;
             }
@@ -213,8 +214,9 @@ pub struct Loaded {
 
 /// The project's thread, if any (the newest canonical `<id>.json`). A canonical file that
 /// won't parse is renamed `<id>.corrupt-<UTC>.json` (kept, not swept) when `writable`. Pending
-/// turns come back as `interrupted` (not written until the next save).
-pub fn load(ctx: &Context, project_dir: &Path, writable: bool) -> Loaded {
+/// turns come back as `interrupted` (not written until the next save), except the ones in
+/// `live`: the turn the runtime is running now (M2).
+pub fn load(ctx: &Context, project_dir: &Path, writable: bool, live: &[Ulid]) -> Loaded {
     let dir = chat_dir(project_dir);
     let mut out = Loaded::default();
     for name in candidate_names(&dir) {
@@ -242,7 +244,7 @@ pub fn load(ctx: &Context, project_dir: &Path, writable: bool) -> Loaded {
         }
     }
     if let Some(t) = out.thread.as_mut() {
-        t.mark_interrupted();
+        t.mark_interrupted(live);
     }
     out
 }
@@ -332,4 +334,45 @@ pub(crate) fn stray_files(project_dir: &Path) -> Vec<String> {
         })
         .map(|(n, _)| format!("{PFORGE_DIR}/{CHAT_DIR}/{n}"))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn turn(id: Ulid, state: TurnState) -> Turn {
+        Turn {
+            id,
+            at: Timestamp(0),
+            role: Role::User,
+            host: ChatHost::Rgn,
+            text: "x".into(),
+            state,
+            error: None,
+            context: None,
+            proposals: Vec::new(),
+            usage: None,
+            fresh_session: false,
+            extra: Extra::new(),
+        }
+    }
+
+    /// §11 / M2: only pending turns the runtime doesn't own become `interrupted`.
+    #[test]
+    fn fr_prm_22_live_turns_stay_pending_on_reload() {
+        let (old, live, done) = (Ulid::from(1u128), Ulid::from(2u128), Ulid::from(3u128));
+        let mut t = Thread::new(Ulid::from(9u128), Timestamp(0), "fake");
+        t.turns = vec![
+            turn(old, TurnState::Pending),
+            turn(live, TurnState::Pending),
+            turn(done, TurnState::Done),
+        ];
+        assert!(t.mark_interrupted(&[live]));
+        let states: Vec<TurnState> = t.turns.iter().map(|t| t.state).collect();
+        assert_eq!(
+            states,
+            [TurnState::Interrupted, TurnState::Pending, TurnState::Done]
+        );
+        assert!(!t.mark_interrupted(&[live]));
+    }
 }

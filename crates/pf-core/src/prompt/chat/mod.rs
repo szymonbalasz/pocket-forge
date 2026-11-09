@@ -110,6 +110,8 @@ fn turn_error(e: &ChatError) -> TurnError {
 
 struct Running {
     turn_id: Ulid,
+    /// The user turn the reply answers: also `pending` while the turn runs (M2).
+    user_turn_id: Ulid,
     project_id: Ulid,
     cancel: CancelHandle,
 }
@@ -214,6 +216,16 @@ impl ChatRuntime {
     /// The running turn, if any.
     pub fn running_turn(&self) -> Option<Ulid> {
         lock(&self.rt).running.as_ref().map(|r| r.turn_id)
+    }
+
+    /// The turns the runtime owns now (the running reply and its user turn): a reload keeps
+    /// them `pending` instead of `interrupted` (§11, M2).
+    fn live_turns(&self) -> Vec<Ulid> {
+        lock(&self.rt)
+            .running
+            .as_ref()
+            .map(|r| vec![r.turn_id, r.user_turn_id])
+            .unwrap_or_default()
     }
 }
 
@@ -710,9 +722,10 @@ impl Command for PrmChatThreadGet {
 
     fn run(core: &Core, input: ProjectInput) -> CoreResult<ThreadView> {
         let (dir, read_only) = open_project(core, input.project_id)?;
+        let live = core.chat.live_turns();
         let loaded = {
             let _io = lock(&core.chat.thread_io);
-            thread::load(&core.ctx, &dir, !read_only)
+            thread::load(&core.ctx, &dir, !read_only, &live)
         };
         let running_turn_id = core.chat.running_turn();
         let fresh_session_next = running_turn_id.is_none()
@@ -950,7 +963,7 @@ impl Command for PrmChatSend {
         // The thread (created at the first send).
         let mut thread = {
             let _io = lock(&core.chat.thread_io);
-            thread::load(&core.ctx, &dir, !read_only).thread
+            thread::load(&core.ctx, &dir, !read_only, &[]).thread
         }
         .unwrap_or_else(|| Thread::new(core.ctx.new_id(), now, backend_name(core.ctx.chat.mode)));
         let thread_id = thread.id;
@@ -1049,6 +1062,15 @@ impl Command for PrmChatSend {
             extra: Default::default(),
         });
         thread.updated_at = now;
+        // Running before the first save, so a reload never reads this turn as `interrupted`
+        // (M2).
+        let cancel = CancelHandle::new();
+        lock(&core.chat.rt).running = Some(Running {
+            turn_id,
+            user_turn_id,
+            project_id: pid,
+            cancel: cancel.clone(),
+        });
         let saved = !read_only && {
             let _io = lock(&core.chat.thread_io);
             thread::save(&core.ctx, &dir, &thread).is_ok()
@@ -1073,12 +1095,6 @@ impl Command for PrmChatSend {
                 })
                 .collect(),
         };
-        let cancel = CancelHandle::new();
-        lock(&core.chat.rt).running = Some(Running {
-            turn_id,
-            project_id: pid,
-            cancel: cancel.clone(),
-        });
         let job = TurnJob {
             ctx: core.ctx.clone(),
             rt: core.chat.rt.clone(),
@@ -1213,7 +1229,8 @@ impl TurnJob {
         };
         let saved = {
             let _io = lock(&self.thread_io);
-            let mut thread = thread::load(&self.ctx, &self.project_dir, self.writable)
+            let live = [self.turn_id, self.user_turn_id];
+            let mut thread = thread::load(&self.ctx, &self.project_dir, self.writable, &live)
                 .thread
                 .filter(|t| t.id == self.thread.id)
                 .unwrap_or_else(|| self.thread.clone());
@@ -1318,7 +1335,8 @@ impl Command for PrmChatInsert {
         }
         let now = core.ctx.now();
         let _io = lock(&core.chat.thread_io);
-        let mut thread = thread::load(&core.ctx, &dir, true)
+        let live = core.chat.live_turns();
+        let mut thread = thread::load(&core.ctx, &dir, true, &live)
             .thread
             .ok_or_else(|| CoreError::new(ErrorCode::NotFound, "no such proposal"))?;
         let (host, text) = thread

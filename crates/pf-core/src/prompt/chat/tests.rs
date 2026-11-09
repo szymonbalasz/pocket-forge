@@ -280,6 +280,7 @@ fn fr_prm_27_send_needs_a_block_and_one_turn_at_a_time() {
     publish(&lab, "rgn", lab.draft("a kitchen"));
     super::lock(&lab.core.chat.rt).running = Some(super::Running {
         turn_id: Ulid::nil(),
+        user_turn_id: Ulid::nil(),
         project_id: pid(&lab),
         cancel: Default::default(),
     });
@@ -812,6 +813,11 @@ fn fr_prm_27_stop_keeps_the_partial_reply() {
         lab.core.chat.running_turn(),
         out["turn_id"].as_str().unwrap().parse().ok()
     );
+    // M2 (§11): the running turn reads back `pending`, never `interrupted`, and an insert
+    // meanwhile doesn't write it as interrupted.
+    let mid = thread_view(&lab)["thread"]["turns"].clone();
+    assert_eq!(mid[0]["state"], "pending");
+    assert_eq!(mid[1]["state"], "pending");
     lab.core
         .dispatch("prm_chat_cancel", json!({"turn_id": out["turn_id"]}))
         .unwrap();
