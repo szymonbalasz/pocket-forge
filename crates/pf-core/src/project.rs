@@ -1156,6 +1156,12 @@ pub fn put_draft(
         Some(older) => draft.over(&older.draft),
         None => draft,
     };
+    if draft.mask_id == Some(None) {
+        // R109: the region went, so a mask still waiting for the lock (R108) goes with it; the
+        // retry must not write it back over the cleared draft.
+        p.pending_mask = None;
+        p.retried_mask = None;
+    }
     let keep = PendingDraft {
         draft: draft.clone(),
         export: export_settings.clone(),
