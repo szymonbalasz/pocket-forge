@@ -82,7 +82,9 @@ describe('export store', () => {
   test('FR-EXP-25 open loads the saved settings and plans them without a commit', async () => {
     await bound();
     expect(exportStore.get().form).toMatchObject({ mode: 'cells', cols: '30', rows: '40' });
-    expect(h.exp.setSettings).toHaveBeenCalledWith({
+    // R101: loading is not an edit, so nothing is sent back to be committed.
+    expect(h.exp.setSettings).not.toHaveBeenCalled();
+    expect(h.exp.plan).toHaveBeenCalledWith({
       grid: { mode: 'cells', source_px_per_square: null, cols: 30, rows: 40 },
       target_px_per_square: null,
       format: 'png',
@@ -92,6 +94,24 @@ describe('export store', () => {
     await exportStore.edit({ target: '70' });
     await exportStore.edit({ target: '7' });
     expect(h.exp.start).not.toHaveBeenCalled();
+  });
+
+  test('FR-EXP-25 R101 opening a project never sends settings, saved or not', async () => {
+    // A never-exported project, and one whose settings can't be read: the empty form stays local.
+    h.exp.getSettings.mockResolvedValueOnce({
+      source_px_per_square: null,
+      target_px_per_square: null,
+    });
+    await bound();
+    await exportStore.bind(null);
+    h.exp.getSettings.mockRejectedValueOnce(coreError('io'));
+    await exportStore.bind('p2');
+    // A resolved conflict reloads the kept settings the same way.
+    await exportStore.reloadSettings();
+    expect(h.exp.setSettings).not.toHaveBeenCalled();
+    // The user's first edit is what sends them.
+    await exportStore.edit({ mode: 'cells', cols: '30', rows: '40' });
+    expect(h.exp.setSettings).toHaveBeenCalledTimes(1);
   });
 
   test('FR-EXP-26 every edit sends the settings to the core (which emits settings-changed)', async () => {
@@ -261,6 +281,75 @@ describe('export store', () => {
     expect(h.prj.close).toHaveBeenLastCalledWith(false);
   });
 
+  test('OQ-EXP-09 an export that ends before the answer lets the held close go on', async () => {
+    for (const end of ['done', 'failed', 'canceled'] as const) {
+      exportStore.reset();
+      await bound();
+      await exportStore.start();
+      h.prj.close.mockReset();
+      h.exp.cancel.mockClear();
+      const closing = projectStore.close();
+      expect(exportStore.get().closeAsk).toBe(true);
+      if (end === 'done') h.emit('export:done', doneEvent('e1'));
+      else if (end === 'failed')
+        h.emit('export:failed', { export_id: 'e1', code: 'locked', detail: null });
+      else h.emit('export:canceled', { export_id: 'e1' });
+      await closing;
+      expect(exportStore.get().closeAsk).toBe(false);
+      expect(h.prj.close).toHaveBeenCalledTimes(1);
+      // The next export doesn't inherit the old question or its close.
+      h.exp.start.mockResolvedValueOnce({ export_id: 'e2' });
+      await exportStore.start();
+      expect(exportStore.get().closeAsk).toBe(false);
+      await exportStore.confirmClose();
+      expect(h.prj.close).toHaveBeenCalledTimes(1);
+      h.emit('export:canceled', { export_id: 'e2' });
+    }
+  });
+
+  test('FR-EXP-19 a closed project’s late export events never end the next export', async () => {
+    await bound();
+    await exportStore.start();
+    const closing = projectStore.close();
+    await exportStore.confirmClose();
+    await closing;
+    await exportStore.bind(null);
+    await exportStore.bind('p2');
+    // The next Start, before export_start returns: the old export's canceled event arrives.
+    let resolve!: (v: { export_id: string }) => void;
+    h.exp.start.mockReturnValueOnce(new Promise((r) => (resolve = r)));
+    const p = exportStore.start();
+    h.emit('export:canceled', { export_id: 'e1' });
+    h.emit('export:progress', { export_id: 'e1', phase: 'write', fraction: 0.9 });
+    expect(exportStore.get().run).toMatchObject({ exportId: null, phase: 'compose' });
+    resolve({ export_id: 'e2' });
+    await p;
+    expect(exportStore.get().run?.exportId).toBe('e2');
+  });
+
+  test('FR-EXP-28 a failed prefetch is tried again, so Start never stays on Loading', async () => {
+    h.exp.prefetchOriginal.mockRejectedValueOnce(coreError('not_available_offline'));
+    await bound();
+    exportStore.setExpanded(true);
+    await vi.waitFor(() => expect(exportStore.get().original.kind).toBe('failed'));
+    // Start says the original isn't there: the prefetch runs again and its answer counts.
+    h.exp.start.mockRejectedValueOnce(coreError('original_unavailable'));
+    h.exp.prefetchOriginal.mockResolvedValueOnce({ ready: true });
+    await exportStore.start();
+    expect(h.exp.prefetchOriginal).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(exportStore.get().original.kind).toBe('ready'));
+    // Collapsing and expanding after a failure tries again too.
+    exportStore.reset();
+    h.exp.prefetchOriginal.mockReset();
+    h.exp.prefetchOriginal.mockRejectedValueOnce(coreError('io'));
+    await bound();
+    exportStore.setExpanded(true);
+    await vi.waitFor(() => expect(exportStore.get().original.kind).toBe('failed'));
+    exportStore.setExpanded(false);
+    exportStore.setExpanded(true);
+    expect(h.exp.prefetchOriginal).toHaveBeenCalledTimes(2);
+  });
+
   test('FR-EXP-18 a failed export shows its message and Retry starts again', async () => {
     await bound();
     await exportStore.start();
@@ -346,6 +435,10 @@ test('FR-PRJ-36 after a resolved conflict the form reloads the kept settings (wa
   });
   await projectStore.resolved('other');
   await vi.waitFor(() => expect(exportStore.get().form.format).toBe('webp'));
-  expect(h.exp.setSettings.mock.calls.at(-1)?.[0]).toMatchObject({ format: 'webp' });
+  // Planned, not sent back: the core's settings are the kept ones already (R101).
+  await vi.waitFor(() =>
+    expect(h.exp.plan.mock.calls.at(-1)?.[0]).toMatchObject({ format: 'webp' }),
+  );
+  expect(h.exp.setSettings.mock.calls.at(-1)?.[0]).toMatchObject({ format: 'jpeg' });
   projectStore.reset();
 });

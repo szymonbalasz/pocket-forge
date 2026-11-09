@@ -154,6 +154,25 @@ export async function appReady(ok: boolean, detail: string): Promise<string | nu
   }
 }
 
+/** R101: tells the app the close guards listen for `app:close-requested`, so the window X waits
+ *  for them. Not fatal when it fails (no Tauri, Playwright): X then closes as before. */
+export async function appCloseGuard(): Promise<void> {
+  try {
+    await invoke('app_close_guard');
+  } catch {
+    // Nothing to guard against outside the app.
+  }
+}
+
+/** R101: the project is closed (or none was open): the app exits. */
+export async function appExit(): Promise<void> {
+  try {
+    await invoke('app_exit');
+  } catch {
+    // Outside the app there is nothing to exit.
+  }
+}
+
 /** Standard base64 of binary data (masks over IPC; ~4× smaller than a JSON number array). */
 export function toBase64(bytes: Uint8Array): string {
   let bin = '';

@@ -389,6 +389,8 @@ export function prjMock(
       const p = open();
       if (!p) return fail('no_project', 'No asset project is open');
       if (p.read_only) return fail('read_only', 'Read-only');
+      // The waiting draft goes first; still locked → `locked`, never `unchanged` (FR-PRJ-21).
+      if (p.pendingSave) return fail('locked', 'The file is locked');
       const label = typeof input.label === 'string' && input.label ? input.label : undefined;
       if (!p.dirty && !label) return fail('unchanged', 'Nothing changed since the last revision');
       const revs = p.revisions as RevisionEntry[];

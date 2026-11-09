@@ -81,6 +81,12 @@ let listening: Promise<void> | null = null;
 let proceedClose: (() => void) | null = null;
 let cancelClose: (() => void) | null = null;
 let guarding = false;
+/** Bumped per Start and whenever a run is abandoned (project change), so a late `export_start`
+ *  answer never names the wrong run. */
+let runSeq = 0;
+/** Exports this panel no longer follows (a closed project's): their late events are ignored even
+ *  while the next run doesn't know its own id yet. */
+const retired = new Set<string>();
 
 /** PRJ close guard: hold the close while an export runs and ask first (OQ-EXP-09). */
 function closeGuard(proceed: () => void, cancel: () => void): boolean {
@@ -89,6 +95,16 @@ function closeGuard(proceed: () => void, cancel: () => void): boolean {
   cancelClose = cancel;
   set({ closeAsk: true, expanded: true });
   return false;
+}
+
+/** The export ended (done, failed, canceled): a close it was holding no longer needs the
+ *  question, so the banner goes and the close goes on (OQ-EXP-09). */
+function runEnded(patch: Partial<ExportState>): void {
+  const proceed = proceedClose;
+  proceedClose = null;
+  cancelClose = null;
+  set({ ...patch, run: null, closeAsk: false });
+  proceed?.();
 }
 
 function set(patch: Partial<ExportState>): void {
@@ -109,7 +125,8 @@ function limitOf(detail: unknown): unknown {
 /** Applies an event only to the current export. */
 function isOurs(exportId: string): boolean {
   const run = state.run;
-  return !!run && (run.exportId === null || run.exportId === exportId);
+  if (!run) return false;
+  return run.exportId === null ? !retired.has(exportId) : run.exportId === exportId;
 }
 
 async function prefetch(projectId: string): Promise<void> {
@@ -121,6 +138,8 @@ async function prefetch(projectId: string): Promise<void> {
       set({ original: { kind: 'ready' } });
   } catch (e) {
     if (state.projectId !== projectId) return;
+    // Not for good: the next expand or Start asks again (FR-EXP-28).
+    prefetched = null;
     const { code, message } = codeOf(e);
     set({ original: { kind: 'failed', message: errorText(code, message) } });
   }
@@ -135,6 +154,8 @@ export const exportStore = {
   /** Test helper: back to the initial state. */
   reset(): void {
     syncSeq = 0;
+    runSeq++;
+    retired.clear();
     prefetched = null;
     proceedClose = null;
     cancelClose = null;
@@ -163,16 +184,16 @@ export const exportStore = {
       });
       await onEvent('export:done', (p) => {
         if (!isOurs(p.export_id)) return;
-        set({ run: null, done: p, error: null });
+        runEnded({ done: p, error: null });
         void exportStore.refreshPlan();
       });
       await onEvent('export:failed', (p) => {
         if (!isOurs(p.export_id)) return;
-        set({ run: null, error: { code: p.code, message: errorText(p.code) } });
+        runEnded({ error: { code: p.code, message: errorText(p.code) } });
         void exportStore.refreshPlan();
       });
       await onEvent('export:canceled', (p) => {
-        if (isOurs(p.export_id)) set({ run: null });
+        if (isOurs(p.export_id)) runEnded({});
       });
     })().catch(() => {
       listening = null;
@@ -185,6 +206,9 @@ export const exportStore = {
     if (state.projectId === projectId) return;
     syncSeq++;
     prefetched = null;
+    // The old project's export (canceled by the close) is no longer ours.
+    runSeq++;
+    if (state.run?.exportId) retired.add(state.run.exportId);
     set({
       ...initial,
       expanded: state.expanded,
@@ -200,7 +224,8 @@ export const exportStore = {
     } catch {
       // No settings yet (or EXP unavailable): keep the empty form.
     }
-    await exportStore.sync();
+    // Loading isn't an edit: only plan (R101, FR-EXP-25: opening never commits).
+    await exportStore.sync(false);
   },
 
   /** Re-reads the settings in effect (after a resolved conflict) and re-plans. */
@@ -215,7 +240,7 @@ export const exportStore = {
     }
     if (state.projectId !== projectId) return;
     set({ form });
-    await exportStore.sync();
+    await exportStore.sync(false);
   },
 
   setExpanded(expanded: boolean): void {
@@ -235,8 +260,10 @@ export const exportStore = {
     return exportStore.sync();
   },
 
-  /** Sends the form to the core and refreshes the plan; the latest call wins. */
-  async sync(): Promise<void> {
+  /** Sends the form to the core and refreshes the plan; the latest call wins. `push` false (the
+   *  form was just loaded from the core) only plans: the core's settings are already these, and
+   *  sending them would mark them for a commit (R101, FR-EXP-25). */
+  async sync(push = true): Promise<void> {
     const projectId = state.projectId;
     if (!projectId) return;
     const seq = ++syncSeq;
@@ -247,8 +274,10 @@ export const exportStore = {
     }
     const stale = () => seq !== syncSeq || state.projectId !== projectId;
     try {
-      await api.export.setSettings(parsed.settings);
-      if (stale()) return;
+      if (push) {
+        await api.export.setSettings(parsed.settings);
+        if (stale()) return;
+      }
       const plan = await api.export.plan(parsed.settings);
       if (stale()) return;
       set({ settings: parsed.settings, plan, planError: null, fieldError: null });
@@ -281,6 +310,7 @@ export const exportStore = {
   async start(): Promise<void> {
     const { settings, plan, run } = state;
     if (!settings || !plan || run) return;
+    const mine = ++runSeq;
     set({
       run: {
         exportId: null,
@@ -295,17 +325,30 @@ export const exportStore = {
     });
     try {
       const { export_id } = await api.export.start(settings, plan.exists !== null);
+      // Abandoned meanwhile (project change): not this panel's export any more.
+      if (mine !== runSeq) {
+        retired.add(export_id);
+        return;
+      }
       // Done or failed may already have arrived for this export.
       if (state.run && state.run.exportId === null)
         set({ run: { ...state.run, exportId: export_id } });
     } catch (e) {
+      if (mine !== runSeq) return;
       const err = codeOf(e);
       set({ run: null });
       if (err.code === 'invalid_settings') {
         set({ fieldError: invalidSettingsError(err.field, limitOf(err.detail)) });
         return;
       }
-      if (err.code === 'original_unavailable') set({ original: { kind: 'loading' } });
+      if (err.code === 'original_unavailable') {
+        // Start waits for the original again: ask for it, else Loading would never end.
+        set({ original: { kind: 'loading' } });
+        if (state.projectId) {
+          prefetched = null;
+          void prefetch(state.projectId);
+        }
+      }
       set({ error: { code: err.code, message: errorText(err.code, err.message) } });
       if (err.code === 'exists') await exportStore.refreshPlan();
     }

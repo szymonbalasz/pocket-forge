@@ -183,7 +183,18 @@ function listen(): void {
 async function openNow(path: string): Promise<boolean> {
   set({ busy: true, error: null, opening: path });
   try {
-    if (state.project) await api.project.close().catch(() => undefined);
+    if (state.project) {
+      // `unsaved` (FR-PRJ-21): a save is still waiting; opening would drop it, so stay and say
+      // why (the core's `project_open` doesn't ask). Other refusals don't block the open.
+      const refused = await api.project.close().then(
+        () => null,
+        (e: unknown) => errorOf(e),
+      );
+      if (refused?.code === 'unsaved') {
+        set({ error: refused, busy: false, opening: null });
+        return false;
+      }
+    }
     const project = await api.project.open(path);
     // A conflict found at open shows as Conflict, not Saved (walk 2 N3).
     set({ project, save: settled(project), busy: false, opening: null, trashNotice: null });
@@ -268,8 +279,9 @@ export const projectStore = {
       const project = await api.project.get();
       set({ project: project ?? state.project, save: { kind: 'saved', at: rev.created_at } });
     } catch (e) {
+      if (!state.project) return; // closed meanwhile: nothing to show it on
       const err = errorOf(e);
-      const at = state.project ? savedAt(state.project) : '';
+      const at = savedAt(state.project);
       set({
         save:
           err.code === 'unchanged'
@@ -285,19 +297,30 @@ export const projectStore = {
   /** Restores a revision as a new `restore` revision (FR-PRJ-23, 43). */
   async restore(revId: string): Promise<void> {
     if (!state.project) return;
+    const before = state.save;
     set({ save: { kind: 'saving' } });
     try {
       const rev = await api.project.restoreRevision(revId);
       const project = await api.project.get();
       set({ project: project ?? state.project, save: { kind: 'saved', at: rev.created_at } });
     } catch (e) {
+      if (!state.project) return; // closed meanwhile: nothing to show it on
+      const err = errorOf(e);
       const code = saveCode(e);
+      // A refusal that writes nothing (unknown or missing revision) leaves the segment as it
+      // was; one that couldn't write never says Saved (FR-PRJ-21, §7).
       set({
-        error: errorOf(e),
+        error: err,
         save:
           code === 'folder_moved'
             ? { kind: 'failed', code, message: '', retrying: false }
-            : { kind: 'saved', at: savedAt(state.project) },
+            : code === 'conflict'
+              ? { kind: 'conflict' }
+              : code === 'locked' || code === 'io'
+                ? { kind: 'failed', ...err, retrying: false }
+                : before.kind === 'saving'
+                  ? settled(state.project)
+                  : before,
       });
     }
     bump();
