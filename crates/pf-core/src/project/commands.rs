@@ -15,7 +15,7 @@ fn no_project() -> CoreError {
     CoreError::new(ErrorCode::NoProject, "no asset project is open")
 }
 
-/// The 10 s retry tick (FR-PRJ-21): retries a pending draft of the open project. (RGN's runner
+/// The 10 s retry tick (FR-PRJ-21): retries a pending draft and mask (R108) of the open project. (RGN's runner
 /// replays the spool, R48.) The app calls it every [`super::SAVE_RETRY_EVERY`]; it is a no-op when
 /// nothing is pending.
 pub fn retry_pending_saves(core: &Core) {

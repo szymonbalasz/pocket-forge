@@ -78,9 +78,10 @@ export function useMaskTools({
     return () => mv.destroy();
   }, [maskLayer, project.project_id]);
 
-  // FR-EDT-28: submit before the project closes, on PRJ's close guard (R55); a failed submit still
-  // closes (the status said unsaved). Retry a failed submit after the next commit (a resolved
-  // conflict, a released lock); a read-only change refreshes the status.
+  // FR-EDT-28: submit before the project closes, on PRJ's close guard (R55). A submit refused as
+  // `locked` waits in PRJ, so the close that follows asks "Close anyway?" (R108, one close path,
+  // R101). Retry a failed submit after the next commit (a resolved conflict, a released lock); a
+  // read-only change refreshes the status.
   useEffect(() => {
     bindRegionSink((r) => ctl.current?.applyValidated(r));
     const off = projectStore.addCloseGuard((proceed) => {

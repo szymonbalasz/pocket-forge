@@ -327,3 +327,76 @@ fn fr_edt_18_a_4096_square_mask_round_trips() {
         .unwrap();
     assert!(bytes_of(&read) == bytes);
 }
+
+fn lock(e: &mut Env, on: bool) {
+    use crate::context::{FaultAction, Faults};
+    std::sync::Arc::get_mut(&mut e.core.ctx).unwrap().faults = if on {
+        Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap()
+    } else {
+        Faults::none()
+    };
+}
+
+#[test]
+fn fr_prj_21_r108_a_locked_mask_write_waits_and_close_asks() {
+    let mut e = env();
+    let rect = json!({"x": 10, "y": 10, "w": 16, "h": 16});
+    lock(&mut e, true);
+    assert_eq!(
+        e.submit(rect.clone(), &[30; 256]).unwrap_err().code,
+        ErrorCode::Locked
+    );
+    // Close (Home, the window X: one close path, R101) asks instead of dropping the mask.
+    for _ in 0..2 {
+        let err = e.core.dispatch("project_close", json!({})).unwrap_err();
+        assert_eq!(err.code, ErrorCode::Unsaved);
+        assert_eq!(err.detail["reason"], "locked");
+        assert!(e.core.state().project.is_some(), "still open");
+    }
+    // The lock lifts: the close's last try writes the waiting mask, then closes.
+    lock(&mut e, false);
+    e.core.dispatch("project_close", json!({})).unwrap();
+    e.snap = e
+        .core
+        .dispatch("project_open", json!({"path": e.snap["project_dir"]}))
+        .unwrap();
+    let mask_id = e.get()["draft"]["mask_id"].clone();
+    assert_eq!(bytes_of(&e.read(&mask_id).unwrap()), vec![30; 256]);
+}
+
+#[test]
+fn fr_prj_21_r108_the_10_s_retry_writes_a_waiting_mask_once() {
+    let mut e = env();
+    let rect = json!({"x": 10, "y": 10, "w": 16, "h": 16});
+    lock(&mut e, true);
+    e.submit(rect.clone(), &[40; 256]).unwrap_err();
+    // Still locked: the retry keeps it waiting.
+    crate::project::commands::retry_pending_saves(&e.core);
+    assert_eq!(e.get()["draft"]["mask_id"], Value::Null);
+    lock(&mut e, false);
+    crate::project::commands::retry_pending_saves(&e.core);
+    let mask_id = e.get()["draft"]["mask_id"].clone();
+    assert_eq!(bytes_of(&e.read(&mask_id).unwrap()), vec![40; 256]);
+    // EDT's own retry after the commit sends the same mask: no second write.
+    let seq = e.core.state().project.as_ref().unwrap().manifest.commit.seq;
+    let again = e.submit(rect.clone(), &[40; 256]).unwrap();
+    assert_eq!(again["mask_id"], mask_id);
+    let seq_after = e.core.state().project.as_ref().unwrap().manifest.commit.seq;
+    assert_eq!(seq_after, seq);
+    // A changed mask is a new write as usual.
+    let next = e.submit(rect, &[50; 256]).unwrap();
+    assert_ne!(next["mask_id"], mask_id);
+    e.core.dispatch("project_close", json!({})).unwrap();
+}
+
+#[test]
+fn fr_prj_21_r108_close_anyway_drops_the_waiting_mask() {
+    let mut e = env();
+    lock(&mut e, true);
+    e.submit(json!({"x": 0, "y": 0, "w": 4, "h": 4}), &[255; 16])
+        .unwrap_err();
+    e.core
+        .dispatch("project_close", json!({"force": true}))
+        .unwrap();
+    assert!(e.core.state().project.is_none());
+}
