@@ -37,8 +37,9 @@ export function segments(text: string): Segment[] {
   return out;
 }
 
-/** FR-PRM-38: the thread total for the footer, or null before any usage. */
-export function usageLabel(turns: readonly ChatTurn[]): string | null {
+/** FR-PRM-38: the thread total for the footer, or null before any usage. On the fake backend
+ *  the cost is notional and says so (L4). */
+export function usageLabel(turns: readonly ChatTurn[], fake = false): string | null {
   let cost = 0;
   let any = false;
   let billed = false;
@@ -49,6 +50,7 @@ export function usageLabel(turns: readonly ChatTurn[]): string | null {
     if (!t.usage.notional) billed = true;
   }
   if (!any) return null;
+  if (fake) return `≈ $${cost.toFixed(2)} notional (fake chat, nothing billed)`;
   return `≈ $${cost.toFixed(2)} ${billed ? 'billed' : 'plan usage'}`;
 }
 

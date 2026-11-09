@@ -302,7 +302,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
             message: e[0],
             fix: e[1],
           }
-        : { state: 'ok', version: '2.1.319', auth_method: 'fake', plan: null, notional: false };
+        : { state: 'ok', version: '2.1.319', auth_method: 'fake', plan: null, notional: true };
     return {
       enabled: chat.enabled,
       consent: chat.consent,
@@ -575,7 +575,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       }
       const proposals = props.map((p) => ({ id: chatId(), text: p }));
       reply.proposals = proposals;
-      reply.usage = { input_tokens: 100, output_tokens: 40, cost_usd: 0.0009, notional: false };
+      reply.usage = { input_tokens: 100, output_tokens: 40, cost_usd: 0.0009, notional: true };
       finish('done', { usage: reply.usage, ...(proposals.length ? { proposals } : {}) });
     };
     setTimeout(step, 0);

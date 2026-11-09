@@ -218,8 +218,8 @@ fn fr_prm_27_send_streams_and_records_the_turns() {
     assert_eq!(ends[0]["state"], "done");
     assert_eq!(ends[0]["proposals"].as_array().unwrap().len(), 1);
     assert_eq!(
-        ends[0]["usage"]["notional"], false,
-        "the fake isn't a plan login"
+        ends[0]["usage"]["notional"], true,
+        "the fake bills nothing (L4)"
     );
 
     let view = thread_view(&lab);

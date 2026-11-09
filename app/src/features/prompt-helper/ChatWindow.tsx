@@ -364,7 +364,7 @@ export function ChatWindow() {
   const unsaved = new Set(view?.unsaved_turn_ids ?? []);
   const running = live?.turnId ?? view?.running_turn_id ?? null;
   const readOnly = !!project.read_only;
-  const usage = usageLabel(turns);
+  const usage = usageLabel(turns, fake);
   const blocked = !host
     ? 'Open the Generate panel to chat about this project.'
     : offline

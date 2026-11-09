@@ -109,7 +109,8 @@ test('FR-PRM-27 FR-PRM-28 FR-PRM-29 send streams the reply; Replace and Copy on 
   await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
   expect(screen.getByText(/You wrote: "make this a kitchen"/)).toBeTruthy();
   expect(input().value).toBe('');
-  expect(id('prm-chat-usage').textContent).toBe('≈ $0.00 billed');
+  // FR-PRM-38 (L4): the fake's cost is notional.
+  expect(id('prm-chat-usage').textContent).toBe('≈ $0.00 notional (fake chat, nothing billed)');
 
   fireEvent.click(id('prm-chat-proposal-copy'));
   await waitFor(() => expect(id('prm-chat-proposal-copy').textContent).toBe('Copied'));
