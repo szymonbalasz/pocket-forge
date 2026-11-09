@@ -218,12 +218,21 @@ pub(crate) fn provider_raw<T>(
 /// The job record's `error{code, hint}` for a normalised provider error (ADR 0001).
 pub fn error_value(e: &ProviderError) -> Value {
     let hint = match e {
-        ProviderError::ProviderFailure { hint } => hint.clone(),
         ProviderError::InsufficientBalance => "Top up the provider balance, then retry.".into(),
         ProviderError::Offline => "The provider can't be reached; polling continues.".into(),
-        other => other.to_string(),
+        other => detail(other),
     };
     json!({ "code": e.code(), "hint": hint })
+}
+
+/// What a hint says about the provider's error. The UI already names the code ("Provider
+/// failure."), so a code-prefixed text ("provider failure: …") isn't repeated (R108).
+fn detail(e: &ProviderError) -> String {
+    match e {
+        ProviderError::ProviderFailure { hint } => hint.clone(),
+        ProviderError::InvalidRequest { field } => format!("field {field}"),
+        other => other.to_string(),
+    }
 }
 
 fn cost_value(c: &Cost) -> Value {
@@ -491,7 +500,8 @@ fn poll_gave_up(e: &ProviderError) -> SpoolUpdate {
         error: Some(json!({
             "code": e.code(),
             "hint": format!(
-                "Polling stopped after {MAX_POLL_ERRORS} errors in a row ({e}). The job may still run and be charged; check the provider before retrying."
+                "Polling stopped after {MAX_POLL_ERRORS} errors in a row ({}). The job may still run and be charged; check the provider before retrying.",
+                detail(e)
             ),
         })),
         ..Default::default()
@@ -627,7 +637,8 @@ fn fetch_error_value(e: &ProviderError) -> Value {
     json!({
         "code": e.code(),
         "hint": format!(
-            "The results couldn't be downloaded ({e}). The job is paid for; it retries on its own, or use Fetch again."
+            "The results couldn't be downloaded ({}). The job is paid for; it retries on its own, or use Fetch again.",
+            detail(e)
         ),
     })
 }
@@ -981,5 +992,35 @@ mod tests {
         assert_eq!(path(Unknown, Succeeded), vec![Succeeded]);
         assert_eq!(path(Running, Running), Vec::<JobState>::new());
         assert_eq!(path(Running, Queued), Vec::<JobState>::new());
+    }
+
+    /// R108: the UI shows the code ("Provider failure.") before the hint, so no hint repeats
+    /// the code-prefixed provider text.
+    #[test]
+    fn fr_rgn_20_error_hints_dont_repeat_the_provider_message() {
+        let failure = ProviderError::ProviderFailure {
+            hint: "HTTP 502 from the provider".into(),
+        };
+        let invalid = ProviderError::InvalidRequest {
+            field: "mask".into(),
+        };
+        let hints = [
+            fetch_error_value(&failure)["hint"].clone(),
+            poll_gave_up(&failure).error.unwrap()["hint"].clone(),
+            error_value(&failure)["hint"].clone(),
+            error_value(&invalid)["hint"].clone(),
+        ];
+        for h in &hints {
+            let h = h.as_str().unwrap().to_lowercase();
+            assert!(!h.contains("provider failure"), "{h}");
+            assert!(!h.contains("invalid request"), "{h}");
+        }
+        assert!(
+            hints[0]
+                .as_str()
+                .unwrap()
+                .contains("(HTTP 502 from the provider)")
+        );
+        assert!(hints[3].as_str().unwrap().contains("mask"));
     }
 }
