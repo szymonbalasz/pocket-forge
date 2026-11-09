@@ -338,18 +338,17 @@ pub fn effective(settings: &Settings) -> Vec<Helper> {
     }
 }
 
-/// The load warning for an invalid section (§11, FR-PRJ-39), if any.
+/// The load warning for an invalid section (§11, FR-PRJ-39), if any. The parser's own text goes
+/// to the log only; the message is for people (walk-p4r L5).
 pub fn load_warning(settings: &Settings) -> Option<SettingsWarning> {
     let v = settings.prompt_helpers.as_ref()?;
     let e = parse_section(v).err()?;
-    tracing::warn!(code = %e.code, "prompt_helpers settings invalid; using the starter helpers");
+    tracing::warn!(code = %e.code, error = %e.message, "prompt_helpers settings invalid; using the starter helpers");
     Some(SettingsWarning {
         code: WARNING_INVALID,
-        message: format!(
-            "The prompt helper settings couldn't be read ({}), so the starter helpers are used \
-             until you save them again.",
-            e.message
-        ),
+        message: "The prompt helper settings couldn't be read, so the starter helpers are used \
+                  until you save them again."
+            .into(),
     })
 }
 

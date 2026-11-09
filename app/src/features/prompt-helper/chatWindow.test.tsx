@@ -260,6 +260,33 @@ test('FR-PRM-27 a double-clicked Retry sends once; Retry waits while a turn is s
   expect((id('prm-chat-retry') as HTMLButtonElement).disabled).toBe(true);
 });
 
+test('FR-PRM-22 §11 an interrupted turn offers Resend; a double click sends once', async () => {
+  setup({ chat: { consent: true } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatWindow />);
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
+  // The app was killed mid-reply: on reopen the reply reads `interrupted` (§11, R103).
+  const w = window as unknown as { __pfMockHandlers: Record<string, (i: never) => unknown> };
+  const get = w.__pfMockHandlers.prm_chat_thread_get!;
+  w.__pfMockHandlers.prm_chat_thread_get = (i: never) => {
+    const v = get(i) as { thread: { turns: { state: string; text: string }[] } };
+    const last = v.thread.turns.at(-1)!;
+    Object.assign(last, { state: 'interrupted', text: '', proposals: [] });
+    return v;
+  };
+  act(() => fake.emit('prm:chat-context', { project_id: PID, host: 'rgn' }));
+  await waitFor(() => expect(id('prm-chat-resend')).toBeTruthy());
+  w.__pfMockHandlers.prm_chat_thread_get = get;
+  const resend = id('prm-chat-resend');
+  fireEvent.click(resend);
+  fireEvent.click(resend);
+  await waitFor(() => expect(fake.callsOf('prm_chat_send')).toHaveLength(2));
+  await act(async () => undefined);
+  expect(fake.callsOf('prm_chat_send').map((s) => s.text)).toEqual(['ideas', 'ideas']);
+});
+
 test('FR-PRM-37 L3 a crashed turn shows the stderr tail under Details', async () => {
   setup({ chat: { consent: true, case: 'crash' } });
   await api.chat.contextPublish(PID, 'rgn', {});
@@ -448,6 +475,36 @@ test('BL-42 FR-PRM-26 the strip previews what the next turn sends', async () => 
     project_id: PID,
     include_images: false,
   });
+});
+
+test('R103 FR-PRM-26 the strip follows a main-window publish without a refocus', async () => {
+  setup({ chat: { consent: true } });
+  chatContext.reset();
+  installChatSink();
+  const w = window as unknown as { __pfMockHandlers: Record<string, (i: never) => unknown> };
+  w.__pfMockHandlers.project_open = () => baseSnapshot();
+  projectStore.reset();
+  await act(() => projectStore.open(baseSnapshot().project_dir));
+  const preview = w.__pfMockHandlers.prm_chat_preview!;
+  let refs = 0;
+  w.__pfMockHandlers.prm_chat_preview = (i: never) => ({
+    ...(preview(i) as object),
+    summary: `${refs} images · prompt · fake model`,
+  });
+  await act(async () => {
+    chatContext.publish('gen', { refs: 0 });
+    await chatContext.flush();
+  });
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-preview').textContent).toContain('0 images'));
+  // Same host, new input (8 references turned on): no host change, no focus event.
+  refs = 8;
+  await act(async () => {
+    chatContext.publish('gen', { refs: 8 });
+    await chatContext.flush();
+  });
+  await waitFor(() => expect(id('prm-chat-preview').textContent).toContain('8 images'));
+  chatContext.reset();
 });
 
 test("BL-42 FR-PRM-23 a send from the window first flushes the main window's pending edit", async () => {

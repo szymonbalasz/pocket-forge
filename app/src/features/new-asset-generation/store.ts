@@ -526,7 +526,10 @@ function subscribe(): void {
   ];
   // The project closed or another one opened, maybe while this tab was hidden: let it go.
   // `structure/` changed (⟳, focus, an Add in the project panel): the sketch list follows.
+  // A new head (a pick, an accept, an undo): Retry's "filled from the job" note is done
+  // (walk-p4r L6).
   let structureSeq = projectStore.get().folders.structure ?? 0;
+  let head = projectStore.get().project?.head_revision ?? null;
   const offGuard = projectStore.addCloseGuard(flushOnClose);
   const offProject = projectStore.subscribe(() => {
     const ps = projectStore.get();
@@ -535,6 +538,11 @@ function subscribe(): void {
     if (seq !== structureSeq) {
       structureSeq = seq;
       void loadSketches();
+    }
+    const nextHead = ps.project?.head_revision ?? null;
+    if (nextHead !== head) {
+      head = nextHead;
+      if (state.info) set({ info: null });
     }
   });
   unsubscribe = () => {

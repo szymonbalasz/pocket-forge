@@ -50,6 +50,10 @@ fn store(core: &Core, list: &[Helper]) -> CoreResult<Vec<Helper>> {
         let out = helpers::effective(&next);
         settings::save(&core.ctx, &next)?;
         state.settings = next;
+        // The unreadable section is replaced: its startup warning no longer applies (L5).
+        state
+            .settings_warnings
+            .retain(|w| w.code != helpers::WARNING_INVALID);
         out
     };
     core.ctx.emit(

@@ -285,9 +285,23 @@ fn fr_prm_02_an_invalid_section_falls_back_to_the_starter_set_with_a_warning() {
     );
     assert_eq!(state.settings_warnings.len(), 1);
     assert_eq!(state.settings_warnings[0].code, helpers::WARNING_INVALID);
+    // walk-p4r L5: a readable message, no parser text.
+    assert_eq!(
+        state.settings_warnings[0].message,
+        "The prompt helper settings couldn't be read, so the starter helpers are used until you \
+         save them again."
+    );
     assert_eq!(helpers::effective(&state.settings), helpers::starter_set());
     drop(state);
     assert_eq!(std::fs::read_to_string(settings_path(&data)).unwrap(), text);
+    // A Save replaces the section: the warning goes from app_info (L5).
+    let rows: Vec<Value> = helpers::starter_set()
+        .iter()
+        .map(|h| json!({"id": h.id, "label": h.label, "text": h.text, "kinds": h.kinds}))
+        .collect();
+    core.dispatch("prm_helpers_save", json!({ "helpers": rows }))
+        .unwrap();
+    assert!(core.state().settings_warnings.is_empty());
 }
 
 #[test]

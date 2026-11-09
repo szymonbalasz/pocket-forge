@@ -219,6 +219,30 @@ fn fr_prj_29_requested_job_reopened_is_lost_and_others_are_resumable() {
 }
 
 #[test]
+fn fr_prj_29_resumable_counts_only_jobs_found_on_open_and_ends_with_them() {
+    let resumable = |s: &S| {
+        s.p.snapshot()
+            .warnings
+            .into_iter()
+            .find(|w| w.code == "resumable")
+            .map(|w| w.message)
+    };
+    let mut s = setup();
+    let a = s.job("one");
+    s.to(a.id, JobState::Submitted);
+    s.reopen();
+    assert_eq!(resumable(&s).as_deref(), Some("1 job(s) can resume."));
+    // walk-p4r L1: a job this session starts never counts.
+    let b = s.job("two");
+    s.to(b.id, JobState::Submitted);
+    assert_eq!(resumable(&s).as_deref(), Some("1 job(s) can resume."));
+    // The warning ends with the last job found on open, though one started since still runs.
+    s.to(a.id, JobState::Failed);
+    assert_eq!(resumable(&s), None);
+    assert_eq!(s.p.jobs[&b.id].state, JobState::Submitted);
+}
+
+#[test]
 fn fr_prj_30_fr_rgn_39_candidates_land_in_numbered_iteration_folders() {
     let mut s = setup();
     let (job, cands) = s.fetched("Kitchen, with pots!", 3);

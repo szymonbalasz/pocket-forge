@@ -37,7 +37,12 @@ export function installChatSink(): void {
   chatContext.setSink({
     publish(host, input) {
       const pid = projectId();
-      return pid ? api.chat.contextPublish(pid, host, input).catch(() => undefined) : undefined;
+      if (!pid) return undefined;
+      // R103: the chat window's strip follows each publish, not only a host change or focus.
+      return api.chat.contextPublish(pid, host, input).then(
+        () => void emitEvent('prm:context-published', { project_id: pid, host }).catch(() => {}),
+        () => undefined,
+      );
     },
     clear(host) {
       const pid = projectId();

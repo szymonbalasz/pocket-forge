@@ -199,6 +199,15 @@ describe('FR-RGN-12 estimate debounce', () => {
 });
 
 describe('labels', () => {
+  test('FR-GEN-30 R97 walk-p4r L6 a refused accept reads as a sentence, with its period', () => {
+    const t = errorText(
+      'invalid_candidate',
+      'That candidate was made on a different base image; it can’t be accepted on this one',
+    );
+    expect(t.endsWith('this one.')).toBe(true);
+    expect(errorText('invalid_candidate', 'Done.')).toBe('Done.');
+  });
+
   test('walk owner-UX L2: an io error never shows OS text', () => {
     const t = errorText(
       'io',

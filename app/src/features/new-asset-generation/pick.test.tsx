@@ -153,6 +153,38 @@ test('R84 after a pick the panel stays on the New image tab (also when opened fr
   expect(screen.getByTestId('gen-panel')).toBeTruthy();
 });
 
+test('FR-GEN-32 walk-p4r L6 the Retry note "filled from the job" ends with the next pick', async () => {
+  await setup();
+  await generate('crypt');
+  await act(async () => fireEvent.click(await screen.findByTestId('rgn-job-retry')));
+  await waitFor(() =>
+    expect(screen.getByTestId('gen-panel-info').textContent).toContain('filled from the job'),
+  );
+  await act(async () => fireEvent.click(screen.getAllByTestId('edt-picker-item')[0]!));
+  await key('Enter');
+  await waitFor(() => expect(projectStore.get().project?.has_image).toBe(true));
+  await waitFor(() => expect(screen.queryByTestId('gen-panel-info')).toBeNull());
+});
+
+test('FR-GEN-29 walk-p4r L6 a refused pick notice ends with the next submit', async () => {
+  await setup();
+  await generate('crypt');
+  const w = window as unknown as { __pfMockHandlers: Record<string, (i: never) => unknown> };
+  const pick = w.__pfMockHandlers.gen_candidate_pick!;
+  w.__pfMockHandlers.gen_candidate_pick = () =>
+    Promise.reject({ code: 'job_active', message: 'a job is already running' });
+  await act(async () => fireEvent.click(screen.getAllByTestId('edt-picker-item')[0]!));
+  await key('Enter');
+  await waitFor(() =>
+    expect(screen.getByTestId('rgn-tracker-notice').textContent).toContain(
+      'A job is already running in this project.',
+    ),
+  );
+  w.__pfMockHandlers.gen_candidate_pick = pick;
+  await generate('crypt again', 3);
+  expect(screen.queryByTestId('rgn-tracker-notice')).toBeNull();
+});
+
 const press = (k: string) =>
   window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
 

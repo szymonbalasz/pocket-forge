@@ -214,6 +214,37 @@ pub struct ProjectSnapshot {
 }
 
 impl OpenProject {
+    /// The warnings as of now. `resumable` (FR-PRJ-29) names only jobs found on open that are
+    /// still running: a job this session started never counts, and the warning ends with the
+    /// last of them (walk-p4r L1).
+    fn live_warnings(&self) -> Vec<Warning> {
+        let mut out = Vec::with_capacity(self.warnings.len());
+        for w in &self.warnings {
+            if w.code != "resumable" {
+                out.push(w.clone());
+                continue;
+            }
+            let jobs: Vec<Value> = w.detail["jobs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|j| {
+                    let id: Ulid = j["job_id"].as_str()?.parse().ok()?;
+                    let job = self.jobs.get(&id).filter(|f| !f.state.is_terminal())?;
+                    Some(serde_json::json!({ "job_id": id, "state": job.state }))
+                })
+                .collect();
+            if !jobs.is_empty() {
+                out.push(Warning {
+                    code: w.code,
+                    message: format!("{} job(s) can resume.", jobs.len()),
+                    detail: serde_json::json!({ "jobs": jobs }),
+                });
+            }
+        }
+        out
+    }
+
     pub fn snapshot(&self) -> ProjectSnapshot {
         let m = &self.manifest;
         let (width, height) = m.image_size().unwrap_or((0, 0));
@@ -226,7 +257,7 @@ impl OpenProject {
             original_image_id: m.original_image_id(),
             has_image: m.has_image(),
             read_only: self.read_only,
-            warnings: self.warnings.clone(),
+            warnings: self.live_warnings(),
             width,
             height,
             format: m.image_format(),
