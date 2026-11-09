@@ -51,6 +51,9 @@ pub const EVENT_DELTA: &str = "prm:chat-delta";
 pub const EVENT_TURN: &str = "prm:chat-turn";
 pub const EVENT_STATUS: &str = "prm:chat-status";
 pub const EVENT_INSERT: &str = "prm:insert";
+/// BL-41: the open project or its attached host changed: `{project_id | null, host | null}`.
+/// The chat window follows the main window with it.
+pub const EVENT_CONTEXT: &str = "prm:chat-context";
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -109,6 +112,17 @@ struct Running {
     turn_id: Ulid,
     project_id: Ulid,
     cancel: CancelHandle,
+}
+
+impl Rt {
+    /// The host whose prompt block is attached for `project_id`: the latest published.
+    fn current_host(&self, project_id: Ulid) -> Option<ChatHost> {
+        self.contexts
+            .iter()
+            .filter(|((p, _), _)| *p == project_id)
+            .max_by_key(|(_, (seq, _))| *seq)
+            .map(|((_, h), _)| *h)
+    }
 }
 
 #[derive(Default)]
@@ -182,6 +196,12 @@ impl ChatRuntime {
         }
     }
 
+    /// BL-41: tells the chat window which project is open (`None`: none) and its host.
+    pub fn notify_project(&self, ctx: &Context, project_id: Option<Ulid>) {
+        let host = project_id.and_then(|p| lock(&self.rt).current_host(p));
+        emit_context(ctx, project_id, host);
+    }
+
     fn clear_status(&self) {
         lock(&self.rt).status = None;
     }
@@ -195,6 +215,13 @@ impl ChatRuntime {
     pub fn running_turn(&self) -> Option<Ulid> {
         lock(&self.rt).running.as_ref().map(|r| r.turn_id)
     }
+}
+
+fn emit_context(ctx: &Context, project_id: Option<Ulid>, host: Option<ChatHost>) {
+    ctx.emit(
+        EVENT_CONTEXT,
+        json!({ "project_id": project_id, "host": host }),
+    );
 }
 
 /// At startup (§11): turn image folders and Claude Code's `projects/` are emptied.
@@ -602,11 +629,18 @@ impl Command for PrmContextPublish {
 
     fn run(core: &Core, input: PublishInput) -> CoreResult<Empty> {
         open_project(core, input.project_id)?;
-        let mut rt = lock(&core.chat.rt);
-        rt.seq += 1;
-        let seq = rt.seq;
-        rt.contexts
-            .insert((input.project_id, input.host), (seq, input.input));
+        let (before, after) = {
+            let mut rt = lock(&core.chat.rt);
+            let before = rt.current_host(input.project_id);
+            rt.seq += 1;
+            let seq = rt.seq;
+            rt.contexts
+                .insert((input.project_id, input.host), (seq, input.input));
+            (before, rt.current_host(input.project_id))
+        };
+        if before != after {
+            emit_context(&core.ctx, Some(input.project_id), after);
+        }
         Ok(Empty {})
     }
 }
@@ -629,9 +663,15 @@ impl Command for PrmContextClear {
     type Output = Empty;
 
     fn run(core: &Core, input: ClearInput) -> CoreResult<Empty> {
-        lock(&core.chat.rt)
-            .contexts
-            .remove(&(input.project_id, input.host));
+        let (before, after) = {
+            let mut rt = lock(&core.chat.rt);
+            let before = rt.current_host(input.project_id);
+            rt.contexts.remove(&(input.project_id, input.host));
+            (before, rt.current_host(input.project_id))
+        };
+        if before != after {
+            emit_context(&core.ctx, Some(input.project_id), after);
+        }
         Ok(Empty {})
     }
 }
@@ -682,12 +722,7 @@ impl Command for PrmChatThreadGet {
                 .try_lock()
                 .map(|s| s.as_ref().is_some_and(|e| e.project_id == input.project_id))
                 .unwrap_or(true);
-        let current_host = lock(&core.chat.rt)
-            .contexts
-            .iter()
-            .filter(|((p, _), _)| *p == input.project_id)
-            .max_by_key(|(_, (seq, _))| *seq)
-            .map(|((_, h), _)| *h);
+        let current_host = lock(&core.chat.rt).current_host(input.project_id);
         Ok(ThreadView {
             thread: loaded.thread,
             running_turn_id,

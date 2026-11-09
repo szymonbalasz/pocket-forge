@@ -870,6 +870,8 @@ export interface Events {
   };
   /** A fresh detection changed the backend status. */
   'prm:chat-status': { backend: ChatBackendStatus };
+  /** BL-41: the open project or its attached host changed (the chat window follows it). */
+  'prm:chat-context': { project_id: string | null; host: ChatHostId | null };
   /** Replace (FR-PRM-29): applied only by that host's attached prompt block. */
   'prm:insert': { project_id: string; host: ChatHostId; proposal_id: string; text: string };
 }

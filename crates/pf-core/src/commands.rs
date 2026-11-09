@@ -498,6 +498,7 @@ impl Command for ProjectOpen {
             old.decoded.release();
         }
         core.served().reset(Some(snap.project_id));
+        core.chat.notify_project(&core.ctx, Some(snap.project_id));
         state.project = Some(p);
         Ok(snap)
     }
@@ -565,6 +566,7 @@ impl Command for ProjectClose {
         crate::export::on_project_close(&core.ctx, &mut state);
         if let Some(p) = state.project.take() {
             core.chat.on_project_close(p.manifest.project_id);
+            core.chat.notify_project(&core.ctx, None);
             p.decoded.release();
         }
         core.served().reset(None);

@@ -345,15 +345,35 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     chat.fakeCase = String(input.case);
     return {};
   };
+  const currentHost = (pid: string): Host | null => {
+    let host: Host | null = null;
+    let best = -1;
+    for (const h of ['rgn', 'gen'] as Host[]) {
+      const c = chat.contexts.get(`${pid}|${h}`);
+      if (c && c.seq > best) {
+        best = c.seq;
+        host = h;
+      }
+    }
+    return host;
+  };
+  // BL-41: a host change is announced, as the core does.
+  const announce = (pid: string, before: Host | null) => {
+    const after = currentHost(pid);
+    if (after !== before) emit('prm:chat-context', { project_id: pid, host: after });
+  };
   handlers.prm_context_publish = (input) => {
-    chat.contexts.set(`${String(input.project_id)}|${String(input.host)}`, {
-      seq: ++chat.seq,
-      input: input.input,
-    });
+    const pid = String(input.project_id);
+    const before = currentHost(pid);
+    chat.contexts.set(`${pid}|${String(input.host)}`, { seq: ++chat.seq, input: input.input });
+    announce(pid, before);
     return {};
   };
   handlers.prm_context_clear = (input) => {
-    chat.contexts.delete(`${String(input.project_id)}|${String(input.host)}`);
+    const pid = String(input.project_id);
+    const before = currentHost(pid);
+    chat.contexts.delete(`${pid}|${String(input.host)}`);
+    announce(pid, before);
     return {};
   };
   handlers.prm_chat_thread_get = (input) => {

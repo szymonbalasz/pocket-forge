@@ -175,3 +175,21 @@ test('FR-PRM-20 Settings before consent says so and offers no login', async () =
   await act(async () => undefined);
   expect(screen.queryByTestId('prm-settings-chat-logout')).toBeNull();
 });
+
+test('BL-41 the window follows the main window by event, without polling', async () => {
+  setup({ chat: { consent: true } });
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('No prompt block'));
+  const reads = fake.callsOf('project_get').length;
+  await api.chat.contextPublish(PID, 'gen', {});
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('New image'));
+  await api.chat.contextClear(PID, 'gen');
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('No prompt block'));
+  // The main window closed the project.
+  const w = window as unknown as { __pfMockHandlers: Record<string, () => unknown> };
+  w.__pfMockHandlers.project_get = () => null;
+  act(() => fake.emit('prm:chat-context', { project_id: null, host: null }));
+  await waitFor(() => expect(id('prm-chat-no-project')).toBeTruthy());
+  await new Promise((r) => setTimeout(r, 1200));
+  expect(fake.callsOf('project_get').length).toBe(reads + 1);
+});

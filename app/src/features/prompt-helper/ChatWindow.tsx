@@ -3,7 +3,8 @@
 // (project · host · backend chip), transcript with proposal cards (Replace + Copy, #60), the
 // context strip, the composer (Send / Stop) and the usage footer. Every state of §7: consent,
 // off, backend errors with their fix and Recheck, no project, no prompt block, running,
-// errors with Retry, offline, read-only, fake.
+// errors with Retry, offline, read-only, fake. It follows the main window through
+// `prm:chat-context` (project and host changes, BL-41) and re-reads on focus.
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
@@ -25,10 +26,6 @@ import {
   usageLabel,
 } from './chatLogic';
 import './chat.css';
-
-/** How often the window re-reads the open project and the attached host (they change in the
- *  main window). */
-export const CHAT_POLL_MS = 1000;
 
 type Problem = { code: string; message: string };
 
@@ -101,12 +98,7 @@ export function ChatWindow() {
     setLive(null);
     setProblem(null);
     void loadThread(pid);
-    const t = setInterval(() => {
-      void loadProject();
-      void loadThread(pidRef.current);
-    }, CHAT_POLL_MS);
-    return () => clearInterval(t);
-  }, [pid, loadThread, loadProject]);
+  }, [pid, loadThread]);
 
   useEffect(() => {
     const subs = [
@@ -121,6 +113,11 @@ export function ChatWindow() {
         void loadThread(pidRef.current);
       }),
       onEvent('prm:chat-status', (p) => setStatus((s) => (s ? { ...s, backend: p.backend } : s))),
+      // BL-41: the main window opened, closed or switched project, or its visible tab changed.
+      onEvent('prm:chat-context', (c) => {
+        if (c.project_id !== pidRef.current) void loadProject();
+        else void loadThread(c.project_id);
+      }),
     ];
     return () =>
       subs.forEach(
@@ -134,7 +131,7 @@ export function ChatWindow() {
             () => undefined,
           ),
       );
-  }, [loadThread]);
+  }, [loadThread, loadProject]);
 
   const send = async (text: string) => {
     if (!pid) return;

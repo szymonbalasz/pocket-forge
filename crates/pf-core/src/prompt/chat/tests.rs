@@ -884,3 +884,38 @@ fn fr_prm_24_the_overlay_golden() {
 /// FR-PRM-24's golden: the overlay JPEG of the lab region (deterministic: no resampling).
 const GOLDEN_OVERLAY: &str =
     "sha256:0a0694704726789ce4a2827d59a6786434cbee4094edc3e97b1b3c36ed07565e";
+
+#[test]
+fn bl_41_the_window_hears_when_the_project_or_its_host_changes() {
+    let lab = lab();
+    let ctx_events = |lab: &Lab| events(lab, super::EVENT_CONTEXT);
+    let opened = ctx_events(&lab);
+    assert_eq!(
+        opened.last().unwrap(),
+        &json!({"project_id": pid(&lab), "host": null})
+    );
+    let n = opened.len();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    publish(&lab, "rgn", lab.draft("a kitchen, edited"));
+    let e = ctx_events(&lab);
+    assert_eq!(
+        e.len(),
+        n + 1,
+        "only a host change is announced, not every edit"
+    );
+    assert_eq!(e[n], json!({"project_id": pid(&lab), "host": "rgn"}));
+    publish(&lab, "gen", json!({}));
+    assert_eq!(ctx_events(&lab).last().unwrap()["host"], "gen");
+    lab.core
+        .dispatch(
+            "prm_context_clear",
+            json!({"project_id": pid(&lab), "host": "gen"}),
+        )
+        .unwrap();
+    assert_eq!(ctx_events(&lab).last().unwrap()["host"], "rgn");
+    lab.core.dispatch("project_close", json!({})).unwrap();
+    assert_eq!(
+        ctx_events(&lab).last().unwrap(),
+        &json!({"project_id": null, "host": null})
+    );
+}
