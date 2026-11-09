@@ -45,3 +45,10 @@
 
 ## Reserved FR ranges
 - _none_
+
+## Phase 4 (#58, #59)
+
+| Task | Agent | Branch state | Result | Next |
+|---|---|---|---|---|
+| Spec: new-asset generation (GEN) | `spec-gen` | writing | — | owner OQs, review |
+| Spec: prompt helper (PRM) | `spec-prm` | writing | — | owner OQs, review |
