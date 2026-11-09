@@ -804,9 +804,25 @@ export const PATCHES_KEPT = (n: number): string =>
     ? '1 patch layer kept in history (undo restores it).'
     : `${n} patch layers kept in history (undo restores them).`;
 
+/** Picks run one at a time (FR-GEN-29): each takes its undo parent after the one before it
+ *  refreshed the head, so a quick second pick never skips the first in the undo stack. */
+let picking: Promise<void> = Promise.resolve();
+
 /** FR-GEN-27/28/30: picks a generate candidate as the new bottom image (one revision, undoable),
  *  from any generate iteration (no spend). */
-async function pickNewImage(jobId: string, candidateId: string): Promise<void> {
+function pickNewImage(jobId: string, candidateId: string): Promise<void> {
+  const pid = state.projectId;
+  const run = picking.then(() => pickNow(pid, jobId, candidateId));
+  picking = run.catch(() => undefined);
+  return run;
+}
+
+async function pickNow(pid: string | null, jobId: string, candidateId: string): Promise<void> {
+  if (!pid || state.projectId !== pid) return;
+  // Enter twice on one candidate: it is the base image already (no second revision).
+  const layers = state.layers as (Layer & { candidate_id?: string })[];
+  if (layers.length === 1 && layers[0]?.kind === 'base' && layers[0].candidate_id === candidateId)
+    return;
   const parent = state.headRevision;
   try {
     const r = await api.gen.pick(jobId, candidateId);
