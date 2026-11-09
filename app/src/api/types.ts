@@ -82,7 +82,11 @@ export interface FolderFile {
   mtime: string;
   image: boolean;
   /** Thumbnail URL on the `pf-tiles` scheme for images, or null (hydrated only on view). */
-  thumb_url?: string | null;
+  thumb_url?:
+    | string
+    | null; /** Images: `cloud_only` (not hydrated) or `corrupt` (won't decode); absent = ok. GEN's sketch
+   *  block badges them (FR-GEN-14). */
+  state?: 'ok' | 'cloud_only' | 'corrupt';
 }
 
 export interface TrashItem {
@@ -146,6 +150,8 @@ export interface Draft {
   references?: DraftReferences | null;
   /** #55: append the blend instruction at submit; absent/null = on (the default). */
   blend_instruction?: boolean | null;
+  /** GEN's New image tab (FR-GEN-19, schema §4.5 `draft.generate`); absent = defaults. */
+  generate?: GenDraft | null;
   updated_at: string;
 }
 
@@ -201,8 +207,9 @@ export interface ProjectSnapshot {
   kind: ProjectKind;
   /** The project folder name (FR-PRJ-44). */
   name: string;
-  /** The original, `<project_dir>/working/<file>`. */
-  image_path: string;
+  /** The original (or, after a pick, the base image), `<project_dir>/working/<file>`; null for a
+   *  project made by Generate new that has no image yet (FR-GEN-02/03, `original: null`). */
+  image_path: string | null;
   /** The project folder (absolute). */
   project_dir: string;
   /** The original's stable image id (= `layers[0].id`, #48 (3)); EDT opens tiles with it. */
@@ -233,6 +240,8 @@ export interface DraftInput {
   references?: DraftReferences | null;
   /** #55: append the blend instruction at submit; absent/null = on (the default). */
   blend_instruction?: boolean | null;
+  /** GEN's New image draft (FR-GEN-19); absent = keep the stored one. */
+  generate?: GenDraft | null;
 }
 
 export interface ImageOpen {
@@ -280,7 +289,18 @@ export interface Capabilities {
   controls: {
     name: string;
     type: 'int' | 'float' | 'enum' | 'bool' | 'string' | 'seed' | 'image' | 'mask';
-    role: 'source' | 'mask' | 'prompt' | 'candidate_count' | 'seed' | 'reference' | 'other';
+    /** `background` (GEN, OQ-GEN-07) renders as an ordinary control; `output_size` inputs are
+     *  never shown as raw controls (FR-GEN-11). */
+    role:
+      | 'source'
+      | 'mask'
+      | 'prompt'
+      | 'candidate_count'
+      | 'seed'
+      | 'reference'
+      | 'background'
+      | 'output_size'
+      | 'other';
     min: number | null;
     max: number | null;
     step: number | null;
@@ -303,7 +323,15 @@ export interface Capabilities {
   prompt_required: boolean;
   slots: CapabilitySlot[];
   warnings: string[];
+  /** `generate` only (PRV amendment, #60): how the output size is set. */
+  output_size?: OutputSize | null;
+  /** `generate` only: the slot a structural sketch is sent in (first), or null (OQ-GEN-05). */
+  structure?: { slot: string } | null;
 }
+
+/** A generate model's output size (FR-GEN-08/09): exact width × height, or a ratio list. */
+export type OutputSize =
+  { mode: 'wh'; min: number; max: number; step: number } | { mode: 'aspect'; allowed: string[] };
 
 /** A reference image input of a model (FR-PRV-31, R49). `min` is 1 for a required input;
  *  `array` = the input takes a list (`file_array`) rather than one file. */
@@ -537,6 +565,10 @@ export interface RgnIteration {
   accepted_in_stack: boolean;
   /** `references[]` count for the chip (FR-RGN-45). */
   references: number;
+  /** FR-GEN-25 (RGN-40 amended): `generate` rows get the `new image` badge; absent = edit. */
+  operation?: Operation;
+  /** A generate job's sent size (FR-GEN-22 `output`). */
+  output?: GenOutput | null;
   /** The chip tooltip: each file sent, its pack (null = the project) and role (FR-RGN-45). */
   reference_files: { file: string; pack_name: string | null; role: RefRole | null }[];
 }
@@ -605,7 +637,8 @@ export interface Commands {
     ProviderSettings,
   ];
   provider_list_models: [{ operation: Operation }, { models: ModelSummary[]; stale: boolean }];
-  provider_get_capabilities: [{ model_id: string }, Capabilities];
+  /** `operation` absent = `edit_masked` (GEN: `generate`, PRV amendment #60). */
+  provider_get_capabilities: [{ model_id: string; operation?: Operation }, Capabilities];
   provider_balance: [Record<string, never>, Balance];
   provider_fake_set_case: [{ case: string }, Record<string, never>];
   rgn_controls_evaluate: [
@@ -675,11 +708,42 @@ export interface Commands {
   ref_pack_delete: [{ pack_id: string }, { item_id: string }];
   ref_trash_list: [Record<string, never>, RefTrashItem[]];
   ref_trash_restore: [{ id: string }, { path: string }];
-  ref_resolve: [{ model_id: string; references: DraftReferences | null }, RefResolved];
+  /** GEN (FR-GEN-13): `operation: generate` resolves against the generate slots; `structure` =
+   *  the chosen sketch, whose slot's `max` is reduced by 1. */
+  ref_resolve: [
+    {
+      model_id: string;
+      references: DraftReferences | null;
+      operation?: Operation;
+      structure?: string | null;
+    },
+    RefResolved,
+  ];
   project_conflict_get: [Record<string, never>, ConflictView];
   project_resolve_conflict: [{ keep: ConflictKeep }, RevisionEntry];
   /** #56: "Discard the rest": every candidate of the job but the accepted and starred ones. */
   rgn_job_discard_rest: [{ job_id: string }, { trashed: number }];
+  // new-asset-generation §9 (GEN, #59, #60)
+  gen_project_create: [{ section: Section; name: string }, { path: string }];
+  gen_size_fit: [{ model_id: string; kind: ProjectKind; size: GenSize }, GenSizeFit];
+  gen_controls_evaluate: [
+    { model_id: string; values: Record<string, unknown> },
+    ControlsEvaluation,
+  ];
+  gen_job_estimate: [{ draft: GenJobDraft }, GenEstimate];
+  gen_job_submit: [
+    { draft: GenJobDraft; estimate_id: string; confirmations: SpendNeed[] },
+    { job_id: string },
+  ];
+  gen_job_retry_draft: [{ job_id: string }, GenRetryDraft];
+  gen_candidate_preview: [
+    { job_id: string; candidate_id: string },
+    { key: string; url: string; rect: RectPx; same_size: boolean },
+  ];
+  gen_candidate_pick: [
+    { job_id: string; candidate_id: string },
+    { layer_id: string; revision_id: string },
+  ];
 }
 
 export type CommandName = keyof Commands;
@@ -881,4 +945,72 @@ export interface RefResolved {
   ready: boolean;
   /** Read-only project (FR-REF-27). */
   read_only: boolean;
+}
+
+// ── New-asset generation (GEN §9, #59, #60) ──────────────────────────────────────────────────
+
+/** The size the New image tab asks for (FR-GEN-07/10): a grid for Maps, a ratio for Tokens and
+ *  Items. */
+export type GenSize =
+  | { mode: 'grid'; cols: number; rows: number; pps: number }
+  | { mode: 'ratio'; aspect: string; long_side: number };
+
+/** `gen_size_fit` notice codes: `model_limit` (pps lowered, FR-GEN-08), `cells_not_square`
+ *  (nearest ratio off by > 1 %, FR-GEN-09). */
+export interface GenNotice {
+  code: string;
+  message: string;
+}
+
+/** `gen_size_fit` (FR-GEN-08/09): what is sent. `wh` models get `w`/`h`, aspect models `aspect`;
+ *  `pps` is the grid's px per square after a model-limit lowering (null for a ratio size). */
+export interface GenSizeFit {
+  mode: 'wh' | 'aspect';
+  w?: number | null;
+  h?: number | null;
+  aspect?: string | null;
+  pps: number | null;
+  notices: GenNotice[];
+}
+
+/** A generate job's `output` (schema §4.6, FR-GEN-22). */
+export interface GenOutput {
+  mode: 'wh' | 'aspect';
+  w?: number | null;
+  h?: number | null;
+  aspect?: string | null;
+  grid?: { cols: number; rows: number; pps: number } | null;
+}
+
+/** `draft.generate` (FR-GEN-19, schema §4.5): the New image tab as saved. PRM's prompt fields
+ *  (`prompt_helpers`) join in slice 6. */
+export interface GenDraft {
+  model_id: string | null;
+  controls: Record<string, unknown>;
+  seed: number | null;
+  size: GenSize | null;
+  /** The chosen sketch in `structure/`, or null = None (FR-GEN-14). */
+  structure: { file: string } | null;
+  references: DraftReferences | null;
+  typed_prompt: string;
+  prompt_helpers?: string[];
+}
+
+/** The draft estimate and submit act on (`gen_job_estimate` / `_submit`). */
+export interface GenJobDraft extends GenDraft {
+  model_id: string;
+  size: GenSize;
+  /** PRM's composed final prompt (FR-GEN-16); the typed prompt until slice 6. */
+  final_prompt: string;
+}
+
+/** `gen_job_estimate` (FR-GEN-20/21): RGN's estimate without a region fit, plus the output. */
+export interface GenEstimate extends Omit<JobEstimate, 'fit'> {
+  output: GenOutput;
+}
+
+/** `gen_job_retry_draft` (FR-GEN-32): the job's draft; the sketch is flagged when its bytes
+ *  changed since that job (`changed_since` = `NNN`) or it is gone (`missing`). */
+export interface GenRetryDraft extends GenDraft {
+  structure: { file: string; changed_since?: string | null; missing?: boolean } | null;
 }
