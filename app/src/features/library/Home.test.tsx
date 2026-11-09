@@ -259,6 +259,33 @@ test('FR-PRJ-45 rename from the card: Enter renames the folder, a taken name sho
   expect(mock.projects.has(`${LIB}/Maps/Old Crypt`)).toBe(true);
 });
 
+test('FR-PRJ-49 a late listing (a thumbnail refresh) never replaces a newer one (a rename)', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  const h = core.handlersSnapshot();
+  const list = h.library_list_projects!;
+  let release: () => void = () => undefined;
+  let first = true;
+  core.useHandlers({
+    ...h,
+    library_list_projects: (input) => {
+      const cardsNow = list(input); // the listing as it is now…
+      if (!first) return cardsNow;
+      first = false;
+      return new Promise<void>((r) => (release = r)).then(() => cardsNow); // …answered late
+    },
+  });
+  act(() => core.emit('project:thumb-updated', { project_id: 'x' }));
+  await waitFor(() => expect(core.names()).toContain('library_list_projects'));
+  const crypt = libraryStore.get().cards!.find((c) => c.name === 'Crypt')!;
+  await act(() => libraryStore.rename(crypt, 'Old Crypt'));
+  await waitFor(() => expect(cardNames()).toContain('Old Crypt'));
+  await act(async () => release());
+  await act(() => new Promise((r) => setTimeout(r, 20)));
+  expect(cardNames()).toContain('Old Crypt');
+  expect(cardNames()).not.toContain('Crypt');
+});
+
 test('FR-PRJ-17 a cloud-only project offline shows not available offline with Retry, which opens it once online', async () => {
   setup();
   await waitFor(() => expect(cards()).toHaveLength(2));
