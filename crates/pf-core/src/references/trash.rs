@@ -1,7 +1,8 @@
 //! The References trash (FR-REF-12, OQ-REF-03 A, schema §4.13):
 //! `<root>/References/.pforge/trash/<item-id>/item.json` plus the moved files. `item.json` is
-//! written first, then the move; an interrupted move is rolled forward at startup. Items older
-//! than 30 days (clock seam) are purged at startup.
+//! written first, then the move; an interrupted move (a kill) is rolled forward at startup. A move
+//! that fails with an error is rolled back at once, so the item never claims files the user was
+//! told weren't deleted (R102). Items older than 30 days (clock seam) are purged at startup.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -119,11 +120,25 @@ pub(crate) fn trash_files(
     dir: &Path,
     files: &[String],
 ) -> CoreResult<Ulid> {
-    let item = new_item(ctx, TrashKind::Images, pack_id, pack_name, files.to_vec());
+    let mut item = new_item(ctx, TrashKind::Images, pack_id, pack_name, files.to_vec());
     let item_dir = trash_dir(root).join(item.id.to_string());
     write_item(ctx, &item_dir, &item)?;
-    for f in files {
-        fsx::move_file(&dir.join(f), &item_dir.join(f))?;
+    for (i, f) in files.iter().enumerate() {
+        if let Err(e) = fsx::move_file(&dir.join(f), &item_dir.join(f)) {
+            // R102: back to the pack; the item keeps only what couldn't go back (if anything).
+            let stuck: Vec<String> = files[..i]
+                .iter()
+                .filter(|m| fsx::move_file(&item_dir.join(m), &dir.join(m)).is_err())
+                .cloned()
+                .collect();
+            if stuck.is_empty() {
+                let _ = std::fs::remove_dir_all(&item_dir);
+            } else {
+                item.files = stuck;
+                let _ = write_item(ctx, &item_dir, &item);
+            }
+            return Err(e);
+        }
     }
     Ok(item.id)
 }
@@ -157,7 +172,11 @@ pub fn delete_pack(ctx: &Context, loc: &PackLoc) -> CoreResult<Ulid> {
     );
     let item_dir = trash_dir(&loc.root).join(item.id.to_string());
     write_item(ctx, &item_dir, &item)?;
-    fsx::move_file(&loc.dir, &item_dir.join(&loc.name))?;
+    if let Err(e) = fsx::move_file(&loc.dir, &item_dir.join(&loc.name)) {
+        // R102: one rename, so nothing moved; the item goes too.
+        let _ = std::fs::remove_dir_all(&item_dir);
+        return Err(e);
+    }
     Ok(item.id)
 }
 
@@ -239,7 +258,8 @@ pub fn restore(ctx: &Context, settings: &Settings, id: Ulid) -> CoreResult<PathB
     }
     item.restored_at = Some(ctx.now());
     write_item(ctx, &item_dir, &item)?;
-    let path = finish_restore(ctx, settings, &root, &item_dir, &item)?;
+    let path = finish_restore(ctx, settings, &root, &item_dir, &item)
+        .inspect_err(|_| reopen_item(ctx, &item_dir, &item))?;
     if let Some(pack_id) = item.pack_id {
         thumb::request(ctx, &path, pack_id);
     }
@@ -286,9 +306,25 @@ fn finish_restore(
             dir
         }
     };
-    std::fs::remove_dir_all(item_dir)
-        .map_err(|e| CoreError::io(format!("removing {}", item_dir.display()), &e))?;
+    if let Err(e) = std::fs::remove_dir_all(item_dir) {
+        // Everything is back; the leftover folder (still `restored_at`) is removed at startup.
+        tracing::warn!(item = %item.id, error = %e, "restored trash item folder not removed");
+    }
     Ok(path)
+}
+
+/// R102: a restore that failed part-way shows in Recently deleted again with what is still in
+/// the trash, instead of staying hidden until the purge deletes it.
+fn reopen_item(ctx: &Context, item_dir: &Path, item: &TrashItem) {
+    let mut item = item.clone();
+    item.restored_at = None;
+    if item.kind == TrashKind::Images {
+        item.files
+            .retain(|f| std::fs::symlink_metadata(item_dir.join(f)).is_ok());
+    }
+    if let Err(e) = write_item(ctx, item_dir, &item) {
+        tracing::warn!(item = %item.id, error = %e, "failed restore not reopened");
+    }
 }
 
 // ---------------------------------------------------------------- startup
@@ -298,7 +334,9 @@ fn finish_restore(
 pub(crate) fn roll_forward(ctx: &Context, settings: &Settings, root: &Path) {
     for (item_dir, item) in items_of(root) {
         let result = if item.restored_at.is_some() {
-            finish_restore(ctx, settings, root, &item_dir, &item).map(|_| ())
+            finish_restore(ctx, settings, root, &item_dir, &item)
+                .inspect_err(|_| reopen_item(ctx, &item_dir, &item))
+                .map(|_| ())
         } else {
             finish_trash(root, &item_dir, &item)
         };
@@ -350,7 +388,8 @@ pub fn purge(ctx: &Context, settings: &Settings) -> (usize, u64) {
     let (mut count, mut bytes) = (0, 0);
     for root in available_roots(ctx, settings) {
         for (dir, item) in items_of(&root) {
-            if item.trashed_at.plus(TRASH_KEEP) >= now {
+            // A restore in flight (or not finished yet) is never purged (R102).
+            if item.trashed_at.plus(TRASH_KEEP) >= now || item.restored_at.is_some() {
                 continue;
             }
             let size = dir_size(&dir);
