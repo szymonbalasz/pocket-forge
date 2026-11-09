@@ -36,6 +36,7 @@
       chat/<thread-id>.json              mutable: the prompt chat thread (§4.14, PRM)
       thumb.jpg                          home-grid thumbnail, ≤ 512 px, rebuildable (FR-PRJ-50)
       project.v<N>.json                  pre-migration copy (§6)
+      broken/project.<stamp>.json        a broken manifest's bytes, copied before any rebuild (R102)
   Maps/.Crypt.pf-tmp-<ulid>/             a project being created (FR-PRJ-09)
   References/                            reference packs (#51); not a section (FR-PRJ-51)
     Swords/                              a pack; folder name = pack name (FR-REF-02)
@@ -49,6 +50,7 @@
   cache/tiles/…                          tile pyramids; key, cap, eviction owned by EDT (R5)
   cache/provider/…                       model list + capabilities, owned by PRV
   pending/<project-id>/…                 write spool (§4.9, R12)
+  pending/<project-id>/quarantine/      spool entries that can't replay, with their bytes (R105)
 ```
 
 **Lose it?** Caches rebuild. `settings.json` is per-machine config (re-pick roots, re-enter spend cap). `pending/` holds not-yet-committed candidate bytes and job updates: losing it before replay loses those only.
@@ -144,7 +146,7 @@ stateDiagram-v2
   [*] --> requested: record_job (no handle)
   requested --> submitted: handle saved
   requested --> failed: submit error
-  requested --> lost: submit timeout, or crash before handle saved (found on open)
+  requested --> lost: unconfirmed submit (R106), or not in flight and older than the submit timeout + 60 s on open (R102)
   submitted --> queued
   submitted --> running
   submitted --> failed
@@ -158,20 +160,25 @@ stateDiagram-v2
   running --> failed
   running --> canceled
   running --> unknown: offline
+  submitted --> lost: 10 poll errors in a row (R106)
+  queued --> lost: 10 poll errors in a row
+  running --> lost: 10 poll errors in a row
+  unknown --> lost: 10 poll errors in a row
+  lost --> submitted: a submit returns a handle for a lost job never submitted (R102)
   unknown --> queued: reconnect
   unknown --> running: reconnect
   unknown --> succeeded: reconnect
   unknown --> failed: reconnect
   unknown --> canceled: reconnect
   succeeded --> fetched: candidates stored
-  succeeded --> failed: all candidates invalid
+  succeeded --> failed: all candidates invalid (a fetch error never fails a succeeded job, R102)
   fetched --> closed: accept, dismiss or next submit
   failed --> [*]
   canceled --> [*]
   lost --> [*]
   closed --> [*]
 ```
-Terminal = `failed | canceled | lost | closed`. A re-pick (RGN FR-RGN-36) accepts another candidate of a `closed` job without a transition. Handle rule: `requested` has no handle; `submitted` and every state reached from it have one inside `provider{}`. PRJ never reads it. RGN's job runner drives the transitions (R14); PRJ persists them.
+Terminal = `failed | canceled | lost | closed`, except the guarded `lost → submitted` revive (R102). A `lost` job's `error.code` says why: `lost` (found on open), `timeout` (unconfirmed submit) or the last poll error's code (R106). A re-pick (RGN FR-RGN-36) accepts another candidate of a `closed` job without a transition. Handle rule: `requested` has no handle; `submitted` and every state reached from it have one inside `provider{}`. PRJ never reads it. RGN's job runner drives the transitions (R14); PRJ persists them.
 
 ### 4.7 Candidate (manifest `candidates[]`)
 | Field | Type | Notes |
@@ -184,7 +191,7 @@ Terminal = `failed | canceled | lost | closed`. A re-pick (RGN FR-RGN-36) accept
 | `status` | `new\|accepted\|dismissed\|discarded\|trashed\|invalid` | R10 |
 | `starred` | bool | separate from status, a favourite marker; skipped by Discard the rest, and an explicit Discard clears it (#56, R65) |
 | `trash_id` | ULID \| null | set while the file is in the trash; after a purge it still names the purged item |
-| `purged_at` | timestamp, optional | set when the 30-day purge deleted the file (FR-PRJ-32, BL-23); the record stays |
+| `purged_at` | timestamp, optional | set when the 30-day purge deleted the file, and only once it is really gone; a file the purge couldn't delete keeps its trash item (FR-PRJ-32, BL-23, R102) |
 
 - `new` = ready to compare · `accepted` · `dismissed` = left over when its job was resolved; the file stays in `results/` (`trash_id` null, #56), and a restored discarded candidate returns as `dismissed` (R66) · `discarded` = the user discarded it · `trashed` = moved by a sweep (orphan, conflict) · `invalid` = won't decode. UI statuses (`pending|ready|invalid`) are EDT/RGN's only.
 - A rebuild (FR-PRJ-24, conflict) adds candidates listed in a job's `candidate_ids[]` but missing here, as `new` (or `invalid` if the file won't decode).
@@ -193,7 +200,7 @@ Terminal = `failed | canceled | lost | closed`. A re-pick (RGN FR-RGN-36) accept
 `id`, `kind` (`candidates|job_inputs|mask|layer|manifest|orphan|conflict_copy`), `files[]` (from → `.pforge/trash/<id>/<from>`; a restore moves it back to `<from>`, recreating its folder), `trashed_at`, `reason`. The manifest records the item first; the file moves follow the commit and are rolled forward on open. Purged when `trashed_at` + 30 days < now (at open).
 
 ### 4.9 Spool entry (`<data-dir>/pending/<project-id>/`)
-`<seq>.json` = `{seq, op: add_candidates|update_job, job_id, payload, created_at}`, plus `<seq>-<cand-id>.<ext>` bytes. Replayed in `seq` order once the project is writable; each entry is deleted after its commit. One the store refuses for good is deleted too, and `project:spool-dropped` tells the user (BL-25).
+`<seq>.json` = `{seq, op: add_candidates|update_job, job_id, payload, created_at}`, plus `<seq>-<cand-id>.<ext>` bytes. Replayed in `seq` order once the project is writable; each entry is deleted after its commit (its .json first, then its bytes, R102). One the store refuses for good is deleted too, and `project:spool-dropped` tells the user (BL-25). An entry that can't replay (unparseable, bytes gone, files taken, candidates refused while the job waits) moves to `quarantine/` with its bytes and fires `project:spool-quarantined`, so later entries go on (R105).
 
 ### 4.10 Export (manifest `export`, EXP owns the meaning)
 | Field | Type | Notes |
@@ -223,7 +230,7 @@ Owner of the meaning: [reference-packs](../specs/reference-packs.md) (REF). In `
 No `name`: the folder name is the pack name (OQ-REF-01).
 
 ### 4.13 References trash item
-`<library-root>/References/.pforge/trash/<item-id>/item.json` = `{schema_version, id, kind: pack|images, pack_id, from, files[], trashed_at, restored_at?}` (`from` = `References/<pack>` for a pack, the file names for images), plus the moved files under the same folder. `item.json` is written first; the move is rolled forward at startup. `restored_at` is set before a restore moves files back, so a restore interrupted by a crash is finished at startup (R50). Purged when `trashed_at` + 30 days < now (FR-REF-12).
+`<library-root>/References/.pforge/trash/<item-id>/item.json` = `{schema_version, id, kind: pack|images, pack_id, from, files[], trashed_at, restored_at?}` (`from` = `References/<pack>` for a pack, the file names for images), plus the moved files under the same folder. `item.json` is written first; the move is rolled forward at startup. `restored_at` is set before a restore moves files back, so a restore interrupted by a crash is finished at startup (R50). Purged when `trashed_at` + 30 days < now and `restored_at` is unset (FR-REF-12). A failed move is rolled back, and a failed restore clears `restored_at` (R102).
 
 ### 4.14 Chat thread (`.pforge/chat/<thread-id>.json`)
 Owner of the meaning: [prompt-helper](../specs/prompt-helper.md) (PRM, FR-PRM-22, §8). One per asset project, created at the first send, written temp → rename after the user's message and again after each reply (not through a manifest commit). Never holds image bytes, credentials, session ids, the email or other `auth status` fields.
