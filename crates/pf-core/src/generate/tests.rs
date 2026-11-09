@@ -858,9 +858,19 @@ fn fr_gen_30_pick_from_an_older_iteration_without_spend() {
         spent,
         "no spend"
     );
-    // The newer one can be picked too; the earlier accepted ones keep their status.
+    // R84 (walk L6): only the current base candidate stays `accepted`; the previous one is
+    // `dismissed` again (and so can be discarded).
+    use crate::manifest::CandidateStatus::Dismissed;
+    let status = |job: Ulid| -> Vec<_> { g.lab.candidates(job).iter().map(|c| c.status).collect() };
+    assert_eq!(status(first), vec![Dismissed, Accepted]);
     g.pick(second, g.cands(second)[0]).unwrap();
-    assert!(g.lab.candidates(first).iter().all(|c| c.status == Accepted));
+    assert_eq!(status(first), vec![Dismissed, Dismissed]);
+    assert_eq!(status(second)[0], Accepted);
+    g.dispatch(
+        "rgn_candidate_discard",
+        json!({"job_id": first, "candidate_id": g.cands(first)[1]}),
+    )
+    .unwrap();
 }
 
 #[test]
