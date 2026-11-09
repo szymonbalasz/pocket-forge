@@ -73,6 +73,11 @@ export function ChatWindow() {
   const [live, setLive] = useState<{ turnId: string; text: string } | null>(null);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [offline, setOffline] = useState(false);
+  /** FR-PRM-27 (code review 4): a send is on its way; Send, Retry and Resend wait. */
+  const [sending, setSending] = useState(false);
+  /** §11 (code review 1): the last send or reply couldn't be written to the thread file. */
+  const [notSaved, setNotSaved] = useState(false);
+  const sendingRef = useRef(false);
   const [includeImages, setIncludeImages] = useState(true);
   const [declined, setDeclined] = useState(false);
   /** L2: what Log in… did ("A console opened…"). */
@@ -139,6 +144,7 @@ export function ChatWindow() {
   useEffect(() => {
     setLive(null);
     setProblem(null);
+    setNotSaved(false);
     void loadThread(pid);
   }, [pid, loadThread]);
 
@@ -175,6 +181,7 @@ export function ChatWindow() {
       }),
       onEvent('prm:chat-turn', (t) => {
         ended.current.add(t.turn_id);
+        setNotSaved(!t.saved);
         setLive((l) => (l && l.turnId === t.turn_id ? null : l));
         if (t.error?.code === 'offline') setOffline(true);
         const detail = t.error?.detail;
@@ -204,11 +211,15 @@ export function ChatWindow() {
   }, [loadThread, loadProject]);
 
   const send = async (text: string) => {
-    if (!pid) return;
+    // A second click before the first send answers is ignored (the ref is set at once).
+    if (!pid || sendingRef.current) return;
+    sendingRef.current = true;
+    setSending(true);
     setProblem(null);
     try {
       await flushMainWindow();
       const out = await api.chat.send(pid, text, includeImages);
+      setNotSaved(!out.saved);
       if (!ended.current.has(out.turn_id))
         setLive({ turnId: out.turn_id, text: deltas.current.get(out.turn_id) ?? '' });
       await loadThread(pid);
@@ -216,6 +227,9 @@ export function ChatWindow() {
       const p = problemOf(e);
       if (p.code === 'offline') setOffline(true);
       setProblem(p);
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
     }
   };
 
@@ -398,15 +412,20 @@ export function ChatWindow() {
             detail={details[t.id]}
             readOnly={readOnly}
             onReplace={replace}
-            retryBlocked={offline}
+            retryBlocked={offline || sending || !!running}
             onRetry={() => {
               const q = questionOf(turns, t.id);
               // M5: Retry respects the offline lock, as Send does.
-              if (q && !offline) void send(q.text);
+              if (q && !offline && !running) void send(q.text);
             }}
           />
         ))}
       </ol>
+      {!readOnly && (notSaved || unsaved.size > 0) && (
+        <p className="prm-chat-warn" role="status" data-testid="prm-chat-not-saved">
+          Not saved: the chat file is locked. These turns are kept until the project closes.
+        </p>
+      )}
       {problem && (
         <p className="prm-chat-error" role="alert" data-testid="prm-chat-error">
           {problem.message}
@@ -425,6 +444,7 @@ export function ChatWindow() {
         disabledReason={blocked}
         onRecheck={offline ? () => void loadStatus(true) : undefined}
         running={running}
+        sending={sending}
         onSend={send}
         onStop={() => {
           if (running) void api.chat.cancel(running).catch(() => undefined);
@@ -494,11 +514,14 @@ function Composer(props: {
   /** M5: offline after a turn: Recheck lifts the lock once detection succeeds. */
   onRecheck?: () => void;
   running: string | null;
+  /** A send is on its way (FR-PRM-27). */
+  sending: boolean;
   onSend(text: string): Promise<void>;
   onStop(): void;
 }) {
   const [text, setText] = useState('');
-  const canSend = !props.disabledReason && !props.running && text.trim().length > 0;
+  const canSend =
+    !props.disabledReason && !props.running && !props.sending && text.trim().length > 0;
   const send = () => {
     if (!canSend) return;
     const t = text;
@@ -554,9 +577,10 @@ function TurnView(props: {
   turn: ChatTurn;
   liveText: string | null;
   running: boolean;
-  /** Kept in memory only (read-only project, §7 / R94). */
+  /** Kept in memory only (read-only project, §7 / R94; a locked thread file, §11). */
   unsaved: boolean;
-  /** M5: offline: Retry and Resend wait for Recheck, as Send does. */
+  /** M5: offline: Retry and Resend wait for Recheck, as Send does; and while a turn is sent or
+   *  runs (FR-PRM-27). */
   retryBlocked: boolean;
   /** L3: the error's detail while the window is open (FR-PRM-37: never written). */
   detail?: string;

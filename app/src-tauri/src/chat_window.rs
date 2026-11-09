@@ -42,10 +42,12 @@ pub fn prm_window_open(app: AppHandle) -> Result<(), CoreError> {
         .map_err(|e| CoreError::internal(format!("can't open the chat window: {e}")))?;
     let handle = app.clone();
     let win = w.clone();
+    // These run on the main thread: neither waits for a process (code review 14). Saving the
+    // rect alone detects nothing, and the session ends on its own thread.
     w.on_window_event(move |ev| match ev {
         WindowEvent::CloseRequested { .. } => save_rect(&handle, &win),
         // FR-PRM-35: closing the window ends the backend session; the thread is kept.
-        WindowEvent::Destroyed => handle.state::<Core>().chat.end_session(),
+        WindowEvent::Destroyed => handle.state::<Core>().chat.end_session_in_background(),
         _ => {}
     });
     let _ = w.set_focus();

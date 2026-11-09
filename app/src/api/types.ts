@@ -1009,7 +1009,8 @@ export interface ChatThreadView {
   fresh_session_next: boolean;
   /** The host whose prompt block is attached (the visible tab), or null (FR-PRM-27/43). */
   current_host: ChatHostId | null;
-  /** Turns kept in memory only (a read-only project, §7 / R94): shown "Not saved". */
+  /** Turns kept in memory only (a read-only project, §7 / R94, or a locked thread file, §11):
+   *  shown "Not saved". */
   unsaved_turn_ids: string[];
 }
 

@@ -224,6 +224,25 @@ test('FR-PRM-37 a failed turn shows its error with Retry, which resends the same
   expect(sends.map((s) => s.text)).toEqual(['ideas', 'ideas']);
 });
 
+test('FR-PRM-27 a double-clicked Retry sends once; Retry waits while a turn is sent', async () => {
+  setup({ chat: { consent: true, case: 'usage_limit' } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(id('prm-chat-retry')).toBeTruthy());
+  await api.chat.fakeSetCase('slow(4)');
+  const retry = id('prm-chat-retry');
+  fireEvent.click(retry);
+  fireEvent.click(retry);
+  await waitFor(() => expect(id('prm-chat-stop')).toBeTruthy());
+  expect(fake.callsOf('prm_chat_send')).toHaveLength(2);
+  expect(screen.queryByTestId('prm-chat-error')).toBeNull();
+  // The old failed turn's Retry is disabled while the new one runs.
+  expect((id('prm-chat-retry') as HTMLButtonElement).disabled).toBe(true);
+});
+
 test('FR-PRM-37 L3 a crashed turn shows the stderr tail under Details', async () => {
   setup({ chat: { consent: true, case: 'crash' } });
   await api.chat.contextPublish(PID, 'rgn', {});
@@ -299,6 +318,21 @@ test('FR-PRM-21 a project switch in the main window switches the window to that 
   act(() => fake.emit('prm:chat-context', { project_id: PID, host: 'rgn' }));
   await waitFor(() => expect(screen.getByText(/You wrote: "make this a kitchen"/)).toBeTruthy());
   expect(id('prm-chat-host').textContent).toBe('Region edit');
+});
+
+test('FR-PRM-22 §11 a locked thread file: the turns show "Not saved" with the banner', async () => {
+  setup({ chat: { consent: true, locked: true } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  expect(screen.queryByTestId('prm-chat-not-saved')).toBeNull();
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
+  expect(id('prm-chat-not-saved').textContent).toContain('the chat file is locked');
+  expect(screen.getAllByTestId('prm-chat-unsaved')).toHaveLength(2);
+  // Not read-only: Replace still works.
+  expect((id('prm-chat-proposal-replace') as HTMLButtonElement).disabled).toBe(false);
 });
 
 test('FR-PRM-21 the Chat button opens the chat window', async () => {

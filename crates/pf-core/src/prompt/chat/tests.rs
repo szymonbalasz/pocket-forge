@@ -363,6 +363,7 @@ fn fr_prm_27_send_needs_a_block_and_one_turn_at_a_time() {
         user_turn_id: Ulid::nil(),
         project_id: pid(&lab),
         cancel: Default::default(),
+        project_closed: false,
     });
     assert_eq!(code(send(&lab, "hi")), ErrorCode::TurnActive);
     super::lock(&lab.core.chat.rt).running = None;
@@ -1357,4 +1358,223 @@ fn fr_prm_32_the_mode_picks_the_backend_over_injected_seams() {
         "the turn's child came from the seam"
     );
     assert_eq!(thread_view(&lab)["thread"]["backend"], "claude-code");
+}
+
+/// Sets the test hook run at `point` (see `super::test_hook`).
+fn hook(lab: &Lab, point: &'static str, f: impl FnOnce(&crate::core::Core) + Send + 'static) {
+    super::lock(&lab.core.chat.hooks).insert(point, Box::new(f));
+}
+
+/// FR-PRM-27 / R97 (code review 4): a send claims the running slot before it builds the
+/// context, so a second send meanwhile (a double-clicked Retry) is refused.
+#[test]
+fn fr_prm_27_a_second_send_while_the_first_builds_is_refused() {
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    let second = Arc::new(std::sync::Mutex::new(None));
+    let seen = second.clone();
+    let p = pid(&lab);
+    hook(&lab, "send_after_build", move |core| {
+        let r = core.dispatch("prm_chat_send", json!({"project_id": p, "text": "twice"}));
+        *seen.lock().unwrap() = Some(r.map(|_| ()).map_err(|e| e.code));
+    });
+    send(&lab, "once").unwrap();
+    assert_eq!(
+        second.lock().unwrap().take(),
+        Some(Err(ErrorCode::TurnActive))
+    );
+    assert_eq!(user_turns(&lab).len(), 1, "the message is sent once");
+    assert!(lab.core.chat.running_turn().is_none());
+    // A send that fails after its claim frees the slot again.
+    lab.core
+        .dispatch(
+            "prm_context_clear",
+            json!({"project_id": pid(&lab), "host": "rgn"}),
+        )
+        .unwrap();
+    assert_eq!(code(send(&lab, "hi")), ErrorCode::NoPromptBlock);
+    assert!(lab.core.chat.running_turn().is_none());
+}
+
+/// FR-PRM-35 / R94 (code review 7): a project that closes while a send builds its context gets
+/// no session and no memory thread, and another project's turn doesn't show as running.
+#[test]
+fn fr_prm_35_a_project_closed_while_a_send_builds_gets_no_session() {
+    let lab = lab();
+    lab.core.state().project.as_mut().unwrap().read_only =
+        Some(crate::project::ReadOnlyReason::NewerVersion);
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    let p = pid(&lab);
+    let parked = Arc::new(std::sync::Mutex::new(None));
+    let park = parked.clone();
+    hook(&lab, "send_after_build", move |core| {
+        // What `project_close` does, under the state lock.
+        let mut st = core.state();
+        let old = st.project.take();
+        core.chat.on_project_close(p);
+        *park.lock().unwrap() = old;
+    });
+    assert_eq!(code(send(&lab, "hi")), ErrorCode::NoProject);
+    assert!(
+        !lab.core.chat.has_session(),
+        "no child outlives the project"
+    );
+    assert!(lab.core.chat.running_turn().is_none());
+    assert!(
+        super::lock(&lab.core.chat.rt).memory.is_none(),
+        "the memory thread isn't recreated"
+    );
+    lab.core.state().project = parked.lock().unwrap().take();
+    assert_eq!(thread_view(&lab)["thread"], Value::Null);
+
+    // Another project's running turn: this project's Send stays enabled.
+    super::lock(&lab.core.chat.rt).running = Some(super::Running {
+        turn_id: Ulid::from(7u128),
+        user_turn_id: Ulid::from(8u128),
+        project_id: Ulid::from(9u128),
+        cancel: Default::default(),
+        project_closed: false,
+    });
+    assert_eq!(thread_view(&lab)["running_turn_id"], Value::Null);
+}
+
+/// FR-PRM-22 / §11 (code review 1): when the thread file can't be written (locked past the
+/// retry), the turn still runs, its turns and reply are kept in memory and shown "not saved",
+/// and `saved` says so; nothing is lost and the old file isn't written back.
+#[test]
+fn fr_prm_22_an_unwritable_thread_file_keeps_the_turn_in_memory() {
+    let id = Ulid::from(42u128);
+    let lab = Lab::with_context(|ctx| {
+        ctx.faults = crate::context::Faults::parse(
+            &format!("after_temp:{id}.json"),
+            crate::context::FaultAction::Error,
+        )
+        .unwrap();
+    });
+    consent(&lab);
+    let path = thread::thread_path(&lab.project_dir, id);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let old = Thread::new(id, crate::time::Timestamp(1), "fake");
+    std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+    let before = std::fs::read(&path).unwrap();
+
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    let out = send(&lab, "make this a kitchen").unwrap();
+    assert_eq!(out["saved"], false);
+    assert_eq!(out["thread_id"], json!(id));
+    assert_eq!(
+        events(&lab, super::EVENT_TURN).last().unwrap()["saved"],
+        false
+    );
+    let view = thread_view(&lab);
+    let turns = view["thread"]["turns"].as_array().unwrap().clone();
+    assert_eq!(turns.len(), 2, "the turn and its reply are kept");
+    assert_eq!(turns[0]["text"], "make this a kitchen");
+    assert_eq!(turns[1]["state"], "done");
+    assert_eq!(
+        view["unsaved_turn_ids"],
+        json!([turns[0]["id"], turns[1]["id"]])
+    );
+    // Replace works on the kept reply.
+    let proposal = turns[1]["proposals"][0]["id"].clone();
+    lab.core
+        .dispatch(
+            "prm_chat_insert",
+            json!({"project_id": pid(&lab), "proposal_id": proposal}),
+        )
+        .unwrap();
+    assert!(!thread_view(&lab)["thread"]["turns"][1]["proposals"][0]["inserted_at"].is_null());
+    // The next turn continues the kept thread.
+    send(&lab, "again").unwrap();
+    let view = thread_view(&lab);
+    assert_eq!(view["thread"]["turns"].as_array().unwrap().len(), 4);
+    assert_eq!(view["unsaved_turn_ids"].as_array().unwrap().len(), 4);
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        before,
+        "the old file isn't written back"
+    );
+    // Closing the project drops the kept turns.
+    lab.core.chat.on_project_close(pid(&lab));
+    assert_eq!(thread_view(&lab)["thread"]["turns"], json!([]));
+}
+
+/// FR-PRM-23 / FR-PRM-35 (code review 12): a project that closes while a publish for it is
+/// on its way keeps no context, so its Send isn't enabled again on reopen.
+#[test]
+fn fr_prm_23_a_close_during_a_publish_leaves_no_context() {
+    let lab = lab();
+    let p = pid(&lab);
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    hook(&lab, "publish_checked", move |_| {
+        tx.send(()).unwrap();
+        // Room for the close to land between the check and the insert, if it can.
+        std::thread::sleep(Duration::from_millis(200));
+    });
+    let core = &lab.core;
+    let parked = std::thread::scope(|s| {
+        let closer = s.spawn(move || {
+            rx.recv().unwrap();
+            let mut st = core.state();
+            let old = st.project.take();
+            core.chat.on_project_close(p);
+            old
+        });
+        let _ = core.dispatch(
+            "prm_context_publish",
+            json!({"project_id": p, "host": "rgn", "input": lab.draft("a kitchen")}),
+        );
+        closer.join().unwrap()
+    });
+    lab.core.state().project = parked;
+    assert_eq!(thread_view(&lab)["current_host"], Value::Null);
+}
+
+/// FR-PRM-21 / FR-PRM-35 (code review 14): what runs as the chat window closes, on the main
+/// thread, never waits for a process: saving the rect detects nothing (even with the 60 s
+/// cache expired), and the session ends without waiting for a turn that still holds it.
+#[test]
+fn fr_prm_35_closing_the_window_never_waits_for_a_process() {
+    let (lab, sp) = claude_lab();
+    consent(&lab);
+    let runs = || sp.log().runs.len();
+    let before = runs();
+    lab.clock.advance(Duration::from_secs(61));
+    let st = lab
+        .core
+        .dispatch(
+            "prm_chat_settings_put",
+            json!({"window": {"x": 10, "y": 20, "w": 400, "h": 600}}),
+        )
+        .unwrap();
+    assert_eq!(runs(), before, "no detection for the window rect");
+    assert_eq!(st["backend"]["state"], "ok", "the cached status");
+    assert_eq!(lab.core.state().settings.prompt_chat.window.unwrap().w, 400);
+
+    // A turn holds the session (a stopping turn): neither the window's close nor a project
+    // close waits for it; the session goes once the turn lets go.
+    let lab = lab_with_session();
+    let held = lab.core.chat.session.clone();
+    let guard = super::lock(&held);
+    let t = std::time::Instant::now();
+    lab.core.chat.end_session_in_background();
+    lab.core.chat.on_project_close(pid(&lab));
+    assert!(t.elapsed() < Duration::from_millis(500), "returned at once");
+    drop(guard);
+    for _ in 0..200 {
+        if !lab.core.chat.has_session() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("the session didn't end");
+}
+
+/// A fake-chat lab with an open session.
+fn lab_with_session() -> Lab {
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "hi").unwrap();
+    assert!(lab.core.chat.has_session());
+    lab
 }

@@ -215,6 +215,18 @@ impl Command for PrmHelpersReset {
     type Output = Vec<Helper>;
 
     fn run(core: &Core, input: HelpersResetInput) -> CoreResult<Vec<Helper>> {
+        // R97 (FR-PRM-03): an invalid stored section shows the starter set, and resetting
+        // from that would overwrite the user's helpers still in it: refused until it's fixed.
+        if let Some(v) = &core.state().settings.prompt_helpers
+            && helpers::parse_section(v).is_err()
+        {
+            return Err(CoreError::new(
+                ErrorCode::Corrupt,
+                "Reset is unavailable while the prompt helper settings can't be read, so your \
+                 own helpers in them aren't overwritten.",
+            )
+            .with_field(helpers::SECTION));
+        }
         let current = helpers::effective(&core.state().settings);
         let next: Vec<Helper> = match input.id {
             None => helpers::starter_set()

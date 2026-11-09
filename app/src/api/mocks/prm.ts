@@ -14,7 +14,12 @@ export interface PrmMockSeed {
   /** The stored list (settings order); absent = the starter set. */
   helpers?: PromptHelper[];
   /** The prompt chat (slice 5): consent given and on; the fake case (FR-PRM-39). */
-  chat?: { consent?: boolean; case?: string };
+  chat?: {
+    consent?: boolean;
+    case?: string;
+    /** The thread file can't be written (locked, §11): turns are kept "not saved". */
+    locked?: boolean;
+  };
 }
 
 export function installPrmMock(seed: PrmMockSeed = {}): void {
@@ -481,7 +486,8 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     const userId = chatId();
     const turnId = chatId();
     const readOnly = !!(handlers.project_get?.({}) as Rec | null)?.read_only;
-    if (readOnly) chat.unsaved.push(userId, turnId);
+    const saved = !readOnly && !seed.chat?.locked;
+    if (!saved) chat.unsaved.push(userId, turnId);
     const summary =
       host === 'rgn'
         ? 'crop 556×456 + mask · prompt · fake model'
@@ -528,7 +534,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       t.updated_at = now();
       chat.running = null;
       if (state !== 'done') chat.session = null;
-      emit('prm:chat-turn', { turn_id: turnId, state, saved: !readOnly, ...extra });
+      emit('prm:chat-turn', { turn_id: turnId, state, saved, ...extra });
     };
     chat.running = {
       turnId,
@@ -587,7 +593,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       context_summary: summary,
       dropped,
       fresh_session: fresh,
-      saved: !readOnly,
+      saved,
     };
   };
   handlers.prm_chat_cancel = (input) => {
