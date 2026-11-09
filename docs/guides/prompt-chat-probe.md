@@ -50,9 +50,9 @@ cargo run -p pf-chat --features real-call --bin pf-chat-probe -- run
 ## Reading the table
 | Rows | Spec claim (§10) | If it fails |
 |---|---|---|
-| C01–C02 | Executable order; the version ≥ 2.1.268 | Fix the install or `--claude` |
+| C01–C02 | Executable order; the version ≥ 2.1.319 (R88) | Fix the install or `--claude` |
 | C03–C07 | `auth status` exit codes, the allowed fields, `configDirectory` | C06 failing = `isolation_unavailable` |
-| C08–C11, C24–C25 | No CLAUDE.md, `AGENTS.md`, hook, skill, agent, command, plugin or MCP marker reaches the chat (C08: §10's invocation; C24: `--safe-mode` alone); C25 proves the markers are live; the real home adds nothing to `system/init` | **Gate**: the chat stays disabled (#60). If C25's detail says the `AGENTS.md` marker wasn't seen, a `CLAUDE.md` above your temp folder hid it: say so when you paste |
+| C08–C11, C24–C25 | No CLAUDE.md, `AGENTS.md`, hook, skill, agent, command, plugin or MCP marker reaches the chat (C08: §10's invocation; C24: `--safe-mode` alone); C25 proves the markers are live (any marker in the control, R88); the real home adds nothing to `system/init` | **Gate**: the chat stays disabled (#60). If C25's detail says the `AGENTS.md` marker wasn't seen, a `CLAUDE.md` above your temp folder hid it: say so when you paste |
 | C12–C14 | Base64 image blocks; `--system-prompt`; two turns with `--no-session-persistence` | Slice 4 changes the adapter |
 | C15 | No transcript in `projects/`, after a clean exit and after a kill | **Gate**: `projects/` emptying is only a backstop |
 | C16–C18, C20 | Exit code, usage fields, streaming granularity, timing budgets | Slice 4 adjusts |

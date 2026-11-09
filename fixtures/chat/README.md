@@ -5,3 +5,5 @@
 - `claude-code/`: real recordings from the owner's CLI, written by `pf-chat-probe` and scrubbed per §10
   ([runbook](../../docs/guides/prompt-chat-probe.md)). Each file is the probe's stdout lines for one
   case. A failed case is written as `<case>.failed.jsonl`. Every file must pass `scripts/check-hygiene.sh`.
+- Used by code: the fake backend (`crates/pf-chat/src/fake.rs`) and the adapter replay tests
+  (`crates/pf-chat/tests/adapter_replay.rs`) embed some of these files, so renaming one breaks the build.

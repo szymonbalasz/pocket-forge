@@ -26,9 +26,11 @@ impl fmt::Display for Version {
     }
 }
 
-/// The floor from §10: `auth status` reports `configDirectory` from 2.1.268 on. The probe
+/// The minimum version (R88): the owner's probe verified every safety gate on 2.1.319, and
+/// older versions were never checked. (`auth status` reports `configDirectory` from 2.1.268,
+/// `--safe-mode` exists from 2.1.169.) The probe
 /// fixes the real minimum, which is never lower.
-pub const MIN_VERSION_FLOOR: Version = Version::new(2, 1, 268);
+pub const MIN_VERSION_FLOOR: Version = Version::new(2, 1, 319);
 
 /// The first `\d+\.\d+\.\d+` in `text`, or `None`.
 pub fn parse_version(text: &str) -> Option<Version> {
@@ -97,9 +99,10 @@ mod tests {
 
     #[test]
     fn fr_prm_33_versions_order_numerically() {
-        assert!(Version::new(2, 1, 319) > MIN_VERSION_FLOOR);
+        assert!(Version::new(2, 1, 319) >= MIN_VERSION_FLOOR);
+        assert!(Version::new(2, 1, 318) < MIN_VERSION_FLOOR);
         assert!(Version::new(2, 1, 99) < MIN_VERSION_FLOOR);
         assert!(Version::new(2, 10, 0) > Version::new(2, 9, 999));
-        assert_eq!(MIN_VERSION_FLOOR.to_string(), "2.1.268");
+        assert_eq!(MIN_VERSION_FLOOR.to_string(), "2.1.319");
     }
 }
