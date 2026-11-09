@@ -68,3 +68,26 @@
 | PRM 3: prompt block in Region edit | — | merged | done (R81) | PRM 4 waits on the owner's probe |
 
 **Phase 4 state (2026-11-09):** GEN slices 1–6 and PRM slices 0–6 merged; both walkthroughs passed and their fixes are merged (R76–R95). No agents running. Owner next: real-provider generation (dry-run-generate recording, 2 cheap paid checks) and the real prompt chat (`corepack pnpm dev:real`).
+
+## Overnight hardening (2026-11-09/10)
+
+| Task | Result |
+|---|---|
+| Phase 4 security review | 3 med + 5 low; fixed (R96, R99) |
+| Phase 4 correctness review | 16 findings; fixed (R97, R98, R100) |
+| Phase 4 FR-to-test audit | 4 missing + 5 weak; closed |
+| pf-chat Windows hardening | npm `.cmd` shim `%` expansion bug fixed; process tree, error mapping, caps (R99) |
+| Old-UI review (phases 1–3) | 12 + 8 unverified; fixed (R101) |
+| Old-core review (phases 1–3) | 16 incl. 3 money + 2 data HIGH; fixed (R102, R104–R106) |
+| Regression walk (phase 4) | PASS; 6 low fixed (R103) |
+| Night walk (all fixes) | PASS; 2 med + 4 low fixed (R107, R108) |
+| Spec + schema sync | specs follow R96–R108 |
+
+**Open owner questions (picks in bold):**
+- Chat child environment (FR-PRM-34): **strip `ANTHROPIC_BASE_URL`/`AUTH_TOKEN`, Bedrock/Vertex switches, `NODE_OPTIONS` and warn at detection** · allow-list · leave as is.
+- Pre-release of the minimum CLI (`2.1.319-beta`): **fails closed** · passes (FR-PRM-33 "first triple").
+- FR-PRM-32 backend switch: **amend the spec to the code** · change the code.
+- "Mask saved" status after a pick: **keep (live mask status)** · hide.
+- FR-PRM-21 window singleton test needs Tauri's mock runtime (new dev feature, §3.5): **later** · now.
+- Glossary candidates: quarantine (spool), Fetch again, unconfirmed submit.
+- Confirm or change rulings R96–R108, especially R101 (app quit = close), R102 (lost, never Retry-to-resubmit) and R98 (undo leaves the New image draft alone).
