@@ -311,6 +311,13 @@ pub fn serve(served: &Mutex<Served>, path: &str) -> SchemeResponse {
                 None => SchemeResponse::status(404),
                 Some((_, _, false)) => SchemeResponse::status(425),
                 Some((file, spec, true)) => match std::fs::read(&file) {
+                    // R105: a tile left empty by a power cut (tiles aren't fsynced) is a failed
+                    // fetch, so FR-EDT-12's retries and Rebuild badge follow. A corrupt one fails
+                    // the UI's decode, which takes the same path.
+                    Ok(body) if body.is_empty() => {
+                        tracing::warn!(key, level, col, row, "pf-tiles: tile empty");
+                        SchemeResponse::status(404)
+                    }
                     Ok(body) => images::ok(spec.mime(), body),
                     Err(e) => {
                         tracing::warn!(key, level, col, row, error = %e, "pf-tiles: tile unreadable");

@@ -283,6 +283,49 @@ fn fr_edt_10_aborted_build_is_never_served_and_rebuilt_on_reopen() {
 }
 
 #[test]
+fn fr_edt_12_an_empty_or_corrupt_tile_fails_and_rebuild_replaces_it() {
+    // R105: tiles aren't fsynced; after a power cut a complete level may hold an empty or
+    // corrupt tile. It must fail in the UI (fetch or decode → FR-EDT-12 retries, then the
+    // Rebuild badge), and Rebuild must write it again.
+    let e = env();
+    let snap = open_png(&e, "crypt.png", 600, 400);
+    let desc = tiles_open(&e, &snap, false);
+    let key = desc["key"].as_str().unwrap().to_owned();
+    wait_built(&e, &key);
+    let dir = cache_root(&e.core.ctx.data_dir).join(&key);
+    let specs = pyramid::levels(600, 400);
+    let empty = pyramid::tile_path(&dir, &specs[0], 1, 0);
+    let corrupt = pyramid::tile_path(&dir, &specs[1], 0, 0);
+    std::fs::write(&empty, b"").unwrap();
+    std::fs::write(&corrupt, b"\xff\xd8 not a jpeg").unwrap();
+
+    let served = |level, col| {
+        e.core
+            .serve_scheme(scheme_path(&tile_url(&desc, level, col, 0)))
+    };
+    assert_eq!(served(0, 1).status, 404, "an empty tile is a failed fetch");
+    let bad = served(1, 0);
+    assert_eq!(bad.status, 200);
+    assert!(
+        image::load_from_memory(&bad.body).is_err(),
+        "a corrupt tile fails the decode"
+    );
+
+    let again = tiles_open(&e, &snap, true);
+    wait_built(&e, &key);
+    for (level, col) in [(0, 1), (1, 0)] {
+        let r = e
+            .core
+            .serve_scheme(scheme_path(&tile_url(&again, level, col, 0)));
+        assert_eq!(r.status, 200);
+        assert!(
+            image::load_from_memory(&r.body).is_ok(),
+            "rebuilt tile decodes"
+        );
+    }
+}
+
+#[test]
 fn fr_edt_10_mtime_change_gives_a_new_key() {
     let e = env();
     let snap = open_png(&e, "m.png", 600, 400);
