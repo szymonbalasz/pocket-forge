@@ -2,7 +2,7 @@
 feature: prompt-helper
 prefix: PRM
 owner: spec-prompt-helper
-status: in-review   # unclaimed → claimed → draft → in-review → complete (owner only)
+status: complete   # unclaimed → claimed → draft → in-review → complete (owner only)
 depends_on: [region-edit, asset-project, provider, reference-packs, new-asset-generation]
 ---
 
