@@ -770,3 +770,19 @@ fn fr_prm_12_settings_editing_needs_no_project() {
     assert!(e.run("prm_helpers_save", json!({"helpers": rows})).is_ok());
     assert!(e.run("prm_helpers_reset", json!({"all": true})).is_ok());
 }
+
+/// FR-PRM-03 / R97 (code review 16): while the stored section is invalid, Reset and Reset all
+/// refuse with a readable message, so the user's helpers in it are never overwritten.
+#[test]
+fn fr_prm_03_reset_refuses_while_the_section_is_invalid() {
+    let e = env();
+    let bad = json!({"helpers": [{"id": U1, "label": "", "text": "Mine.", "kinds": ["map"]}]});
+    e.core.state().settings.prompt_helpers = Some(bad.clone());
+    for input in [json!({"all": true}), json!({"id": "builtin:no-text"})] {
+        let err = e.run("prm_helpers_reset", input).unwrap_err();
+        assert_eq!(err.code, ErrorCode::Corrupt);
+        assert_eq!(err.field.as_deref(), Some("prompt_helpers"));
+        assert!(err.message.contains("your own helpers"), "{}", err.message);
+    }
+    assert_eq!(e.core.state().settings.prompt_helpers, Some(bad));
+}
