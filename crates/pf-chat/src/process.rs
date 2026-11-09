@@ -12,7 +12,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -25,6 +25,9 @@ pub const STDERR_TAIL: usize = 2048;
 /// How long a one-shot command's stdout may still drain after the child ended, even at
 /// the deadline ([`OsSpawner::run`]).
 const READ_GRACE: Duration = Duration::from_secs(2);
+
+/// How long [`ChildProcess::stderr_tail`] waits for stderr to drain after the exit.
+const STDERR_DRAIN: Duration = Duration::from_secs(1);
 
 /// Stdout lines buffered between the reader thread and the turn (backpressure: a child
 /// that floods stdout waits instead of filling memory; review-sec 7).
@@ -147,7 +150,8 @@ pub trait ChildProcess: Send {
     /// Waits at most `timeout` for the exit; `None` while it still runs.
     fn wait(&mut self, timeout: Duration) -> Option<Exited>;
     fn killer(&self) -> Arc<dyn Kill>;
-    /// The last [`STDERR_TAIL`] bytes of stderr, raw (scrub before showing).
+    /// The last [`STDERR_TAIL`] bytes of stderr, raw (scrub before showing). After the
+    /// child exited it includes everything it wrote (the reader drains first, bounded).
     fn stderr_tail(&self) -> String;
 }
 
@@ -390,6 +394,8 @@ pub struct OsChild {
     rx: Receiver<Option<String>>,
     eof: bool,
     stderr: Arc<Mutex<VecDeque<u8>>>,
+    /// Set when the stderr reader has read to EOF.
+    stderr_done: Arc<(Mutex<bool>, Condvar)>,
     killer: Arc<OsKill>,
 }
 
@@ -420,8 +426,13 @@ impl OsChild {
             let _ = tx.send(None);
         });
         let stderr = Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL)));
+        let stderr_done = Arc::new((Mutex::new(true), Condvar::new()));
         if let Some(mut e) = child.stderr.take() {
             let sink = Arc::clone(&stderr);
+            let done = Arc::clone(&stderr_done);
+            if let Ok(mut d) = done.0.lock() {
+                *d = false;
+            }
             thread::spawn(move || {
                 let mut chunk = [0u8; 4096];
                 while let Ok(n) = e.read(&mut chunk) {
@@ -434,6 +445,10 @@ impl OsChild {
                         s.drain(..over);
                     }
                 }
+                if let Ok(mut d) = done.0.lock() {
+                    *d = true;
+                }
+                done.1.notify_all();
             });
         }
         let child = Arc::new(Mutex::new(child));
@@ -448,6 +463,7 @@ impl OsChild {
             rx,
             eof: false,
             stderr,
+            stderr_done,
             killer,
         })
     }
@@ -489,6 +505,20 @@ impl ChildProcess for OsChild {
     }
 
     fn stderr_tail(&self) -> String {
+        // review-code 15: once the child has exited, let the reader drain the pipe first
+        // (bounded: a grandchild may still hold stderr open).
+        let exited = self
+            .child
+            .lock()
+            .ok()
+            .and_then(|mut c| c.try_wait().ok().flatten())
+            .is_some();
+        if exited && let Ok(d) = self.stderr_done.0.lock() {
+            let _ = self
+                .stderr_done
+                .1
+                .wait_timeout_while(d, STDERR_DRAIN, |done| !*done);
+        }
         self.stderr
             .lock()
             .map(|s| String::from_utf8_lossy(&s.iter().copied().collect::<Vec<_>>()).into_owned())
@@ -637,6 +667,28 @@ mod tests {
             "{:?}",
             start.elapsed()
         );
+    }
+
+    /// review-code 15: right after the exit, the stderr tail already holds the last line the
+    /// child wrote, even after a burst of stderr.
+    #[cfg(windows)]
+    #[test]
+    fn prm_s10_stderr_tail_is_complete_after_the_exit() {
+        for _ in 0..5 {
+            let mut child = OsSpawner
+                .spawn(&cmd_spec(
+                    "(for /l %i in (1,1,300) do @echo stderr line %i 1>&2) & echo END-OF-STDERR 1>&2 & exit 3",
+                ))
+                .unwrap_or_else(|e| panic!("spawn: {e}"));
+            while child.next_line(Duration::from_secs(10)) != Next::Eof {}
+            assert_eq!(
+                child.wait(Duration::from_secs(10)),
+                Some(Exited { code: Some(3) })
+            );
+            let tail = child.stderr_tail();
+            assert!(tail.trim_end().ends_with("END-OF-STDERR"), "{tail}");
+            assert!(tail.len() <= STDERR_TAIL);
+        }
     }
 
     /// The real spawner and the job object, on a harmless system command (never the CLI).

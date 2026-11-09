@@ -12,6 +12,8 @@ use crate::stream::{LineOutcome, LineParser, MAX_LINE, MAX_REPLY, StreamEvent, T
 
 /// How long a crashed child gets to report its exit code.
 const EXIT_WAIT: Duration = Duration::from_secs(5);
+/// How long a child killed after [`EXIT_WAIT`] gets to be gone.
+const KILL_WAIT: Duration = Duration::from_secs(2);
 
 /// What the turn saw besides text.
 #[derive(Debug, Default)]
@@ -160,10 +162,12 @@ fn crashed(
     scrub: &dyn Fn(&str) -> String,
     io_error: Option<String>,
 ) -> TurnOutcome {
-    let exit = child.wait(EXIT_WAIT);
+    let mut exit = child.wait(EXIT_WAIT);
     if exit.is_none() {
         child.killer().kill();
+        exit = child.wait(KILL_WAIT);
     }
+    // Read after the exit: the tail then holds all of stderr (review-code 15).
     let mut detail = scrub(child.stderr_tail().trim());
     if let Some(e) = io_error {
         if !detail.is_empty() {
