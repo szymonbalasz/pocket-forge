@@ -158,6 +158,64 @@ describe('undo stack', () => {
   });
 });
 
+describe('undo stack across a canvas remount', () => {
+  test('FR-GEN-29 a remount for a new bottom image drops only the canvas (mask) entries', async () => {
+    const u = new UndoStack();
+    const log: string[] = [];
+    const e = (n: string, canvas?: boolean) => ({
+      label: n,
+      bytes: canvas ? 10 : 0,
+      canvas,
+      undo: () => void log.push(`-${n}`),
+      redo: () => void log.push(`+${n}`),
+    });
+    u.push(e('stroke', true));
+    u.push(e('accept patch'));
+    u.push(e('stroke 2', true));
+    u.push(e('pick new image'));
+    await u.undo();
+    u.dropCanvasEntries();
+    expect(u.snapshot()).toMatchObject({ depth: 1, redo: 1, label: 'accept patch', bytes: 0 });
+    await u.redo();
+    expect(log).toEqual(['-pick new image', '+pick new image']);
+  });
+
+  test('FR-GEN-29 a drop while the undo runs (its reload remounts the canvas) still moves the step', async () => {
+    const u = new UndoStack();
+    u.push({
+      label: 'stroke',
+      bytes: 1,
+      canvas: true,
+      undo: () => undefined,
+      redo: () => undefined,
+    });
+    u.push({
+      label: 'pick new image',
+      bytes: 0,
+      undo: async () => {
+        await Promise.resolve();
+        u.dropCanvasEntries();
+      },
+      redo: () => undefined,
+    });
+    expect(await u.undo()).toBe(true);
+    expect(u.snapshot()).toMatchObject({ depth: 0, redo: 1, label: null });
+  });
+
+  test('FR-GEN-29 the mask controller marks its entries as the canvas’s', () => {
+    const u = new UndoStack();
+    const c = new MaskController({
+      undo: u,
+      view: { reset: () => undefined, update: () => undefined },
+      setRegion: () => undefined,
+    });
+    c.changeRegion({ inner: { x: 0, y: 0, w: 4, h: 4 }, outer: { x: 0, y: 0, w: 4, h: 4 } });
+    expect(u.snapshot().depth).toBe(1);
+    u.dropCanvasEntries();
+    expect(u.snapshot().depth).toBe(0);
+  });
+});
+
 describe('mask controller', () => {
   const view: MaskView = { reset: () => undefined, update: () => undefined };
   const region = (x: number, y: number, w: number, h: number): RegionState => ({

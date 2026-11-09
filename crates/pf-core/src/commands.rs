@@ -1135,7 +1135,8 @@ pub use crate::prompt::commands::{
 
 /// GEN slice 3 commands live in their own module (new-asset-generation §9).
 pub use crate::generate::commands::{
-    GenControlsEvaluate, GenJobEstimate, GenJobRetryDraft, GenJobSubmit, GenSizeFitCmd,
+    GenCandidatePick, GenCandidatePreview, GenControlsEvaluate, GenJobEstimate, GenJobRetryDraft,
+    GenJobSubmit, GenSizeFitCmd,
 };
 
 // ---------------------------------------------------------------- registry (append-only)
@@ -1236,6 +1237,8 @@ registry![
     GenJobEstimate,
     GenJobSubmit,
     GenJobRetryDraft,
+    GenCandidatePreview,
+    GenCandidatePick,
 ];
 
 #[cfg(test)]

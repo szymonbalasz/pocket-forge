@@ -396,3 +396,23 @@
   transform-origin: center;
   pointer-events: none;
 }
+
+/* FR-GEN-26 / OQ-GEN-13: a candidate of another size, alone and fit to view. Its alpha is
+   flattened over #808080 by the core (FR-GEN-12). */
+.edt-preview-alone {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--pf-space-2);
+  background: var(--pf-bg-0);
+  pointer-events: none;
+}
+
+.edt-preview-alone img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 0 0 1px var(--pf-border);
+}

@@ -552,6 +552,9 @@ export function installRgnMock(seed: RgnMockSeed): void {
     },
     rgn_candidate_preview: (input: Rec) => {
       const j = s.jobs.find((x) => x.id === input.job_id);
+      // As pf-core: a New image candidate is previewed and picked by GEN (FR-GEN-26/27).
+      if ((j as unknown as Rec | undefined)?.operation === 'generate')
+        return fail('wrong_operation', 'Pick it from New image.', 'job_id');
       const c = s.cands.find((x) => x.id === input.candidate_id);
       if (!j || !c || c.status === 'invalid')
         return fail('invalid_candidate', 'The candidate can’t be used.');
@@ -561,6 +564,8 @@ export function installRgnMock(seed: RgnMockSeed): void {
     rgn_candidate_accept: (input: Rec) => {
       if (snap.read_only) return fail('read_only', 'The project is read-only.');
       const j = s.jobs.find((x) => x.id === input.job_id);
+      if ((j as unknown as Rec | undefined)?.operation === 'generate')
+        return fail('wrong_operation', 'Pick it from New image.', 'job_id');
       const c = s.cands.find((x) => x.id === input.candidate_id);
       if (!j || !c || c.status === 'invalid')
         return fail('invalid_candidate', 'The candidate can’t be used.');
@@ -744,6 +749,8 @@ export function installRgnMock(seed: RgnMockSeed): void {
   /** Test controls: drive the active job through Appendix B. */
   w.__pfRgnMock = {
     state: () => s,
+    /** Syncs the snapshot from the state and emits `project:committed` (the GEN mock's pick). */
+    commit: () => committed(),
     setConnectivity(c: string) {
       s.connectivity = c;
     },

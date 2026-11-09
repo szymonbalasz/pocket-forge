@@ -115,6 +115,8 @@ tauri_commands! {
     gen_job_estimate => c::GenJobEstimate,
     gen_job_submit => c::GenJobSubmit,
     gen_job_retry_draft => c::GenJobRetryDraft,
+    gen_candidate_preview => c::GenCandidatePreview,
+    gen_candidate_pick => c::GenCandidatePick,
 }
 
 #[cfg(test)]

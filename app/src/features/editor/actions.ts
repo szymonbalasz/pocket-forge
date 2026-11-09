@@ -80,5 +80,9 @@ const bound: { fill: () => void; clear: () => void; undo: () => void; redo: () =
 /** Binds the mask / undo actions (returns the unbind function). */
 export function bindActions(b: Partial<typeof bound>): () => void {
   Object.assign(bound, b);
-  return () => Object.assign(bound, { fill: noop, clear: noop, undo: noop, redo: noop });
+  // Unbinds only what this call bound (the panel binds undo / redo, the canvas fill / clear).
+  return () => {
+    for (const k of Object.keys(b) as (keyof typeof bound)[])
+      if (bound[k] === b[k]) bound[k] = noop;
+  };
 }

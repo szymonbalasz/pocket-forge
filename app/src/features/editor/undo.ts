@@ -8,6 +8,9 @@ export interface UndoEntry {
   bytes: number;
   undo(): void | Promise<void>;
   redo(): void | Promise<void>;
+  /** Tied to one canvas instance (mask and region snapshots): dropped when the canvas remounts
+   *  for a new bottom image (a pick or its undo, FR-GEN-29). Command entries survive it. */
+  canvas?: boolean;
 }
 
 export interface UndoSnapshot {
@@ -74,6 +77,17 @@ export class UndoStack {
 
   async redo(): Promise<boolean> {
     return this.step(this.undone, this.done, 'redo');
+  }
+
+  /** The canvas remounted within the same project: its mask entries can't apply any more. */
+  dropCanvasEntries(): void {
+    // In place: a step in progress (an undo whose reload remounts the canvas) holds these arrays.
+    for (const list of [this.done, this.undone]) {
+      const kept = list.filter((e) => !e.canvas);
+      list.splice(0, list.length, ...kept);
+    }
+    this.total = [...this.done, ...this.undone].reduce((n, e) => n + e.bytes, 0);
+    this.emit();
   }
 
   clear(): void {

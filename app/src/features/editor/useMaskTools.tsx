@@ -175,38 +175,28 @@ export function useMaskTools({
       sync.current = null;
       setActiveMaskSync(null);
       editorStore.set({ maskStatus: { kind: 'none' }, maskPainted: null });
-      undoStack.clear(); // KQ-16: history is per session.
+      // KQ-16: history is per session; the panel clears it when the project changes. A remount
+      // for a new bottom image (FR-GEN-29) drops only this canvas's mask entries.
+      undoStack.dropCanvasEntries();
       // The region left behind is this session's; a reopen restores it again first.
       editorStore.set({ regionFor: null });
     },
     [],
   );
 
-  // Undo summary → store (toolbar tooltip, FR-EDT-22) and action bindings.
-  useEffect(() => {
-    const off = undoStack.subscribe((s) =>
-      editorStore.set({
-        undo: { depth: s.depth, redo: s.redo, label: s.label, busy: s.busy, error: s.error },
+  // Mask action bindings (undo / redo and their summary are the panel's, `useSessionUndo`).
+  useEffect(
+    () =>
+      bindActions({
+        fill: () => ctl.current?.fillAll(255),
+        clear: () => ctl.current?.fillAll(0),
       }),
-    );
-    const unbind = bindActions({
-      fill: () => ctl.current?.fillAll(255),
-      clear: () => ctl.current?.fillAll(0),
-      undo: () => void undoStack.undo(),
-      redo: () => void undoStack.redo(),
-    });
-    return () => {
-      off();
-      unbind();
-    };
-  }, []);
+    [],
+  );
 
   // FR-EDT-21 / FR-EDT-27 shortcuts.
   useEffect(() => {
     const map: ShortcutMap = {
-      'Ctrl+Z': () => void undoStack.undo(),
-      'Ctrl+Shift+Z': () => void undoStack.redo(),
-      'Ctrl+Y': () => void undoStack.redo(),
       Delete: () => {
         if (ctl.current?.currentRegion) ctl.current.changeRegion(null);
       },

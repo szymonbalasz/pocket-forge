@@ -107,6 +107,7 @@ export class MaskController {
       bytes: (prev.mask?.data.length ?? 0) + (nextMask?.data.length ?? 0),
       undo: () => apply(prev.region, prev.mask),
       redo: () => apply(next, nextMask),
+      canvas: true,
     });
   }
 
@@ -202,6 +203,7 @@ export class MaskController {
       bytes: before.length + after.length,
       undo: () => set(before),
       redo: () => set(after),
+      canvas: true,
     };
     this.deps.undo.push(entry);
   }
