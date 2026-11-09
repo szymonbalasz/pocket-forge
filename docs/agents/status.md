@@ -56,7 +56,7 @@
 | GEN 2: image-less project, base layer, pick commit | — | merged | done (R79) | — |
 | GEN 3: core generate jobs | — | merged | done (R80) | — |
 | GEN 4: preview, pick, re-pick, undo | — | merged | done (R82) | — |
-| GEN 6: prompt block in New image, GenContextSource | `gen-3` | building | — | — |
+| GEN 6: prompt block in New image, GenContextSource | `gen-3` (kept for walk fixes) | merged | done (R83) | walkthrough running |
 | GEN 5: + New menu, New image tab (mocked) | — | merged | done (R77) | slice 4 picker routing, slice 6 prompt block |
 | PRM 0: `pf-chat` crate + probe | `prm-0` (kept for the probe) | merged | done; pf-chat in CI | **owner runs the probe** (docs/guides/prompt-chat-probe.md) |
 | PRM 1: helpers core | — | merged | done (R78) | — |
