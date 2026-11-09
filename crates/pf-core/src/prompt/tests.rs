@@ -697,6 +697,53 @@ fn fr_prm_08_preview_returns_parts_skipped_and_the_char_count() {
     assert_eq!(err.code, ErrorCode::InvalidInput);
 }
 
+#[test]
+fn fr_prm_08_r81_preview_strips_a_pasted_trailing_instruction_like_the_send() {
+    let e = env();
+    let rgn = crate::settings::RegionEditSettings::default();
+    let blend = crate::region_edit::instruction::instruction_for(&rgn, Kind::Map);
+    let preview = |typed: &str| {
+        e.run(
+            "prm_compose_preview",
+            json!({
+                "kind": "map",
+                "typed_prompt": typed,
+                "helper_ids": ["builtin:no-people"],
+                "blend_instruction": blend,
+            }),
+        )
+        .unwrap()
+    };
+    // A copied "as sent" prompt pasted back: the instruction is shown once, as it is sent.
+    let pasted = preview(&format!("moss on the stones\n\n{blend}"));
+    let typed = preview("moss on the stones");
+    assert_eq!(pasted["text"], typed["text"]);
+    assert_eq!(
+        pasted["text"]
+            .as_str()
+            .unwrap()
+            .matches(blend.as_str())
+            .count(),
+        1
+    );
+    assert_eq!(
+        crate::region_edit::instruction::without_instruction(
+            &format!("moss on the stones\n\n{blend}"),
+            Some(&blend)
+        ),
+        "moss on the stones",
+        "the send's strip"
+    );
+    // No instruction: nothing is stripped, also not a trailing blank line.
+    let out = e
+        .run(
+            "prm_compose_preview",
+            json!({"kind": "token", "typed_prompt": "a wolf\n\n", "blend_instruction": ""}),
+        )
+        .unwrap();
+    assert_eq!(out["text"], "a wolf\n\n");
+}
+
 // ---------------------------------------------------------------- FR-PRM-09
 
 #[test]

@@ -130,6 +130,7 @@
 | `region` | `{inner, outer, margin}` \| null | null for `generate` (FR-GEN-22) |
 | `fit` | `{sent_w, sent_h, scale}` \| null | null for `generate` |
 | `mask_id` | ULID \| null | the draft mask the job was built from; null for `generate` |
+| `base_layer_id` | ULID \| null; optional | R97: `layers[0]`'s id when a region-edit job was submitted. Accept refuses a candidate whose job names a different base. Absent on older jobs (not checked); null for `generate` |
 | `inputs` | `{region: "region.png", mask: "mask.png"}` \| null | as sent (R2); null for `generate`, which writes no input files (absent = the default names) |
 | `references[]` | `{source: project\|pack\|structure, pack_id \| null, pack_name \| null, path, content_hash, slot, role \| null, sent: {w, h, bytes, hash, resized}}` | #51, FR-REF-25: the files sent, in request order; `path` = `references/<file>` or `References/<pack>/<file>`; hashes only, no copies (OQ-REF-02). `[]` when none. A `generate` job's sketch is the first row, `source: structure`, `path` = `structure/<file>` (FR-GEN-15). Written with `requested`, never changed |
 | `estimate`, `cost` | `{amount \| unknown, unit}` | PRV's generic `Cost` |

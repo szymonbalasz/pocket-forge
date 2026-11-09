@@ -152,3 +152,42 @@ test('R84 after a pick the panel stays on the New image tab (also when opened fr
   ).toBe('new-image');
   expect(screen.getByTestId('gen-panel')).toBeTruthy();
 });
+
+const press = (k: string) =>
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true }));
+
+test('FR-GEN-29 R97 two quick picks run in turn: undo goes back to the first, and Enter twice makes one revision', async () => {
+  await setup();
+  await generate('crypt', 3);
+  const image = () => projectStore.get().project?.image_path;
+  // #2 then #3 inside one round trip.
+  await act(async () => {
+    press('2');
+    press('Enter');
+    press('3');
+    press('Enter');
+  });
+  await waitFor(() => expect(fake.callsOf('gen_candidate_pick')).toHaveLength(2));
+  await waitFor(() => expect(image()).toBe('working/001 crypt 03.png'));
+
+  // Enter twice on #1: one pick, one revision.
+  await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(3));
+  await act(async () => {
+    press('1');
+    press('Enter');
+    press('Enter');
+  });
+  await waitFor(() => expect(image()).toBe('working/001 crypt 01.png'));
+  await act(() => new Promise((r) => setTimeout(r, 50)));
+  expect(fake.callsOf('gen_candidate_pick')).toHaveLength(3);
+
+  // Undo walks back one pick at a time: #3, then #2 (never past it to "No image yet").
+  await key('z', { ctrlKey: true });
+  await waitFor(() => expect(image()).toBe('working/001 crypt 03.png'));
+  await waitFor(async () => {
+    await key('z', { ctrlKey: true });
+    expect(fake.callsOf('project_restore_revision')).toHaveLength(2);
+  });
+  await waitFor(() => expect(image()).toBe('working/001 crypt 02.png'));
+  expect(fake.callsOf('project_restore_revision').map((c) => c.rev_id)).not.toContain('r0');
+});

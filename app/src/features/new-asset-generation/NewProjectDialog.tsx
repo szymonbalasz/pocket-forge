@@ -39,8 +39,9 @@ export interface NewProjectDialogProps {
   /** Project names already in the section (the prefill avoids them). */
   taken: readonly string[];
   onOpenChange(open: boolean): void;
-  /** The project was created: open it (PRJ). */
-  onCreated(path: string): void;
+  /** The project was created: open it (PRJ). Resolves false when that open failed or was
+   *  cancelled. */
+  onCreated(path: string): Promise<boolean>;
 }
 
 export function NewProjectDialog(props: NewProjectDialogProps) {
@@ -70,7 +71,12 @@ function Body({ section, taken, onOpenChange, onCreated }: NewProjectDialogProps
       // BL-40: ≤ 4 clicks to a confirmed job (GEN §12): the tab opens focused on the next step.
       gen.focusOnOpen();
       onOpenChange(false);
-      onCreated(path);
+      // R85/R86: both requests are for this project only; a failed or cancelled open (a close
+      // guard said no) must not hand them to the next project opened.
+      if (!(await onCreated(path))) {
+        generateTab.openNextWith(null);
+        gen.takeFocusRequest();
+      }
     } catch (err) {
       const code = err instanceof ApiError ? err.code : 'io';
       setError(ERROR_TEXT[code] ?? (err instanceof Error ? err.message : String(err)));

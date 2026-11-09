@@ -239,6 +239,10 @@ impl Command for RgnCandidateAccept {
             let state = core.state();
             let p = state.project.as_ref().ok_or_else(no_project)?;
             p.require_writable()?;
+            // R97: before the bake, whose rect may not fit the other base image.
+            if let Ok(j) = store::job(p, input.job_id) {
+                store::check_same_base(p, j)?;
+            }
         }
         let b = bake_job(core, input.job_id, input.candidate_id)?;
         let baked = bake(&b, input.blend)?;
