@@ -39,5 +39,8 @@ test('FR-PRJ-26 FR-PRJ-15 FR-PRJ-41 read-only shows its reason; FR-PRJ-35 a conf
   );
   expect(saveLabel({ kind: 'saved', at }, 'original_changed')).toBe('Read-only (original changed)');
   expect(saveState({ kind: 'saved', at }, 'original_changed')).toBe('read_only');
+  // R84: a changed picked base image, as FR-PRJ-15.
+  expect(saveLabel({ kind: 'saved', at }, 'base_changed')).toBe('Read-only (base image changed)');
+  expect(saveState({ kind: 'saved', at }, 'base_changed')).toBe('read_only');
   expect(saveLabel({ kind: 'conflict' }, null)).toBe('Conflict');
 });

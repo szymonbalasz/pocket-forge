@@ -15,6 +15,12 @@ export function bytesLabel(bytes: number): string {
   return `${n} ${UNITS[u]}`;
 }
 
+/** A Storage row's label; `working/` holds the picked base image of a generated project. */
+export function storageLabel(key: string, project: { layers: { kind: string }[] } | null): string {
+  if (key === 'original' && project?.layers[0]?.kind === 'base') return 'Base image';
+  return CATEGORY_LABEL[key] ?? key;
+}
+
 export const CATEGORY_LABEL: Record<string, string> = {
   original: 'Original',
   layers: 'Layers',
