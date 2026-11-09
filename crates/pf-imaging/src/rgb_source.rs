@@ -43,17 +43,7 @@ pub(crate) fn decode_whole(path: &Path) -> Result<image::DynamicImage, ProbeErro
 /// Decodes a whole file to RGB8 (PRJ `DecodedOriginal`, FR-PRJ-42): non-interlaced PNGs are
 /// streamed in bands, so no RGBA intermediate is held; other files decode once with the limits.
 pub fn decode_rgb8(path: &Path) -> Result<image::RgbImage, ProbeError> {
-    let src = RgbSource::open(path)?;
-    let (w, h) = (src.width, src.height);
-    let mut buf = Vec::new();
-    buf.try_reserve_exact(w as usize * h as usize * 3)
-        .map_err(|_| ProbeError::data("out of memory"))?;
-    src.for_each_band::<ProbeError>(512, |_, rows| {
-        buf.extend_from_slice(rows);
-        Ok(())
-    })?;
-    image::RgbImage::from_raw(w, h, buf)
-        .ok_or_else(|| ProbeError::Corrupt("the image data is truncated".into()))
+    RgbSource::open(path)?.into_rgb8()
 }
 
 enum Kind {
@@ -87,6 +77,24 @@ impl RgbSource {
             height: img.height(),
             kind: Kind::Whole(img.into_raw()),
         })
+    }
+
+    /// The whole image as one RGB8 buffer (ADR 0004: one ≤ 768 MiB copy at 16k). A whole
+    /// decode is moved, not copied (review #12); a streamed PNG fills one buffer band by band.
+    pub fn into_rgb8(self) -> Result<image::RgbImage, ProbeError> {
+        let (w, h) = (self.width, self.height);
+        let truncated = || ProbeError::Corrupt("the image data is truncated".into());
+        if let Kind::Whole(buf) = self.kind {
+            return image::RgbImage::from_raw(w, h, buf).ok_or_else(truncated);
+        }
+        let mut buf = Vec::new();
+        buf.try_reserve_exact(w as usize * h as usize * 3)
+            .map_err(|_| ProbeError::data("out of memory"))?;
+        self.for_each_band::<ProbeError>(512, |_, rows| {
+            buf.extend_from_slice(rows);
+            Ok(())
+        })?;
+        image::RgbImage::from_raw(w, h, buf).ok_or_else(truncated)
     }
 
     /// Calls `f(y0, rows)` for consecutive bands of `band` rows (the last may be shorter).
@@ -225,6 +233,29 @@ mod tests {
             decode_rgb8(&la).unwrap().get_pixel(1, 1).0,
             crate::FLATTEN_BG
         );
+    }
+
+    /// Review #12, ADR 0004: a file decoded whole (JPEG, WebP, interlaced PNG) becomes the
+    /// `DecodedOriginal` buffer itself, with no second full copy.
+    #[test]
+    fn fr_prj_42_a_whole_decode_is_not_copied_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let img = crate::test_support::smooth_rgb(64, 48);
+        let path = tmp.path().join("a.jpg");
+        img.save(&path).unwrap();
+        let src = RgbSource::open(&path).unwrap();
+        let Kind::Whole(buf) = &src.kind else {
+            panic!("a JPEG is decoded whole")
+        };
+        let decoded = buf.as_ptr();
+        let rgb = src.into_rgb8().unwrap();
+        assert_eq!(rgb.dimensions(), (64, 48));
+        assert_eq!(
+            rgb.as_raw().as_ptr(),
+            decoded,
+            "the decoded buffer is moved, not copied"
+        );
+        assert!(crate::test_support::psnr(&rgb, &img) > 30.0);
     }
 
     /// BL-27: a broken body says the image data is unreadable, not the header.

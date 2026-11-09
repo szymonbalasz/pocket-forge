@@ -806,6 +806,8 @@ export type CommandName = keyof Commands;
 
 /** Core events (name → payload). Append new events. */
 export interface Events {
+  /** R101: the window X or an app quit; the UI closes the project through its guards first. */
+  'app:close-requested': null;
   'project:committed': { seq: number };
   'import:done': { total: number };
   'edt:tiles-progress': { key: string; level: number };

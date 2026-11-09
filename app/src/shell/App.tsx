@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Tooltip } from 'radix-ui';
 
 import { api, type AppInfo } from '../api';
+import { installAppClose } from './appClose';
 import { features } from './features';
 import { Layout } from './Layout';
 
@@ -13,6 +14,8 @@ export function App() {
   useEffect(() => {
     api.appInfo().then(setInfo, () => undefined);
   }, []);
+  // R101: the window X closes the project through its guards before the app exits.
+  useEffect(() => installAppClose(), []);
 
   return (
     <Tooltip.Provider delayDuration={400}>

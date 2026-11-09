@@ -43,6 +43,8 @@ const initial: LibraryState = {
 let state: LibraryState = initial;
 const listeners = new Set<() => void>();
 let listening = false;
+/** Bumped by every `refresh`, so only the newest listing lands (FR-PRJ-49). */
+let refreshSeq = 0;
 
 function set(patch: Partial<LibraryState>): void {
   state = { ...state, ...patch };
@@ -97,11 +99,14 @@ export const libraryStore = {
   /** Reloads the selected section's cards (FR-PRJ-49). */
   async refresh(): Promise<void> {
     const section = state.section;
+    // The newest listing wins: a late one (a thumbnail refresh) never replaces a newer one.
+    const seq = ++refreshSeq;
+    const current = () => seq === refreshSeq && state.section === section;
     try {
       const cards = await api.library.listProjects(section);
-      if (state.section === section) set({ cards, listError: null });
+      if (current()) set({ cards, listError: null });
     } catch (e) {
-      if (state.section === section) set({ cards: [], listError: errorOf(e) });
+      if (current()) set({ cards: [], listError: errorOf(e) });
     }
   },
 

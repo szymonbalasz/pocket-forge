@@ -27,6 +27,8 @@ macro_rules! tauri_commands {
                 crate::app_ready,
                 crate::chat_window::prm_window_open,
                 crate::chat_window::prm_chat_login,
+                crate::app_close_guard,
+                crate::app_exit,
             ]
         }
 
