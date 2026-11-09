@@ -62,6 +62,26 @@ test('FR-PRM-33 FR-PRM-37 a backend error shows its message and fix; Recheck re-
   expect(fake.callsOf('prm_chat_status').some((c) => c.refresh === true)).toBe(true);
 });
 
+test('FR-PRM-45 L2 the window Log in… says what happened; the fake logs in, Recheck continues', async () => {
+  setup({ chat: { consent: true, case: 'not_logged_in' } });
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-login')).toBeTruthy());
+  fireEvent.click(id('prm-chat-login'));
+  await waitFor(() =>
+    expect(id('prm-chat-login-note').textContent).toContain('logged in without a console'),
+  );
+  fireEvent.click(id('prm-chat-recheck'));
+  await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
+});
+
+test('FR-PRM-20 L6 the window follows Settings → off without a refocus', async () => {
+  setup({ chat: { consent: true } });
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
+  await act(() => api.chat.settingsPut({ enabled: false }));
+  await waitFor(() => expect(screen.getByText('Prompt chat is off.')).toBeTruthy());
+});
+
 test('FR-PRM-21 no project open: "Open a project to chat about it"', async () => {
   setup({ chat: { consent: true } }, null);
   render(<ChatWindow />);
@@ -215,7 +235,6 @@ test('FR-PRM-20 FR-PRM-45 Settings → Prompt chat: on/off, the status, the path
   render(<ChatSettings />);
   await waitFor(() => expect(id('prm-settings-chat-status').textContent).toContain('Fake backend'));
   expect((id('prm-settings-chat-toggle') as HTMLInputElement).checked).toBe(true);
-  expect(screen.queryByTestId('prm-settings-chat-login')).toBeNull();
   fireEvent.click(id('prm-settings-chat-toggle'));
   await waitFor(() => expect(id('prm-settings-chat-status').textContent).toContain('Off.'));
   expect(fake.callsOf('prm_chat_settings_put')).toEqual([{ enabled: false }]);
@@ -228,6 +247,24 @@ test('FR-PRM-20 FR-PRM-45 Settings → Prompt chat: on/off, the status, the path
   );
   fireEvent.click(screen.getByText('Show privacy notice'));
   expect(screen.getByText(/Prompt chat sends data to Anthropic/)).toBeTruthy();
+});
+
+test('FR-PRM-45 L2 Settings Log in… / Log out / Recheck work on the fake and the status follows', async () => {
+  setup({ chat: { consent: true } });
+  render(<ChatSettings />);
+  await waitFor(() => expect(id('prm-settings-chat-status').textContent).toContain('Fake backend'));
+  fireEvent.click(id('prm-settings-chat-logout'));
+  await waitFor(() =>
+    expect(id('prm-settings-chat-status').textContent).toContain("isn't logged in"),
+  );
+  fireEvent.click(id('prm-settings-chat-login'));
+  await waitFor(() => expect(screen.getByText(/logged in without a console/)).toBeTruthy());
+  fireEvent.click(id('prm-settings-chat-recheck'));
+  await waitFor(() => expect(id('prm-settings-chat-status').textContent).toContain('Fake backend'));
+  // A change made elsewhere (the chat window, a case switch) shows without a reload.
+  await act(() => api.chat.fakeSetCase('offline'));
+  await act(() => api.chat.settingsPut({ enabled: false }));
+  await waitFor(() => expect(id('prm-settings-chat-status').textContent).toContain('Off.'));
 });
 
 test('FR-PRM-20 Settings before consent says so and offers no login', async () => {

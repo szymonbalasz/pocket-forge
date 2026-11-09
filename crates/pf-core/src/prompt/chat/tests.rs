@@ -265,6 +265,34 @@ fn fr_prm_27_send_streams_and_records_the_turns() {
     assert_eq!(std::fs::read_dir(&cwd).unwrap().count(), 1);
 }
 
+/// FR-PRM-20 (L2, L6): a settings, consent, logout or case change emits the whole status, so
+/// Settings and the window follow it without a refocus.
+#[test]
+fn fr_prm_20_status_changes_are_announced() {
+    let lab = lab();
+    let last = |lab: &Lab| events(lab, super::EVENT_STATUS).last().cloned().unwrap();
+    assert_eq!(last(&lab)["enabled"], true, "consent turns the chat on");
+    lab.core
+        .dispatch("prm_chat_settings_put", json!({"enabled": false}))
+        .unwrap();
+    assert_eq!(last(&lab)["enabled"], false);
+    assert_eq!(last(&lab)["backend"]["state"], "not_checked");
+    lab.core
+        .dispatch("prm_chat_settings_put", json!({"enabled": true}))
+        .unwrap();
+    lab.core.dispatch("prm_chat_logout", json!({})).unwrap();
+    assert_eq!(
+        last(&lab)["backend"]["code"],
+        "not_logged_in",
+        "the fake logs out"
+    );
+    super::open_login_console(&lab.core).unwrap();
+    lab.core
+        .dispatch("prm_chat_fake_set_case", json!({"case": "offline"}))
+        .unwrap();
+    assert_eq!(last(&lab)["fake_case"], "offline");
+}
+
 /// §7 / R94: on a read-only project the chat works with the turns kept in memory, shown as
 /// "not saved"; nothing is written, and the memory goes with the project.
 #[test]

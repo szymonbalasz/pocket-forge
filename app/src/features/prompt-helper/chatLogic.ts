@@ -65,6 +65,13 @@ export function backendChip(status: ChatStatus): string {
   return 'Not checked';
 }
 
+/** FR-PRM-45 (L2): what Log in… did. The fake opens no console and is logged in at once. */
+export function loginNote(status: ChatStatus): string {
+  return status.mode === 'fake'
+    ? 'Fake backend: logged in without a console. Recheck to continue.'
+    : 'A console opened: log in there, then Recheck.';
+}
+
 /** FR-PRM-38: the strip warns once per thread when the chat bills an API key. */
 export function billsApiKey(status: ChatStatus): boolean {
   return status.backend.state === 'ok' && status.backend.auth_method === 'api_key';

@@ -246,6 +246,15 @@ impl ChatRuntime {
     }
 }
 
+/// `prm:chat-status` with the whole status after a settings, consent, login or case change, so
+/// Settings and the chat window follow it without a refocus (L2, L6).
+fn emit_status(core: &Core, st: &ChatStatus) {
+    core.ctx.emit(
+        EVENT_STATUS,
+        serde_json::to_value(st).unwrap_or(Value::Null),
+    );
+}
+
 fn emit_context(ctx: &Context, project_id: Option<Ulid>, host: Option<ChatHost>) {
     ctx.emit(
         EVENT_CONTEXT,
@@ -500,6 +509,10 @@ impl Command for PrmChatConsent {
             next.prompt_chat.enabled = true;
             settings::save(&core.ctx, &next)?;
             state.settings = next;
+            drop(state);
+            let st = status(core, false);
+            emit_status(core, &st);
+            return Ok(st);
         }
         Ok(status(core, false))
     }
@@ -579,7 +592,9 @@ impl Command for PrmChatSettingsPut {
             core.chat.clear_status();
             core.chat.end_session();
         }
-        Ok(status(core, false))
+        let st = status(core, false);
+        emit_status(core, &st);
+        Ok(st)
     }
 }
 
@@ -608,7 +623,9 @@ impl Command for PrmChatLogout {
         core.chat.end_session();
         backend(core, &chat).logout().map_err(|e| core_error(&e))?;
         core.chat.clear_status();
-        Ok(status(core, true))
+        let st = status(core, true);
+        emit_status(core, &st);
+        Ok(st)
     }
 }
 
@@ -1479,6 +1496,8 @@ impl Command for PrmChatFakeSetCase {
             .map_err(|e: String| CoreError::invalid("case", e))?;
         core.ctx.chat.fake.set_case(case);
         core.chat.clear_status();
+        let st = status(core, false);
+        emit_status(core, &st);
         Ok(Empty {})
     }
 }

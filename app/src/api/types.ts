@@ -869,8 +869,9 @@ export interface Events {
     error?: ChatBackendError;
     proposals?: ChatProposal[];
   };
-  /** A fresh detection changed the backend status. */
-  'prm:chat-status': { backend: ChatBackendStatus };
+  /** A fresh detection changed the backend status (`backend` only), or a settings, consent,
+   *  logout or fake-case change (the whole status, L2). */
+  'prm:chat-status': { backend: ChatBackendStatus } & Partial<ChatStatus>;
   /** BL-42 (window to window): the chat window asks the main window to publish its pending
    *  context now; the main window answers `prm:context-flushed` with the same id. */
   'prm:context-flush': { id: string };

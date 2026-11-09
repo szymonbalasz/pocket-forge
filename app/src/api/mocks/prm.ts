@@ -316,21 +316,30 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
   };
   const hostLabel = (h: Host) => (h === 'rgn' ? 'Region edit' : 'New image');
   handlers.prm_chat_status = () => statusOf();
+  // L2: a change announces the whole status, as the core does.
+  const announced = () => {
+    const s = statusOf();
+    emit('prm:chat-status', s);
+    return s;
+  };
   handlers.prm_chat_consent = (input) => {
-    if (input.accept) {
-      chat.consent = true;
-      chat.enabled = true;
-    }
-    return statusOf();
+    if (!input.accept) return statusOf();
+    chat.consent = true;
+    chat.enabled = true;
+    return announced();
   };
   handlers.prm_chat_settings_put = (input) => {
     if (typeof input.enabled === 'boolean') chat.enabled = input.enabled;
     if ('claude_path' in input) chat.claudePath = (input.claude_path as string | null) ?? null;
     if (!chat.enabled) chat.session = null;
-    return statusOf();
+    return announced();
   };
-  handlers.prm_chat_logout = () =>
-    chat.consent ? statusOf() : fail('consent_required', 'accept the privacy notice first');
+  // The fake logs out, and a not-logged-in fake logs in at once (no console).
+  handlers.prm_chat_logout = () => {
+    if (!chat.consent) return fail('consent_required', 'accept the privacy notice first');
+    chat.fakeCase = 'not_logged_in';
+    return announced();
+  };
   handlers.prm_chat_session_end = () => {
     chat.running?.cancel();
     chat.session = null;
@@ -341,10 +350,14 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     chat.windowOpens += 1;
     return null;
   };
-  handlers.prm_chat_login = () =>
-    chat.consent ? null : fail('consent_required', 'accept the privacy notice first');
+  handlers.prm_chat_login = () => {
+    if (!chat.consent) return fail('consent_required', 'accept the privacy notice first');
+    if (chat.fakeCase === 'not_logged_in') chat.fakeCase = 'success';
+    return null;
+  };
   handlers.prm_chat_fake_set_case = (input) => {
     chat.fakeCase = String(input.case);
+    announced();
     return {};
   };
   const currentHost = (pid: string): Host | null => {

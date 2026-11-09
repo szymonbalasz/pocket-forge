@@ -22,6 +22,7 @@ import {
   backendChip,
   billsApiKey,
   HOST_LABEL,
+  loginNote,
   PRIVACY_NOTICE,
   questionOf,
   segments,
@@ -73,6 +74,8 @@ export function ChatWindow() {
   const [offline, setOffline] = useState(false);
   const [includeImages, setIncludeImages] = useState(true);
   const [declined, setDeclined] = useState(false);
+  /** L2: what Log in… did ("A console opened…"). */
+  const [loginSaid, setLoginSaid] = useState<string | null>(null);
   const [preview, setPreview] = useState<ChatPreview | null>(null);
   const [focusTick, setFocusTick] = useState(0);
   const [list, setList] = useState<HTMLOListElement | null>(null);
@@ -173,7 +176,8 @@ export function ChatWindow() {
         if (t.error?.code === 'offline') setOffline(true);
         void loadThread(pidRef.current);
       }),
-      onEvent('prm:chat-status', (p) => setStatus((s) => (s ? { ...s, backend: p.backend } : s))),
+      // L2 / L6: detection, settings and consent changes are followed without a refocus.
+      onEvent('prm:chat-status', (p) => setStatus((s) => (s ? { ...s, ...p } : s))),
       // BL-41: the main window opened, closed or switched project, or its visible tab changed.
       onEvent('prm:chat-context', (c) => {
         if (c.project_id !== pidRef.current) void loadProject();
@@ -313,8 +317,12 @@ export function ChatWindow() {
               <button
                 type="button"
                 className="primary"
+                data-testid="prm-chat-login"
                 onClick={() =>
-                  void api.chat.login().catch((e: unknown) => setProblem(problemOf(e)))
+                  void api.chat.login().then(
+                    () => setLoginSaid(loginNote(status)),
+                    (e: unknown) => setProblem(problemOf(e)),
+                  )
                 }
               >
                 Log in…
@@ -328,6 +336,11 @@ export function ChatWindow() {
               Recheck
             </button>
           </div>
+          {loginSaid && (
+            <p className="muted small" role="status" data-testid="prm-chat-login-note">
+              {loginSaid}
+            </p>
+          )}
           {problem && <p className="prm-chat-error">{problem.message}</p>}
         </section>
       </main>
