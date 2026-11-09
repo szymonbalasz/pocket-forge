@@ -70,6 +70,9 @@ export function errorText(code: string, message: string): string {
       return 'A job is already running in this project.';
     case 'read_only':
       return 'The project is read-only.';
+    case 'invalid_candidate':
+      // Walk-p4r L6: the core's text is a clause; shown as a sentence.
+      return /[.!?]$/.test(message) ? message : `${message}.`;
     case 'repick_unavailable':
       return 'Only the newest iteration can be accepted (after undoing its accept). Compare, star and discard still work.';
     case 'estimate_stale':

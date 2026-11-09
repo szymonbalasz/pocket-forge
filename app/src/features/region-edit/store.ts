@@ -625,6 +625,8 @@ async function refreshIterations(): Promise<void> {
       selectedJobId: selected,
       live,
       ...(changed ? { selectedCandidateId: null, preview: null } : {}),
+      // A new job (a Region edit or New image submit): earlier notices are done (walk-p4r L6).
+      ...(newest !== before ? { trackerNotice: null } : {}),
     });
     if (changed) editorBridge.setCompare(null);
     // The open-time "N job(s) can resume" banner ends with the last running job (walk D7).
