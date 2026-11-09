@@ -1,6 +1,6 @@
 # Prompt chat probe: first run (owner runbook)
 
-PRM slice 0 ([prompt-helper spec](../specs/prompt-helper.md) §10, §14). `pf-chat-probe` checks the Claude Code claims the prompt chat depends on: isolation first (FR-PRM-45), then the other claims. It also records the fixtures that slice 4 replays. It runs on your machine only, never in CI. Steps 1–2 are free. Step 3 uses a little of your Claude plan: four short turns, one of them with a 512×640 image. Run every command from the repo root.
+PRM slice 0 ([prompt-helper spec](../specs/prompt-helper.md) §10, §14). `pf-chat-probe` checks the Claude Code claims the prompt chat depends on: isolation first (FR-PRM-45), then the other claims. It also records the fixtures that slice 4 replays. It runs on your machine only, never in CI. Steps 1–2 are free. Step 3 uses a little of your Claude plan: six short turns, one of them with a 512×640 image. Run every command from the repo root.
 
 ## 1. Check the CLI (free)
 ```sh
@@ -25,8 +25,10 @@ cargo run -p pf-chat --features real-call --bin pf-chat-probe -- run
 | Session | What it does | Cost |
 |---|---|---|
 | empty config | `auth status` and one turn in a fresh, empty folder → *not logged in* | free |
-| isolation | A stand-in home with marker files (a `CLAUDE.md` in `.claude/` and in a parent folder, a hook, a skill, an agent, a command, a plugin, an MCP server), with `--debug-file` | 1 short turn |
-| main | §10's exact argument list, your real environment: turn 1 with the overlay image, turn 2 text only, in the same process | 2 turns |
+| isolation | §10's exact invocation (`--safe-mode`, home = the empty `<data-dir>/chat-home/`), cwd under a stand-in folder with marker files (a `CLAUDE.md` in `.claude/` and in a parent folder, a hook, a skill, an agent, a command, a plugin, an MCP server), with `--debug-file` | 1 short turn |
+| safe-mode layer | `--safe-mode` alone: the stand-in is the home folder, and an `AGENTS.md` marker sits above the cwd (in the OS temp folder, away from the repo's `CLAUDE.md`) | 1 short turn |
+| control | The same without `--safe-mode`: the markers must show up, or the two sessions above prove nothing | 1 short turn |
+| main | §10's exact invocation, your real environment (home replaced by the chat home): turn 1 with the overlay image, turn 2 text only, in the same process | 2 turns |
 | cancel | Same list plus `--include-partial-messages`, killed after 5 text deltas | 1 turn, cut short |
 | `--max-turn` (optional) | Six noise images, ~4 MiB (FR-PRM-25's worst case) | 1 turn, heavier |
 
@@ -50,7 +52,7 @@ cargo run -p pf-chat --features real-call --bin pf-chat-probe -- run
 |---|---|---|
 | C01–C02 | Executable order; the version ≥ 2.1.268 | Fix the install or `--claude` |
 | C03–C07 | `auth status` exit codes, the allowed fields, `configDirectory` | C06 failing = `isolation_unavailable` |
-| C08–C11 | Nothing from `<home>/.claude*` is read; the real home adds nothing to `system/init` | **Gate**: the chat stays disabled (#60) |
+| C08–C11, C24–C25 | No CLAUDE.md, `AGENTS.md`, hook, skill, agent, command, plugin or MCP marker reaches the chat (C08: §10's invocation; C24: `--safe-mode` alone); C25 proves the markers are live; the real home adds nothing to `system/init` | **Gate**: the chat stays disabled (#60). If C25's detail says the `AGENTS.md` marker wasn't seen, a `CLAUDE.md` above your temp folder hid it: say so when you paste |
 | C12–C14 | Base64 image blocks; `--system-prompt`; two turns with `--no-session-persistence` | Slice 4 changes the adapter |
 | C15 | No transcript in `projects/`, after a clean exit and after a kill | **Gate**: `projects/` emptying is only a backstop |
 | C16–C18, C20 | Exit code, usage fields, streaming granularity, timing budgets | Slice 4 adjusts |
@@ -63,4 +65,5 @@ cargo run -p pf-chat --features real-call --bin pf-chat-probe -- run
 
 ## Clean up
 - `… pf-chat-probe -- logout` logs the chat's folder out. Deleting `<data-dir>/claude-config/` removes everything Claude Code kept there.
-- `<data-dir>/chat-probe/` and `<data-dir>/chat/probe-thread/` are recreated on every run.
+- `<data-dir>/chat-probe/` and `<data-dir>/chat/probe-thread/` are recreated on every run. `<temp>/pf-chat-probe-agents/` is removed after the isolation sessions.
+- `<data-dir>/chat-home/` should stay empty; the summary lists what it holds.

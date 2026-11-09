@@ -12,6 +12,15 @@ pub const ENV_CONFIG_DIR: &str = "CLAUDE_CONFIG_DIR";
 /// The folder name of the isolated config inside `<data-dir>` (FR-PRM-45).
 pub const CONFIG_DIR_NAME: &str = "claude-config";
 
+/// The folder name of the chat child's empty home inside `<data-dir>` (FR-PRM-45, defence
+/// in depth: `<home>/.claude/CLAUDE.md` is read from the home folder even with
+/// `CLAUDE_CONFIG_DIR` set, probe C08 on 2.1.319).
+pub const CHAT_HOME_DIR_NAME: &str = "chat-home";
+
+/// The home variables a chat child gets pointed at [`chat_home_dir`] (Windows reads
+/// `USERPROFILE`, else `HOMEDRIVE` + `HOMEPATH`; elsewhere `HOME`).
+pub const HOME_VARS: [&str; 4] = ["USERPROFILE", "HOME", "HOMEDRIVE", "HOMEPATH"];
+
 /// Extra variables set on every chat child and detection command (§10).
 pub const EXTRA_ENV: [(&str, &str); 2] = [
     ("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1"),
@@ -26,7 +35,15 @@ pub fn config_dir(data_dir: &Path) -> PathBuf {
     data_dir.join(CONFIG_DIR_NAME)
 }
 
-/// The chat child's arguments, exactly §10's list (snapshot-tested).
+/// `<data-dir>/chat-home/`: an empty folder the chat child sees as its home (FR-PRM-45).
+pub fn chat_home_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join(CHAT_HOME_DIR_NAME)
+}
+
+/// The chat child's arguments, exactly §10's list (snapshot-tested). `--safe-mode` keeps
+/// CLAUDE.md (user, project and ancestor folders), auto memory, skills, plugins, hooks, MCP
+/// servers, commands and agents from loading while the plan login still works (documented
+/// since 2.1.169; needed because `CLAUDE_CONFIG_DIR` alone leaks CLAUDE.md, probe C08).
 pub fn chat_args(system_prompt: &str) -> Vec<String> {
     [
         "-p",
@@ -40,6 +57,7 @@ pub fn chat_args(system_prompt: &str) -> Vec<String> {
         "--strict-mcp-config",
         "--disable-slash-commands",
         "--no-session-persistence",
+        "--safe-mode",
         "--system-prompt",
         system_prompt,
     ]
@@ -89,6 +107,28 @@ where
     env.push((ENV_CONFIG_DIR.into(), config_dir.as_os_str().to_owned()));
     for (k, v) in EXTRA_ENV {
         env.push((k.into(), v.into()));
+    }
+    env
+}
+
+/// A chat child's environment: [`child_env`], plus every [`HOME_VARS`] entry replaced by
+/// `USERPROFILE` and `HOME` = `chat_home` (FR-PRM-45). The credentials live in
+/// `CLAUDE_CONFIG_DIR`, so the login still works (probe C08 ran a logged-in turn with a
+/// stand-in home). Detection and login commands keep [`child_env`].
+pub fn chat_child_env<I>(
+    parent: I,
+    config_dir: &Path,
+    chat_home: &Path,
+) -> Vec<(OsString, OsString)>
+where
+    I: IntoIterator<Item = (OsString, OsString)>,
+{
+    let mut env: Vec<(OsString, OsString)> = child_env(parent, config_dir)
+        .into_iter()
+        .filter(|(k, _)| !HOME_VARS.contains(&k.to_string_lossy().to_uppercase().as_str()))
+        .collect();
+    for k in ["USERPROFILE", "HOME"] {
+        env.push((k.into(), chat_home.as_os_str().to_owned()));
     }
     env
 }
@@ -220,18 +260,13 @@ mod tests {
             "--strict-mcp-config",
             "--disable-slash-commands",
             "--no-session-persistence",
+            "--safe-mode",
             "--system-prompt",
             "SYS",
         ];
         assert_eq!(args, want);
-        // Never --bare, --resume, --model, --allowedTools or file paths (§10).
-        for banned in [
-            "--bare",
-            "--resume",
-            "--model",
-            "--allowedTools",
-            "--safe-mode",
-        ] {
+        // Never --bare (no plan login), --resume, --model, --allowedTools or file paths (§10).
+        for banned in ["--bare", "--resume", "--model", "--allowedTools"] {
             assert!(!args.iter().any(|a| a == banned), "{banned}");
         }
     }
@@ -265,6 +300,33 @@ mod tests {
             env.iter()
                 .all(|(k, _)| !k.to_string_lossy().to_uppercase().starts_with("PF_"))
         );
+    }
+
+    #[test]
+    fn fr_prm_45_chat_child_env_points_home_at_the_empty_chat_home() {
+        let parent = [
+            ("PATH", "/bin"),
+            ("UserProfile", "/real/home"),
+            ("HOME", "/real/home"),
+            ("HOMEDRIVE", "C:"),
+            ("HOMEPATH", "/real/home"),
+            ("PF_DATA_DIR", "/x"),
+        ]
+        .map(|(k, v)| (OsString::from(k), OsString::from(v)));
+        let data = Path::new("/data");
+        let env = chat_child_env(parent, &config_dir(data), &chat_home_dir(data));
+        let get = |k: &str| {
+            env.iter()
+                .filter(|(n, _)| n.to_string_lossy().eq_ignore_ascii_case(k))
+                .map(|(_, v)| v.to_string_lossy().replace('\\', "/"))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(get("USERPROFILE"), ["/data/chat-home"]);
+        assert_eq!(get("HOME"), ["/data/chat-home"]);
+        assert!(get("HOMEDRIVE").is_empty() && get("HOMEPATH").is_empty());
+        assert_eq!(get(ENV_CONFIG_DIR), ["/data/claude-config"]);
+        assert_eq!(get("PATH"), ["/bin"]);
+        assert!(get("PF_DATA_DIR").is_empty());
     }
 
     fn fs(files: &'static [&'static str]) -> impl Fn(&Path) -> bool {
