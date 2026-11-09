@@ -363,6 +363,7 @@ fn fr_prm_27_send_needs_a_block_and_one_turn_at_a_time() {
         user_turn_id: Ulid::nil(),
         project_id: pid(&lab),
         cancel: Default::default(),
+        project_closed: false,
     });
     assert_eq!(code(send(&lab, "hi")), ErrorCode::TurnActive);
     super::lock(&lab.core.chat.rt).running = None;
@@ -1092,4 +1093,46 @@ fn fr_prm_27_a_second_send_while_the_first_builds_is_refused() {
         .unwrap();
     assert_eq!(code(send(&lab, "hi")), ErrorCode::NoPromptBlock);
     assert!(lab.core.chat.running_turn().is_none());
+}
+
+/// FR-PRM-35 / R94 (code review 7): a project that closes while a send builds its context gets
+/// no session and no memory thread, and another project's turn doesn't show as running.
+#[test]
+fn fr_prm_35_a_project_closed_while_a_send_builds_gets_no_session() {
+    let lab = lab();
+    lab.core.state().project.as_mut().unwrap().read_only =
+        Some(crate::project::ReadOnlyReason::NewerVersion);
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    let p = pid(&lab);
+    let parked = Arc::new(std::sync::Mutex::new(None));
+    let park = parked.clone();
+    hook(&lab, "send_after_build", move |core| {
+        // What `project_close` does, under the state lock.
+        let mut st = core.state();
+        let old = st.project.take();
+        core.chat.on_project_close(p);
+        *park.lock().unwrap() = old;
+    });
+    assert_eq!(code(send(&lab, "hi")), ErrorCode::NoProject);
+    assert!(
+        !lab.core.chat.has_session(),
+        "no child outlives the project"
+    );
+    assert!(lab.core.chat.running_turn().is_none());
+    assert!(
+        super::lock(&lab.core.chat.rt).memory.is_none(),
+        "the memory thread isn't recreated"
+    );
+    lab.core.state().project = parked.lock().unwrap().take();
+    assert_eq!(thread_view(&lab)["thread"], Value::Null);
+
+    // Another project's running turn: this project's Send stays enabled.
+    super::lock(&lab.core.chat.rt).running = Some(super::Running {
+        turn_id: Ulid::from(7u128),
+        user_turn_id: Ulid::from(8u128),
+        project_id: Ulid::from(9u128),
+        cancel: Default::default(),
+        project_closed: false,
+    });
+    assert_eq!(thread_view(&lab)["running_turn_id"], Value::Null);
 }

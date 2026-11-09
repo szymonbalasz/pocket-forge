@@ -114,6 +114,9 @@ struct Running {
     user_turn_id: Ulid,
     project_id: Ulid,
     cancel: CancelHandle,
+    /// The turn's project closed while it ran (code review 7): the turn keeps nothing in
+    /// memory and a send still building stops before it opens a session.
+    project_closed: bool,
 }
 
 impl Rt {
@@ -206,7 +209,9 @@ impl ChatRuntime {
     }
 
     /// The asset project closed or another one opened: its contexts go, and its session ends
-    /// (FR-PRM-35). A running turn finishes into its own thread file (§11).
+    /// (FR-PRM-35). A running turn finishes into its own thread file (§11); a send still
+    /// building its context is stopped here, under the same lock it commits under, so it
+    /// never opens a session or keeps a memory thread for the closed project.
     pub fn on_project_close(&self, project_id: Ulid) {
         let running = {
             let mut rt = lock(&self.rt);
@@ -217,6 +222,10 @@ impl ChatRuntime {
                 .is_some_and(|m| m.project_id == project_id)
             {
                 rt.memory = None;
+            }
+            if let Some(r) = rt.running.as_mut().filter(|r| r.project_id == project_id) {
+                r.project_closed = true;
+                r.cancel.cancel();
             }
             rt.running.as_ref().map(|r| r.project_id)
         };
@@ -793,7 +802,12 @@ impl Command for PrmChatThreadGet {
             loaded.thread = Some(m.thread.clone());
             unsaved_turn_ids = m.unsaved.clone();
         }
-        let running_turn_id = core.chat.running_turn();
+        // Only this project's turn (code review 7): another project's turn doesn't disable Send.
+        let running_turn_id = lock(&core.chat.rt)
+            .running
+            .as_ref()
+            .filter(|r| r.project_id == input.project_id)
+            .map(|r| r.turn_id);
         let fresh_session_next = running_turn_id.is_none()
             && !core
                 .chat
@@ -1050,8 +1064,10 @@ impl Command for PrmChatSend {
         let thread_id = thread.id;
         let cwd = core.ctx.data_dir.join("chat").join(thread_id.to_string());
 
-        // The session (FR-PRM-35): reused for the same project while its child lives.
+        // The session (FR-PRM-35): reused for the same project while its child lives. Not
+        // opened when the project closed (or the session ended) during the build.
         let mut slot = lock(&core.chat.session);
+        claim.check_live()?;
         if slot
             .as_ref()
             .is_some_and(|e| e.project_id != pid || !e.session.is_alive())
@@ -1145,6 +1161,15 @@ impl Command for PrmChatSend {
         // `interrupted` (M2).
         {
             let mut rt = lock(&core.chat.rt);
+            // Checked under `rt`, where a close stops the claim: a closed project's memory
+            // thread is never recreated (R94).
+            if cancel.is_cancelled() {
+                drop(rt);
+                return Err(claim
+                    .check_live()
+                    .err()
+                    .unwrap_or_else(|| CoreError::internal("the turn stopped")));
+            }
             if read_only {
                 let mut ids = unsaved.take().unwrap_or_default();
                 ids.extend([user_turn_id, turn_id]);
@@ -1252,8 +1277,26 @@ impl<'a> Claim<'a> {
             user_turn_id: claim.user_turn_id,
             project_id,
             cancel: claim.cancel.clone(),
+            project_closed: false,
         });
         Ok(claim)
+    }
+
+    /// Fails once the turn was stopped before it started: its project closed, the session
+    /// ended (window closed, chat off) or Stop.
+    fn check_live(&self) -> CoreResult<()> {
+        if !self.cancel.is_cancelled() {
+            return Ok(());
+        }
+        let closed = lock(self.rt)
+            .running
+            .as_ref()
+            .is_some_and(|r| r.turn_id == self.turn_id && r.project_closed);
+        Err(if closed {
+            CoreError::new(ErrorCode::NoProject, "that asset project is not open")
+        } else {
+            CoreError::new(ErrorCode::Canceled, "the message wasn't sent")
+        })
     }
 
     /// The turn's job owns the slot now.
