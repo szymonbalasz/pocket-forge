@@ -37,13 +37,21 @@ pub fn run_turn(
     if cancel.is_cancelled() {
         return (TurnOutcome::Canceled { partial }, false);
     }
-    if let Err(e) = child.send_line(stdin_line) {
+    // FR-PRM-36's clock starts before the write: a child that stops reading stdin (an image
+    // turn is more than the pipe holds) can't hold the turn past the first-event budget.
+    let mut timer = TurnTimer::start(budget, clock.now());
+    let write_budget = timer.remaining(clock.now()).unwrap_or_default();
+    if let Err(e) = child.send_line(stdin_line, write_budget) {
         if cancel.is_cancelled() {
             return (TurnOutcome::Canceled { partial }, false);
         }
+        if e.kind() == std::io::ErrorKind::TimedOut {
+            child.killer().kill();
+            let error = ChatError::new(ChatErrorKind::Timeout);
+            return (TurnOutcome::Failed { error, partial }, false);
+        }
         return (crashed(child, &partial, scrub, Some(e.to_string())), false);
     }
-    let mut timer = TurnTimer::start(budget, clock.now());
     let mut parser = LineParser::new();
     let mut signals = Signals::default();
     let mut streaming = false;

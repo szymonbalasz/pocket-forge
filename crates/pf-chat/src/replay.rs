@@ -21,6 +21,9 @@ pub enum Step {
     Delay(Duration),
     /// Nothing, ever (until killed).
     Stall,
+    /// As a turn's first step: the child never reads that stdin line, so the write blocks
+    /// (review-code 5).
+    StdinStall,
     /// The process exits with this code; stdout closes.
     Exit(Option<i32>),
 }
@@ -121,9 +124,17 @@ impl ScriptedChild {
 }
 
 impl ChildProcess for ScriptedChild {
-    fn send_line(&mut self, line: &str) -> io::Result<()> {
+    fn send_line(&mut self, line: &str, timeout: Duration) -> io::Result<()> {
         if self.is_killed() || self.exit.is_some() || !self.stdin_open {
             return Err(io::Error::new(io::ErrorKind::BrokenPipe, "child gone"));
+        }
+        if self.turns.front().and_then(|t| t.first()) == Some(&Step::StdinStall) {
+            // The write never completes: wait out the timeout on the clock.
+            return if self.nap(timeout) {
+                Err(io::Error::new(io::ErrorKind::TimedOut, "stdin not read"))
+            } else {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "child killed"))
+            };
         }
         if let Ok(mut log) = self.stdin_log.lock() {
             log.push(line.to_owned());
@@ -148,7 +159,7 @@ impl ChildProcess for ScriptedChild {
                     self.exit = Some(Exited { code: Some(0) });
                     return Next::Eof;
                 }
-                None | Some(Step::Stall) => {
+                None | Some(Step::Stall | Step::StdinStall) => {
                     self.nap(left);
                     return if self.is_killed() {
                         Next::Eof
@@ -352,7 +363,7 @@ mod tests {
         };
         let mut c = ScriptedChild::new(script, Arc::new(clock.clone()));
         assert_eq!(c.next_line(Duration::from_secs(1)), Next::Timeout);
-        assert!(c.send_line("{}").is_ok());
+        assert!(c.send_line("{}", Duration::from_secs(1)).is_ok());
         assert_eq!(c.next_line(Duration::from_secs(1)), Next::Line("a".into()));
         assert_eq!(c.next_line(Duration::from_secs(3)), Next::Timeout);
         assert_eq!(c.next_line(Duration::from_secs(3)), Next::Line("b".into()));

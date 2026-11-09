@@ -134,7 +134,9 @@ pub trait Kill: Send + Sync {
 /// A long-lived stream-json child: stdin stays open across turns (FR-PRM-35).
 pub trait ChildProcess: Send {
     /// Writes one line (the trailing newline is added).
-    fn send_line(&mut self, line: &str) -> io::Result<()>;
+    /// A write that hasn't finished within `timeout` (a child that stopped reading stdin,
+    /// with more queued than the pipe holds) returns `ErrorKind::TimedOut` (FR-PRM-36).
+    fn send_line(&mut self, line: &str, timeout: Duration) -> io::Result<()>;
     /// The next stdout line, waiting at most `timeout`.
     fn next_line(&mut self, timeout: Duration) -> Next;
     fn close_stdin(&mut self);
@@ -300,10 +302,75 @@ impl Kill for OsKill {
     }
 }
 
+/// The child's stdin, written by its own thread so a write that blocks (the child stopped
+/// reading, the pipe is full) can be given up on after a timeout (review-code 5, FR-PRM-36).
+/// The blocked thread ends when the child is killed and the pipe breaks. Dropping the
+/// writer closes stdin once no write is in flight.
+struct StdinWriter {
+    tx: mpsc::Sender<Vec<u8>>,
+    ack: Receiver<io::Result<()>>,
+    /// A write timed out and may still be blocked.
+    stuck: bool,
+}
+
+impl StdinWriter {
+    fn new(mut stdin: ChildStdin) -> Self {
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        let (ack_tx, ack) = mpsc::channel();
+        thread::spawn(move || {
+            for buf in rx {
+                let r = stdin.write_all(&buf).and_then(|()| stdin.flush());
+                let failed = r.is_err();
+                if ack_tx.send(r).is_err() || failed {
+                    break;
+                }
+            }
+        });
+        Self {
+            tx,
+            ack,
+            stuck: false,
+        }
+    }
+
+    fn send(&mut self, line: &str, timeout: Duration) -> io::Result<()> {
+        if self.stuck {
+            match self.ack.try_recv() {
+                Ok(_) => self.stuck = false,
+                Err(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "an earlier stdin write is still blocked",
+                    ));
+                }
+            }
+        }
+        let mut buf = Vec::with_capacity(line.len() + 1);
+        buf.extend_from_slice(line.as_bytes());
+        buf.push(b'\n');
+        self.tx
+            .send(buf)
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "stdin closed"))?;
+        match self.ack.recv_timeout(timeout) {
+            Ok(r) => r,
+            Err(RecvTimeoutError::Timeout) => {
+                self.stuck = true;
+                Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "the child didn't read its stdin in time",
+                ))
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "stdin closed"))
+            }
+        }
+    }
+}
+
 /// A real stream-json child.
 pub struct OsChild {
     child: Arc<Mutex<Child>>,
-    stdin: Option<ChildStdin>,
+    stdin: Option<StdinWriter>,
     rx: Receiver<Option<String>>,
     eof: bool,
     stderr: Arc<Mutex<VecDeque<u8>>>,
@@ -326,7 +393,7 @@ impl OsChild {
                 return Err(e);
             }
         };
-        let stdin = child.stdin.take();
+        let stdin = child.stdin.take().map(StdinWriter::new);
         let stdout = child
             .stdout
             .take()
@@ -371,14 +438,12 @@ impl OsChild {
 }
 
 impl ChildProcess for OsChild {
-    fn send_line(&mut self, line: &str) -> io::Result<()> {
+    fn send_line(&mut self, line: &str, timeout: Duration) -> io::Result<()> {
         let s = self
             .stdin
             .as_mut()
             .ok_or_else(|| io::Error::new(io::ErrorKind::BrokenPipe, "stdin closed"))?;
-        s.write_all(line.as_bytes())?;
-        s.write_all(b"\n")?;
-        s.flush()
+        s.send(line, timeout)
     }
 
     fn next_line(&mut self, timeout: Duration) -> Next {
@@ -453,6 +518,52 @@ mod tests {
             false
         });
         assert_eq!(n, 1);
+    }
+
+    /// review-code 5: a child that never reads stdin; a write bigger than the pipe gives up
+    /// after its timeout instead of blocking, and the kill still ends the child.
+    #[cfg(windows)]
+    #[test]
+    fn prm_s10_os_child_stdin_write_is_bounded() {
+        let exe = Executable {
+            path: PathBuf::from("cmd.exe"),
+            kind: ExeKind::Native,
+            source: crate::invocation::ExeSource::Override,
+        };
+        let env: Vec<(OsString, OsString)> = std::env::vars_os().collect();
+        let spec = CommandSpec::new(
+            &exe,
+            vec![
+                "/d".into(),
+                "/c".into(),
+                "echo ready & ping -n 30 127.0.0.1 >nul".into(),
+            ],
+            env,
+            &std::env::temp_dir(),
+            true,
+        );
+        let mut child = OsSpawner
+            .spawn(&spec)
+            .unwrap_or_else(|e| panic!("spawn: {e}"));
+        assert!(matches!(
+            child.next_line(Duration::from_secs(10)),
+            Next::Line(_)
+        ));
+        let big = "x".repeat(8 << 20);
+        let start = Instant::now();
+        let e = child
+            .send_line(&big, Duration::from_millis(500))
+            .expect_err("8 MiB can't fit in the pipe");
+        assert_eq!(e.kind(), io::ErrorKind::TimedOut);
+        assert!(start.elapsed() < Duration::from_secs(5));
+        // A second write while the first is stuck fails at once.
+        let e = child
+            .send_line("{}", Duration::from_secs(5))
+            .expect_err("still stuck");
+        assert_eq!(e.kind(), io::ErrorKind::TimedOut);
+        assert!(start.elapsed() < Duration::from_secs(5));
+        child.killer().kill();
+        assert!(child.wait(Duration::from_secs(5)).is_some());
     }
 
     /// The real spawner and the job object, on a harmless system command (never the CLI).

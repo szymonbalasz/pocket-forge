@@ -819,3 +819,24 @@ fn fr_prm_37_the_reply_is_capped() {
     assert_eq!(deltas.concat(), partial, "the UI saw exactly what is kept");
     assert!(!s.is_alive());
 }
+
+// ---------------------------------------------------------------- blocked stdin
+
+/// review-code 5 (FR-PRM-36): a child that never reads its stdin can't hold the turn past
+/// the 60 s first-event budget; the write is given up on, the child killed.
+#[test]
+fn fr_prm_36_a_blocked_stdin_write_times_out() {
+    let r = rig();
+    let mut s = r.open(Script {
+        turns: vec![vec![Step::StdinStall]],
+        stderr: String::new(),
+    });
+    let (out, deltas) = turn(s.as_mut(), &input("hi"));
+    assert!(
+        matches!(&out, TurnOutcome::Failed { error, .. } if error.code() == "timeout"),
+        "{out:?}"
+    );
+    assert!(deltas.is_empty());
+    assert_eq!(r.clock.now(), S(60));
+    assert!(!s.is_alive(), "the child is killed");
+}
