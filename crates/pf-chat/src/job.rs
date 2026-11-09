@@ -90,3 +90,44 @@ impl Drop for JobObject {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    /// An app crash (§10, R75): nothing calls `terminate`, the kernel just closes the job
+    /// handle. `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` must then end the child and the
+    /// grandchild that holds its stdout.
+    #[test]
+    fn prm_s10_closing_the_job_handle_ends_the_tree() {
+        let mut child = Command::new("cmd.exe")
+            .args(["/d", "/c", "echo ready & ping -n 60 127.0.0.1 >nul"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap_or_else(|e| panic!("spawn: {e}"));
+        let job = JobObject::new().unwrap_or_else(|e| panic!("job: {e}"));
+        job.assign(&child).unwrap_or_else(|e| panic!("assign: {e}"));
+        let mut stdout = child.stdout.take().unwrap_or_else(|| panic!("stdout"));
+        let mut first = [0u8; 5];
+        stdout
+            .read_exact(&mut first)
+            .unwrap_or_else(|e| panic!("read: {e}"));
+        assert_eq!(&first, b"ready");
+        let start = Instant::now();
+        drop(job);
+        // EOF only once `ping` (the grandchild holding the pipe) is gone too.
+        let mut rest = Vec::new();
+        let _ = stdout.read_to_end(&mut rest);
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "the tree outlived the job"
+        );
+        // (Windows ends them with exit code 0; only the exit itself is checked.)
+        assert!(child.wait().is_ok());
+    }
+}

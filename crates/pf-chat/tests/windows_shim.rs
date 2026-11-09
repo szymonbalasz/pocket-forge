@@ -9,6 +9,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use pf_chat::backend::{
     CancelHandle, ChatBackend, ChatSession, SessionOptions, TurnEvent, TurnInput, TurnOutcome,
@@ -42,8 +43,10 @@ endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\node_
 
 /// The fake CLI. `--version` and `auth status --json` answer like 2.1.319 (with CRLF and
 /// stderr noise); otherwise it speaks stream-json and answers each user message with one
-/// assistant message holding a JSON report, then a `result`. A message containing `HANG`
-/// starts a grandchild, writes both pids to `FAKE_CLAUDE_PIDFILE` and never answers.
+/// assistant message holding a JSON report, then a `result`. A message containing `SPAWN`
+/// or `HANG` starts a detached grandchild that never exits (outside node's own job, so
+/// only ours can end it) and writes both pids to `FAKE_CLAUDE_PIDFILE`; `HANG` then never
+/// sends a `result` and ignores stdin closing.
 const FAKE_CLI: &str = r#"
 const fs = require('fs');
 const args = process.argv.slice(2);
@@ -64,15 +67,19 @@ if (args[0] === '--version') {
   let prompt;
   try { prompt = fs.readFileSync(args[i + 1], 'utf8'); } catch (e) { prompt = 'ERR ' + e.message; }
   out({ type: 'system', subtype: 'init', tools: [] });
+  let hanging = false;
   const rl = require('readline').createInterface({ input: process.stdin });
   rl.on('line', (line) => {
     const msg = JSON.parse(line);
     const text = msg.message.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
-    if (text.includes('HANG')) {
+    if (text.includes('HANG') || text.includes('SPAWN')) {
       const g = require('child_process').spawn(process.execPath,
-        ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+        ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', detached: true });
       fs.writeFileSync(process.env.FAKE_CLAUDE_PIDFILE, process.pid + '\n' + g.pid + '\n');
+    }
+    if (text.includes('HANG')) {
       out({ type: 'assistant', message: { content: [{ type: 'text', text: 'hanging' }] } });
+      hanging = true;
       setInterval(() => {}, 1000);
       return;
     }
@@ -81,7 +88,7 @@ if (args[0] === '--version') {
     out({ type: 'result', subtype: 'success', is_error: false, result: '',
           usage: { input_tokens: 1, output_tokens: 1 } });
   });
-  rl.on('close', () => process.exit(0));
+  rl.on('close', () => { if (!hanging) process.exit(0); });
 }
 "#;
 
@@ -100,6 +107,7 @@ struct Rig {
     _tmp: tempfile::TempDir,
     data: PathBuf,
     shim: PathBuf,
+    pidfile: PathBuf,
     backend: ClaudeCodeBackend,
 }
 
@@ -119,6 +127,7 @@ fn rig() -> Rig {
     let home = root.join("home");
     std::fs::create_dir_all(&home).unwrap();
     let data = root.join("data");
+    let pidfile = tmp.path().join("pids.txt");
 
     let system = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
     let path = std::env::join_paths([prefix.clone(), node_dir(), system]).unwrap();
@@ -138,6 +147,7 @@ fn rig() -> Rig {
         ("HOMEPATH", "\\nowhere".into()),
         ("PF_DATA_DIR", "leak".into()),
         ("ANTHROPIC_API_KEY", "dummy-not-a-key".into()),
+        ("FAKE_CLAUDE_PIDFILE", pidfile.clone().into_os_string()),
     ] {
         parent_env.push((k.into(), v));
     }
@@ -152,6 +162,7 @@ fn rig() -> Rig {
         _tmp: tmp,
         data,
         shim,
+        pidfile,
         backend,
     }
 }
@@ -258,4 +269,97 @@ fn fr_prm_34_npm_shim_survives_special_characters_and_text_goes_over_stdin() {
     assert!(s.is_alive());
     s.close();
     assert!(!s.is_alive());
+}
+
+/// Whether a process with `pid` runs (`tasklist`, a system tool; no new dependency).
+fn running(pid: u32) -> bool {
+    let out = std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).contains(&format!("\"{pid}\""))
+}
+
+/// Waits up to 10 s for the fake CLI's pid file: `[node, grandchild]`.
+fn tree_pids(r: &Rig) -> Vec<u32> {
+    let start = Instant::now();
+    loop {
+        let pids: Vec<u32> = std::fs::read_to_string(&r.pidfile)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| l.trim().parse().ok())
+            .collect();
+        if pids.len() == 2 {
+            return pids;
+        }
+        assert!(start.elapsed() < Duration::from_secs(10), "no pid file");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn assert_tree_gone(pids: &[u32]) {
+    let start = Instant::now();
+    while pids.iter().any(|&p| running(p)) {
+        if start.elapsed() > Duration::from_secs(10) {
+            // Don't leak them: they hold the test's output pipe open.
+            for p in pids {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/PID", &p.to_string()])
+                    .output();
+            }
+            panic!("a process of the cmd → node → node tree outlived the job: {pids:?}");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Stop (FR-PRM-27, §10): cancel kills the shim's whole tree, `cmd.exe` → `node` (the
+/// CLI) → its own child, through the Job Object.
+#[test]
+fn fr_prm_27_cancel_kills_the_shim_process_tree() {
+    let r = rig();
+    let mut s = r.open();
+    let cancel = CancelHandle::new();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let pids = std::thread::scope(|scope| {
+        let stop = cancel.clone();
+        scope.spawn(move || {
+            // Stop once the CLI and its grandchild run.
+            let _: Result<(), _> = rx.recv();
+            stop.cancel();
+        });
+        let mut tx = Some(tx);
+        let mut pids = Vec::new();
+        let out = s.run_turn(&input("HANG please"), &cancel, &mut |_| {
+            if let Some(tx) = tx.take() {
+                pids = tree_pids(&r);
+                assert!(pids.iter().all(|&p| running(p)), "{pids:?}");
+                let _ = tx.send(());
+            }
+        });
+        assert_eq!(
+            out,
+            TurnOutcome::Canceled {
+                partial: "hanging".into()
+            }
+        );
+        pids
+    });
+    assert!(!s.is_alive());
+    assert_tree_gone(&pids);
+}
+
+/// App exit (§10, R75): dropping the session (the app closing) closes stdin; the CLI exits
+/// but leaves a grandchild running, which ends with the job
+/// (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: the same handle close an app crash causes).
+#[test]
+fn prm_s10_session_drop_kills_what_the_cli_leaves_behind() {
+    let r = rig();
+    let mut s = r.open();
+    let out = s.run_turn(&input("SPAWN"), &CancelHandle::new(), &mut |_| {});
+    assert!(matches!(out, TurnOutcome::Completed { .. }), "{out:?}");
+    let pids = tree_pids(&r);
+    assert!(pids.iter().all(|&p| running(p)), "{pids:?}");
+    drop(s);
+    assert_tree_gone(&pids);
 }
