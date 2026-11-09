@@ -622,6 +622,34 @@ fn fr_gen_13_the_sketch_slot_gives_up_one_place_only_when_chosen() {
     assert_eq!(g.estimate(&d).unwrap()["references"], 3);
 }
 
+#[test]
+fn fr_gen_18_the_seed_used_is_recorded_random_or_pinned() {
+    let g = G::empty("maps", "Crypt");
+    // Random: drawn at submit, sent and recorded.
+    let id = g.run(&g.two("random"));
+    let j = g.job_json(id);
+    let used = j["seed"]["requested"]
+        .as_u64()
+        .expect("a random seed is drawn");
+    assert_eq!(j["provider"]["request"]["seed"], json!(used));
+    assert!(j["seed"]["returned"].is_u64(), "the seed the provider used");
+    // Each candidate keeps its own seed.
+    assert!(g.lab.candidates(id).iter().all(|c| c.seed.is_some()));
+    // Two random submits draw different seeds.
+    let other = g.run(&g.two("random again"));
+    assert_ne!(g.job_json(other)["seed"]["requested"], json!(used));
+    // Pinned: sent as is.
+    let mut d = g.two("pinned");
+    d["seed"] = json!(1234);
+    let id = g.run(&d);
+    let j = g.job_json(id);
+    assert_eq!(j["seed"]["requested"], 1234);
+    assert_eq!(j["provider"]["request"]["seed"], 1234);
+    // Retry keeps a pinned seed and draws a new random one otherwise (FR-GEN-32).
+    assert_eq!(g.retry(id).unwrap()["seed"], 1234);
+    assert_eq!(g.retry(other).unwrap()["seed"], Value::Null);
+}
+
 // ---------------------------------------------------------------- retry (FR-GEN-32)
 
 #[test]
