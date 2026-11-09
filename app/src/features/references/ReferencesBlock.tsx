@@ -217,7 +217,9 @@ function Group({
 }
 
 function Item({ item, r, readOnly }: { item: RefItem; r: RefResolved; readOnly: boolean }) {
-  const [failed, setFailed] = useState(false);
+  // The URL that failed, not a flag: a refreshed file (a new URL) is tried again.
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const failed = !!item.thumb_url && failedUrl === item.thumb_url;
   const blocked = tickBlock(r.slots, item);
   const mode = roleMode(r.slots);
   const roles = r.slots.flatMap((s) => (s.role ? [s.role] : []));
@@ -244,7 +246,12 @@ function Item({ item, r, readOnly }: { item: RefItem; r: RefResolved; readOnly: 
           onChange={() => block.toggle(item.key)}
         />
         {item.thumb_url && !failed ? (
-          <img src={item.thumb_url} alt="" loading="lazy" onError={() => setFailed(true)} />
+          <img
+            src={item.thumb_url}
+            alt=""
+            loading="lazy"
+            onError={() => setFailedUrl(item.thumb_url ?? null)}
+          />
         ) : (
           <span className="ref-block-thumb-empty" />
         )}

@@ -253,6 +253,29 @@ test('FR-REF-09 the pack view re-lists on window focus and on Refresh, so Explor
   await waitFor(() => expect(images()).toContain('again.png'));
 });
 
+test('FR-REF-14 a pack thumbnail that failed to load is tried again after a refresh gives a new one', async () => {
+  setup();
+  await openWeapons();
+  const first = () => screen.getAllByTestId('ref-pack-image')[0]!;
+  const img = first().querySelector('img')!;
+  fireEvent.error(img);
+  expect(first().querySelector('img')).toBeNull();
+  const h = core.handlersSnapshot();
+  const get = h.ref_pack_get!;
+  core.useHandlers({
+    ...h,
+    ref_pack_get: async (input) => {
+      const p = (await get(input)) as { images: { thumb_url?: string | null }[] };
+      return {
+        ...p,
+        images: p.images.map((i) => ({ ...i, thumb_url: i.thumb_url && `${i.thumb_url}?v=2` })),
+      };
+    },
+  });
+  fireEvent.click(screen.getByTestId('ref-pack-refresh'));
+  await waitFor(() => expect(first().querySelector('img')?.getAttribute('src')).toMatch(/\?v=2$/));
+});
+
 test('FR-REF-10 renaming from the pack view and from the card menu; a taken name is refused', async () => {
   setup();
   await openWeapons();
