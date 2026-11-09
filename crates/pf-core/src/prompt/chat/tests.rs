@@ -1183,3 +1183,73 @@ fn fr_prm_40_a_failed_command_leaves_the_project_and_settings_unchanged() {
         ErrorCode::ReadOnly
     );
 }
+
+#[test]
+fn fr_prm_44_a_host_switched_turn_gets_the_now_on_note() {
+    use pf_chat::system_prompt::{HOST_GEN_V1, HOST_RGN_V1, Host, host_note, system_prompt};
+    let (lab, sp) = claude_lab();
+    consent(&lab);
+    sp.push_script(Script::recordings(&[SUCCESS_IMAGE, TWO_PROPOSALS]));
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "make this a kitchen").unwrap();
+    // The tab switch to New image keeps the session (FR-PRM-43).
+    lab.core
+        .dispatch(
+            "prm_context_clear",
+            json!({"project_id": pid(&lab), "host": "rgn"}),
+        )
+        .unwrap();
+    let gen_draft = json!({
+        "model_id": "fake-gen-wh",
+        "controls": {},
+        "seed": null,
+        "size": {"mode": "grid", "cols": 30, "rows": 40, "pps": 70},
+        "structure": null,
+        "references": null,
+        "typed_prompt": "a crypt",
+        "final_prompt": "a crypt",
+    });
+    lab.core
+        .dispatch("provider_list_models", json!({"operation": "generate"}))
+        .unwrap();
+    lab.core
+        .dispatch("gen_job_estimate", json!({"draft": gen_draft}))
+        .unwrap();
+    publish(&lab, "gen", gen_draft);
+    let out = send(&lab, "a flooded crypt").unwrap();
+    assert_eq!(out["host"], "gen");
+    assert_eq!(out["fresh_session"], false);
+
+    let log = sp.log();
+    assert_eq!(log.spawns.len(), 1, "no restart for the host switch");
+    // The session's system prompt is the first turn's host.
+    let args = &log.spawns[0].0.args;
+    let at = args.iter().position(|a| a == "--system-prompt").unwrap();
+    assert_eq!(args[at + 1], system_prompt(Host::Rgn));
+    assert!(!args[at + 1].contains(HOST_GEN_V1));
+    let text_of = |line: &str| -> String {
+        let v: Value = serde_json::from_str(line).unwrap();
+        v["message"]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| c["type"] == "text")
+            .map(|c| c["text"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+            .join("")
+    };
+    let lines = log.stdin(0);
+    assert_eq!(lines.len(), 2);
+    let first = text_of(&lines[0]);
+    assert!(first.starts_with("[Context]\n"), "same host: no note");
+    assert!(!first.contains("[Now on:"));
+    let second = text_of(&lines[1]);
+    let note = host_note(Host::Gen);
+    assert_eq!(note, format!("[Now on: New image] {HOST_GEN_V1}"));
+    assert!(
+        second.starts_with(&format!("{note}\n\n[Context]\n")),
+        "the note tops the message: {second}"
+    );
+    assert!(second.ends_with("a flooded crypt"));
+    assert!(!second.contains(HOST_RGN_V1));
+}
