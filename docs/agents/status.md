@@ -58,4 +58,5 @@
 | GEN 5: + New menu, New image tab (mocked) | — | merged | done (R77) | slice 4 picker routing, slice 6 prompt block |
 | PRM 0: `pf-chat` crate + probe | `prm-0` (kept for the probe) | merged | done; pf-chat in CI | **owner runs the probe** (docs/guides/prompt-chat-probe.md) |
 | PRM 1: helpers core | — | merged | done (R78) | — |
-| PRM 2: prompt block + Settings UI (mocked) | `prm-1` | resumed | — | — |
+| PRM 2: prompt block + Settings UI (mocked) | — | merged | done | — |
+| PRM 3: prompt block in Region edit | `prm-1` | building | — | — |
