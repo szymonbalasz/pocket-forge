@@ -534,6 +534,15 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
             fix: "You've hit your limit · resets 3pm",
           },
         });
+      if (chat.fakeCase === 'offline')
+        return finish('failed', {
+          error: {
+            code: 'offline',
+            message: "Can't reach Anthropic.",
+            fix: 'Check the connection, then Recheck.',
+            detail: 'API Error: Connection error.',
+          },
+        });
       if (i < pieces.length) {
         const piece = pieces[i++]!;
         reply.text += piece;

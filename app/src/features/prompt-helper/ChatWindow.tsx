@@ -379,9 +379,11 @@ export function ChatWindow() {
             unsaved={unsaved.has(t.id)}
             readOnly={readOnly}
             onReplace={replace}
+            retryBlocked={offline}
             onRetry={() => {
               const q = questionOf(turns, t.id);
-              if (q) void send(q.text);
+              // M5: Retry respects the offline lock, as Send does.
+              if (q && !offline) void send(q.text);
             }}
           />
         ))}
@@ -389,15 +391,6 @@ export function ChatWindow() {
       {problem && (
         <p className="prm-chat-error" role="alert" data-testid="prm-chat-error">
           {problem.message}
-          {problem.code === 'offline' && (
-            <button
-              type="button"
-              data-testid="prm-chat-recheck"
-              onClick={() => void loadStatus(true)}
-            >
-              Recheck
-            </button>
-          )}
         </p>
       )}
       <Strip
@@ -411,6 +404,7 @@ export function ChatWindow() {
       />
       <Composer
         disabledReason={blocked}
+        onRecheck={offline ? () => void loadStatus(true) : undefined}
         running={running}
         onSend={send}
         onStop={() => {
@@ -478,6 +472,8 @@ function Strip(props: {
 
 function Composer(props: {
   disabledReason: string | null;
+  /** M5: offline after a turn: Recheck lifts the lock once detection succeeds. */
+  onRecheck?: () => void;
   running: string | null;
   onSend(text: string): Promise<void>;
   onStop(): void;
@@ -509,6 +505,11 @@ function Composer(props: {
       />
       <div className="prm-chat-actions">
         {props.disabledReason && <span className="muted small">{props.disabledReason}</span>}
+        {props.onRecheck && (
+          <button type="button" data-testid="prm-chat-recheck" onClick={props.onRecheck}>
+            Recheck
+          </button>
+        )}
         {props.running ? (
           <button type="button" data-testid="prm-chat-stop" onClick={props.onStop}>
             Stop
@@ -536,6 +537,8 @@ function TurnView(props: {
   running: boolean;
   /** Kept in memory only (read-only project, §7 / R94). */
   unsaved: boolean;
+  /** M5: offline: Retry and Resend wait for Recheck, as Send does. */
+  retryBlocked: boolean;
   readOnly: boolean;
   onReplace(p: ChatProposal): Promise<void>;
   onRetry(): void;
@@ -589,7 +592,12 @@ function TurnView(props: {
       {t.state === 'interrupted' && (
         <p className="muted small">
           Interrupted.{' '}
-          <button type="button" className="link" onClick={props.onRetry}>
+          <button
+            type="button"
+            className="link"
+            disabled={props.retryBlocked}
+            onClick={props.onRetry}
+          >
             Resend
           </button>
         </p>
@@ -598,7 +606,12 @@ function TurnView(props: {
         <div className="prm-chat-error" role="alert">
           <p>{t.error.message}</p>
           {t.error.fix && <p className="muted small">{t.error.fix}</p>}
-          <button type="button" onClick={props.onRetry}>
+          <button
+            type="button"
+            data-testid="prm-chat-retry"
+            disabled={props.retryBlocked}
+            onClick={props.onRetry}
+          >
             Retry
           </button>
         </div>

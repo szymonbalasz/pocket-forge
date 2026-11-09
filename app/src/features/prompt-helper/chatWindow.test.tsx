@@ -162,6 +162,28 @@ test('FR-PRM-37 a failed turn shows its error with Retry, which resends the same
   expect(sends.map((s) => s.text)).toEqual(['ideas', 'ideas']);
 });
 
+test('§7 §11 M5 an offline turn locks Send and Retry until Recheck succeeds', async () => {
+  setup({ chat: { consent: true, case: 'offline' } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(screen.getByText("Can't reach Anthropic.")).toBeTruthy());
+  expect(screen.getByText(/Offline: Recheck once the connection is back/)).toBeTruthy();
+  expect((id('prm-chat-send') as HTMLButtonElement).disabled).toBe(true);
+  expect((id('prm-chat-retry') as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(id('prm-chat-retry'));
+  expect(fake.callsOf('prm_chat_send')).toHaveLength(1);
+  // The connection is back: Recheck lifts the lock, then Retry resends.
+  await api.chat.fakeSetCase('success');
+  fireEvent.click(id('prm-chat-recheck'));
+  await waitFor(() => expect((id('prm-chat-retry') as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.queryByTestId('prm-chat-recheck')).toBeNull();
+  fireEvent.click(id('prm-chat-retry'));
+  await waitFor(() => expect(fake.callsOf('prm_chat_send')).toHaveLength(2));
+});
+
 test('§7 R94 read-only project: the turns show, marked "Not saved"; Replace is disabled', async () => {
   setup({ chat: { consent: true } }, {
     ...baseSnapshot(),
