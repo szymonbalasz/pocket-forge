@@ -111,7 +111,7 @@ PRJ owns storage, names and the atomic commit; fields are defined once in [manif
 | `rgn_candidate_accept` | job, candidate, blend → `{layer_id, revision_id}` (also a re-pick, FR-RGN-36) | `invalid_candidate` (incl. "made on a different base image", R97), `original_unavailable`, `repick_unavailable` |
 | `rgn_candidate_star` / `_discard` | job, candidate, flag → ok | `not_found`, `invalid_input` (discard of the accepted candidate, R67) |
 | `rgn_patch_retune` | layer id, blend → `{layer_id, revision_id}` | `source_missing`, `original_unavailable` |
-| `rgn_iterations_list` | — → `[{job_id, n, dir, slug, state, kept, returned, cost, accepted_in_stack}]` newest first | `no_project` |
+| `rgn_iterations_list` | — → `[{job_id, n, dir, slug, state, kept, returned, cost, accepted_in_stack, references, reference_files, operation, output, handle_kept, error}]` newest first. `references` is the chip's count and `reference_files` its tooltip (FR-RGN-45). `operation` is `edit_masked` or `generate`, and `output` is a generate job's sent size, else `null` (FR-GEN-25). `handle_kept` is true when the provider handle is saved, so a `lost` job may still finish at the provider. `error` is the job's `{code, hint}` or `null`, the strip's hint after a reopen (R108) | `no_project` |
 | `rgn_spend_get` / `_set` | — / `{cap, threshold}` → `{spend, cap, threshold}` | `invalid_value` |
 | `rgn_blend_instruction_get` / `_set` | — / `{text}` (≤ 2000 chars; `null` = default) → `{text, default_text, is_default, for_project}` (#55) | `invalid_input`, PRJ settings errors |
 
