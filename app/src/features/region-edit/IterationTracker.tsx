@@ -50,6 +50,9 @@ function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined 
   const progress = live?.progress ?? null;
   const error = live?.error ?? null;
   const longRunning = live?.longRunning || (running && !!live && now - live.startedAt >= 180_000);
+  // R109: a paid job whose fetch failed may be dismissed, after a confirm.
+  const [askDismiss, setAskDismiss] = useState(false);
+  const fetchFailed = canFetchAgain(state, error);
   const stop = (fn: () => void) => (e: React.MouseEvent) => {
     e.stopPropagation();
     fn();
@@ -147,7 +150,39 @@ function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined 
             Dismiss
           </button>
         )}
+        {fetchFailed && !askDismiss && (
+          <button
+            type="button"
+            data-testid="rgn-job-dismiss"
+            onClick={stop(() => setAskDismiss(true))}
+          >
+            Dismiss
+          </button>
+        )}
       </div>
+      {fetchFailed && askDismiss && (
+        <div className="warning small rgn-strip-buttons" data-testid="rgn-job-dismiss-ask">
+          You may have paid for this; its results can’t be downloaded.
+          <button
+            type="button"
+            className="prm-danger"
+            data-testid="rgn-job-dismiss-confirm"
+            onClick={stop(() => {
+              setAskDismiss(false);
+              void rgn.dismiss(row.job_id);
+            })}
+          >
+            Dismiss
+          </button>
+          <button
+            type="button"
+            data-testid="rgn-job-dismiss-cancel"
+            onClick={stop(() => setAskDismiss(false))}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
     </div>
   );
 }

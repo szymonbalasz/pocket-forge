@@ -100,6 +100,9 @@ struct Tracked {
     poll_errors: u32,
     /// Fetch errors in a row that weren't transient (R102): they set the backoff.
     fetch_errors: u32,
+    /// "Fetch again" came while a tick was busy with the job: the tick's result is put back due
+    /// at once with its backoff reset, not with the tick's own schedule (night review 10).
+    fetch_asked: bool,
 }
 
 /// The runner's state, in [`super::RgnState`]. Memory only (spec §8).
@@ -138,6 +141,7 @@ impl Runner {
                 progress: 0.0,
                 poll_errors: 0,
                 fetch_errors: 0,
+                fetch_asked: false,
             });
         self.wake.notify();
     }
@@ -184,10 +188,24 @@ impl Runner {
             Some(t) => {
                 t.next_at = now;
                 t.fetch_errors = 0;
+                // A busy tick writes its own copy back when it ends; it honours this.
+                t.fetch_asked = t.busy;
                 self.wake.notify();
             }
             None => self.track(project_id, project_dir, job, now),
         }
+    }
+
+    /// A tick's copy back in place of the entry it took. A "Fetch again" asked meanwhile wins
+    /// over the tick's schedule: due now, backoff reset.
+    fn put_back(&mut self, mut cur: Tracked, now: Timestamp) {
+        if self.jobs.get(&cur.job.id).is_some_and(|t| t.fetch_asked) {
+            cur.next_at = now;
+            cur.fetch_errors = 0;
+            self.wake.notify();
+        }
+        cur.fetch_asked = false;
+        self.jobs.insert(cur.job.id, cur);
     }
 
     /// Jobs the runner drives (for tests and the tracker).
@@ -342,6 +360,7 @@ pub(crate) fn commit_job_update(
         progress: 0.0,
         poll_errors: 0,
         fetch_errors: 0,
+        fetch_asked: false,
     };
     commit_update(ctx, state, &t, u)
 }
@@ -808,7 +827,7 @@ fn step(core: &Core, t: Tracked) {
                 let Some(job) = store_candidates(core, &mut state, &cur, cands, seed) else {
                     cur.busy = false;
                     cur.next_at = now.plus(poll_delay(elapsed(&cur.job, now), None));
-                    state.rgn.runner.jobs.insert(cur.job.id, cur);
+                    state.rgn.runner.put_back(cur, now);
                     return;
                 };
                 cur.job = job;
@@ -837,7 +856,7 @@ fn step(core: &Core, t: Tracked) {
     let delay =
         delay.unwrap_or_else(|| poll_delay(elapsed(&cur.job, now), cur.last_error.as_ref()));
     cur.next_at = now.plus(delay);
-    state.rgn.runner.jobs.insert(cur.job.id, cur);
+    state.rgn.runner.put_back(cur, now);
 }
 
 pub(crate) fn emit_spend(ctx: &Context, state: &State) {
@@ -982,6 +1001,47 @@ pub fn on_project_open(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Night review 10: "Fetch again" while a tick is fetching the job isn't overwritten by the
+    /// tick's own backoff when it ends.
+    #[test]
+    fn fr_rgn_24_fetch_again_during_a_busy_tick_is_not_lost() {
+        use crate::region_edit::job_tests::Lab;
+        let lab = Lab::new();
+        let id = lab.submit("kitchen");
+        for _ in 0..3 {
+            tick(&lab.core, true);
+        }
+        lab.set_case("auth");
+        tick(&lab.core, true);
+        assert_eq!(lab.job(id).state, JobState::Succeeded);
+        // A tick takes the job (as `tick` does) and fetches without the lock...
+        let taken = {
+            let mut state = lab.core.state();
+            let t = state.rgn.runner.jobs.get_mut(&id).unwrap();
+            t.busy = true;
+            t.clone()
+        };
+        // ...the user presses Fetch again meanwhile...
+        lab.core
+            .dispatch("rgn_job_fetch_again", serde_json::json!({"job_id": id}))
+            .unwrap();
+        // ...and the tick's fetch fails once more.
+        step(&lab.core, taken);
+        let now = lab.core.ctx.now();
+        let state = lab.core.state();
+        let t = &state.rgn.runner.jobs[&id];
+        assert!(
+            t.next_at <= now,
+            "due at once, not after the tick's backoff"
+        );
+        assert_eq!(t.fetch_errors, 0, "backoff reset");
+        assert!(!t.busy && !t.fetch_asked);
+        drop(state);
+        lab.set_case("success");
+        assert_eq!(tick(&lab.core, false), None);
+        assert_eq!(lab.job(id).state, JobState::Fetched);
+    }
 
     #[test]
     fn fr_rgn_35_path_inserts_running_where_the_provider_skipped_it() {

@@ -2266,3 +2266,96 @@ fn fr_rgn_32_no_visible_seam_with_offset_12() {
     eprintln!("FR-RGN-32: hard {hard:.2?}, steps {steps:.3?} levels/px, residual {residual:.3}");
     assert!(residual <= 0.1, "residual offset {residual} levels");
 }
+
+#[test]
+fn fr_prj_29_r109_a_submit_refused_as_locked_leaves_no_job_file() {
+    use crate::context::{FaultAction, Faults};
+    let mut lab = Lab::new();
+    let set_faults = |lab: &mut Lab, f: Faults| {
+        std::sync::Arc::get_mut(&mut lab.core.ctx).unwrap().faults = f;
+    };
+    set_faults(
+        &mut lab,
+        Faults::parse("after_temp:project.json", FaultAction::Locked).unwrap(),
+    );
+    let draft = lab.draft("moss");
+    let err = lab.submit_draft(draft).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Locked);
+    let jobs = lab.project_dir.join(crate::manifest::JOBS_DIR);
+    let left: Vec<_> = std::fs::read_dir(&jobs)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .collect();
+    assert!(left.is_empty(), "nothing left behind: {left:?}");
+    // After a restart well past the lost window, no "may still run" notice for it.
+    set_faults(&mut lab, Faults::none());
+    lab.close();
+    let lab = lab.restart();
+    lab.clock.advance(std::time::Duration::from_secs(86_400));
+    let snap = lab.open();
+    let lost = snap["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|w| w["code"] == "lost");
+    assert!(!lost, "{snap}");
+    assert!(lab.core.state().project.as_ref().unwrap().jobs.is_empty());
+}
+
+/// R109: a paid job whose fetch keeps failing can be dismissed after at least one failed fetch.
+/// It ends `failed` with `fetch_failed`, its handle kept, and is never fetched or resubmitted.
+#[test]
+fn fr_rgn_28_r109_dismiss_after_a_failed_fetch_fails_the_job_and_keeps_the_handle() {
+    let lab = Lab::new();
+    let id = lab.submit("kitchen");
+    for _ in 0..3 {
+        runner::tick(&lab.core, true);
+    }
+    assert_eq!(lab.job(id).state, JobState::Succeeded);
+    // No failed fetch yet: still being fetched.
+    assert_eq!(
+        code(lab.core.dispatch("rgn_job_dismiss", json!({"job_id": id}))),
+        ErrorCode::JobActive
+    );
+    let handle = lab.job(id).provider.clone();
+    lab.set_case("auth");
+    runner::tick(&lab.core, true);
+    assert_eq!(lab.job(id).error.as_ref().unwrap()["code"], "auth");
+    lab.core
+        .dispatch("rgn_job_dismiss", json!({"job_id": id}))
+        .unwrap();
+    let job = lab.job(id);
+    assert_eq!(job.state, JobState::Failed);
+    assert_eq!(job.error.as_ref().unwrap()["code"], "fetch_failed");
+    assert_eq!(job.provider, handle, "the handle is kept");
+    assert!(job.resolved_at.is_some());
+    assert!(!lab.core.state().rgn.runner.tracked().contains(&id));
+    let shown = lab.events_named(runner::EVENT_JOB_STATE).pop().unwrap();
+    assert_eq!(
+        (&shown["state"], &shown["error"]["code"]),
+        (&json!("failed"), &json!("fetch_failed"))
+    );
+    // Never fetched again, never resubmitted; the project takes a new submit.
+    lab.set_case("success");
+    let calls = lab.fake().call_count();
+    for _ in 0..3 {
+        runner::tick(&lab.core, true);
+    }
+    assert_eq!(lab.fake().call_count(), calls);
+    assert_eq!(
+        code(
+            lab.core
+                .dispatch("rgn_job_fetch_again", json!({"job_id": id}))
+        ),
+        ErrorCode::InvalidInput
+    );
+    let next = lab.run("pantry");
+    assert_eq!(lab.job(next).state, JobState::Fetched);
+    lab.close();
+    let lab = lab.restart();
+    lab.open();
+    assert_eq!(lab.job(id).state, JobState::Failed);
+    assert!(!lab.core.state().rgn.runner.tracked().contains(&id));
+}

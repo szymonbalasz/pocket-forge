@@ -489,6 +489,58 @@ fn fr_ref_12_r102_a_failed_trash_move_is_rolled_back_not_forward() {
 }
 
 #[test]
+fn fr_ref_12_r109_a_rollback_whose_item_write_fails_never_lists_restored_files() {
+    let mut e = env();
+    let out = create(
+        &e,
+        "Swords",
+        &[
+            ("a.png", swatch(1)),
+            ("b.png", swatch(2)),
+            ("c.png", swatch(3)),
+        ],
+    );
+    let l = loc(&e, out.pack.pack_id);
+    // A trash move of a, b, c: the item is written, a and b moved, then c's move fails.
+    let mut item: trash::TrashItem = serde_json::from_value(json!({
+        "schema_version": 1,
+        "id": ulid::Ulid::from_parts(9, 9).to_string(),
+        "kind": "images",
+        "pack_id": l.json.pack_id.to_string(),
+        "from": "References/Swords",
+        "files": ["a.png", "b.png", "c.png"],
+        "trashed_at": crate::time::Timestamp(T0),
+    }))
+    .unwrap();
+    let item_dir = trash::trash_dir(&e.lib()).join(item.id.to_string());
+    std::fs::create_dir_all(&item_dir).unwrap();
+    std::fs::write(
+        item_dir.join("item.json"),
+        serde_json::to_vec(&item).unwrap(),
+    )
+    .unwrap();
+    for f in ["a.png", "b.png"] {
+        std::fs::rename(l.dir.join(f), item_dir.join(f)).unwrap();
+    }
+    // b can't go back (its name is taken by a folder), and item.json can't be rewritten.
+    std::fs::create_dir(l.dir.join("b.png")).unwrap();
+    e.ctx.faults = Faults::parse("after_temp:item.json", FaultAction::Error).unwrap();
+    let moved = ["a.png".to_owned(), "b.png".to_owned()];
+    trash::roll_back_moves(&e.ctx, &item_dir, &l.dir, &mut item, &moved);
+    e.ctx.faults = Faults::none();
+    assert!(l.dir.join("a.png").is_file(), "moved back");
+    // The next start's roll-forward doesn't trash a (or c) again.
+    super::sweep_startup(&e.ctx, &e.settings);
+    assert!(l.dir.join("a.png").is_file(), "never rolled forward");
+    assert!(l.dir.join("c.png").is_file());
+    assert!(
+        trash::list(&e.ctx, &e.settings)
+            .iter()
+            .all(|i| !i.files.iter().any(|f| f == "a.png" || f == "c.png"))
+    );
+}
+
+#[test]
 fn fr_ref_12_r102_a_failed_restore_shows_the_item_again() {
     let mut e = env();
     let out = create(&e, "Swords", &[("a.png", swatch(1))]);
