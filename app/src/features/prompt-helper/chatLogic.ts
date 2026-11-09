@@ -56,16 +56,48 @@ export function usageLabel(turns: readonly ChatTurn[], fake = false): string | n
 
 const cap = (s: string) => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
 
-/** The header's backend chip: `Claude Code 2.1.319 · Max`, or the error message. */
-export function backendChip(status: ChatStatus): string {
+/** Short error labels for the window's header chip; the body shows the full message (L6). */
+const SHORT_ERROR: Record<string, string> = {
+  not_installed: 'Not installed',
+  version_unsupported: 'Version too old',
+  isolation_unavailable: 'Isolation unavailable',
+  not_logged_in: 'Not logged in',
+  usage_limit: 'Usage limit',
+  offline: 'Offline',
+  timeout: 'Timed out',
+  backend_crashed: 'Crashed',
+  stream_malformed: 'Backend error',
+  backend_error: 'Backend error',
+};
+
+/** The backend chip: `Claude Code 2.1.319 · Max`, or the error message (`short`: a short label,
+ *  for the window header, whose body already shows the message, L6). */
+export function backendChip(status: ChatStatus, short = false): string {
   const b: ChatBackendStatus = status.backend;
   if (b.state === 'ok') {
     if (status.mode === 'fake') return 'Fake backend';
     return `Claude Code ${b.version}${b.plan ? ` · ${cap(b.plan)}` : ''}`;
   }
-  if (b.state === 'error') return b.message;
+  if (b.state === 'error') return short ? (SHORT_ERROR[b.code] ?? 'Error') : b.message;
   return 'Not checked';
 }
+
+/** L6: the reply's segments to show. Once a reply's prompt blocks became proposal cards, those
+ *  fences aren't shown again in the text (the first `proposals` non-empty `prompt` blocks). */
+export function replySegments(text: string, proposals: number): Segment[] {
+  let left = proposals;
+  return segments(text).filter((s) => {
+    if (left > 0 && s.kind === 'code' && s.lang.toLowerCase() === 'prompt' && s.text.trim()) {
+      left -= 1;
+      return false;
+    }
+    return true;
+  });
+}
+
+/** L6: a fix that only says "Retry." is left out next to the Retry button. */
+export const fixWorthShowing = (fix: string | undefined): fix is string =>
+  !!fix && fix.trim().toLowerCase() !== 'retry.';
 
 /** FR-PRM-45 (L2): what Log in… did. The fake opens no console and is logged in at once. */
 export function loginNote(status: ChatStatus): string {

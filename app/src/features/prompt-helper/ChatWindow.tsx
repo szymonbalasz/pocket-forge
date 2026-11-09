@@ -23,9 +23,10 @@ import {
   billsApiKey,
   HOST_LABEL,
   loginNote,
+  fixWorthShowing,
   PRIVACY_NOTICE,
   questionOf,
-  segments,
+  replySegments,
   usageLabel,
 } from './chatLogic';
 import './chat.css';
@@ -245,7 +246,7 @@ export function ChatWindow() {
         className={`prm-chat-chip${status.backend.state === 'error' ? ' is-error' : ''}`}
         data-testid="prm-chat-status"
       >
-        {backendChip(status)}
+        {backendChip(status, true)}
       </span>
       {fake && (
         <span className="prm-chat-chip is-fake" data-testid="prm-chat-fake">
@@ -588,7 +589,7 @@ function TurnView(props: {
   return (
     <li className="prm-chat-turn is-reply" data-record-id={t.id} aria-busy={props.running}>
       {notSaved}
-      {segments(text).map((s, i) =>
+      {replySegments(text, props.running ? 0 : (t.proposals ?? []).length).map((s, i) =>
         s.kind === 'code' ? (
           <pre key={i} className="prm-chat-code" data-lang={s.lang || undefined}>
             <code>{s.text}</code>
@@ -625,7 +626,7 @@ function TurnView(props: {
       {t.state === 'failed' && t.error && (
         <div className="prm-chat-error" role="alert">
           <p>{t.error.message}</p>
-          {t.error.fix && <p className="muted small">{t.error.fix}</p>}
+          {fixWorthShowing(t.error.fix) && <p className="muted small">{t.error.fix}</p>}
           {props.detail && (
             <details className="small" data-testid="prm-chat-error-detail">
               <summary>Details</summary>

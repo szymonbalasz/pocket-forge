@@ -56,6 +56,8 @@ test('FR-PRM-33 FR-PRM-37 a backend error shows its message and fix; Recheck re-
   render(<ChatWindow />);
   await waitFor(() => expect(screen.getByRole('alert').textContent).toContain("isn't logged in"));
   expect(screen.getByText('Log in…')).toBeTruthy();
+  // L6: the header chip is short; the message shows once, in the body.
+  expect(id('prm-chat-status').textContent).toBe('Not logged in');
   await api.chat.fakeSetCase('success');
   fireEvent.click(id('prm-chat-recheck'));
   await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
@@ -108,6 +110,8 @@ test('FR-PRM-27 FR-PRM-28 FR-PRM-29 send streams the reply; Replace and Copy on 
   fireEvent.keyDown(input(), { key: 'Enter', ctrlKey: true });
   await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
   expect(screen.getByText(/You wrote: "make this a kitchen"/)).toBeTruthy();
+  // L6: the proposal shows once, as its card, not also as a fence in the reply.
+  expect(document.querySelectorAll('.prm-chat-code')).toHaveLength(1);
   expect(input().value).toBe('');
   // FR-PRM-38 (L4): the fake's cost is notional.
   expect(id('prm-chat-usage').textContent).toBe('≈ $0.00 notional (fake chat, nothing billed)');
