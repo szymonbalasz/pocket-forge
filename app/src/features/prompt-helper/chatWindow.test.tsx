@@ -260,6 +260,33 @@ test('FR-PRM-27 a double-clicked Retry sends once; Retry waits while a turn is s
   expect((id('prm-chat-retry') as HTMLButtonElement).disabled).toBe(true);
 });
 
+test('FR-PRM-22 §11 an interrupted turn offers Resend; a double click sends once', async () => {
+  setup({ chat: { consent: true } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatWindow />);
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
+  // The app was killed mid-reply: on reopen the reply reads `interrupted` (§11, R103).
+  const w = window as unknown as { __pfMockHandlers: Record<string, (i: never) => unknown> };
+  const get = w.__pfMockHandlers.prm_chat_thread_get;
+  w.__pfMockHandlers.prm_chat_thread_get = (i: never) => {
+    const v = get(i) as { thread: { turns: { state: string; text: string }[] } };
+    const last = v.thread.turns.at(-1)!;
+    Object.assign(last, { state: 'interrupted', text: '', proposals: [] });
+    return v;
+  };
+  act(() => fake.emit('prm:chat-context', { project_id: PID, host: 'rgn' }));
+  await waitFor(() => expect(id('prm-chat-resend')).toBeTruthy());
+  w.__pfMockHandlers.prm_chat_thread_get = get;
+  const resend = id('prm-chat-resend');
+  fireEvent.click(resend);
+  fireEvent.click(resend);
+  await waitFor(() => expect(fake.callsOf('prm_chat_send')).toHaveLength(2));
+  await act(async () => undefined);
+  expect(fake.callsOf('prm_chat_send').map((s) => s.text)).toEqual(['ideas', 'ideas']);
+});
+
 test('FR-PRM-37 L3 a crashed turn shows the stderr tail under Details', async () => {
   setup({ chat: { consent: true, case: 'crash' } });
   await api.chat.contextPublish(PID, 'rgn', {});

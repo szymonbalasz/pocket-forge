@@ -646,6 +646,7 @@ function TurnView(props: {
           <button
             type="button"
             className="link"
+            data-testid="prm-chat-resend"
             disabled={props.retryBlocked}
             onClick={props.onRetry}
           >
