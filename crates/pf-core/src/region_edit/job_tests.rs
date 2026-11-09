@@ -930,6 +930,33 @@ fn fr_rgn_21_retry_draft_prefills_with_a_new_seed_unless_pinned() {
     assert_eq!(lab.manifest()["jobs"].as_array().unwrap().len(), 2);
 }
 
+#[test]
+fn fr_rgn_21_owner_73_retry_restores_the_blend_toggle_off_the_model_and_the_typed_prompt() {
+    let lab = Lab::new();
+    let mut d = lab.draft("  a stone well  ");
+    d["model_id"] = json!("fake-black-edit");
+    d["blend_instruction"] = json!(false);
+    let id = lab.submit_draft(d).unwrap();
+    lab.drive();
+    let draft = lab
+        .core
+        .dispatch("rgn_job_retry_draft", json!({"job_id": id}))
+        .unwrap();
+    assert_eq!(draft["model_id"], "fake-black-edit");
+    assert_eq!(draft["blend_instruction"], json!(false), "off stays off");
+    assert_eq!(draft["final_prompt"], "  a stone well  ", "the typed prompt, as typed");
+    // On is restored as on.
+    let id = lab.submit("a kitchen");
+    lab.drive();
+    let draft = lab
+        .core
+        .dispatch("rgn_job_retry_draft", json!({"job_id": id}))
+        .unwrap();
+    assert_eq!(draft["blend_instruction"], json!(true));
+    assert_eq!(draft["model_id"], "fake-white-edit");
+    assert_eq!(draft["final_prompt"], "a kitchen", "no blend text folded in");
+}
+
 /// Walk owner-UX M1: the count is sent as `candidate_count`, not in the job's `controls`, so
 /// Retry must put it back under the count control's name, or it falls back to the default.
 #[test]
