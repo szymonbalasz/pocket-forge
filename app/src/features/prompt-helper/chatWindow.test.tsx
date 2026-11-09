@@ -9,6 +9,9 @@ import { baseSnapshot, type FakeTauri } from '../../api/mocks/tauri';
 import type { PrmMockSeed } from '../../api/mocks/prm';
 import { ChatSettings } from './ChatSettings';
 import { ChatWindow } from './ChatWindow';
+import { installChatSink } from './chatSink';
+import { chatContext } from '../../shared/chatContext';
+import { projectStore } from '../../store/project';
 import { mockPrm, TestHost } from './testUtils';
 
 let fake: FakeTauri;
@@ -192,4 +195,43 @@ test('BL-41 the window follows the main window by event, without polling', async
   await waitFor(() => expect(id('prm-chat-no-project')).toBeTruthy());
   await new Promise((r) => setTimeout(r, 1200));
   expect(fake.callsOf('project_get').length).toBe(reads + 1);
+});
+
+test('BL-42 FR-PRM-26 the strip previews what the next turn sends', async () => {
+  setup({ chat: { consent: true } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-preview').textContent).toContain('crop 556×456 + mask'));
+  expect(screen.getByAltText('region crop with the mask')).toBeTruthy();
+  fireEvent.click(id('prm-chat-include-images'));
+  await waitFor(() => expect(id('prm-chat-preview').textContent).toContain('text only'));
+  expect(screen.queryByAltText('region crop with the mask')).toBeNull();
+  expect(fake.callsOf('prm_chat_preview').at(-1)).toEqual({
+    project_id: PID,
+    include_images: false,
+  });
+});
+
+test("BL-42 FR-PRM-23 a send from the window first flushes the main window's pending edit", async () => {
+  setup({ chat: { consent: true } });
+  chatContext.reset();
+  installChatSink();
+  const w = window as unknown as { __pfMockHandlers: Record<string, () => unknown> };
+  w.__pfMockHandlers.project_open = () => baseSnapshot();
+  projectStore.reset();
+  await act(() => projectStore.open(baseSnapshot().project_dir));
+  await api.chat.contextPublish(PID, 'rgn', { final_prompt: 'old' });
+  render(<ChatWindow />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  // An edit in the main window, still inside its 300 ms debounce.
+  chatContext.publish('rgn', { final_prompt: 'edited' });
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(fake.callsOf('prm_chat_send')).toHaveLength(1));
+  const order = fake.calls.map((c) => c.cmd);
+  const lastPublish = order.lastIndexOf('prm_context_publish');
+  expect(lastPublish).toBeGreaterThan(-1);
+  expect(lastPublish).toBeLessThan(order.indexOf('prm_chat_send'));
+  expect(fake.callsOf('prm_context_publish').at(-1)!.input).toEqual({ final_prompt: 'edited' });
+  chatContext.reset();
 });

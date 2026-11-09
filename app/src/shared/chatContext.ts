@@ -22,9 +22,12 @@ let current: { host: ChatHostId; input: unknown } | null = null;
 let pending: { host: ChatHostId; input: unknown; timer: ReturnType<typeof setTimeout> } | null =
   null;
 
-function send(host: ChatHostId, input: unknown): void {
+function send(host: ChatHostId, input: unknown): Promise<void> {
   current = { host, input };
-  void sink?.publish(host, input);
+  return Promise.resolve(sink?.publish(host, input)).then(
+    () => undefined,
+    () => undefined,
+  );
 }
 
 export const chatContext = {
@@ -33,18 +36,19 @@ export const chatContext = {
     if (pending) clearTimeout(pending.timer);
     const timer = setTimeout(() => {
       pending = null;
-      send(host, input);
+      void send(host, input);
     }, CHAT_PUBLISH_MS);
     pending = { host, input, timer };
   },
 
-  /** Publishes a pending input now (right before a chat send, FR-PRM-23). */
-  flush(): void {
-    if (!pending) return;
+  /** Publishes a pending input now (right before a chat send, FR-PRM-23). Resolves once the
+   *  sink has it (at once when nothing is pending); never rejects. */
+  flush(): Promise<void> {
+    if (!pending) return Promise.resolve();
     clearTimeout(pending.timer);
     const { host, input } = pending;
     pending = null;
-    send(host, input);
+    return send(host, input);
   },
 
   /** `host`'s block was hidden or unmounted: its context goes (FR-GEN-36). */

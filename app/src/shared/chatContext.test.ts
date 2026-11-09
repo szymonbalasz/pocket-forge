@@ -29,12 +29,29 @@ test('FR-PRM-23 flush publishes the pending input right before a send', () => {
   const s = sink();
   chatContext.setSink(s);
   chatContext.publish('rgn', { x: 1 });
-  chatContext.flush();
+  void chatContext.flush();
   expect(s.publish).toHaveBeenCalledWith('rgn', { x: 1 });
   vi.advanceTimersByTime(CHAT_PUBLISH_MS);
   expect(s.publish).toHaveBeenCalledTimes(1);
-  chatContext.flush(); // nothing pending: no-op
+  void chatContext.flush(); // nothing pending: no-op
   expect(s.publish).toHaveBeenCalledTimes(1);
+});
+
+test('BL-42 flush resolves once the sink has the input', async () => {
+  let release: () => void = () => undefined;
+  const s = {
+    publish: vi.fn(() => new Promise<void>((r) => (release = r))),
+    clear: vi.fn(),
+  };
+  chatContext.setSink(s);
+  chatContext.publish('rgn', { x: 2 });
+  let done = false;
+  const p = chatContext.flush().then(() => (done = true));
+  await Promise.resolve();
+  expect(done).toBe(false);
+  release();
+  await p;
+  expect(done).toBe(true);
 });
 
 test('FR-GEN-36 FR-PRM-43 a hidden host clears its own context only; the new host publishes', () => {

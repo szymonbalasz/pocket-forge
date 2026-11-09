@@ -369,6 +369,35 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     announce(pid, before);
     return {};
   };
+  // FR-PRM-26 / BL-42: what the next turn would send.
+  handlers.prm_chat_preview = (input) => {
+    const host = currentHost(String(input.project_id));
+    const withImages = input.include_images !== false;
+    return {
+      host,
+      summary: !host
+        ? ''
+        : withImages
+          ? host === 'rgn'
+            ? 'crop 556×456 + mask · prompt · fake model'
+            : '7 images · prompt · fake model'
+          : 'text only · prompt · fake model',
+      images:
+        host === 'rgn' && withImages
+          ? [
+              {
+                id: 'rgn:overlay',
+                label: 'region crop with the mask',
+                w: 556,
+                h: 456,
+                thumb: 'data:image/gif;base64,R0lGODlhAQABAAAAACw=',
+                already_sent: false,
+              },
+            ]
+          : [],
+      dropped: [],
+    };
+  };
   handlers.prm_context_clear = (input) => {
     const pid = String(input.project_id);
     const before = currentHost(pid);

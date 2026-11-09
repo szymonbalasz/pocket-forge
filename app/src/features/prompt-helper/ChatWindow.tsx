@@ -9,7 +9,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import {
   api,
+  emitEvent,
   onEvent,
+  type ChatPreview,
   type ChatProposal,
   type ChatStatus,
   type ChatThreadView,
@@ -29,6 +31,34 @@ import './chat.css';
 
 type Problem = { code: string; message: string };
 
+/** BL-42: how long a send waits for the main window to publish its pending context. */
+export const FLUSH_WAIT_MS = 400;
+
+/** BL-42 / FR-PRM-23: asks the main window to publish its pending context and waits for its
+ *  answer (or {@link FLUSH_WAIT_MS}), so a send never misses the last edits. */
+async function flushMainWindow(): Promise<void> {
+  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let answered: () => void = () => undefined;
+  const done = new Promise<void>((resolve) => {
+    answered = resolve;
+    setTimeout(resolve, FLUSH_WAIT_MS);
+  });
+  const off = await onEvent('prm:context-flushed', (p) => {
+    if (p.id === id) answered();
+  }).catch(() => null);
+  try {
+    await emitEvent('prm:context-flush', { id });
+    await done;
+  } catch {
+    // No event bridge: send what the core has.
+  } finally {
+    if (off)
+      void Promise.resolve()
+        .then(off)
+        .catch(() => undefined);
+  }
+}
+
 function problemOf(e: unknown): Problem {
   const x = e as { code?: string; message?: string };
   return { code: x.code ?? 'error', message: x.message ?? String(e) };
@@ -43,6 +73,8 @@ export function ChatWindow() {
   const [offline, setOffline] = useState(false);
   const [includeImages, setIncludeImages] = useState(true);
   const [declined, setDeclined] = useState(false);
+  const [preview, setPreview] = useState<ChatPreview | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
   const deltas = useRef(new Map<string, string>());
   const ended = useRef(new Set<string>());
   const pid = project?.project_id ?? null;
@@ -89,6 +121,7 @@ export function ChatWindow() {
     const focus = () => {
       void loadStatus(true);
       void loadProject();
+      setFocusTick((n) => n + 1);
     };
     window.addEventListener('focus', focus);
     return () => window.removeEventListener('focus', focus);
@@ -99,6 +132,22 @@ export function ChatWindow() {
     setProblem(null);
     void loadThread(pid);
   }, [pid, loadThread]);
+
+  // FR-PRM-26 / BL-42: what the next turn would send, refreshed when the host, the thread or
+  // Include images changes, and on focus.
+  const host = view?.current_host ?? null;
+  const turnCount = view?.thread?.turns.length ?? 0;
+  useEffect(() => {
+    if (!pid || !host) return setPreview(null);
+    let stale = false;
+    api.chat.preview(pid, includeImages).then(
+      (p) => !stale && setPreview(p),
+      () => !stale && setPreview(null),
+    );
+    return () => {
+      stale = true;
+    };
+  }, [pid, host, includeImages, turnCount, focusTick]);
 
   useEffect(() => {
     const subs = [
@@ -137,6 +186,7 @@ export function ChatWindow() {
     if (!pid) return;
     setProblem(null);
     try {
+      await flushMainWindow();
       const out = await api.chat.send(pid, text, includeImages);
       if (!ended.current.has(out.turn_id))
         setLive({ turnId: out.turn_id, text: deltas.current.get(out.turn_id) ?? '' });
@@ -284,7 +334,6 @@ export function ChatWindow() {
   const turns = view?.thread?.turns ?? [];
   const running = live?.turnId ?? view?.running_turn_id ?? null;
   const readOnly = !!project.read_only;
-  const host = view?.current_host ?? null;
   const usage = usageLabel(turns);
   const blocked = !host
     ? 'Open the Generate panel to chat about this project.'
@@ -335,6 +384,7 @@ export function ChatWindow() {
         freshNext={!!view?.fresh_session_next && turns.length > 0}
         apiKey={billsApiKey(status)}
         readOnly={readOnly}
+        preview={preview}
       />
       <Composer
         disabledReason={blocked}
@@ -356,6 +406,7 @@ function Strip(props: {
   includeImages: boolean;
   onIncludeImages(on: boolean): void;
   freshNext: boolean;
+  preview: ChatPreview | null;
   apiKey: boolean;
   readOnly: boolean;
 }) {
@@ -373,6 +424,24 @@ function Strip(props: {
         />
         Include images
       </label>
+      {props.preview && props.host && (
+        <span className="prm-chat-preview" data-testid="prm-chat-preview">
+          {props.preview.images.map((i) => (
+            <img
+              key={i.id}
+              src={i.thumb}
+              alt={i.already_sent ? `${i.label} (already sent)` : i.label}
+              className={i.already_sent ? 'is-sent' : undefined}
+            />
+          ))}
+          <span className="small muted">{props.preview.summary}</span>
+          {props.preview.dropped.length > 0 && (
+            <span className="prm-chat-warn small">
+              Not sent (turn limit): {props.preview.dropped.join(', ')}
+            </span>
+          )}
+        </span>
+      )}
       {props.freshNext && (
         <span className="muted small">New session: earlier messages aren&apos;t sent.</span>
       )}

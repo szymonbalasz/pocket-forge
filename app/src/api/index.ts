@@ -2,7 +2,7 @@
 // ESLint rule forbids `@tauri-apps/*` imports anywhere else. Playwright mocks the layer below
 // this one (window.__TAURI_INTERNALS__), so the wrapper itself is under test.
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
@@ -86,6 +86,11 @@ export function currentWindowLabel(): string {
     }
   ).__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
   return meta ?? new URLSearchParams(window.location.search).get('window') ?? 'main';
+}
+
+/** Sends an event to every window (BL-42: the chat window asks the main window to flush). */
+export function emitEvent<E extends keyof Events>(name: E, payload: Events[E]): Promise<void> {
+  return emit(name, payload);
 }
 
 /** Subscribes to a core event. Returns the unsubscribe function. */
@@ -359,6 +364,9 @@ export const api = {
     insert: (projectId: string, proposalId: string) =>
       call('prm_chat_insert', { project_id: projectId, proposal_id: proposalId }),
     fakeSetCase: (c: string) => call('prm_chat_fake_set_case', { case: c }),
+    /** What the next turn would send, for the context strip (FR-PRM-26, BL-42). */
+    preview: (projectId: string, includeImages = true) =>
+      call('prm_chat_preview', { project_id: projectId, include_images: includeImages }),
     /** Opens or focuses the chat window (FR-PRM-21). */
     openWindow: () => call('prm_window_open', {}),
     /** Opens the login console (FR-PRM-45). */

@@ -182,3 +182,21 @@
   font-size: 11px;
   color: var(--pf-text-dim);
 }
+
+.prm-chat-preview {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--pf-space-1);
+}
+
+.prm-chat-preview img {
+  max-height: 40px;
+  max-width: 48px;
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+}
+
+.prm-chat-preview img.is-sent {
+  opacity: 0.4;
+}
