@@ -66,3 +66,5 @@
 | PRM 1: helpers core | — | merged | done (R78) | — |
 | PRM 2: prompt block + Settings UI (mocked) | — | merged | done | — |
 | PRM 3: prompt block in Region edit | — | merged | done (R81) | PRM 4 waits on the owner's probe |
+
+**Phase 4 state (2026-11-09):** GEN slices 1–6 and PRM slices 0–6 merged; both walkthroughs passed and their fixes are merged (R76–R95). No agents running. Owner next: real-provider generation (dry-run-generate recording, 2 cheap paid checks) and the real prompt chat (`corepack pnpm dev:real`).
