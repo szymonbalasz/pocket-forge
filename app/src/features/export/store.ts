@@ -99,13 +99,15 @@ function closeGuard(proceed: () => void, cancel: () => void): boolean {
 }
 
 /** The export ended (done, failed, canceled): a close it was holding no longer needs the
- *  question, so the banner goes and the close goes on (OQ-EXP-09). */
-function runEnded(patch: Partial<ExportState>): void {
+ *  question, so the banner goes and the close goes on (OQ-EXP-09). True if it let a close go
+ *  on: the project is closing, so nothing re-plans (walk-night L4: no late `export_plan`). */
+function runEnded(patch: Partial<ExportState>): boolean {
   const proceed = proceedClose;
   proceedClose = null;
   cancelClose = null;
   set({ ...patch, run: null, closeAsk: false });
   proceed?.();
+  return !!proceed;
 }
 
 function set(patch: Partial<ExportState>): void {
@@ -190,13 +192,12 @@ export const exportStore = {
       });
       await onEvent('export:done', (p) => {
         if (!isOurs(p.export_id)) return;
-        runEnded({ done: p, error: null });
-        void exportStore.refreshPlan();
+        if (!runEnded({ done: p, error: null })) void exportStore.refreshPlan();
       });
       await onEvent('export:failed', (p) => {
         if (!isOurs(p.export_id)) return;
-        runEnded({ error: { code: p.code, message: errorText(p.code) } });
-        void exportStore.refreshPlan();
+        if (!runEnded({ error: { code: p.code, message: errorText(p.code) } }))
+          void exportStore.refreshPlan();
       });
       await onEvent('export:canceled', (p) => {
         if (isOurs(p.export_id)) runEnded({});
