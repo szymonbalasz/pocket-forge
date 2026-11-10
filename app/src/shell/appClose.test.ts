@@ -11,8 +11,11 @@ const LIB = 'C:/pf-mock/library';
 const CRYPT = `${LIB}/Maps/Crypt`;
 const offs: (() => void)[] = [];
 
-// Every close request is acked (R109); the tests below check what follows it.
-const names = () => core.names().filter((n) => n !== 'app_close_ack');
+// Every close request is acked (R109); the tests below check what follows it. The close question
+// signal (R110) has its own tests.
+const names = () => core.names().filter((n) => n !== 'app_close_ack' && n !== 'app_close_asking');
+/** What the UI told the app about close questions (R110), in order. */
+const asking = () => core.calls.filter((c) => c.cmd === 'app_close_asking').map((c) => c.input);
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 async function start(patch: Partial<PrjMockProject> | null): Promise<void> {
@@ -23,6 +26,7 @@ async function start(patch: Partial<PrjMockProject> | null): Promise<void> {
     app_close_guard: () => null,
     app_close_unguard: () => null,
     app_close_ack: () => true,
+    app_close_asking: () => null,
     app_exit: () => null,
   });
   projectStore.reset();
@@ -163,4 +167,69 @@ test('R109 R101 a close request not sent by the app (another window) is ignored'
   await pressX();
   expect(core.names()).toEqual(['app_close_ack']);
   expect(projectStore.get().project).not.toBeNull();
+});
+
+test('R110 FR-PRJ-21 the Close anyway question pauses the quit deadline while it shows', async () => {
+  await start({ pendingSave: true });
+  await pressX();
+  expect(asking()).toEqual([{ asking: true, cancel: false }]);
+  await projectStore.close(true);
+  await flush();
+  // Answered: the deadline starts over for the close, which then exits.
+  expect(asking()).toEqual([
+    { asking: true, cancel: false },
+    { asking: false, cancel: false },
+  ]);
+  expect(names()).toContain('app_exit');
+});
+
+test('R110 FR-PRJ-21 dismissing the Close anyway question cancels the quit', async () => {
+  await start({ pendingSave: true });
+  await pressX();
+  projectStore.clearError();
+  await flush();
+  expect(asking()).toContainEqual({ asking: false, cancel: false });
+  expect(asking().at(-1)).toEqual({ asking: false, cancel: true });
+  expect(names()).not.toContain('app_exit');
+});
+
+test('R110 OQ-EXP-09 the export question pauses the deadline; Keep exporting cancels the quit', async () => {
+  await start({});
+  projectStore.setCloseQuestion('export', true); // the export question is on screen
+  await flush();
+  expect(asking()).toEqual([{ asking: true, cancel: false }]);
+  let cancel!: () => void;
+  offs.push(
+    projectStore.addCloseGuard((_, c) => {
+      cancel = c;
+      return false;
+    }),
+  );
+  await pressX();
+  expect(asking()).toHaveLength(1);
+  projectStore.setCloseQuestion('export', false);
+  cancel(); // Keep exporting
+  await flush();
+  expect(asking()).toEqual([
+    { asking: true, cancel: false },
+    { asking: false, cancel: false },
+    { asking: false, cancel: true },
+  ]);
+  expect(names()).toEqual([]);
+});
+
+test('R110 a close that just runs (a held flush, no question) never pauses the deadline', async () => {
+  await start({});
+  let proceed!: () => void;
+  offs.push(
+    projectStore.addCloseGuard((p) => {
+      proceed = p;
+      return false;
+    }),
+  );
+  await pressX();
+  proceed();
+  await flush();
+  expect(asking()).toEqual([]);
+  expect(names()).toEqual(['project_close', 'app_exit']);
 });

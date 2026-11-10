@@ -91,12 +91,43 @@ fn app_ready(app: AppHandle, ok: bool, detail: String) -> Option<String> {
 /// `app_exit`. Before that (the UI never loaded), X closes as it always did. R109: the UI acks
 /// each request (`app_close_ack`); one not acked within `ACK_WITHIN` (a crashed or unmounted UI)
 /// closes the app anyway, and the UI un-guards when its listener goes (`app_close_unguard`).
+/// R110: an acked close exits within `DECIDE_WITHIN` anyway (a UI that acks and then hangs),
+/// unless the UI says a close question is on screen (`app_close_asking`): that pauses the
+/// deadline until it's answered (the deadline starts over) or dismissed (the quit is off).
 mod quit {
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     /// R109: how long a held close waits for the UI to say it got it.
     pub const ACK_WITHIN: Duration = Duration::from_secs(3);
+    /// R110: how long an acked close waits for the UI to exit while no close question shows.
+    pub const DECIDE_WITHIN: Duration = Duration::from_secs(10);
+    /// How often a paused deadline looks again.
+    const PAUSED_POLL: Duration = Duration::from_millis(250);
+
+    /// What the deadline thread does next.
+    #[derive(Debug, PartialEq, Eq)]
+    pub enum Due {
+        /// The UI took too long: exit.
+        Exit,
+        /// Look again after this long.
+        Wait(Duration),
+        /// The quit is over (exited, dismissed) or a later one took over: the thread ends.
+        Stop,
+    }
+
+    /// The R110 quit deadline.
+    struct Deadline {
+        /// The quit under way (its number), if any.
+        armed: Option<u64>,
+        /// Quits armed so far.
+        quits: u64,
+        /// A close question is on screen.
+        asking: bool,
+        /// When the countdown started (the ack, or the question going).
+        from: Option<Instant>,
+    }
 
     pub struct Quit {
         /// Guards installed minus removed. Signed: a removal that arrives before its install
@@ -106,6 +137,7 @@ mod quit {
         /// Close requests sent to the UI, and the latest one it acked.
         asked: AtomicU64,
         acked: AtomicU64,
+        deadline: Mutex<Deadline>,
     }
 
     pub static QUIT: Quit = Quit::new();
@@ -117,6 +149,67 @@ mod quit {
                 exiting: AtomicBool::new(false),
                 asked: AtomicU64::new(0),
                 acked: AtomicU64::new(0),
+                deadline: Mutex::new(Deadline {
+                    armed: None,
+                    quits: 0,
+                    asking: false,
+                    from: None,
+                }),
+            }
+        }
+
+        fn deadline(&self) -> std::sync::MutexGuard<'_, Deadline> {
+            self.deadline
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        }
+
+        /// R110: an acked close starts the deadline. The quit's number if this started one (the
+        /// caller runs its thread); `None` while one runs: a second X keeps the first deadline.
+        pub fn arm(&self, now: Instant) -> Option<u64> {
+            let mut d = self.deadline();
+            if d.armed.is_some() {
+                return None;
+            }
+            d.quits += 1;
+            d.armed = Some(d.quits);
+            d.from = Some(now);
+            d.armed
+        }
+
+        /// R110: a close question shows (`true`: the deadline pauses) or went (`false`: it
+        /// starts over, so the answer's close gets its full time).
+        pub fn asking(&self, on: bool, now: Instant) {
+            let mut d = self.deadline();
+            d.asking = on;
+            if !on {
+                d.from = Some(now);
+            }
+        }
+
+        /// R110: the close question was dismissed: the quit is off, the app stays.
+        pub fn cancel(&self) {
+            self.deadline().armed = None;
+        }
+
+        /// R110: what quit `seq`'s deadline thread does at `now`.
+        pub fn due(&self, seq: u64, now: Instant) -> Due {
+            if self.exiting.load(Ordering::SeqCst) {
+                return Due::Stop;
+            }
+            let d = self.deadline();
+            if d.armed != Some(seq) {
+                return Due::Stop;
+            }
+            if d.asking {
+                return Due::Wait(PAUSED_POLL);
+            }
+            let spent = d
+                .from
+                .map_or(Duration::ZERO, |f| now.saturating_duration_since(f));
+            match DECIDE_WITHIN.checked_sub(spent) {
+                Some(left) if !left.is_zero() => Due::Wait(left),
+                _ => Due::Exit,
             }
         }
 
@@ -159,7 +252,72 @@ mod quit {
 
     #[cfg(test)]
     mod tests {
-        use super::Quit;
+        use std::time::{Duration, Instant};
+
+        use super::{DECIDE_WITHIN, Due, Quit};
+
+        fn s(n: u64) -> Duration {
+            Duration::from_secs(n)
+        }
+
+        #[test]
+        fn r110_fr_prj_21_an_acked_close_exits_within_10_s_without_a_question() {
+            let q = Quit::new();
+            let t0 = Instant::now();
+            let quit = q.arm(t0).expect("the ack starts the deadline");
+            assert_eq!(q.due(quit, t0 + s(4)), Due::Wait(s(6)));
+            // A second X (acked too) keeps the first deadline: the UI hung, X must still work.
+            assert_eq!(q.arm(t0 + s(5)), None);
+            assert_eq!(q.due(quit, t0 + DECIDE_WITHIN), Due::Exit);
+            assert!(q.exiting());
+            assert_eq!(
+                q.due(quit, t0 + s(11)),
+                Due::Stop,
+                "exiting: the thread ends"
+            );
+        }
+
+        #[test]
+        fn r110_fr_prj_21_a_close_question_pauses_the_deadline_and_its_answer_restarts_it() {
+            let q = Quit::new();
+            let t0 = Instant::now();
+            let quit = q.arm(t0).unwrap();
+            q.asking(true, t0 + s(2));
+            assert!(
+                matches!(q.due(quit, t0 + s(60)), Due::Wait(d) if d < s(1)),
+                "a question on screen: never exits while it waits for the user"
+            );
+            // Answered (Close anyway, Cancel export and close): the close gets a full 10 s.
+            q.asking(false, t0 + s(60));
+            assert_eq!(q.due(quit, t0 + s(65)), Due::Wait(s(5)));
+            assert_eq!(q.due(quit, t0 + s(70)), Due::Exit);
+        }
+
+        #[test]
+        fn r110_fr_prj_21_a_question_shown_before_the_x_pauses_from_the_ack() {
+            let q = Quit::new();
+            let t0 = Instant::now();
+            q.asking(true, t0); // the export question from Home, then X
+            let quit = q.arm(t0 + s(1)).unwrap();
+            assert!(matches!(q.due(quit, t0 + s(30)), Due::Wait(d) if d < s(1)));
+        }
+
+        #[test]
+        fn r110_fr_prj_21_dismissing_the_question_cancels_the_quit() {
+            let q = Quit::new();
+            let t0 = Instant::now();
+            let quit = q.arm(t0).unwrap();
+            q.asking(true, t0 + s(1));
+            // Keep exporting / Dismiss: the order of the two signals doesn't matter.
+            q.asking(false, t0 + s(3));
+            q.cancel();
+            assert_eq!(q.due(quit, t0 + s(30)), Due::Stop, "the app stays open");
+            // The next X is a new quit with its own deadline.
+            let next = q.arm(t0 + s(40)).expect("a new quit");
+            assert_ne!(next, quit);
+            assert_eq!(q.due(quit, t0 + s(60)), Due::Stop, "the old thread ends");
+            assert_eq!(q.due(next, t0 + s(50)), Due::Exit);
+        }
 
         #[test]
         fn r101_a_close_waits_for_the_ui_only_while_it_guards_and_not_once_it_exits() {
@@ -236,9 +394,24 @@ fn app_close_unguard() {
 /// The UI got `app:close-requested` (R109): the held close is its guards' to decide. False if
 /// Rust sent no close request since the last ack: the event came from elsewhere (the chat
 /// window may emit events, and can't call this command), and the UI ignores it.
+/// R110: the ack also starts the quit deadline (`quit::DECIDE_WITHIN`).
 #[tauri::command]
-fn app_close_ack() -> bool {
-    quit::QUIT.ack()
+fn app_close_ack(app: AppHandle) -> bool {
+    let asked = quit::QUIT.ack();
+    if asked && let Some(seq) = quit::QUIT.arm(std::time::Instant::now()) {
+        exit_by_deadline(app, seq);
+    }
+    asked
+}
+
+/// R110: a close question shows (`asking`: the quit deadline pauses) or went (it starts over);
+/// `cancel`: it was dismissed, so the quit is off and the app stays open.
+#[tauri::command]
+fn app_close_asking(asking: bool, cancel: bool) {
+    quit::QUIT.asking(asking, std::time::Instant::now());
+    if cancel {
+        quit::QUIT.cancel();
+    }
 }
 
 /// The UI closed the project (or none was open): the app exits (R101). Off the main thread:
@@ -269,6 +442,29 @@ fn close_unless_acked(app: AppHandle, seq: u64) {
         });
     if let Err(e) = spawned {
         tracing::warn!(error = %e, "no close timeout");
+    }
+}
+
+/// R110: an acked close the UI doesn't finish within `DECIDE_WITHIN` (no close question on
+/// screen) exits anyway, e.g. a UI that acked and then hung in a guard or a command.
+fn exit_by_deadline(app: AppHandle, seq: u64) {
+    let spawned = std::thread::Builder::new()
+        .name("pf-close-deadline".into())
+        .spawn(move || {
+            loop {
+                match quit::QUIT.due(seq, std::time::Instant::now()) {
+                    quit::Due::Wait(d) => std::thread::sleep(d),
+                    quit::Due::Stop => return,
+                    quit::Due::Exit => {
+                        tracing::warn!("the UI didn't finish closing: closing anyway");
+                        exit_app(&app);
+                        return;
+                    }
+                }
+            }
+        });
+    if let Err(e) = spawned {
+        tracing::warn!(error = %e, "no close deadline");
     }
 }
 

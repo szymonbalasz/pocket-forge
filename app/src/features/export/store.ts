@@ -117,6 +117,8 @@ function runEnded(patch: Partial<ExportState>): boolean {
 
 function set(patch: Partial<ExportState>): void {
   state = { ...state, ...patch };
+  // R110: the question is a close question on screen (the app's quit deadline waits for it).
+  if ('closeAsk' in patch) projectStore.setCloseQuestion('export', state.closeAsk);
   for (const l of listeners) l();
 }
 

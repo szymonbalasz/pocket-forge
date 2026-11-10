@@ -113,6 +113,7 @@
     "allow-app-close-guard",
     "allow-app-exit",
     "allow-app-close-unguard",
-    "allow-app-close-ack"
+    "allow-app-close-ack",
+    "allow-app-close-asking"
   ]
 }
