@@ -1034,7 +1034,7 @@ export interface ChatThread {
 
 /** #61 (FR-PRM-47): the commit after which the core started a thread. */
 export interface ChatStartedAfter {
-  reason: 'accepted' | 'picked';
+  reason: 'accepted' | 'picked' | 'dropped';
   revision_id: string;
   seq: number;
 }

@@ -136,4 +136,12 @@ test('FR-PRM-47 #61 the divider says why a thread started', () => {
       t({ previous_thread_id: 'a', started_after: { reason: 'picked', revision_id: 'r', seq: 3 } }),
     ),
   ).toBe('New chat after picking r3');
+  expect(
+    dividerText(
+      t({
+        previous_thread_id: 'a',
+        started_after: { reason: 'dropped', revision_id: 'r', seq: 4 },
+      }),
+    ),
+  ).toBe('New chat after dropping in r4');
 });

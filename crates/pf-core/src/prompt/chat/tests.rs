@@ -1981,3 +1981,32 @@ fn fr_prm_47_an_accept_while_a_turn_runs_keeps_the_thread() {
     super::lock(&lab.core.chat.rt).running = None;
     assert_eq!(shown(&lab).id, old.id);
 }
+
+/// #61 (integrator call): an image dropped on Working becoming the base image
+/// (`project_base_from_file`, FR-PRJ-55) starts a fresh thread like an accept or a pick.
+#[test]
+fn fr_prm_47_a_dropped_base_image_starts_a_new_thread() {
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "first").unwrap();
+    let old = shown(&lab);
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("dropped.png");
+    std::fs::write(&file, crate::test_support::png_bytes(64, 48, 9)).unwrap();
+    let out = lab
+        .core
+        .dispatch(
+            "project_base_from_file",
+            json!({"path": file.to_string_lossy()}),
+        )
+        .unwrap();
+    let now = shown(&lab);
+    assert_eq!(now.previous_thread_id, Some(old.id));
+    let after = now.started_after.expect("started_after");
+    assert_eq!(after.reason, thread::StartReason::Dropped);
+    assert_eq!(json!(after.revision_id), out["revision_id"]);
+    assert_eq!(
+        events(&lab, super::EVENT_THREAD).last().unwrap()["started_after"]["reason"],
+        "dropped"
+    );
+}

@@ -124,13 +124,15 @@ pub struct Turn {
     pub extra: Extra,
 }
 
-/// Why the core started a thread on its own (#61): after accepting a region edit or picking a
-/// generated image. The panel shows a one-line divider ("New chat after accepting r12").
+/// Why the core started a thread on its own (#61): after accepting a region edit, picking a
+/// generated image, or an image dropped on Working becoming the base image (FR-PRJ-55). The
+/// panel shows a one-line divider ("New chat after accepting r12").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StartReason {
     Accepted,
     Picked,
+    Dropped,
 }
 
 /// `started_after` (#61): the commit after which the core started this thread.

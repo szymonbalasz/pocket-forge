@@ -1089,8 +1089,8 @@ impl Command for PrmChatThreadNew {
     }
 }
 
-/// #61 (FR-PRM-47): after a region edit is accepted or a generated image is picked, the core
-/// starts a fresh thread, only when the shown one has turns. Skipped while a turn runs: the
+/// #61 (FR-PRM-47): after a region edit is accepted, a generated image is picked or a dropped
+/// image becomes the base image (FR-PRJ-55), the core starts a fresh thread, only when the shown one has turns. Skipped while a turn runs: the
 /// reply goes on in the thread it was asked in. Never fails the commit that called it.
 pub(crate) fn start_after_commit(
     core: &Core,

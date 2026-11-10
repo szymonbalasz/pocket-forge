@@ -243,7 +243,7 @@ Owner of the meaning: [prompt-helper](../specs/prompt-helper.md) (PRM, FR-PRM-22
 | `created_at`, `updated_at` | time | `updated_at` decides a sync conflict copy |
 | `backend` | `fake\|claude-code` | |
 | `previous_thread_id?` | ULID | #61: the thread this one replaced (New chat, or after an accept or a pick); that file is kept, hidden |
-| `started_after?` | object | #61: `{reason: accepted\|picked, revision_id, seq}` when the core started this thread after an accept or a pick (the chat's divider, "New chat after accepting r12") |
+| `started_after?` | object | #61: `{reason: accepted\|picked\|dropped, revision_id, seq}` when the core started this thread after an accept or a pick (the chat's divider, "New chat after accepting r12") |
 | `retired_at?` | time | #61: a newer thread replaced this one; never shown again, never swept |
 | `turns[]` | object | `{id, at, role: user\|assistant, host: rgn\|gen, text, state: pending\|done\|canceled\|failed\|interrupted, error?{code, message, fix?}, context?{summary, images[{id, role, w, h, hash}], dropped[], final_prompt, model_id, controls{}}, proposals[{id, text, inserted_at?}], usage?{input_tokens, output_tokens, cost_usd?, notional}, fresh_session?}`. User turns carry `context` (and `fresh_session` when they started a new backend session); replies carry the text, `error`, `proposals` and `usage`. A turn still `pending` when the file is read is `interrupted` |
 
