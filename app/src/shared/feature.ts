@@ -2,9 +2,10 @@ import type { ComponentType } from 'react';
 
 /** Where the shell renders a feature's components (ui-guidelines § Layout, `shell/Layout.tsx`).
  *  `rail` section rail · `left` project panel · `toolbar` vertical strip left of the canvas ·
- *  `canvas` the editor area · `bottom` picker / iterations strip · `right` Generate / Export panel.
- *  The status bar is not a slot: features add `status` segments to it. */
-export type Slot = 'rail' | 'left' | 'toolbar' | 'canvas' | 'bottom' | 'right';
+ *  `canvas` the editor area · `bottom` picker / iterations strip · `dock` a full-height panel left
+ *  of the right pane (the prompt chat, #61; it sizes and hides itself) · `right` Generate / Export
+ *  panel. The status bar is not a slot: features add `status` segments to it. */
+export type Slot = 'rail' | 'left' | 'toolbar' | 'canvas' | 'bottom' | 'dock' | 'right';
 
 /** A status-bar segment (ui-guidelines: EDT zoom and mask, PRJ save state, RGN job state, PRV
  *  provider chip). The bar shows every registered segment, ordered by `priority` (low = left);

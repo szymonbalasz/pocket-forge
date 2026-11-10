@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod acl;
-mod chat_window;
+mod chat;
 mod commands;
 #[cfg(debug_assertions)]
 mod smoke_export;
@@ -347,10 +347,7 @@ mod quit {
         fn r109_r101_only_a_close_rust_asked_for_is_acked() {
             let q = Quit::new();
             q.guard();
-            assert!(
-                !q.ack(),
-                "an event from elsewhere (the chat window): ignored"
-            );
+            assert!(!q.ack(), "an event from elsewhere: ignored");
             q.ask();
             assert!(q.ack(), "the X asked: the UI runs the close");
             assert!(!q.ack(), "a copy of the same event: ignored");
@@ -392,8 +389,8 @@ fn app_close_unguard() {
 }
 
 /// The UI got `app:close-requested` (R109): the held close is its guards' to decide. False if
-/// Rust sent no close request since the last ack: the event came from elsewhere (the chat
-/// window may emit events, and can't call this command), and the UI ignores it.
+/// Rust sent no close request since the last ack: the event didn't come from here (R109: only
+/// Rust asks), and the UI ignores it.
 /// R110: the ack also starts the quit deadline (`quit::DECIDE_WITHIN`).
 #[tauri::command]
 fn app_close_ack(app: AppHandle) -> bool {
@@ -421,10 +418,10 @@ fn app_exit(app: AppHandle) {
     exit_app(&app);
 }
 
-/// Ends the app after the windows' teardown (R109); a second call leaves it to the first.
+/// Ends the app after the chat's teardown (R109); a second call leaves it to the first.
 fn exit_app(app: &AppHandle) {
     if quit::QUIT.exiting() {
-        chat_window::quit_teardown(app);
+        chat::quit_teardown(app);
         app.exit(0);
     }
 }
@@ -523,8 +520,7 @@ pub fn run() {
                     let core = handle.state::<Core>();
                     pf_core::region_edit::runner::run_pump(&core)
                 })?;
-            // R101: X asks the UI's close guards first. PRM FR-PRM-21: the chat window closes
-            // with the main window (its own X is not held).
+            // R101: X asks the UI's close guards first.
             if let Some(main) = app.get_webview_window("main") {
                 let handle = app.handle().clone();
                 main.on_window_event(move |ev| match ev {
@@ -536,7 +532,6 @@ pub fn run() {
                         }
                         close_unless_acked(handle.clone(), seq);
                     }
-                    tauri::WindowEvent::Destroyed => chat_window::close_with_main(&handle),
                     _ => {}
                 });
             }

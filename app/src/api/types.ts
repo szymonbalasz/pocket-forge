@@ -777,16 +777,18 @@ export interface Commands {
   prm_helpers_save: [{ helpers: PromptHelperInput[] }, PromptHelper[]];
   prm_helpers_reset: [{ id: string } | { all: true }, PromptHelper[]];
   prm_compose_preview: [ComposePreviewInput, ComposePreview];
-  /** PRM slice 5 (§9): the prompt chat core. `refresh` re-detects (window focus, Recheck). */
-  prm_chat_status: [{ refresh?: boolean }, ChatStatus];
+  /** PRM slice 5 (§9): the prompt chat core. `refresh` re-detects (panel open, focus, Recheck);
+   *  `cached` starts nothing (the dock's state at startup, #61). */
+  prm_chat_status: [{ refresh?: boolean; cached?: boolean }, ChatStatus];
   prm_chat_consent: [{ accept: boolean }, ChatStatus];
-  /** Settings → Prompt chat (on/off, the Claude Code path) and the window rect. `null` clears. */
+  /** Settings → Prompt chat (on/off, the Claude Code path) and the dock's state (#61). `null`
+   *  clears the path. */
   prm_chat_settings_put: [
-    { enabled?: boolean; claude_path?: string | null; window?: ChatWindowRect | null },
+    { enabled?: boolean; claude_path?: string | null; dock?: Partial<ChatDock> },
     ChatStatus,
   ];
   prm_chat_logout: [Record<string, never>, ChatStatus];
-  /** The chat window closed (FR-PRM-35): the next turn starts a fresh session. */
+  /** Ends the backend session (FR-PRM-35): the next turn starts a fresh one. */
   prm_chat_session_end: [Record<string, never>, Record<string, never>];
   prm_context_publish: [
     { project_id: string; host: ChatHostId; input: unknown },
@@ -802,8 +804,6 @@ export interface Commands {
   ];
   prm_chat_fake_set_case: [{ case: string }, Record<string, never>];
   prm_chat_preview: [{ project_id: string; include_images?: boolean }, ChatPreview];
-  /** Tauri layer (FR-PRM-40, R91): opens or focuses the `prompt-chat` window. */
-  prm_window_open: [Record<string, never>, null];
   /** Tauri layer (FR-PRM-45): a console running `claude auth login` for the chat's folder. */
   prm_chat_login: [Record<string, never>, null];
 }
@@ -882,17 +882,7 @@ export interface Events {
   /** A fresh detection changed the backend status (`backend` only), or a settings, consent,
    *  logout or fake-case change (the whole status, L2). */
   'prm:chat-status': { backend: ChatBackendStatus } & Partial<ChatStatus>;
-  /** BL-42 (window to window): the chat window asks the main window to publish its pending
-   *  context now; the main window answers `prm:context-flushed` with the same id. */
-  'prm:context-flush': { id: string };
-  'prm:context-flushed': { id: string };
-  /** R96 (window to window): the chat window's "Turn it on" asks the main window to turn the
-   *  chat on, since only the main window may call `prm_chat_settings_put`. */
-  'prm:chat-enable': Record<string, never>;
-  /** R103 (window to window): the main window published a tab's context; the chat window's
-   *  next-turn strip re-reads its preview (the core announces host changes only, BL-41). */
-  'prm:context-published': { project_id: string; host: ChatHostId };
-  /** BL-41: the open project or its attached host changed (the chat window follows it). */
+  /** BL-41: the open project or its attached host changed (the chat panel follows it). */
   'prm:chat-context': { project_id: string | null; host: ChatHostId | null };
   /** Replace (FR-PRM-29): applied only by that host's attached prompt block. */
   'prm:insert': { project_id: string; host: ChatHostId; proposal_id: string; text: string };
@@ -952,13 +942,14 @@ export interface ChatStatus {
   claude_path: string | null;
   /** Why the saved path is ignored (R96: checked on use), or null when unset or valid. */
   claude_path_issue: string | null;
+  /** The chat dock's remembered state (#61). */
+  dock: ChatDock;
 }
 
-export interface ChatWindowRect {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+/** The chat dock (FR-PRM-21, #61): open or closed, and its width in px (320–720). */
+export interface ChatDock {
+  open: boolean;
+  width: number;
 }
 
 export type ChatTurnState = 'pending' | 'done' | 'canceled' | 'failed' | 'interrupted';

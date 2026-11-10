@@ -1,15 +1,18 @@
-// The chat window and Settings → Prompt chat on the mocked core (prompt-helper §7, slice 6):
-// consent, the backend error state with Recheck, send with streaming, proposal Replace + Copy,
-// Stop, errors with Retry, no project, no prompt block, read-only, and the Chat button.
+// The chat panel and Settings → Prompt chat on the mocked core (prompt-helper §7): consent, the
+// backend error state with Recheck, send with streaming, proposal Replace + Copy, Stop, errors
+// with Retry, no project, no prompt block, read-only; the dock (#61: open, hide, resize,
+// remembered) and the Chat button.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
 
 import { api, type ProjectSnapshot } from '../../api';
 import { baseSnapshot, type FakeTauri } from '../../api/mocks/tauri';
 import type { PrmMockSeed } from '../../api/mocks/prm';
+import { ChatDock, ChatDockToggle } from './ChatDock';
+import { ChatPanel } from './ChatPanel';
 import { ChatSettings } from './ChatSettings';
-import { ChatWindow } from './ChatWindow';
 import { installChatSink } from './chatSink';
+import { resetDockStore } from './dock';
 import { chatContext } from '../../shared/chatContext';
 import { projectStore } from '../../store/project';
 import { mockPrm, TestHost } from './testUtils';
@@ -25,6 +28,7 @@ afterEach(() => {
 
 function setup(seed: PrmMockSeed, project: ProjectSnapshot | null = baseSnapshot()): void {
   fake = mockPrm(seed);
+  resetDockStore();
   const w = window as unknown as { __pfMockHandlers: Record<string, () => unknown> };
   w.__pfMockHandlers.project_get = () => project;
 }
@@ -39,7 +43,7 @@ async function type(text: string) {
 
 test('FR-PRM-20 the notice comes first; Not now starts nothing, Accept opens the chat', async () => {
   setup({});
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(screen.getByText(/Prompt chat sends data to Anthropic/)).toBeTruthy());
   fireEvent.click(id('prm-chat-consent-decline'));
   expect(screen.getByText(/The chat stays off/)).toBeTruthy();
@@ -53,7 +57,7 @@ test('FR-PRM-20 the notice comes first; Not now starts nothing, Accept opens the
 
 test('FR-PRM-33 FR-PRM-37 a backend error shows its message and fix; Recheck re-detects', async () => {
   setup({ chat: { consent: true, case: 'not_logged_in' } });
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(screen.getByRole('alert').textContent).toContain("isn't logged in"));
   expect(screen.getByText('Log in…')).toBeTruthy();
   // L6: the header chip is short; the message shows once, in the body.
@@ -66,7 +70,7 @@ test('FR-PRM-33 FR-PRM-37 a backend error shows its message and fix; Recheck re-
 
 test('FR-PRM-45 L2 the window Log in… says what happened; the fake logs in, Recheck continues', async () => {
   setup({ chat: { consent: true, case: 'not_logged_in' } });
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-login')).toBeTruthy());
   fireEvent.click(id('prm-chat-login'));
   await waitFor(() =>
@@ -78,38 +82,34 @@ test('FR-PRM-45 L2 the window Log in… says what happened; the fake logs in, Re
 
 test('FR-PRM-20 L6 the window follows Settings → off without a refocus', async () => {
   setup({ chat: { consent: true } });
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
   await act(() => api.chat.settingsPut({ enabled: false }));
   await waitFor(() => expect(screen.getByText('Prompt chat is off.')).toBeTruthy());
 });
 
-test('R96 FR-PRM-20 "Turn it on" asks the main window; the chat window never calls settings_put', async () => {
+test('FR-PRM-20 #61 "Turn it on" in the panel turns the chat on (enabled only)', async () => {
   setup({ chat: { consent: true } });
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
   await act(() => api.chat.settingsPut({ enabled: false }));
   await waitFor(() => expect(screen.getByText('Prompt chat is off.')).toBeTruthy());
-  // No main window listening: the click calls no command itself.
-  fireEvent.click(id('prm-chat-enable'));
-  await waitFor(() => expect(fake.callsOf('plugin:event|emit')).toHaveLength(1));
-  expect(fake.callsOf('prm_chat_settings_put')).toEqual([{ enabled: false }]);
-  // The main window's sink answers: it turns the chat on, and the window follows the status.
-  installChatSink();
   fireEvent.click(id('prm-chat-enable'));
   await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
   expect(fake.callsOf('prm_chat_settings_put')).toEqual([{ enabled: false }, { enabled: true }]);
+  // No window-to-window event is involved any more.
+  expect(fake.callsOf('plugin:event|emit')).toHaveLength(0);
 });
 
 test('FR-PRM-21 no project open: "Open a project to chat about it"', async () => {
   setup({ chat: { consent: true } }, null);
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-no-project').textContent).toContain('Open a project'));
 });
 
 test('FR-PRM-27 without an attached prompt block Send is disabled with the reason', async () => {
   setup({ chat: { consent: true } });
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await type('hello');
   expect((id('prm-chat-send') as HTMLButtonElement).disabled).toBe(true);
   expect(id('prm-chat-blocked-no-host').textContent).toMatch(/Open the Generate panel/);
@@ -124,7 +124,7 @@ test('FR-PRM-27 FR-PRM-28 FR-PRM-29 send streams the reply; Replace and Copy on 
   await api.chat.contextPublish(PID, 'rgn', { final_prompt: 'a kitchen' });
   const writeText = vi.fn(() => Promise.resolve());
   Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
   await type('make this a kitchen');
   fireEvent.keyDown(input(), { key: 'Enter', ctrlKey: true });
@@ -169,7 +169,7 @@ test('FR-PRM-38 an api_key login: the strip warns once per thread and the footer
     return v;
   };
   await api.chat.contextPublish(PID, 'rgn', { final_prompt: 'a kitchen' });
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
   const warns = () => screen.queryAllByText('Billed to your Anthropic API key.');
   expect(warns()).toHaveLength(1);
@@ -196,7 +196,7 @@ test('FR-PRM-22 M3 the transcript shows the newest turn on open and after a send
     set: (v: number) => void set.push(v),
   });
   try {
-    render(<ChatWindow />);
+    render(<ChatPanel />);
     await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
     expect(set.at(-1)).toBe(300);
     height = 900;
@@ -213,7 +213,7 @@ test('FR-PRM-22 M3 the transcript shows the newest turn on open and after a send
 test('FR-PRM-27 Stop keeps the partial reply', async () => {
   setup({ chat: { consent: true, case: 'slow(4)' } });
   await api.chat.contextPublish(PID, 'gen', {});
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('New image'));
   await type('a crypt');
   fireEvent.click(id('prm-chat-send'));
@@ -231,7 +231,7 @@ test('FR-PRM-27 Stop keeps the partial reply', async () => {
 test('FR-PRM-37 a failed turn shows its error with Retry, which resends the same text', async () => {
   setup({ chat: { consent: true, case: 'usage_limit' } });
   await api.chat.contextPublish(PID, 'rgn', {});
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
   await type('ideas');
   fireEvent.click(id('prm-chat-send'));
@@ -247,7 +247,7 @@ test('FR-PRM-37 a failed turn shows its error with Retry, which resends the same
 test('FR-PRM-27 a double-clicked Retry sends once; Retry waits while a turn is sent', async () => {
   setup({ chat: { consent: true, case: 'usage_limit' } });
   await api.chat.contextPublish(PID, 'rgn', {});
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
   await type('ideas');
   fireEvent.click(id('prm-chat-send'));
@@ -266,7 +266,7 @@ test('FR-PRM-27 a double-clicked Retry sends once; Retry waits while a turn is s
 test('FR-PRM-22 §11 an interrupted turn offers Resend; a double click sends once', async () => {
   setup({ chat: { consent: true } });
   await api.chat.contextPublish(PID, 'rgn', {});
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await type('ideas');
   fireEvent.click(id('prm-chat-send'));
   await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
@@ -299,7 +299,7 @@ test('FR-PRM-22 §11 an interrupted turn offers Resend; a double click sends onc
 test('FR-PRM-22 BL-43 an older thread reply that arrives late never overwrites a newer one', async () => {
   setup({ chat: { consent: true } });
   await api.chat.contextPublish(PID, 'rgn', {});
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await type('ideas');
   fireEvent.click(id('prm-chat-send'));
   await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
@@ -332,7 +332,7 @@ test('FR-PRM-22 BL-43 an older thread reply that arrives late never overwrites a
 test('FR-PRM-37 L3 a crashed turn shows the stderr tail under Details', async () => {
   setup({ chat: { consent: true, case: 'crash' } });
   await api.chat.contextPublish(PID, 'rgn', {});
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
   await type('ideas');
   fireEvent.click(id('prm-chat-send'));
@@ -343,7 +343,7 @@ test('FR-PRM-37 L3 a crashed turn shows the stderr tail under Details', async ()
 test('§7 §11 M5 an offline turn locks Send and Retry until Recheck succeeds', async () => {
   setup({ chat: { consent: true, case: 'offline' } });
   await api.chat.contextPublish(PID, 'rgn', {});
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
   await type('ideas');
   fireEvent.click(id('prm-chat-send'));
@@ -370,7 +370,7 @@ test('§7 R94 read-only project: the turns show, marked "Not saved"; Replace is 
     read_only: 'original_changed',
   } as ProjectSnapshot);
   await api.chat.contextPublish(PID, 'rgn', {});
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(screen.getByText('Not saved: read-only project.')).toBeTruthy());
   await type('ideas');
   fireEvent.click(id('prm-chat-send'));
@@ -386,7 +386,7 @@ test('§7 R94 read-only project: the turns show, marked "Not saved"; Replace is 
 test('FR-PRM-21 a project switch in the main window switches the window to that thread', async () => {
   setup({ chat: { consent: true } });
   await api.chat.contextPublish(PID, 'rgn', { final_prompt: 'a kitchen' });
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
   await type('make this a kitchen');
   fireEvent.click(id('prm-chat-send'));
@@ -413,7 +413,7 @@ test('FR-PRM-27 night review 9 after a switch, the other project’s finishing t
   const other = { ...baseSnapshot(), project_id: '01JPROJECTB000000000000000' };
   await api.chat.contextPublish(PID, 'rgn', {});
   await api.chat.contextPublish(other.project_id, 'rgn', {});
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
   await type('a kitchen');
   fireEvent.click(id('prm-chat-send'));
@@ -447,7 +447,7 @@ test('FR-PRM-27 night review 9 a send refused with turn_active waits, saying why
   await api.chat.send(PID, 'a kitchen', false);
   const w = window as unknown as { __pfMockHandlers: Record<string, () => unknown> };
   w.__pfMockHandlers.project_get = () => other;
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
   await type('a crypt');
   fireEvent.click(id('prm-chat-send'));
@@ -464,7 +464,7 @@ test('FR-PRM-27 night review 9 a send refused with turn_active waits, saying why
 test('FR-PRM-22 §11 a locked thread file: the turns show "Not saved" with the banner', async () => {
   setup({ chat: { consent: true, locked: true } });
   await api.chat.contextPublish(PID, 'rgn', {});
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
   expect(screen.queryByTestId('prm-chat-not-saved')).toBeNull();
   await type('ideas');
@@ -476,11 +476,79 @@ test('FR-PRM-22 §11 a locked thread file: the turns show "Not saved" with the b
   expect((id('prm-chat-proposal-replace') as HTMLButtonElement).disabled).toBe(false);
 });
 
-test('FR-PRM-21 the Chat button opens the chat window', async () => {
-  setup({});
-  render(<TestHost host="rgn" prompt="x" />);
+test('FR-PRM-21 #61 the Chat button opens the docked chat panel and remembers it', async () => {
+  setup({ chat: { consent: true } });
+  render(
+    <>
+      <TestHost host="rgn" prompt="x" />
+      <ChatDock />
+    </>,
+  );
+  await act(async () => undefined);
+  expect(screen.queryByTestId('prm-dock')).toBeNull();
   fireEvent.click(id('prm-block-chat'));
-  await waitFor(() => expect(fake.callsOf('prm_window_open')).toHaveLength(1));
+  await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
+  expect((id('prm-dock') as HTMLElement).hidden).toBe(false);
+  expect(fake.callsOf('prm_chat_settings_put')).toEqual([{ dock: { open: true } }]);
+  // The startup read started nothing.
+  expect(fake.callsOf('prm_chat_status')[0]).toEqual({ cached: true });
+});
+
+test('FR-PRM-21 #61 the dock opens where it was left, at its remembered width', async () => {
+  setup({ chat: { consent: true, dockOpen: true } });
+  await api.chat.settingsPut({ dock: { width: 560 } });
+  render(<ChatDock />);
+  await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
+  expect((id('prm-dock') as HTMLElement).style.width).toBe('560px');
+});
+
+test('FR-PRM-21 FR-PRM-35 #61 hiding the dock keeps a running reply; reopening shows it', async () => {
+  setup({ chat: { consent: true, case: 'slow(5)' } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(
+    <>
+      <ChatDock />
+      <ChatDockToggle />
+    </>,
+  );
+  fireEvent.click(id('prm-dock-toggle'));
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(id('prm-chat-stop')).toBeTruthy());
+  fireEvent.click(id('prm-chat-close'));
+  expect((id('prm-dock') as HTMLElement).hidden).toBe(true);
+  expect(id('prm-dock-toggle').getAttribute('aria-pressed')).toBe('false');
+  expect(fake.callsOf('prm_chat_cancel')).toHaveLength(0);
+  expect(fake.callsOf('prm_chat_session_end')).toHaveLength(0);
+  // The reply finishes while hidden; reopening shows it, streamed in full.
+  await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1), {
+    timeout: 5000,
+  });
+  fireEvent.click(id('prm-dock-toggle'));
+  expect((id('prm-dock') as HTMLElement).hidden).toBe(false);
+  expect(screen.getByText(/You wrote: "ideas"/)).toBeTruthy();
+  expect(fake.callsOf('prm_chat_settings_put')).toEqual([
+    { dock: { open: true } },
+    { dock: { open: false } },
+    { dock: { open: true } },
+  ]);
+});
+
+test('FR-PRM-21 #61 the drag handle resizes within 320–720 px and saves the width once', async () => {
+  setup({ chat: { consent: true, dockOpen: true } });
+  render(<ChatDock />);
+  await waitFor(() => expect(id('prm-dock')).toBeTruthy());
+  const handle = id('prm-dock-resize');
+  const dock = id('prm-dock') as HTMLElement;
+  fireEvent.pointerDown(handle, { clientX: 1000, pointerId: 1 });
+  fireEvent.pointerMove(handle, { clientX: 900, pointerId: 1 });
+  expect(dock.style.width).toBe('500px');
+  fireEvent.pointerMove(handle, { clientX: 100, pointerId: 1 });
+  expect(dock.style.width).toBe('720px');
+  fireEvent.pointerMove(handle, { clientX: 1500, pointerId: 1 });
+  expect(dock.style.width).toBe('320px');
+  fireEvent.pointerUp(handle, { pointerId: 1 });
+  expect(fake.callsOf('prm_chat_settings_put')).toEqual([{ dock: { width: 320 } }]);
 });
 
 test('FR-PRM-20 FR-PRM-45 Settings → Prompt chat: on/off, the status, the path override', async () => {
@@ -541,9 +609,9 @@ test('FR-PRM-20 Settings before consent says so and offers no login', async () =
   expect(screen.queryByTestId('prm-settings-chat-logout')).toBeNull();
 });
 
-test('BL-41 the window follows the main window by event, without polling', async () => {
+test('BL-41 the panel follows the open project by event, without polling', async () => {
   setup({ chat: { consent: true } });
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('No prompt block'));
   const reads = fake.callsOf('project_get').length;
   await api.chat.contextPublish(PID, 'gen', {});
@@ -562,7 +630,7 @@ test('BL-41 the window follows the main window by event, without polling', async
 test('BL-42 FR-PRM-26 the strip previews what the next turn sends', async () => {
   setup({ chat: { consent: true } });
   await api.chat.contextPublish(PID, 'rgn', {});
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-preview').textContent).toContain('crop 556×456 + mask'));
   expect(screen.getByAltText('region crop with the mask')).toBeTruthy();
   fireEvent.click(id('prm-chat-include-images'));
@@ -574,7 +642,7 @@ test('BL-42 FR-PRM-26 the strip previews what the next turn sends', async () => 
   });
 });
 
-test('R103 FR-PRM-26 the strip follows a main-window publish without a refocus', async () => {
+test('R103 FR-PRM-26 the strip follows a context publish without a refocus', async () => {
   setup({ chat: { consent: true } });
   chatContext.reset();
   installChatSink();
@@ -592,7 +660,7 @@ test('R103 FR-PRM-26 the strip follows a main-window publish without a refocus',
     chatContext.publish('gen', { refs: 0 });
     await chatContext.flush();
   });
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-preview').textContent).toContain('0 images'));
   // Same host, new input (8 references turned on): no host change, no focus event.
   refs = 8;
@@ -604,7 +672,7 @@ test('R103 FR-PRM-26 the strip follows a main-window publish without a refocus',
   chatContext.reset();
 });
 
-test("BL-42 FR-PRM-23 a send from the window first flushes the main window's pending edit", async () => {
+test("BL-42 FR-PRM-23 a send first flushes the visible tab's pending edit", async () => {
   setup({ chat: { consent: true } });
   chatContext.reset();
   installChatSink();
@@ -613,7 +681,7 @@ test("BL-42 FR-PRM-23 a send from the window first flushes the main window's pen
   projectStore.reset();
   await act(() => projectStore.open(baseSnapshot().project_dir));
   await api.chat.contextPublish(PID, 'rgn', { final_prompt: 'old' });
-  render(<ChatWindow />);
+  render(<ChatPanel />);
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
   // An edit in the main window, still inside its 300 ms debounce.
   chatContext.publish('rgn', { final_prompt: 'edited' });

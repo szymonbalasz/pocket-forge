@@ -1270,7 +1270,7 @@ fn fr_prm_40_a_failed_command_leaves_the_project_and_settings_unchanged() {
         ),
         (
             "prm_chat_settings_put",
-            json!({"enabled": false, "window": {"x": 0, "y": 0, "w": 200, "h": 200}}),
+            json!({"enabled": false, "dock": {"width": 100}}),
             ErrorCode::InvalidInput,
         ),
         (
@@ -1677,29 +1677,64 @@ fn fr_prm_23_a_close_during_a_publish_leaves_no_context() {
     assert_eq!(thread_view(&lab)["current_host"], Value::Null);
 }
 
-/// FR-PRM-21 / FR-PRM-35 (code review 14): what runs as the chat window closes, on the main
-/// thread, never waits for a process: saving the rect detects nothing (even with the 60 s
-/// cache expired), and the session ends without waiting for a turn that still holds it.
+/// FR-PRM-21 (#61) / FR-PRM-35 (code review 14): a dock toggle or resize detects nothing (even
+/// with the 60 s cache expired) and announces nothing; the startup read starts nothing; and
+/// the session ends without waiting for a turn that still holds it.
 #[test]
-fn fr_prm_35_closing_the_window_never_waits_for_a_process() {
+fn fr_prm_21_the_dock_state_is_remembered_without_a_process() {
     let (lab, sp) = claude_lab();
     consent(&lab);
     let runs = || sp.log().runs.len();
     let before = runs();
+    let statuses = events(&lab, super::EVENT_STATUS).len();
     lab.clock.advance(Duration::from_secs(61));
     let st = lab
         .core
-        .dispatch(
-            "prm_chat_settings_put",
-            json!({"window": {"x": 10, "y": 20, "w": 400, "h": 600}}),
-        )
+        .dispatch("prm_chat_settings_put", json!({"dock": {"open": true}}))
         .unwrap();
-    assert_eq!(runs(), before, "no detection for the window rect");
+    assert_eq!(
+        st["dock"],
+        json!({"open": true, "width": 400}),
+        "first-run width"
+    );
+    let st = lab
+        .core
+        .dispatch("prm_chat_settings_put", json!({"dock": {"width": 520}}))
+        .unwrap();
+    assert_eq!(runs(), before, "no detection for the dock");
+    assert_eq!(
+        events(&lab, super::EVENT_STATUS).len(),
+        statuses,
+        "nothing announced"
+    );
     assert_eq!(st["backend"]["state"], "ok", "the cached status");
-    assert_eq!(lab.core.state().settings.prompt_chat.window.unwrap().w, 400);
+    assert_eq!(st["dock"], json!({"open": true, "width": 520}), "open kept");
+    let read = lab
+        .core
+        .dispatch("prm_chat_status", json!({"cached": true}))
+        .unwrap();
+    assert_eq!(read["dock"], json!({"open": true, "width": 520}));
+    assert_eq!(runs(), before, "the startup read starts nothing");
+    for bad in [319, 721] {
+        assert_eq!(
+            code(
+                lab.core
+                    .dispatch("prm_chat_settings_put", json!({"dock": {"width": bad}}))
+            ),
+            ErrorCode::InvalidInput
+        );
+    }
+    // An old chat window rect is kept as an unknown field and ignored.
+    let settings = crate::settings::settings_path(&lab.core.ctx.data_dir);
+    let mut file: Value = serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
+    file["prompt_chat"]["window"] = json!({"x": 1, "y": 2, "w": 400, "h": 600});
+    std::fs::write(&settings, serde_json::to_vec(&file).unwrap()).unwrap();
+    let loaded = crate::settings::load_or_init(&lab.core.ctx).unwrap().0;
+    assert_eq!(loaded.prompt_chat.dock.unwrap().width, 520);
+    assert!(loaded.prompt_chat.extra.contains_key("window"));
 
-    // A turn holds the session (a stopping turn): neither the window's close nor a project
-    // close waits for it; the session goes once the turn lets go.
+    // A turn holds the session (a stopping turn): neither ending it in the background nor a
+    // project close waits for it; the session goes once the turn lets go.
     let lab = lab_with_session();
     let held = lab.core.chat.session.clone();
     let guard = super::lock(&held);

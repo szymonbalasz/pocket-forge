@@ -1,8 +1,8 @@
 //! Tests for the per-window command ACL (R96): every app command is declared in
-//! `app_commands.rs` (build.rs turns it into `allow-<command>` permissions), the main window is
-//! granted all of them, and the prompt chat window only what it calls. Tauri itself fails the
-//! build on a permission that names no declared command, and refuses at run time any app
-//! command a window's capabilities don't grant.
+//! `app_commands.rs` (build.rs turns it into `allow-<command>` permissions), and the main
+//! window, the only one since the chat became a panel (#61), is granted all of them. Tauri
+//! itself fails the build on a permission that names no declared command, and refuses at run
+//! time any app command a window's capabilities don't grant.
 
 use std::collections::BTreeSet;
 
@@ -11,29 +11,14 @@ use serde_json::Value;
 include!("../app_commands.rs");
 
 /// The Tauri-layer commands next to the core ones (`commands::handler`).
-const APP_LEVEL: [&str; 8] = [
+const APP_LEVEL: [&str; 7] = [
     "app_ready",
-    "prm_window_open",
     "prm_chat_login",
     "app_close_guard",
     "app_exit",
     "app_close_unguard",
     "app_close_ack",
     "app_close_asking",
-];
-
-/// What `ChatWindow.tsx` calls (R96). Settings, logout, provider, library and export are not
-/// among them; turning the chat on from the chat window goes through the main window.
-const CHAT_WINDOW: [&str; 9] = [
-    "prm_chat_status",
-    "prm_chat_consent",
-    "prm_chat_thread_get",
-    "prm_chat_preview",
-    "prm_chat_send",
-    "prm_chat_cancel",
-    "prm_chat_insert",
-    "prm_chat_login",
-    "project_get",
 ];
 
 fn capability(file: &str) -> Value {
@@ -81,22 +66,18 @@ fn r96_main_window_is_granted_every_app_command() {
     assert_eq!(granted("default.json"), set(APP_COMMANDS));
 }
 
+/// #61: the prompt chat is a panel in the main window; no other window has a capability.
 #[test]
-fn fr_prm_40_chat_window_is_granted_only_what_it_calls() {
-    let chat = granted("prompt-chat.json");
-    assert_eq!(chat, set(&CHAT_WINDOW));
-    for refused in [
-        "prm_chat_settings_put",
-        "prm_chat_logout",
-        "prm_context_publish",
-        "provider_credentials_set",
-        "library_set_roots",
-        "export_start",
-    ] {
-        assert!(!chat.contains(refused), "{refused}");
-    }
+fn fr_prm_40_only_the_main_window_has_a_capability() {
+    let dir = format!("{}/capabilities", env!("CARGO_MANIFEST_DIR"));
+    let files: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(files, ["default.json"]);
     assert_eq!(
-        capability("prompt-chat.json")["windows"],
-        serde_json::json!(["prompt-chat"])
+        capability("default.json")["windows"],
+        serde_json::json!(["main"])
     );
 }

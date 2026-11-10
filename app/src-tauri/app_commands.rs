@@ -2,8 +2,7 @@
 // (`AppManifest::commands`, one `allow-<command>` permission each), and the ACL tests in
 // `src/acl.rs`. Once an app manifest exists, Tauri refuses any app command that isn't declared
 // here, so a new entry in `src/commands.rs` also goes here (the tests fail until it does) and
-// into a capability: `capabilities/default.json` for the main window, and
-// `capabilities/prompt-chat.json` only if the chat window calls it.
+// into the main window's capability, `capabilities/default.json`.
 
 /// Every command the invoke handler registers: the core commands in registry order, then the
 /// app-level ones.
@@ -110,7 +109,6 @@ pub const APP_COMMANDS: &[&str] = &[
     "rgn_job_fetch_again",
     "prm_chat_thread_new",
     "app_ready",
-    "prm_window_open",
     "prm_chat_login",
     "app_close_guard",
     "app_exit",

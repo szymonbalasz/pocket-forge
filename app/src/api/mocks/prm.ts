@@ -21,6 +21,8 @@ export interface PrmMockSeed {
     locked?: boolean;
     /** A `claude_path` already in settings.json (never checked by a put, R96). */
     claudePath?: string;
+    /** #61: the chat dock was left open. */
+    dockOpen?: boolean;
   };
 }
 
@@ -30,10 +32,19 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
   type H = PromptHelper;
 
   const w = window as unknown as Rec;
+  // A new install silences the previous one: a reply it was still streaming never reaches the
+  // next (a Vitest test's leftover turn would look like "another project's" turn). On window,
+  // since e2e injects this function as source text.
+  (w.__pfPrmRetire as (() => void) | undefined)?.();
+  let retired = false;
+  w.__pfPrmRetire = () => {
+    retired = true;
+  };
   const handlers = (w.__pfMockHandlers ??= {}) as Record<string, (input: Rec) => unknown>;
   const fail = (code: string, message: string, field?: string, detail?: unknown) =>
     Promise.reject({ code, message, ...(field ? { field } : {}), ...(detail ? { detail } : {}) });
   const emit = (event: string, payload: unknown) => {
+    if (retired) return;
     const m = w.__pfMock as { emit?: (e: string, p: unknown) => void } | undefined;
     if (m?.emit) m.emit(event, payload);
     else
@@ -270,7 +281,8 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     enabled: seed.chat?.consent ?? false,
     fakeCase: seed.chat?.case ?? 'success',
     claudePath: (seed.chat?.claudePath ?? null) as string | null,
-    windowOpens: 0,
+    /** #61: the chat dock's remembered state (\`prompt_chat.dock\`). */
+    dock: { open: seed.chat?.dockOpen ?? false, width: 400 },
     seq: 0,
     contexts: new Map<string, { seq: number; input: unknown }>(),
     threads: new Map<string, { id: string; turns: Turn[]; updated_at: string }>(),
@@ -334,6 +346,7 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       login_command: null,
       claude_path: chat.claudePath,
       claude_path_issue: claudePathIssue(chat.claudePath),
+      dock: { ...chat.dock },
     };
   };
   const hostLabel = (h: Host) => (h === 'rgn' ? 'Region edit' : 'New image');
@@ -351,6 +364,15 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     return announced();
   };
   handlers.prm_chat_settings_put = (input) => {
+    // #61: the dock's state alone detects nothing and announces nothing, as the core.
+    const dock = input.dock as { open?: boolean; width?: number } | undefined;
+    if (dock) {
+      if (dock.width !== undefined && (dock.width < 320 || dock.width > 720))
+        return fail('invalid_input', 'the chat dock is 320–720 px wide', 'dock');
+      if (typeof dock.open === 'boolean') chat.dock.open = dock.open;
+      if (typeof dock.width === 'number') chat.dock.width = dock.width;
+      if (input.enabled === undefined && !('claude_path' in input)) return statusOf();
+    }
     if (typeof input.enabled === 'boolean') chat.enabled = input.enabled;
     if ('claude_path' in input) {
       const p = ((input.claude_path as string | null) ?? '').trim();
@@ -371,11 +393,6 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     chat.running?.cancel();
     chat.session = null;
     return {};
-  };
-  // Tauri-layer commands (R91): e2e replaces `prm_window_open` with a popup page.
-  handlers.prm_window_open = () => {
-    chat.windowOpens += 1;
-    return null;
   };
   handlers.prm_chat_login = () => {
     if (!chat.consent) return fail('consent_required', 'accept the privacy notice first');
