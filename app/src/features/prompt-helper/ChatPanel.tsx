@@ -1,16 +1,14 @@
-// The prompt chat window (prompt-helper §7, FR-PRM-20..29, PRM slice 6): its own webview
-// (label `prompt-chat`, R91), bound to the asset project open in the main window. Header
-// (project · host · backend chip), transcript with proposal cards (Replace + Copy, #60), the
-// context strip, the composer (Send / Stop) and the usage footer. Every state of §7: consent,
-// off, backend errors with their fix and Recheck, no project, no prompt block, running,
-// errors with Retry, offline, read-only, fake. It follows the main window through
-// `prm:chat-context` (project and host changes, BL-41), refreshes the strip on
-// `prm:context-published` (R103) and re-reads on focus.
-import { useCallback, useEffect, useRef, useState } from 'react';
+// The prompt chat panel (prompt-helper §7, FR-PRM-20..29): docked in the main window (#61,
+// `ChatDock`), bound to the open asset project. Header (project · host · backend chip · close),
+// transcript with proposal cards (Replace + Copy, #60), the context strip, the composer (Send /
+// Stop) and the usage footer. Every state of §7: consent, off, backend errors with their fix and
+// Recheck, no project, no prompt block, running, errors with Retry, offline, read-only, fake. It
+// follows the open project and host through `prm:chat-context` (BL-41), refreshes the strip
+// after each context publish (R103) and re-detects on window focus while it is shown.
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import {
   api,
-  emitEvent,
   onEvent,
   type ChatPreview,
   type ChatProposal,
@@ -22,6 +20,7 @@ import {
 import {
   backendChip,
   billsApiKey,
+  dividerText,
   HOST_LABEL,
   loginNote,
   fixWorthShowing,
@@ -30,37 +29,11 @@ import {
   replySegments,
   usageLabel,
 } from './chatLogic';
+import { onContextPublished } from './chatSink';
+import { chatContext } from '../../shared/chatContext';
 import './chat.css';
 
 type Problem = { code: string; message: string };
-
-/** BL-42: how long a send waits for the main window to publish its pending context. */
-export const FLUSH_WAIT_MS = 400;
-
-/** BL-42 / FR-PRM-23: asks the main window to publish its pending context and waits for its
- *  answer (or {@link FLUSH_WAIT_MS}), so a send never misses the last edits. */
-async function flushMainWindow(): Promise<void> {
-  const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  let answered: () => void = () => undefined;
-  const done = new Promise<void>((resolve) => {
-    answered = resolve;
-    setTimeout(resolve, FLUSH_WAIT_MS);
-  });
-  const off = await onEvent('prm:context-flushed', (p) => {
-    if (p.id === id) answered();
-  }).catch(() => null);
-  try {
-    await emitEvent('prm:context-flush', { id });
-    await done;
-  } catch {
-    // No event bridge: send what the core has.
-  } finally {
-    if (off)
-      void Promise.resolve()
-        .then(off)
-        .catch(() => undefined);
-  }
-}
 
 /** Night review 9: a turn of another project still holds the one chat slot (it finishes after
  *  a project switch, R103), so the core refuses a send with `turn_active`. A turn seen only
@@ -75,7 +48,15 @@ function problemOf(e: unknown): Problem {
   return { code: x.code ?? 'error', message: x.message ?? String(e) };
 }
 
-export function ChatWindow() {
+export function ChatPanel({
+  visible = true,
+  onClose,
+}: {
+  /** The dock is open (a hidden panel keeps streaming but stops re-detecting on focus). */
+  visible?: boolean;
+  /** Hides the dock (`prm-chat-close`). Never cancels a running turn (FR-PRM-35). */
+  onClose?: () => void;
+}) {
   const [status, setStatus] = useState<ChatStatus | null>(null);
   const [project, setProject] = useState<ProjectSnapshot | null | undefined>(undefined);
   const [view, setView] = useState<ChatThreadView | null>(null);
@@ -166,11 +147,13 @@ export function ChatWindow() {
     }
   }, []);
 
-  // FR-PRM-33: detection on open and on window focus; the project and host follow the main
-  // window.
+  // FR-PRM-33: detection when the panel is shown (60 s cache) and on window focus while shown;
+  // the project and host follow the open project.
   useEffect(() => {
+    if (!visible) return;
     void loadStatus(false);
     void loadProject();
+    setRefreshTick((n) => n + 1);
     const focus = () => {
       void loadStatus(true);
       void loadProject();
@@ -178,7 +161,16 @@ export function ChatWindow() {
     };
     window.addEventListener('focus', focus);
     return () => window.removeEventListener('focus', focus);
-  }, [loadStatus, loadProject]);
+  }, [visible, loadStatus, loadProject]);
+
+  // R103: each context publish refreshes the next-turn strip.
+  useEffect(
+    () =>
+      onContextPublished((projectId) => {
+        if (projectId === pidRef.current) setRefreshTick((n) => n + 1);
+      }),
+    [],
+  );
 
   useEffect(() => {
     // The previous project's running turn goes on after the switch and holds the slot.
@@ -192,7 +184,7 @@ export function ChatWindow() {
   }, [pid, loadThread, noteElsewhere]);
 
   // FR-PRM-26 / BL-42: what the next turn would send, refreshed when the host, the thread or
-  // Include images changes, when the main window publishes context (R103), and on focus.
+  // Include images changes, after each context publish (R103), and on focus.
   const host = view?.current_host ?? null;
   const turnCount = view?.thread?.turns.length ?? 0;
   useEffect(() => {
@@ -236,21 +228,21 @@ export function ChatWindow() {
       }),
       // L2 / L6: detection, settings and consent changes are followed without a refocus.
       onEvent('prm:chat-status', (p) => setStatus((s) => (s ? { ...s, ...p } : s))),
-      // BL-41: the main window opened, closed or switched project, or its visible tab changed.
+      // #61: New chat, or a fresh thread after an accept or a pick.
+      onEvent('prm:chat-thread', (t) => {
+        if (t.project_id === pidRef.current) void loadThread(t.project_id);
+      }),
+      // BL-41: a project opened, closed or switched, or the visible tab changed.
       onEvent('prm:chat-context', (c) => {
         if (c.project_id !== pidRef.current) void loadProject();
         else void loadThread(c.project_id);
-      }),
-      // R103: a main-window edit (a publish) refreshes the next-turn strip.
-      onEvent('prm:context-published', (c) => {
-        if (c.project_id === pidRef.current) setRefreshTick((n) => n + 1);
       }),
     ];
     return () =>
       subs.forEach(
         (s) =>
           void s.then(
-            // The event bridge may be gone already (window closing): ignore.
+            // The event bridge may be gone already (the window closing): ignore.
             (off) =>
               void Promise.resolve()
                 .then(off)
@@ -267,7 +259,8 @@ export function ChatWindow() {
     setSending(true);
     setProblem(null);
     try {
-      await flushMainWindow();
+      // FR-PRM-23 / BL-42: the visible tab's pending edit is published first.
+      await chatContext.flush();
       const out = await api.chat.send(pid, text, includeImages);
       setNotSaved(!out.saved);
       if (!ended.current.has(out.turn_id))
@@ -287,6 +280,19 @@ export function ChatWindow() {
     }
   };
 
+  /** #61 (FR-PRM-46): New chat. */
+  const newChat = async () => {
+    if (!pid || sendingRef.current) return;
+    setProblem(null);
+    try {
+      await api.chat.threadNew(pid);
+      setNotSaved(false);
+      await loadThread(pid);
+    } catch (e) {
+      setProblem(problemOf(e));
+    }
+  };
+
   const replace = async (p: ChatProposal) => {
     if (!pid) return;
     setProblem(null);
@@ -300,14 +306,26 @@ export function ChatWindow() {
 
   if (!status)
     return (
-      <main className="prm-chat" data-testid="prm-chat">
+      <section className="prm-chat" data-testid="prm-chat">
         <p className="muted">Loading…</p>
-      </main>
+      </section>
     );
 
   const fake = status.mode === 'fake';
-  const header = (
+  const header = (extra?: ReactNode) => (
     <header className="prm-chat-head">
+      {onClose && (
+        <button
+          type="button"
+          className="prm-chat-close"
+          data-testid="prm-chat-close"
+          aria-label="Hide the prompt chat"
+          title="Hide the prompt chat (a reply keeps going)"
+          onClick={onClose}
+        >
+          ×
+        </button>
+      )}
       <span className="prm-chat-title">{project?.name ?? 'Prompt chat'}</span>
       {view?.current_host && <span className="prm-chat-tag">{HOST_LABEL[view.current_host]}</span>}
       <span
@@ -321,13 +339,14 @@ export function ChatWindow() {
           Fake chat
         </span>
       )}
+      {extra}
     </header>
   );
 
   if (!status.consent)
     return (
-      <main className="prm-chat" data-testid="prm-chat">
-        {header}
+      <section className="prm-chat" data-testid="prm-chat">
+        {header()}
         <section className="prm-chat-notice" aria-label="Privacy notice">
           <p>
             <strong>{PRIVACY_NOTICE[0]}</strong> {PRIVACY_NOTICE[1]}
@@ -356,32 +375,36 @@ export function ChatWindow() {
             </button>
           </div>
         </section>
-      </main>
+      </section>
     );
 
   if (!status.enabled)
     return (
-      <main className="prm-chat" data-testid="prm-chat">
-        {header}
+      <section className="prm-chat" data-testid="prm-chat">
+        {header()}
         <section className="prm-chat-notice">
           <p>Prompt chat is off.</p>
           <button
             type="button"
             className="primary"
             data-testid="prm-chat-enable"
-            onClick={() => void emitEvent('prm:chat-enable', {}).catch(() => undefined)}
+            onClick={() =>
+              void api.chat
+                .settingsPut({ enabled: true })
+                .then(setStatus, (e) => setProblem(problemOf(e)))
+            }
           >
             Turn it on
           </button>
         </section>
-      </main>
+      </section>
     );
 
   const b = status.backend;
   if (b.state === 'error')
     return (
-      <main className="prm-chat" data-testid="prm-chat">
-        {header}
+      <section className="prm-chat" data-testid="prm-chat">
+        {header()}
         <section className="prm-chat-notice" role="alert">
           <p>{b.message}</p>
           <p className="muted">{b.fix}</p>
@@ -417,17 +440,17 @@ export function ChatWindow() {
           )}
           {problem && <p className="prm-chat-error">{problem.message}</p>}
         </section>
-      </main>
+      </section>
     );
 
   if (!project)
     return (
-      <main className="prm-chat" data-testid="prm-chat">
-        {header}
+      <section className="prm-chat" data-testid="prm-chat">
+        {header()}
         <p className="prm-chat-empty" data-testid="prm-chat-no-project">
           Open a project to chat about it.
         </p>
-      </main>
+      </section>
     );
 
   const turns = view?.thread?.turns ?? [];
@@ -446,10 +469,24 @@ export function ChatWindow() {
       : busyElsewhere
         ? { reason: 'elsewhere', text: ELSEWHERE_REASON }
         : null;
+  const divider = view?.thread ? dividerText(view.thread) : null;
+  // #61: New chat, disabled while a turn is sent or streams (the core refuses it then).
+  const newChatButton = (
+    <button
+      type="button"
+      className="prm-chat-new"
+      data-testid="prm-chat-new"
+      title="Start a new chat; this one is kept in the project"
+      disabled={sending || !!running || turns.length === 0}
+      onClick={() => void newChat()}
+    >
+      New chat
+    </button>
+  );
 
   return (
-    <main className="prm-chat" data-testid="prm-chat">
-      {header}
+    <section className="prm-chat" data-testid="prm-chat">
+      {header(newChatButton)}
       <ol
         className="prm-chat-transcript"
         aria-label="Chat"
@@ -460,13 +497,19 @@ export function ChatWindow() {
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
         }}
       >
+        {divider && (
+          <li className="prm-chat-divider" data-testid="prm-chat-divider">
+            {divider}
+          </li>
+        )}
         {turns.length === 0 && (
           <li className="prm-chat-empty">Ask for ideas about the prompt of the visible tab.</li>
         )}
-        {turns.map((t) => (
+        {turns.map((t, i) => (
           <TurnView
             key={t.id}
             turn={t}
+            first={i === 0}
             liveText={t.id === live?.turnId ? live.text : null}
             running={t.id === running}
             unsaved={unsaved.has(t.id)}
@@ -514,7 +557,7 @@ export function ChatWindow() {
       <footer className="prm-chat-foot muted small" data-testid="prm-chat-usage">
         {usage ?? 'No usage yet'}
       </footer>
-    </main>
+    </section>
   );
 }
 
@@ -649,6 +692,8 @@ function Composer(props: {
 
 function TurnView(props: {
   turn: ChatTurn;
+  /** The thread's first turn: its fresh session is the new chat itself, not worth a note. */
+  first: boolean;
   liveText: string | null;
   running: boolean;
   /** Kept in memory only (read-only project, §7 / R94; a locked thread file, §11). */
@@ -671,7 +716,9 @@ function TurnView(props: {
   if (t.role === 'user')
     return (
       <li className="prm-chat-turn is-user" data-record-id={t.id}>
-        {t.fresh_session && <p className="prm-chat-session muted small">New session</p>}
+        {t.fresh_session && !props.first && (
+          <p className="prm-chat-session muted small">New session</p>
+        )}
         <span className="prm-chat-tag">{HOST_LABEL[t.host]}</span>
         {notSaved}
         <p className="prm-chat-text">{t.text}</p>

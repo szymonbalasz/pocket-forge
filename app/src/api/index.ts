@@ -2,7 +2,7 @@
 // ESLint rule forbids `@tauri-apps/*` imports anywhere else. Playwright mocks the layer below
 // this one (window.__TAURI_INTERNALS__), so the wrapper itself is under test.
 import { invoke } from '@tauri-apps/api/core';
-import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 
@@ -75,22 +75,6 @@ export async function call<N extends CommandName>(
 /** True inside the Tauri window (or a test that mocks it). */
 export function hasCore(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
-}
-
-/** The label of the window this page runs in: `main` or `prompt-chat` (R91). Tauri gives it in
- *  its metadata; a plain browser page (Playwright) may pass `?window=<label>`. */
-export function currentWindowLabel(): string {
-  const meta = (
-    window as unknown as {
-      __TAURI_INTERNALS__?: { metadata?: { currentWindow?: { label?: string } } };
-    }
-  ).__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
-  return meta ?? new URLSearchParams(window.location.search).get('window') ?? 'main';
-}
-
-/** Sends an event to every window (BL-42: the chat window asks the main window to flush). */
-export function emitEvent<E extends keyof Events>(name: E, payload: Events[E]): Promise<void> {
-  return emit(name, payload);
 }
 
 /** Subscribes to a core event. Returns the unsubscribe function. */
@@ -419,9 +403,10 @@ export const api = {
     composePreview: (input: Commands['prm_compose_preview'][0]) =>
       call('prm_compose_preview', input),
   },
-  /** prompt-helper §9 (PRM part B): the prompt chat core (slice 5). The window is slice 6. */
+  /** prompt-helper §9 (PRM part B): the prompt chat core; the chat is a docked panel (#61). */
   chat: {
-    status: (refresh = false) => call('prm_chat_status', refresh ? { refresh } : {}),
+    status: (refresh = false, cached = false) =>
+      call('prm_chat_status', refresh ? { refresh } : cached ? { cached } : {}),
     consent: (accept: boolean) => call('prm_chat_consent', { accept }),
     settingsPut: (input: Commands['prm_chat_settings_put'][0]) =>
       call('prm_chat_settings_put', input),
@@ -432,6 +417,8 @@ export const api = {
     contextClear: (projectId: string, host: ChatHostId) =>
       call('prm_context_clear', { project_id: projectId, host }),
     thread: (projectId: string) => call('prm_chat_thread_get', { project_id: projectId }),
+    /** New chat (#61, FR-PRM-46). */
+    threadNew: (projectId: string) => call('prm_chat_thread_new', { project_id: projectId }),
     send: (projectId: string, text: string, includeImages = true) =>
       call('prm_chat_send', { project_id: projectId, text, include_images: includeImages }),
     cancel: (turnId: string) => call('prm_chat_cancel', { turn_id: turnId }),
@@ -441,8 +428,6 @@ export const api = {
     /** What the next turn would send, for the context strip (FR-PRM-26, BL-42). */
     preview: (projectId: string, includeImages = true) =>
       call('prm_chat_preview', { project_id: projectId, include_images: includeImages }),
-    /** Opens or focuses the chat window (FR-PRM-21). */
-    openWindow: () => call('prm_window_open', {}),
     /** Opens the login console (FR-PRM-45). */
     login: () => call('prm_chat_login', {}),
   },

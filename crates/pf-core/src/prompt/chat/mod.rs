@@ -35,7 +35,7 @@ use crate::context::Context;
 use crate::core::{Command, Core, Validate};
 use crate::error::{CoreError, CoreResult, ErrorCode};
 use crate::prompt::context::{ChatContextSource, ChatHost, ChatImage, limit_images};
-use crate::settings::{self, ChatConsent, ChatWindowRect, PromptChatSettings};
+use crate::settings::{self, ChatConsent, ChatDock, DOCK_MAX, DOCK_MIN, PromptChatSettings};
 use crate::time::Timestamp;
 use thread::{
     Proposal, Role, SentImageRecord, Thread, Turn, TurnContext, TurnError, TurnState, TurnUsage,
@@ -53,7 +53,7 @@ pub const EVENT_TURN: &str = "prm:chat-turn";
 pub const EVENT_STATUS: &str = "prm:chat-status";
 pub const EVENT_INSERT: &str = "prm:insert";
 /// BL-41: the open project or its attached host changed: `{project_id | null, host | null}`.
-/// The chat window follows the main window with it.
+/// The chat panel follows it.
 pub const EVENT_CONTEXT: &str = "prm:chat-context";
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -250,7 +250,7 @@ impl ChatRuntime {
         }
     }
 
-    /// FR-PRM-35 without waiting (code review 14: the chat window closing on the main thread):
+    /// FR-PRM-35 without waiting (code review 14: never block the main thread):
     /// the running turn is canceled, and the session ends on its own thread.
     pub fn end_session_in_background(&self) {
         let cancel = lock(&self.rt).running.as_ref().map(|r| r.cancel.clone());
@@ -262,7 +262,7 @@ impl ChatRuntime {
 
     /// R109: the app quits. The running turn is canceled and given up to `within` to finish
     /// into its thread ("Stopped.", R103), then the session closes here, before the process
-    /// ends (a quit skips the windows' own teardown). Never call it on the main thread: it
+    /// ends. Never call it on the main thread: it
     /// waits for the turn and the child.
     pub fn shutdown(&self, within: Duration) {
         let deadline = Instant::now() + within;
@@ -334,7 +334,7 @@ impl ChatRuntime {
         }
     }
 
-    /// BL-41: tells the chat window which project is open (`None`: none) and its host.
+    /// BL-41: tells the chat panel which project is open (`None`: none) and its host.
     pub fn notify_project(&self, ctx: &Context, project_id: Option<Ulid>) {
         let host = project_id.and_then(|p| lock(&self.rt).current_host(p));
         emit_context(ctx, project_id, host);
@@ -344,7 +344,7 @@ impl ChatRuntime {
         lock(&self.rt).status = None;
     }
 
-    /// True while a session is open (tests, the window's "New session" note).
+    /// True while a session is open (tests, the panel's "New session" note).
     pub fn has_session(&self) -> bool {
         self.session.try_lock().map(|s| s.is_some()).unwrap_or(true)
     }
@@ -366,7 +366,7 @@ impl ChatRuntime {
 }
 
 /// `prm:chat-status` with the whole status after a settings, consent, login or case change, so
-/// Settings and the chat window follow it without a refocus (L2, L6).
+/// Settings and the chat panel follow it without a refocus (L2, L6).
 fn emit_status(core: &Core, st: &ChatStatus) {
     core.ctx.emit(
         EVENT_STATUS,
@@ -488,6 +488,8 @@ pub struct ChatStatus {
     pub claude_path: Option<String>,
     /// Why the saved `claude_path` is ignored (R96), or `null` when it is unset or valid.
     pub claude_path_issue: Option<String>,
+    /// The chat dock: open or closed and its width (FR-PRM-21, #61).
+    pub dock: ChatDock,
 }
 
 /// FR-PRM-20/33: no process before consent or while off, not even detection.
@@ -513,6 +515,7 @@ pub fn status(core: &Core, refresh: bool) -> ChatStatus {
         },
         claude_path: chat.claude_path.clone(),
         claude_path_issue: claude_path_issue(&chat),
+        dock: chat.dock.unwrap_or_default(),
     }
 }
 
@@ -535,6 +538,7 @@ fn status_without_process(core: &Core) -> ChatStatus {
         login_command: None,
         claude_path: chat.claude_path.clone(),
         claude_path_issue: claude_path_issue(&chat),
+        dock: chat.dock.unwrap_or_default(),
     }
 }
 
@@ -622,9 +626,13 @@ fn no_prompt_block(host: Option<ChatHost>) -> CoreError {
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StatusInput {
-    /// Re-detect now (window focus, Recheck), ignoring the 60 s cache.
+    /// Re-detect now (panel open, window focus, Recheck), ignoring the 60 s cache.
     #[serde(default)]
     pub refresh: bool,
+    /// Start nothing: the cached detection (or `not_checked`). The dock's state at startup
+    /// (#61) is read this way.
+    #[serde(default)]
+    pub cached: bool,
 }
 
 impl Validate for StatusInput {}
@@ -638,6 +646,9 @@ impl Command for PrmChatStatus {
     type Output = ChatStatus;
 
     fn run(core: &Core, input: StatusInput) -> CoreResult<ChatStatus> {
+        if input.cached && !input.refresh {
+            return Ok(status_without_process(core));
+        }
         Ok(status(core, input.refresh))
     }
 }
@@ -695,8 +706,18 @@ pub struct ChatSettingsInput {
     pub enabled: Option<bool>,
     #[serde(default, deserialize_with = "nullable")]
     pub claude_path: Option<Option<String>>,
-    #[serde(default, deserialize_with = "nullable")]
-    pub window: Option<Option<ChatWindowRect>>,
+    #[serde(default)]
+    pub dock: Option<DockInput>,
+}
+
+/// `prm_chat_settings_put.dock` (#61): what changed; the rest is kept.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DockInput {
+    #[serde(default)]
+    pub open: Option<bool>,
+    #[serde(default)]
+    pub width: Option<u32>,
 }
 
 /// R96: the file names `prompt_chat.claude_path` may end in (any case).
@@ -738,12 +759,12 @@ impl Validate for ChatSettingsInput {
         if let Some(Some(p)) = &self.claude_path {
             check_claude_path(p)?;
         }
-        if let Some(Some(w)) = &self.window
-            && (w.w < 360 || w.h < 480)
+        if let Some(w) = self.dock.and_then(|d| d.width)
+            && !(DOCK_MIN..=DOCK_MAX).contains(&w)
         {
             return Err(CoreError::invalid(
-                "window",
-                "the chat window is at least 360×480 (FR-PRM-21)",
+                "dock",
+                format!("the chat dock is {DOCK_MIN}–{DOCK_MAX} px wide (FR-PRM-21)"),
             ));
         }
         Ok(())
@@ -751,7 +772,7 @@ impl Validate for ChatSettingsInput {
 }
 
 /// `prm_chat_settings_put`: Settings → Prompt chat (on/off, the Claude Code path) and the
-/// window's remembered rect. Consent is never set here. Turning the chat off ends any running
+/// dock's remembered state (#61). Consent is never set here. Turning the chat off ends any running
 /// process and keeps the thread (FR-PRM-20).
 pub struct PrmChatSettingsPut;
 
@@ -761,9 +782,8 @@ impl Command for PrmChatSettingsPut {
     type Output = ChatStatus;
 
     fn run(core: &Core, input: ChatSettingsInput) -> CoreResult<ChatStatus> {
-        // The window's rect alone (saved as the chat window closes, on the main thread):
-        // nothing to detect or announce (code review 14).
-        let window_only = input.enabled.is_none() && input.claude_path.is_none();
+        // The dock's state alone (a toggle, a resize): nothing to detect or announce.
+        let dock_only = input.enabled.is_none() && input.claude_path.is_none();
         let (turned_off, path_changed) = {
             let mut state = core.state();
             let mut next = state.settings.clone();
@@ -776,8 +796,15 @@ impl Command for PrmChatSettingsPut {
             if let Some(p) = input.claude_path {
                 c.claude_path = p.map(|p| p.trim().to_owned()).filter(|p| !p.is_empty());
             }
-            if let Some(w) = input.window {
-                c.window = w;
+            if let Some(d) = input.dock {
+                let mut dock = c.dock.unwrap_or_default();
+                if let Some(open) = d.open {
+                    dock.open = open;
+                }
+                if let Some(width) = d.width {
+                    dock.width = width;
+                }
+                c.dock = Some(dock);
             }
             let out = (was_on && !c.enabled, old_path != c.claude_path);
             settings::save(&core.ctx, &next)?;
@@ -788,7 +815,7 @@ impl Command for PrmChatSettingsPut {
             core.chat.clear_status();
             core.chat.end_session();
         }
-        if window_only {
+        if dock_only {
             return Ok(status_without_process(core));
         }
         let st = status(core, false);
@@ -828,8 +855,9 @@ impl Command for PrmChatLogout {
     }
 }
 
-/// `prm_chat_session_end`: the chat window closed (FR-PRM-35). The next turn starts a fresh
-/// session.
+/// `prm_chat_session_end`: ends the backend session (FR-PRM-35); the next turn starts a fresh
+/// one. Kept for the MCP endpoint and tests; the chat panel doesn't call it (#61: hiding the
+/// panel keeps the session).
 pub struct PrmChatSessionEnd;
 
 impl Command for PrmChatSessionEnd {
@@ -1036,6 +1064,119 @@ impl Command for PrmChatThreadGet {
             unsaved_turn_ids,
         })
     }
+}
+
+/// `prm_chat_thread_new`'s output: the thread now shown, or `null` when nothing changed (the
+/// shown thread has no turns yet, or there is none).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ThreadNewOutput {
+    pub thread_id: Option<Ulid>,
+}
+
+/// `prm_chat_thread_new` (#61, FR-PRM-46): New chat. A fresh thread replaces the shown one;
+/// the old file stays in `.pforge/chat/`, hidden and never swept. Refused (`busy`) while a
+/// turn runs. A thread without turns is kept as it is.
+pub struct PrmChatThreadNew;
+
+impl Command for PrmChatThreadNew {
+    const NAME: &'static str = "prm_chat_thread_new";
+    type Input = ProjectInput;
+    type Output = ThreadNewOutput;
+
+    fn run(core: &Core, input: ProjectInput) -> CoreResult<ThreadNewOutput> {
+        let thread_id = new_thread(core, input.project_id, None)?;
+        Ok(ThreadNewOutput { thread_id })
+    }
+}
+
+/// #61 (FR-PRM-47): after a region edit is accepted, a generated image is picked or a dropped
+/// image becomes the base image (FR-PRJ-55), the core starts a fresh thread, only when the shown one has turns. Skipped while a turn runs: the
+/// reply goes on in the thread it was asked in. Never fails the commit that called it.
+pub(crate) fn start_after_commit(
+    core: &Core,
+    project_id: Ulid,
+    reason: thread::StartReason,
+    revision_id: Ulid,
+    seq: u64,
+) {
+    let after = thread::StartedAfter {
+        reason,
+        revision_id,
+        seq,
+    };
+    match new_thread(core, project_id, Some(after)) {
+        Ok(_) => {}
+        Err(e) if e.code == ErrorCode::Busy => {}
+        Err(e) => tracing::warn!(error = %e, "no new chat thread after the commit"),
+    }
+}
+
+/// `prm:chat-thread` (#61): the project's shown thread changed (New chat, or after an accept
+/// or a pick); an open panel reloads it.
+pub const EVENT_THREAD: &str = "prm:chat-thread";
+
+/// Starts a fresh thread for the project (#61): the shown thread is retired (kept, hidden),
+/// the new one names it and why it started, and the backend session ends so the next turn
+/// starts fresh (FR-PRM-35). `Ok(None)`: the shown thread has no turns, nothing changed. A
+/// read-only project's new thread lives in memory (R94); a writable one's is written, or kept
+/// in memory while the file can't be written (§11).
+fn new_thread(
+    core: &Core,
+    pid: Ulid,
+    started_after: Option<thread::StartedAfter>,
+) -> CoreResult<Option<Ulid>> {
+    let (dir, read_only) = open_project(core, pid)?;
+    let _io = lock(&core.chat.thread_io);
+    if lock(&core.chat.rt).running.is_some() {
+        return Err(CoreError::new(
+            ErrorCode::Busy,
+            "wait for the reply to finish, or stop it, before starting a new chat",
+        ));
+    }
+    let memory = lock(&core.chat.rt).memory_of(pid).map(|(t, _)| t);
+    let Some(mut old) = memory.or_else(|| thread::load(&core.ctx, &dir, !read_only, &[]).thread)
+    else {
+        return Ok(None);
+    };
+    if old.turns.is_empty() {
+        return Ok(None);
+    }
+    let now = core.ctx.now();
+    let mut next = Thread::new(core.ctx.new_id(), now, backend_name(core.ctx.chat.mode));
+    next.previous_thread_id = Some(old.id);
+    next.started_after = started_after;
+    if read_only {
+        lock(&core.chat.rt).memory = Some(MemoryThread {
+            project_id: pid,
+            thread: next.clone(),
+            unsaved: Vec::new(),
+        });
+    } else {
+        // The old file keeps its turns and its `updated_at`; `retired_at` hides it. The new
+        // thread's `previous_thread_id` hides it too, should this write fail.
+        old.retired_at = Some(now);
+        if let Err(e) = thread::save(&core.ctx, &dir, &old) {
+            tracing::warn!(error = %e, "the old chat thread wasn't marked retired");
+        }
+        let saved = thread::save(&core.ctx, &dir, &next).is_ok();
+        let mut rt = lock(&core.chat.rt);
+        rt.memory = (!saved).then(|| MemoryThread {
+            project_id: pid,
+            thread: next.clone(),
+            unsaved: Vec::new(),
+        });
+    }
+    // The new chat doesn't carry the old conversation: its first turn starts a fresh session.
+    core.chat.close_detached(Some(pid));
+    core.ctx.emit(
+        EVENT_THREAD,
+        json!({
+            "project_id": pid,
+            "thread_id": next.id,
+            "started_after": next.started_after,
+        }),
+    );
+    Ok(Some(next.id))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1660,12 +1801,9 @@ impl TurnJob {
                     .memory_of(self.project_id)
                     .filter(|(t, _)| t.id == self.thread.id);
                 let (base, unsaved) = memory.unzip();
+                // By id: the turn finishes into the thread it was sent in, shown or not (#61).
                 let mut thread = base
-                    .or_else(|| {
-                        thread::load(&self.ctx, &self.project_dir, self.writable, &live)
-                            .thread
-                            .filter(|t| t.id == self.thread.id)
-                    })
+                    .or_else(|| thread::load_id(&self.project_dir, self.thread.id, &live))
                     .unwrap_or_else(|| self.thread.clone());
                 finish(&mut thread);
                 let ok = thread::save(&self.ctx, &self.project_dir, &thread).is_ok();

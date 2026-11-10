@@ -111,12 +111,12 @@
     "allow-rgn-iteration-discard-all-undo",
     "allow-project-base-from-file",
     "allow-app-ready",
-    "allow-prm-window-open",
     "allow-prm-chat-login",
     "allow-app-close-guard",
     "allow-app-exit",
     "allow-app-close-unguard",
     "allow-app-close-ack",
-    "allow-app-close-asking"
+    "allow-app-close-asking",
+    "allow-prm-chat-thread-new"
   ]
 }

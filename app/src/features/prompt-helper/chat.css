@@ -1,11 +1,81 @@
-/* The prompt chat window (prompt-helper §7). Tokens only (ui-guidelines). */
+/* The prompt chat panel (prompt-helper §7), docked left of the right-hand pane (#61). Tokens
+   only (ui-guidelines). */
+.prm-dock {
+  position: relative;
+  flex: 0 0 auto;
+  max-width: 60vw;
+  min-height: 0;
+  border-left: 1px solid var(--pf-border);
+  background: var(--pf-bg-2);
+}
+
+.prm-dock-resize {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 1;
+}
+
+.prm-dock-resize:hover,
+.prm-dock-resize:active {
+  background: var(--pf-accent);
+  opacity: 0.4;
+}
+
+.prm-dock-toggle {
+  font-size: 11px;
+  padding: 0 var(--pf-space-2);
+}
+
+.prm-dock-toggle.is-on {
+  color: var(--pf-accent);
+  border-color: var(--pf-accent);
+}
+
 .prm-chat {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
+  min-height: 0;
   box-sizing: border-box;
   background: var(--pf-bg-2);
   color: var(--pf-text);
+}
+
+.prm-chat-new {
+  order: 98;
+  margin-left: auto;
+  font-size: 11px;
+  padding: 0 var(--pf-space-2);
+}
+
+.prm-chat-head:has(.prm-chat-new) .prm-chat-close {
+  margin-left: 0;
+}
+
+.prm-chat-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-space-2);
+  font-size: 11px;
+  color: var(--pf-text-dim);
+}
+
+.prm-chat-divider::before,
+.prm-chat-divider::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--pf-border);
+}
+
+.prm-chat-close {
+  order: 99;
+  margin-left: auto;
+  padding: 0 var(--pf-space-2);
+  line-height: 1.2;
 }
 
 .prm-chat-head {

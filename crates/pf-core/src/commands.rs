@@ -996,7 +996,20 @@ impl Command for ProjectBaseFromFile {
         let p = state.project.as_mut().ok_or_else(no_project)?;
         project::require_folder(p)?;
         p.require_writable()?;
-        project::store::base_from_file(&core.ctx, install_id, p, &PathBuf::from(&input.path))
+        let out =
+            project::store::base_from_file(&core.ctx, install_id, p, &PathBuf::from(&input.path))?;
+        let project_id = p.manifest.project_id;
+        let seq = project::revision_seq(p, out.revision_id);
+        drop(state);
+        // #61: like an accept or a pick, the chat starts a fresh thread (PRM FR-PRM-47).
+        crate::prompt::chat::start_after_commit(
+            core,
+            project_id,
+            crate::prompt::chat::thread::StartReason::Dropped,
+            out.revision_id,
+            seq,
+        );
+        Ok(out)
     }
 }
 
@@ -1180,7 +1193,7 @@ pub use crate::prompt::commands::{
 pub use crate::prompt::chat::{
     PrmChatCancel, PrmChatConsent, PrmChatFakeSetCase, PrmChatInsert, PrmChatLogout,
     PrmChatPreview, PrmChatSend, PrmChatSessionEnd, PrmChatSettingsPut, PrmChatStatus,
-    PrmChatThreadGet, PrmContextClear, PrmContextPublish,
+    PrmChatThreadGet, PrmChatThreadNew, PrmContextClear, PrmContextPublish,
 };
 
 // ---------------------------------------------------------------- new-asset generation
@@ -1308,6 +1321,7 @@ registry![
     RgnIterationDiscardAll,
     RgnIterationDiscardAllUndo,
     ProjectBaseFromFile,
+    PrmChatThreadNew,
 ];
 
 #[cfg(test)]

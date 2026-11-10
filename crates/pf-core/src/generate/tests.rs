@@ -1784,3 +1784,44 @@ fn fr_gen_34_a_conflict_during_a_generate_job_spools_the_candidates_and_replays(
         json!(cands[0].id)
     );
 }
+
+/// #61 (PRM FR-PRM-47): picking a generated image starts a fresh chat thread when the shown
+/// thread has turns, with `started_after{picked, the pick's revision}` for the divider.
+#[test]
+fn fr_prm_47_a_pick_starts_a_new_chat_thread_when_the_thread_has_turns() {
+    use crate::prompt::chat::thread::{self, StartReason};
+    let g = G::empty("maps", "Crypt");
+    let job = g.run(&g.two("Flooded crypt"));
+    let c = g.cands(job);
+    let pid = g.snapshot()["project_id"].clone();
+    // A thread with one turn, as a send writes it.
+    let old = Ulid::from(7u128);
+    let at = crate::time::Timestamp(0);
+    let mut file = thread::Thread::new(old, at, "fake");
+    file.turns.push(
+        serde_json::from_value(json!({"id": Ulid::from(8u128), "at": at, "role": "user",
+            "host": "gen", "text": "a crypt", "state": "done"}))
+        .unwrap(),
+    );
+    std::fs::create_dir_all(thread::chat_dir(&g.lab.project_dir)).unwrap();
+    std::fs::write(
+        thread::thread_path(&g.lab.project_dir, old),
+        serde_json::to_vec(&file).unwrap(),
+    )
+    .unwrap();
+    let out = g.pick(job, c[0]).unwrap();
+    let view = g
+        .dispatch("prm_chat_thread_get", json!({"project_id": pid}))
+        .unwrap();
+    let shown: thread::Thread = serde_json::from_value(view["thread"].clone()).unwrap();
+    assert_ne!(shown.id, old);
+    assert_eq!(shown.previous_thread_id, Some(old));
+    let after = shown.started_after.expect("started_after");
+    assert_eq!(after.reason, StartReason::Picked);
+    assert_eq!(json!(after.revision_id), out["revision_id"]);
+    assert!(after.seq > 0);
+    assert!(
+        thread::load_id(&g.lab.project_dir, old, &[]).is_some(),
+        "kept"
+    );
+}

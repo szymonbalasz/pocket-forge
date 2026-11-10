@@ -74,13 +74,32 @@ pub struct ChatConsent {
     pub notice_version: u32,
 }
 
-/// The chat window's size and position (FR-PRM-21), per machine.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct ChatWindowRect {
-    pub x: i32,
-    pub y: i32,
-    pub w: u32,
-    pub h: u32,
+/// The chat dock (FR-PRM-21, #61), per machine: open or closed, and its width in px. An old
+/// `window{x, y, w, h}` from the chat window is kept as an unknown field and ignored.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatDock {
+    #[serde(default)]
+    pub open: bool,
+    #[serde(default = "dock_width")]
+    pub width: u32,
+}
+
+/// FR-PRM-21: the dock's width limits and its first-run width.
+pub const DOCK_MIN: u32 = 320;
+pub const DOCK_MAX: u32 = 720;
+pub const DOCK_DEFAULT: u32 = 400;
+
+fn dock_width() -> u32 {
+    DOCK_DEFAULT
+}
+
+impl Default for ChatDock {
+    fn default() -> Self {
+        ChatDock {
+            open: false,
+            width: DOCK_DEFAULT,
+        }
+    }
 }
 
 /// `prompt_chat` (PRM §8): absent = off, not consented.
@@ -94,7 +113,7 @@ pub struct PromptChatSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claude_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub window: Option<ChatWindowRect>,
+    pub dock: Option<ChatDock>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }

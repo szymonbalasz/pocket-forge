@@ -10,6 +10,7 @@ import { Popover, Tooltip } from 'radix-ui';
 import { api, onEvent, type ComposePreview, type ProjectKind, type PromptHelper } from '../../api';
 import { chatContext } from '../../shared/chatContext';
 import { projectStore } from '../../store/project';
+import { setDockOpen } from './dock';
 import {
   PLACEHOLDER,
   TIPS,
@@ -158,15 +159,15 @@ export function PromptBlock(props: PromptBlockProps) {
         awaitingPrompt={!!props.required && prompt.trim() === ''}
       />
       <div className="prm-block-actions">
-        {/* FR-PRM-21: opens or focuses the chat window; the block's context is published
-            first (FR-PRM-23). */}
+        {/* FR-PRM-21 (#61): opens the chat panel; the block's context is published first
+            (FR-PRM-23). */}
         <button
           type="button"
           data-testid="prm-block-chat"
-          aria-label="Chat about this prompt (opens the chat window)"
+          aria-label="Chat about this prompt (opens the chat panel)"
           onClick={() => {
             void chatContext.flush();
-            void api.chat.openWindow().catch(() => undefined);
+            setDockOpen(true);
           }}
         >
           Chat

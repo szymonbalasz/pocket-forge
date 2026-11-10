@@ -1,13 +1,15 @@
 // The window layout (ui-guidelines § Layout, #44–#46): section rail · left panel · toolbar +
-// canvas · bottom strip · status bar · right panel. Each slot renders the registered features
-// for it (shell/features.ts); a feature never renders into another feature's slot.
+// canvas · bottom strip · status bar · dock · right panel. Each slot renders the registered
+// features for it (shell/features.ts); a feature never renders into another feature's slot.
 //
-//   ┌────┬───────────┬─────────┬──────────────────┬─────────────┐
-//   │rail│ left      │ toolbar │ canvas           │ right       │
-//   │    │           ├─────────┴──────────────────┤             │
-//   │    │           │ bottom                     │             │
-//   │    │           │ status                     │             │
-//   └────┴───────────┴────────────────────────────┴─────────────┘
+//   ┌────┬───────────┬─────────┬──────────────────┬──────┬─────────────┐
+//   │rail│ left      │ toolbar │ canvas           │ dock │ right       │
+//   │    │           ├─────────┴──────────────────┤      │             │
+//   │    │           │ bottom                     │      │             │
+//   │    │           │ status                     │      │             │
+//   └────┴───────────┴────────────────────────────┴──────┴─────────────┘
+//
+// The dock (#61: the prompt chat) renders its own panel, sizes it and hides it.
 //
 // The right panel collapses while every component in it reports idle (`shared/slot.ts`), e.g. on
 // Home with no project open (BL-15).
@@ -180,6 +182,7 @@ export function Layout({
         )}
         <StatusBar features={features} />
       </div>
+      {has('dock') && <SlotView features={features} slot="dock" />}
       {has('right') && (
         <aside className="pf-right" data-testid="app-slot-right" hidden={right.idle}>
           {right.view}

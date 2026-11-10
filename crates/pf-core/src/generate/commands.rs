@@ -764,6 +764,17 @@ impl Command for GenCandidatePick {
         if let Ok(j) = crate::project::store::job(p, input.job_id) {
             crate::region_edit::runner::emit_state(&core.ctx, j, None);
         }
+        let project_id = p.manifest.project_id;
+        let seq = crate::project::revision_seq(p, out.revision_id);
+        drop(state);
+        // #61: the chat starts a fresh thread after a pick (PRM FR-PRM-47).
+        crate::prompt::chat::start_after_commit(
+            core,
+            project_id,
+            crate::prompt::chat::thread::StartReason::Picked,
+            out.revision_id,
+            seq,
+        );
         Ok(out)
     }
 }

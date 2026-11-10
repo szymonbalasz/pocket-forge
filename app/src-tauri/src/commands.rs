@@ -25,8 +25,7 @@ macro_rules! tauri_commands {
             tauri::generate_handler![
                 $($name,)*
                 crate::app_ready,
-                crate::chat_window::prm_window_open,
-                crate::chat_window::prm_chat_login,
+                crate::chat::prm_chat_login,
                 crate::app_close_guard,
                 crate::app_exit,
                 crate::app_close_unguard,
@@ -144,6 +143,7 @@ tauri_commands! {
     rgn_iteration_discard_all => c::RgnIterationDiscardAll,
     rgn_iteration_discard_all_undo => c::RgnIterationDiscardAllUndo,
     project_base_from_file => c::ProjectBaseFromFile,
+    prm_chat_thread_new => c::PrmChatThreadNew,
 }
 
 #[cfg(test)]
