@@ -14,7 +14,6 @@
     "dev": "node scripts/dev.mjs",
     "dev:real": "node scripts/dev.mjs --real",
     "tauri:smoke": "node scripts/tauri-smoke.mjs",
-    "app:install": "node scripts/install-local.mjs",
     "fixtures": "node fixtures/gen/gen-fixtures.mjs",
     "check:crates": "node scripts/check-crate-deps.mjs"
   }

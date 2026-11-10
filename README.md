@@ -18,15 +18,6 @@ corepack pnpm tauri:smoke   # build the app and check the window loads
 corepack pnpm fixtures      # generate fixture images into fixtures/generated/
 ```
 
-## Install a local build (Windows)
-
-```sh
-corepack pnpm app:install          # release build → %LOCALAPPDATA%\Programs\Pocket Forge, plus Desktop and Start menu shortcuts
-corepack pnpm app:install --hook   # also rebuild and reinstall in the background after every merge or pull on main
-```
-
-The installed app is a release build: it uses Scenario and the real prompt chat, and keeps its data apart from dev runs. A running app is never interrupted; the new build starts on the next launch. A failed build leaves the installed app as it was (see `install.log` in the install folder). `--unhook` removes the hook.
-
 Build conventions: [AGENTS.md §9](AGENTS.md#9-build-conventions).
 
 - Vision: [docs/vision.md](docs/vision.md)
