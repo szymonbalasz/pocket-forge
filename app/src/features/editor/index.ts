@@ -8,7 +8,7 @@ export const editorFeature: Feature = {
   id: 'editor',
   prefix: 'edt',
   slots: { toolbar: EditorToolbar, canvas: EditorPanel, bottom: EditorPicker },
-  status: [{ id: 'view', priority: 10, Component: EditorStatus }],
+  status: [{ id: 'view', priority: 10, drop: 3, Component: EditorStatus }],
 };
 
 // Shared with other features (FR-EDT-23, R19): the session undo stack and the candidate picker.

@@ -14,6 +14,7 @@ import { ChatSettings } from './ChatSettings';
 import { installChatSink } from './chatSink';
 import { resetDockStore } from './dock';
 import { chatContext } from '../../shared/chatContext';
+import { setDockRoom } from '../../shared/dockRoom';
 import { projectStore } from '../../store/project';
 import { mockPrm, TestHost } from './testUtils';
 
@@ -740,4 +741,34 @@ test('FR-PRM-47 #61 a fresh thread after an accept reloads the panel with its di
     expect(id('prm-chat-divider').textContent).toBe('New chat after accepting r12'),
   );
   expect(screen.queryAllByTestId('prm-chat-proposal')).toHaveLength(0);
+});
+
+test('FR-PRM-21 walk-61 L1 the dock never squeezes the canvas: it narrows with the window, the remembered width stays', async () => {
+  setup({ chat: { consent: true, dockOpen: true } });
+  await api.chat.settingsPut({ dock: { width: 600 } });
+  const before = fake.callsOf('prm_chat_settings_put').length;
+  render(<ChatDock />);
+  await waitFor(() => expect(id('prm-chat-input')).toBeTruthy());
+  const dock = id('prm-dock') as HTMLElement;
+  expect(dock.style.width).toBe('600px');
+  // The window shrinks: the canvas keeps its 480 px, so the dock gets 450.
+  act(() => setDockRoom(450));
+  expect(dock.style.width).toBe('450px');
+  expect(id('prm-dock-resize').getAttribute('aria-valuemax')).toBe('450');
+  // Even less room: the dock still opens at its minimum.
+  act(() => setDockRoom(100));
+  expect(dock.style.width).toBe('320px');
+  // The window grows again: back to the user's width; nothing was saved meanwhile.
+  act(() => setDockRoom(900));
+  expect(dock.style.width).toBe('600px');
+  expect(fake.callsOf('prm_chat_settings_put')).toHaveLength(before);
+  // A drag stops at what the window allows.
+  act(() => setDockRoom(500));
+  const handle = id('prm-dock-resize');
+  fireEvent.pointerDown(handle, { clientX: 1000, pointerId: 1 });
+  fireEvent.pointerMove(handle, { clientX: 700, pointerId: 1 });
+  expect(dock.style.width).toBe('500px');
+  fireEvent.pointerUp(handle, { pointerId: 1 });
+  expect(fake.callsOf('prm_chat_settings_put').at(-1)).toEqual({ dock: { width: 500 } });
+  act(() => setDockRoom(null));
 });

@@ -10,7 +10,7 @@ export const regionEditFeature: Feature = {
   prefix: 'rgn',
   slots: { right: GeneratePanel, bottom: IterationTracker },
   // After the project's save state (50), before the provider chip (90).
-  status: [{ id: 'job', priority: 60, Component: JobStatus }],
+  status: [{ id: 'job', priority: 60, drop: 2, Component: JobStatus }],
 };
 
 // #55: the blend instruction text, in the settings dialog.
