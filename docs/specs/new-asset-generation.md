@@ -127,7 +127,7 @@ PRJ owns storage and commits; fields go into [manifest-schema](../architecture/m
 | `gen_candidate_preview` | job, candidate → `{key, rect, same_size}` | `invalid_candidate`, `not_found` |
 | `gen_candidate_pick` | job, candidate → `{layer_id, revision_id}` | `invalid_candidate`, `not_found`, `wrong_operation`, `job_active` (R97) |
 
-- **Reused as is:** `rgn_job_cancel`, `rgn_job_dismiss`, `rgn_job_discard_rest`, `rgn_candidate_star` / `_discard`, `rgn_iterations_list` (rows gain `operation`), `rgn_spend_get` / `_set`; PRJ `project_folder_list` / `_add`, `project_restore_revision`; REF `ref_resolve` and `prepare_for_send`; EDT `register_transient_image`.
+- **Reused as is:** `rgn_job_cancel`, `rgn_job_dismiss`, `rgn_job_discard_rest`, `rgn_iteration_discard_all` / `_undo` (#61), `rgn_candidate_star` / `_discard`, `rgn_iterations_list` (rows gain `operation`), `rgn_spend_get` / `_set`; PRJ `project_folder_list` / `_add`, `project_restore_revision`; REF `ref_resolve` and `prepare_for_send`; EDT `register_transient_image`.
 - **Rust API:** `GenContextSource` implements PRM's `ChatContextSource` (FR-GEN-17). **Uses** PRM's `prompt::compose` and `prm_context_publish` / `_clear`.
 - **Events:** RGN's `rgn:job-state`, `rgn:candidate-ready`, `rgn:spend`; PRJ's `project:committed`, `project:thumb-updated`.
 
