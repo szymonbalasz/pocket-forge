@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
-import type { ChatStatus, ChatTurn, PromptHelper } from '../../api';
-import { billsApiKey, fixWorthShowing, replySegments, usageLabel } from './chatLogic';
+import type { ChatStatus, ChatThread, ChatTurn, PromptHelper } from '../../api';
+import { billsApiKey, dividerText, fixWorthShowing, replySegments, usageLabel } from './chatLogic';
 import { effectiveTicks, fieldError, moveWithin, rowHelpers, toggleTick } from './logic';
 
 const h = (id: string, patch: Partial<PromptHelper> = {}): PromptHelper => ({
@@ -108,4 +108,32 @@ describe('FR-PRM-38 usage', () => {
     expect(billsApiKey(ok(null))).toBe(false);
     expect(billsApiKey(st({ state: 'not_checked' } as never))).toBe(false);
   });
+});
+
+test('FR-PRM-47 #61 the divider says why a thread started', () => {
+  const t = (extra: object) =>
+    ({
+      schema_version: 1,
+      id: 't',
+      created_at: '',
+      updated_at: '',
+      backend: 'fake',
+      turns: [],
+      ...extra,
+    }) as ChatThread;
+  expect(dividerText(t({}))).toBeNull();
+  expect(dividerText(t({ previous_thread_id: 'a' }))).toBe('New chat');
+  expect(
+    dividerText(
+      t({
+        previous_thread_id: 'a',
+        started_after: { reason: 'accepted', revision_id: 'r', seq: 12 },
+      }),
+    ),
+  ).toBe('New chat after accepting r12');
+  expect(
+    dividerText(
+      t({ previous_thread_id: 'a', started_after: { reason: 'picked', revision_id: 'r', seq: 3 } }),
+    ),
+  ).toBe('New chat after picking r3');
 });

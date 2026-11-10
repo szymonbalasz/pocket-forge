@@ -1,5 +1,14 @@
 // Pure helpers for the chat window (prompt-helper §7, PRM slice 6).
-import type { ChatBackendStatus, ChatHostId, ChatStatus, ChatTurn } from '../../api';
+import type { ChatBackendStatus, ChatHostId, ChatStatus, ChatThread, ChatTurn } from '../../api';
+
+/** #61: the one-line divider at the top of a thread that replaced another: why it started
+ *  (FR-PRM-47, "New chat after accepting r12"), or "New chat" after the button; none for the
+ *  project's first thread. */
+export function dividerText(t: ChatThread): string | null {
+  const a = t.started_after;
+  if (a) return `New chat after ${a.reason === 'picked' ? 'picking' : 'accepting'} r${a.seq}`;
+  return t.previous_thread_id ? 'New chat' : null;
+}
 
 export const HOST_LABEL: Record<ChatHostId, string> = {
   rgn: 'Region edit',

@@ -395,6 +395,8 @@ export const api = {
     contextClear: (projectId: string, host: ChatHostId) =>
       call('prm_context_clear', { project_id: projectId, host }),
     thread: (projectId: string) => call('prm_chat_thread_get', { project_id: projectId }),
+    /** New chat (#61, FR-PRM-46). */
+    threadNew: (projectId: string) => call('prm_chat_thread_new', { project_id: projectId }),
     send: (projectId: string, text: string, includeImages = true) =>
       call('prm_chat_send', { project_id: projectId, text, include_images: includeImages }),
     cancel: (turnId: string) => call('prm_chat_cancel', { turn_id: turnId }),

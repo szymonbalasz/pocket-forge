@@ -285,7 +285,10 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
     dock: { open: seed.chat?.dockOpen ?? false, width: 400 },
     seq: 0,
     contexts: new Map<string, { seq: number; input: unknown }>(),
-    threads: new Map<string, { id: string; turns: Turn[]; updated_at: string }>(),
+    threads: new Map<
+      string,
+      { id: string; turns: Turn[]; updated_at: string; previous?: string; after?: Rec }
+    >(),
     running: null as null | { turnId: string; projectId: string; cancel: () => void },
     session: null as null | string,
     /** §7 / R94: turns sent on a read-only project (kept in memory only). */
@@ -477,6 +480,8 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
               updated_at: t.updated_at,
               backend: 'fake',
               turns: t.turns,
+              ...(t.previous ? { previous_thread_id: t.previous } : {}),
+              ...(t.after ? { started_after: t.after } : {}),
             }
           : null,
         // As the core: only this project's turn (another project's turn still holds the slot).
@@ -500,6 +505,22 @@ export function installPrmMock(seed: PrmMockSeed = {}): void {
       }),
     );
   };
+  // #61 (FR-PRM-46/47): a fresh thread replaces the shown one, as the core.
+  const newThread = (pid: string, after?: Rec): string | null => {
+    const old = chat.threads.get(pid);
+    if (!old || old.turns.length === 0) return null;
+    const t = { id: chatId(), turns: [], updated_at: now(), previous: old.id, after };
+    chat.threads.set(pid, t);
+    if (chat.session === pid) chat.session = null;
+    emit('prm:chat-thread', { project_id: pid, thread_id: t.id, started_after: after ?? null });
+    return t.id;
+  };
+  handlers.prm_chat_thread_new = (input) => {
+    if (chat.running) return fail('busy', 'wait for the reply to finish, or stop it');
+    return { thread_id: newThread(String(input.project_id)) };
+  };
+  /** Test seam: what the core does after an accept or a pick (FR-PRM-47). */
+  w.__pfPrmStartAfter = (pid: string, after: Rec) => (chat.running ? null : newThread(pid, after));
   handlers.prm_chat_send = (input) => {
     const pid = String(input.project_id);
     const text = String(input.text ?? '').trim();

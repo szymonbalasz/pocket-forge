@@ -5,7 +5,7 @@
 // Recheck, no project, no prompt block, running, errors with Retry, offline, read-only, fake. It
 // follows the open project and host through `prm:chat-context` (BL-41), refreshes the strip
 // after each context publish (R103) and re-detects on window focus while it is shown.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 
 import {
   api,
@@ -20,6 +20,7 @@ import {
 import {
   backendChip,
   billsApiKey,
+  dividerText,
   HOST_LABEL,
   loginNote,
   fixWorthShowing,
@@ -227,6 +228,10 @@ export function ChatPanel({
       }),
       // L2 / L6: detection, settings and consent changes are followed without a refocus.
       onEvent('prm:chat-status', (p) => setStatus((s) => (s ? { ...s, ...p } : s))),
+      // #61: New chat, or a fresh thread after an accept or a pick.
+      onEvent('prm:chat-thread', (t) => {
+        if (t.project_id === pidRef.current) void loadThread(t.project_id);
+      }),
       // BL-41: a project opened, closed or switched, or the visible tab changed.
       onEvent('prm:chat-context', (c) => {
         if (c.project_id !== pidRef.current) void loadProject();
@@ -275,6 +280,19 @@ export function ChatPanel({
     }
   };
 
+  /** #61 (FR-PRM-46): New chat. */
+  const newChat = async () => {
+    if (!pid || sendingRef.current) return;
+    setProblem(null);
+    try {
+      await api.chat.threadNew(pid);
+      setNotSaved(false);
+      await loadThread(pid);
+    } catch (e) {
+      setProblem(problemOf(e));
+    }
+  };
+
   const replace = async (p: ChatProposal) => {
     if (!pid) return;
     setProblem(null);
@@ -294,7 +312,7 @@ export function ChatPanel({
     );
 
   const fake = status.mode === 'fake';
-  const header = (
+  const header = (extra?: ReactNode) => (
     <header className="prm-chat-head">
       {onClose && (
         <button
@@ -321,13 +339,14 @@ export function ChatPanel({
           Fake chat
         </span>
       )}
+      {extra}
     </header>
   );
 
   if (!status.consent)
     return (
       <section className="prm-chat" data-testid="prm-chat">
-        {header}
+        {header()}
         <section className="prm-chat-notice" aria-label="Privacy notice">
           <p>
             <strong>{PRIVACY_NOTICE[0]}</strong> {PRIVACY_NOTICE[1]}
@@ -362,7 +381,7 @@ export function ChatPanel({
   if (!status.enabled)
     return (
       <section className="prm-chat" data-testid="prm-chat">
-        {header}
+        {header()}
         <section className="prm-chat-notice">
           <p>Prompt chat is off.</p>
           <button
@@ -385,7 +404,7 @@ export function ChatPanel({
   if (b.state === 'error')
     return (
       <section className="prm-chat" data-testid="prm-chat">
-        {header}
+        {header()}
         <section className="prm-chat-notice" role="alert">
           <p>{b.message}</p>
           <p className="muted">{b.fix}</p>
@@ -427,7 +446,7 @@ export function ChatPanel({
   if (!project)
     return (
       <section className="prm-chat" data-testid="prm-chat">
-        {header}
+        {header()}
         <p className="prm-chat-empty" data-testid="prm-chat-no-project">
           Open a project to chat about it.
         </p>
@@ -450,10 +469,24 @@ export function ChatPanel({
       : busyElsewhere
         ? { reason: 'elsewhere', text: ELSEWHERE_REASON }
         : null;
+  const divider = view?.thread ? dividerText(view.thread) : null;
+  // #61: New chat, disabled while a turn is sent or streams (the core refuses it then).
+  const newChatButton = (
+    <button
+      type="button"
+      className="prm-chat-new"
+      data-testid="prm-chat-new"
+      title="Start a new chat; this one is kept in the project"
+      disabled={sending || !!running || turns.length === 0}
+      onClick={() => void newChat()}
+    >
+      New chat
+    </button>
+  );
 
   return (
     <section className="prm-chat" data-testid="prm-chat">
-      {header}
+      {header(newChatButton)}
       <ol
         className="prm-chat-transcript"
         aria-label="Chat"
@@ -464,13 +497,19 @@ export function ChatPanel({
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
         }}
       >
+        {divider && (
+          <li className="prm-chat-divider" data-testid="prm-chat-divider">
+            {divider}
+          </li>
+        )}
         {turns.length === 0 && (
           <li className="prm-chat-empty">Ask for ideas about the prompt of the visible tab.</li>
         )}
-        {turns.map((t) => (
+        {turns.map((t, i) => (
           <TurnView
             key={t.id}
             turn={t}
+            first={i === 0}
             liveText={t.id === live?.turnId ? live.text : null}
             running={t.id === running}
             unsaved={unsaved.has(t.id)}
@@ -653,6 +692,8 @@ function Composer(props: {
 
 function TurnView(props: {
   turn: ChatTurn;
+  /** The thread's first turn: its fresh session is the new chat itself, not worth a note. */
+  first: boolean;
   liveText: string | null;
   running: boolean;
   /** Kept in memory only (read-only project, §7 / R94; a locked thread file, §11). */
@@ -675,7 +716,9 @@ function TurnView(props: {
   if (t.role === 'user')
     return (
       <li className="prm-chat-turn is-user" data-record-id={t.id}>
-        {t.fresh_session && <p className="prm-chat-session muted small">New session</p>}
+        {t.fresh_session && !props.first && (
+          <p className="prm-chat-session muted small">New session</p>
+        )}
         <span className="prm-chat-tag">{HOST_LABEL[t.host]}</span>
         {notSaved}
         <p className="prm-chat-text">{t.text}</p>

@@ -796,6 +796,8 @@ export interface Commands {
   ];
   prm_context_clear: [{ project_id: string; host: ChatHostId }, Record<string, never>];
   prm_chat_thread_get: [{ project_id: string }, ChatThreadView];
+  /** #61 (FR-PRM-46): New chat; `null` when the shown thread has no turns (nothing changed). */
+  prm_chat_thread_new: [{ project_id: string }, { thread_id: string | null }];
   prm_chat_send: [{ project_id: string; text: string; include_images?: boolean }, ChatSendResult];
   prm_chat_cancel: [{ turn_id: string }, Record<string, never>];
   prm_chat_insert: [
@@ -884,6 +886,12 @@ export interface Events {
   'prm:chat-status': { backend: ChatBackendStatus } & Partial<ChatStatus>;
   /** BL-41: the open project or its attached host changed (the chat panel follows it). */
   'prm:chat-context': { project_id: string | null; host: ChatHostId | null };
+  /** #61: the project's shown thread changed (New chat, after an accept or a pick). */
+  'prm:chat-thread': {
+    project_id: string;
+    thread_id: string;
+    started_after: ChatStartedAfter | null;
+  };
   /** Replace (FR-PRM-29): applied only by that host's attached prompt block. */
   'prm:insert': { project_id: string; host: ChatHostId; proposal_id: string; text: string };
 }
@@ -1006,6 +1014,17 @@ export interface ChatThread {
   updated_at: string;
   backend: 'fake' | 'claude-code';
   turns: ChatTurn[];
+  /** #61: the thread this one replaced (New chat, or after an accept or a pick). */
+  previous_thread_id?: string;
+  /** #61: why the core started this thread (the divider, "New chat after accepting r12"). */
+  started_after?: ChatStartedAfter;
+}
+
+/** #61 (FR-PRM-47): the commit after which the core started a thread. */
+export interface ChatStartedAfter {
+  reason: 'accepted' | 'picked';
+  revision_id: string;
+  seq: number;
 }
 
 export interface ChatThreadView {

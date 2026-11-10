@@ -695,3 +695,49 @@ test("BL-42 FR-PRM-23 a send first flushes the visible tab's pending edit", asyn
   expect(fake.callsOf('prm_context_publish').at(-1)!.input).toEqual({ final_prompt: 'edited' });
   chatContext.reset();
 });
+
+test('FR-PRM-46 #61 New chat starts an empty thread with a divider; disabled while a reply streams', async () => {
+  setup({ chat: { consent: true, case: 'slow(5)' } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatPanel />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  // Nothing to replace yet.
+  expect((id('prm-chat-new') as HTMLButtonElement).disabled).toBe(true);
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(id('prm-chat-stop')).toBeTruthy());
+  expect((id('prm-chat-new') as HTMLButtonElement).disabled).toBe(true);
+  await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1), {
+    timeout: 5000,
+  });
+  expect((id('prm-chat-new') as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.queryByTestId('prm-chat-divider')).toBeNull();
+  fireEvent.click(id('prm-chat-new'));
+  await waitFor(() => expect(id('prm-chat-divider').textContent).toBe('New chat'));
+  expect(fake.callsOf('prm_chat_thread_new')).toEqual([{ project_id: PID }]);
+  expect(screen.queryAllByTestId('prm-chat-proposal')).toHaveLength(0);
+  expect((id('prm-chat-new') as HTMLButtonElement).disabled).toBe(true);
+  // The first turn of the new chat carries no "New session" note.
+  await api.chat.fakeSetCase('success');
+  await type('again');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
+  expect(screen.queryByText('New session')).toBeNull();
+});
+
+test('FR-PRM-47 #61 a fresh thread after an accept reloads the panel with its divider', async () => {
+  setup({ chat: { consent: true } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatPanel />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
+  const startAfter = (window as unknown as { __pfPrmStartAfter: (p: string, a: object) => void })
+    .__pfPrmStartAfter;
+  act(() => startAfter(PID, { reason: 'accepted', revision_id: 'r', seq: 12 }));
+  await waitFor(() =>
+    expect(id('prm-chat-divider').textContent).toBe('New chat after accepting r12'),
+  );
+  expect(screen.queryAllByTestId('prm-chat-proposal')).toHaveLength(0);
+});
