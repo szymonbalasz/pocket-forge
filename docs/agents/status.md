@@ -82,7 +82,11 @@
 | Regression walk (phase 4) | PASS; 6 low fixed (R103) |
 | Night walk (all fixes) | PASS; 2 med + 4 low fixed (R107, R108) |
 | Review of the night's own fixes | 2 HIGH (X could wedge; X dead after a UI crash) + 5 MED; fixed (R109) |
-| Spec + schema sync | specs follow R96–R109 |
+| R109 walk | PASS; 2 MED fixed (R110: a locked project.json is never a conflict; quit deadline) |
+| Flaky BL-43 | fixed (test timing); chat thread stale-reply guard added |
+| Spec + schema sync | specs follow R96–R110 |
+
+**State (2026-11-10 ~03:30):** everything merged, main CI green, no agents running. Rulings R96–R110 await your confirmation.
 
 **Open owner questions (picks in bold):**
 - Chat child environment (FR-PRM-34): **strip `ANTHROPIC_BASE_URL`/`AUTH_TOKEN`, Bedrock/Vertex switches, `NODE_OPTIONS` and warn at detection** · allow-list · leave as is.
