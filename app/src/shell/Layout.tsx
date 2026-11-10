@@ -6,13 +6,16 @@
 //   │rail│ left      │ toolbar │ canvas           │ dock │ right       │
 //   │    │           ├─────────┴──────────────────┤      │             │
 //   │    │           │ bottom                     │      │             │
-//   │    │           │ status                     │      │             │
-//   └────┴───────────┴────────────────────────────┴──────┴─────────────┘
+//   ├────┴───────────┴────────────────────────────┴──────┴─────────────┤
+//   │ status                                                            │
+//   └───────────────────────────────────────────────────────────────────┘
 //
 // The dock (#61: the prompt chat) renders its own panel, sizes it and hides it. The shell tells it
 // how wide it may get (`shared/dockRoom.ts`): the canvas keeps CANVAS_MIN px (walk-61 L1).
 //
-// The status bar never wraps (walk-61 L1): the `grow` segment truncates, then segments with a
+// The status bar spans the whole window, under every pane (fix-walk61b): at a normal width
+// (>= 1280 px) every segment fits whatever the panels and the dock do. It never wraps (walk-61
+// L1): when the window truly is too narrow, the `grow` segment truncates, then segments with a
 // `drop` rank hide, lowest rank first, until the rest fits.
 //
 // The right panel collapses while every component in it reports idle (`shared/slot.ts`), e.g. on
@@ -116,8 +119,10 @@ function StatusBar({ features }: { features: readonly Feature[] }) {
     const fit = () => fitStatusBar(bar);
     fit();
     window.addEventListener('resize', fit);
+    // The bar, and each segment: a segment can grow without a text change (a font loads).
     const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fit);
     ro?.observe(bar);
+    for (const seg of bar.children) ro?.observe(seg);
     // A segment's text changed (a job's progress, the save state): fit again.
     const mo = typeof MutationObserver === 'undefined' ? null : new MutationObserver(fit);
     mo?.observe(bar, { childList: true, subtree: true, characterData: true });
@@ -225,57 +230,64 @@ export function Layout({
   useDockRoomMeasure(rootRef, [railRef, leftRef, toolbarRef, rightRef], panes);
 
   return (
-    <div className="pf-layout" data-testid="app-shell" ref={rootRef}>
-      <nav className="pf-rail" data-testid="app-slot-rail" aria-label="Sections" ref={railRef}>
-        {has('rail') ? <SlotView features={features} slot="rail" /> : railFallback}
-      </nav>
-      {has('left') && (
-        <aside
-          className="pf-left"
-          data-testid="app-slot-left"
-          style={{ width: left.width }}
-          ref={leftRef}
-        >
-          <div className="pf-left-body">
-            <SlotView features={features} slot="left" />
+    <div className="pf-shell" data-testid="app-shell" ref={rootRef}>
+      <div className="pf-layout">
+        <nav className="pf-rail" data-testid="app-slot-rail" aria-label="Sections" ref={railRef}>
+          {has('rail') ? <SlotView features={features} slot="rail" /> : railFallback}
+        </nav>
+        {has('left') && (
+          <aside
+            className="pf-left"
+            data-testid="app-slot-left"
+            style={{ width: left.width }}
+            ref={leftRef}
+          >
+            <div className="pf-left-body">
+              <SlotView features={features} slot="left" />
+            </div>
+            <div
+              className="pf-resize"
+              role="separator"
+              aria-orientation="vertical"
+              aria-valuemin={LEFT_MIN}
+              aria-valuemax={LEFT_MAX}
+              aria-valuenow={left.width}
+              data-testid="app-left-resize"
+              {...left.handle}
+            />
+          </aside>
+        )}
+        <div className="pf-center">
+          {banners}
+          <div className="pf-work">
+            {has('toolbar') && (
+              <div className="pf-toolbar" data-testid="app-slot-toolbar" ref={toolbarRef}>
+                <SlotView features={features} slot="toolbar" />
+              </div>
+            )}
+            <main className="pf-canvas" data-testid="app-slot-canvas">
+              <SlotView features={features} slot="canvas" />
+            </main>
           </div>
-          <div
-            className="pf-resize"
-            role="separator"
-            aria-orientation="vertical"
-            aria-valuemin={LEFT_MIN}
-            aria-valuemax={LEFT_MAX}
-            aria-valuenow={left.width}
-            data-testid="app-left-resize"
-            {...left.handle}
-          />
-        </aside>
-      )}
-      <div className="pf-center">
-        {banners}
-        <div className="pf-work">
-          {has('toolbar') && (
-            <div className="pf-toolbar" data-testid="app-slot-toolbar" ref={toolbarRef}>
-              <SlotView features={features} slot="toolbar" />
+          {has('bottom') && (
+            <div className="pf-bottom" data-testid="app-slot-bottom">
+              <SlotView features={features} slot="bottom" />
             </div>
           )}
-          <main className="pf-canvas" data-testid="app-slot-canvas">
-            <SlotView features={features} slot="canvas" />
-          </main>
         </div>
-        {has('bottom') && (
-          <div className="pf-bottom" data-testid="app-slot-bottom">
-            <SlotView features={features} slot="bottom" />
-          </div>
+        {has('dock') && <SlotView features={features} slot="dock" />}
+        {has('right') && (
+          <aside
+            className="pf-right"
+            data-testid="app-slot-right"
+            hidden={right.idle}
+            ref={rightRef}
+          >
+            {right.view}
+          </aside>
         )}
-        <StatusBar features={features} />
       </div>
-      {has('dock') && <SlotView features={features} slot="dock" />}
-      {has('right') && (
-        <aside className="pf-right" data-testid="app-slot-right" hidden={right.idle} ref={rightRef}>
-          {right.view}
-        </aside>
-      )}
+      <StatusBar features={features} />
     </div>
   );
 }

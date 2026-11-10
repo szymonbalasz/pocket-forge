@@ -70,3 +70,25 @@ test('FR-PRM-21 walk-61 L1 the dock leaves the canvas 480 px, follows the window
   await page.setViewportSize({ width: 1700, height: 900 });
   await expect.poll(() => width('prm-dock')).toBe(wide);
 });
+
+test('FR-PRM-21 fix-walk61b at 1280 px nothing in the status bar hides, dock closed or open: the bar spans the window', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openRgn(page);
+  const bar = page.getByTestId('app-status-bar');
+  const dropped = bar.locator('[data-dropped]');
+  const barWidth = async () => (await bar.boundingBox())!.width;
+  await expect(page.getByTestId('edt-view-fit')).toBeVisible();
+  await expect(page.getByTestId('app-slot-left')).toBeVisible();
+  await expect(page.getByTestId('app-slot-right')).toBeVisible();
+  expect(await barWidth()).toBe(1280);
+  await expect(dropped).toHaveCount(0);
+  // The dock takes width from the canvas, not from the bar.
+  await page.getByTestId('prm-block-chat').click();
+  await expect(page.getByTestId('prm-dock')).toBeVisible();
+  expect(await barWidth()).toBe(1280);
+  await expect(dropped).toHaveCount(0);
+  await expect(page.getByTestId('edt-view-fit')).toBeVisible();
+  await expect(page.getByTestId('prm-dock-toggle')).toBeVisible();
+});
