@@ -270,6 +270,11 @@ test('FR-PRM-22 §11 an interrupted turn offers Resend; a double click sends onc
   await type('ideas');
   fireEvent.click(id('prm-chat-send'));
   await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
+  // BL-43: the proposal can show while the first send still awaits its own thread reload. Wait
+  // for that send to settle (Send is live again with text typed), so its late reload can't
+  // overwrite the reopened thread below and Resend isn't disabled when clicked.
+  await type('next');
+  await waitFor(() => expect((id('prm-chat-send') as HTMLButtonElement).disabled).toBe(false));
   // The app was killed mid-reply: on reopen the reply reads `interrupted` (§11, R103).
   const w = window as unknown as { __pfMockHandlers: Record<string, (i: never) => unknown> };
   const get = w.__pfMockHandlers.prm_chat_thread_get!;
@@ -280,7 +285,8 @@ test('FR-PRM-22 §11 an interrupted turn offers Resend; a double click sends onc
     return v;
   };
   act(() => fake.emit('prm:chat-context', { project_id: PID, host: 'rgn' }));
-  await waitFor(() => expect(id('prm-chat-resend')).toBeTruthy());
+  // A user can only click an enabled Resend.
+  await waitFor(() => expect((id('prm-chat-resend') as HTMLButtonElement).disabled).toBe(false));
   w.__pfMockHandlers.prm_chat_thread_get = get;
   const resend = id('prm-chat-resend');
   fireEvent.click(resend);
