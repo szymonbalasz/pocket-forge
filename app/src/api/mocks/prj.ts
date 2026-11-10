@@ -40,6 +40,8 @@ export interface PrjMockProject {
   pendingSave?: boolean;
   /** A sync conflict (FR-PRJ-36): `project_conflict_get` returns it; add a `conflict` warning. */
   conflict?: ConflictView;
+  /** A job is running (R97): `project_base_from_file` answers `job_active` (FR-PRJ-55). */
+  jobActive?: boolean;
 }
 
 export interface PrjMockSeed {
@@ -172,6 +174,15 @@ export function prjMock(
       ] as RevisionEntry[],
       dirty: false,
       seq: 1,
+      jobActive: !!p.jobActive,
+      /** FR-PRJ-55: the base image dropped on Working (`working/<name>`), else null. */
+      base: null,
+      /** Revision id → the bottom image it holds, so a restore (undo) brings it back. */
+      bases: {},
+    };
+    (rec.bases as Rec)[(rec.revisions as RevisionEntry[])[0]!.id] = {
+      base: null,
+      noImage: !!p.noImage,
     };
     state.projects.set(path, rec);
     return rec;
@@ -196,16 +207,22 @@ export function prjMock(
 
   const open = (): Rec | null =>
     state.openPath ? (state.projects.get(state.openPath) ?? null) : null;
+  /** Records the bottom image a new revision holds (FR-PRJ-55 undo). */
+  const remember = (p: Rec, revId: string) => {
+    (p.bases as Rec)[revId] = { base: p.base ?? null, noImage: !!p.noImage };
+  };
 
   const snapshot = (p: Rec): Rec => {
     const revisions = p.revisions as RevisionEntry[];
+    const dropped = typeof p.base === 'string' ? p.base : null;
+    const layerId = dropped ? `01JLAYERD${String(dropped.length).padStart(16, '0')}` : null;
     return {
       project_id: p.id,
       kind: KIND[String(p.section)],
       name: p.name,
-      image_path: p.noImage ? null : `${String(p.path)}/working/${String(p.original)}`,
+      image_path: p.noImage ? null : `${String(p.path)}/working/${dropped ?? String(p.original)}`,
       has_image: !p.noImage,
-      original_image_id: p.noImage ? null : '01JLAYER00000000000000000',
+      original_image_id: p.noImage ? null : (layerId ?? '01JLAYER00000000000000000'),
       project_dir: p.path,
       saved: true,
       read_only: p.read_only,
@@ -217,9 +234,9 @@ export function prjMock(
         ? []
         : [
             {
-              id: '01JLAYER00000000000000000',
-              kind: 'original',
-              file: null,
+              id: layerId ?? '01JLAYER00000000000000000',
+              kind: dropped ? 'base' : 'original',
+              file: dropped ? `working/${dropped}` : null,
               cx: seed.image.w / 2,
               cy: seed.image.h / 2,
               scale: 1,
@@ -402,6 +419,7 @@ export function prjMock(
         ...(label ? { label } : {}),
       };
       revs.push(rev);
+      remember(p, rev.id);
       p.dirty = false;
       p.last_edited = seed.now;
       p.seq = Number(p.seq) + 1;
@@ -423,7 +441,15 @@ export function prjMock(
         created_at: seed.now,
         reason: 'restore',
       };
+      const held = (p.bases as Record<string, { base: string | null; noImage: boolean }>)[
+        String(input.rev_id)
+      ];
+      if (held) {
+        p.base = held.base;
+        p.noImage = held.noImage;
+      }
       revs.push(rev);
+      remember(p, rev.id);
       p.seq = Number(p.seq) + 1;
       return rev;
     },
@@ -441,6 +467,9 @@ export function prjMock(
       if (!FOLDERS.includes(folder)) return fail('unknown_folder', `Unknown folder ${folder}`);
       if (p.read_only) return fail('read_only', 'Read-only');
       for (const path of input.paths as string[])
+        if (seed.dirs?.[path] || /missing/i.test(path))
+          return fail('not_found', `${path} is not a file`);
+      for (const path of input.paths as string[])
         state.addUserFile(String(p.path), folder as ProjectFolder, {
           name: base(path),
           bytes: 2048,
@@ -448,6 +477,48 @@ export function prjMock(
           image: IMAGE.test(path),
         });
       return [...((p.folders as Record<string, FolderFile[]>)[folder] ?? [])];
+    },
+    // FR-PRJ-55 (#61): one image dropped on Working becomes the base image (one `accept`
+    // revision). Names in the path pick the creation checks' refusals, as `createOne` does.
+    project_base_from_file: (input) => {
+      const p = open();
+      if (!p) return fail('no_project', 'No asset project is open');
+      if (p.read_only) return fail('read_only', 'Read-only');
+      if (p.jobActive)
+        return fail('job_active', 'a job is running in this project; pick when it has finished');
+      const path = String(input.path);
+      const name = base(path);
+      if (seed.dirs?.[path] || /missing/i.test(name))
+        return fail('not_found', `${path} is not a file`, { field: 'path' });
+      if (/corrupt/i.test(name)) return fail('corrupt', 'the image is damaged');
+      if (/animated/i.test(name)) return fail('animated', 'animated images are not supported');
+      if (/huge/i.test(name)) return fail('too_large', 'the image is larger than 16384 px');
+      if (!IMAGE.test(name)) return fail('unsupported', 'not a PNG, JPEG or WebP image');
+      const working = (p.folders as Record<string, FolderFile[]>).working!;
+      const ext = name.match(/\.[^.]*$/)?.[0]?.toLowerCase() ?? '';
+      let file = `${sanitize(stem(name))}${ext}`;
+      for (let i = 2; working.some((f) => f.name === file); i++)
+        file = `${sanitize(stem(name))} (${i})${ext}`;
+      working.push({ name: file, bytes: 4096, mtime: seed.now, image: true });
+      const revs = p.revisions as RevisionEntry[];
+      const rev: RevisionEntry = {
+        id: nextRev(),
+        seq: revs.length,
+        created_at: seed.now,
+        reason: 'accept',
+        label: `Dropped: ${name.slice(0, 40)}`,
+      };
+      p.base = file;
+      p.noImage = false;
+      revs.push(rev);
+      remember(p, rev.id);
+      p.seq = Number(p.seq) + 1;
+      return {
+        layer_id: `01JLAYERD${String(file.length).padStart(16, '0')}`,
+        revision_id: rev.id,
+        file: `working/${file}`,
+        patches_dropped: 0,
+      };
     },
     project_trash_list: () => [...((open()?.trash as TrashItem[]) ?? [])],
     project_trash_restore: (input) => {

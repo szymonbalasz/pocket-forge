@@ -805,8 +805,8 @@ async function previewGenerate(jobId: string, candId: string): Promise<void> {
 
 /** FR-GEN-29: undo = restore the parent revision, redo = the pick's; then PRJ's snapshot is read
  *  again so the canvas follows the bottom image (or goes back to "No image yet"). */
-function pickUndoEntry(parent: string, later: string): UndoEntry {
-  const e = revisionUndoEntry('Pick new image', parent, later);
+function pickUndoEntry(parent: string, later: string, label = 'Pick new image'): UndoEntry {
+  const e = revisionUndoEntry(label, parent, later);
   return {
     ...e,
     undo: async () => {
@@ -865,6 +865,46 @@ async function pickNow(pid: string | null, jobId: string, candidateId: string): 
   // The snapshot isn't refetched on commit: the canvas and the tab strip follow PRJ's.
   await projectStore.reload();
   await Promise.all([refreshProject(), refreshIterations()]);
+}
+
+/** What a drop on Working did (FR-PRJ-55): the panel words the notice. */
+export type DropResult =
+  { ok: true; file: string; patchesDropped: number } | { ok: false; code: string; message: string };
+
+/** FR-PRJ-55 (#61): one image file dropped on the project panel's Working section becomes the
+ *  bottom image as one undoable revision, exactly as a pick does: queued with picks (FR-GEN-29),
+ *  refused while a job runs (R97) or the project is read-only, undo = restore the parent. */
+export function dropNewImage(path: string): Promise<DropResult> {
+  const run = picking.then(() => dropNow(path));
+  picking = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+async function dropNow(path: string): Promise<DropResult> {
+  let out: DropResult;
+  try {
+    // The head right now (the RGN store may not follow this project yet): the undo parent.
+    const parent = (await api.project.get())?.head_revision ?? null;
+    const r = await api.project.baseFromFile(path);
+    if (parent) pushUndo(pickUndoEntry(parent, r.revision_id, 'Drop new image'));
+    out = { ok: true, file: r.file, patchesDropped: r.patches_dropped ?? 0 };
+    if (state.preview) set({ preview: null });
+    editorBridge.setCompare(null);
+  } catch (e) {
+    const err = uiError(e);
+    out = {
+      ok: false,
+      code: isFolderMovedError(e) ? 'folder_moved' : err.code,
+      message: err.message,
+    };
+  }
+  // The canvas and the tab strip follow PRJ's snapshot, as after a pick.
+  await projectStore.reload();
+  await Promise.all([refreshProject(), refreshIterations()]);
+  return out;
 }
 
 /** The accept in flight (FR-RGN-30): a second one of the same candidate while it runs joins
