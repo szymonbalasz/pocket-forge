@@ -74,7 +74,8 @@ export function confirmPlan(
   form: ConfirmForm,
   onKeys: string[] | null = null,
 ): ConfirmPlan {
-  const setup = est.needs.includes('set_cap') || stored.cap === null || stored.threshold === null;
+  // From the stored limits, not `est.needs`: a reused estimate can predate them (walk-61 L3).
+  const setup = stored.cap === null || stored.threshold === null;
   const cost = est.cost.amount;
   const known = cost === 'unknown' ? 0 : cost;
   const typedCap = parse(form.cap);

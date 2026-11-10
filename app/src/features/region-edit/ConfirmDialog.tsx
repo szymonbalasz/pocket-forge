@@ -64,8 +64,13 @@ export function SpendConfirm(props: SpendConfirmProps) {
 function ConfirmBody(props: SpendConfirmProps & { estimate: SpendEstimate }) {
   const s = { spend: props.spend, submitting: props.submitting, confirmError: props.error };
   const est = props.estimate;
-  const stored = { cap: s.spend?.cap ?? est.cap, threshold: s.spend?.threshold ?? null };
-  const live = { ...est, spend: s.spend?.spend ?? est.spend };
+  // walk-61 L3: the live spend settings win over the estimate's copy. An estimate reused after
+  // the first submit stored the limits still has none (and `set_cap`); asking again was wrong.
+  const stored = {
+    cap: s.spend?.cap ?? est.cap,
+    threshold: s.spend?.threshold ?? est.threshold,
+  };
+  const live = { ...est, ...stored, spend: s.spend?.spend ?? est.spend };
   const [form, setForm] = useState<ConfirmForm>(() => initialForm(live, stored.threshold));
   // FR-RGN-45: the count follows the block's selection, not the (reused) estimate.
   const refsBlock = useReferencesBlock();
