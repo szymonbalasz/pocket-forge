@@ -115,4 +115,5 @@ pub const APP_COMMANDS: &[&str] = &[
     "app_exit",
     "app_close_unguard",
     "app_close_ack",
+    "app_close_asking",
 ];

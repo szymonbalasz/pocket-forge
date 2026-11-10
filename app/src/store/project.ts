@@ -54,6 +54,8 @@ let listening = false;
  *  false to hold the close and later call `proceed` (once) or `cancel`. */
 export type CloseGuard = (proceed: () => void, cancel: () => void) => boolean;
 const closeGuards = new Set<CloseGuard>();
+/** R110: the features whose close question is on screen (EXP's "Cancel the export and close?"). */
+const closeQuestions = new Set<string>();
 
 /** Called with the snapshot after a sync conflict is resolved (FR-PRJ-36). On Keep other,
  *  features that keep draft state (RGN, REF, EXP, EDT's mask) reload it from the kept version,
@@ -232,6 +234,19 @@ export const projectStore = {
   /** Test helper: back to the initial state. */
   reset(): void {
     set(initial);
+  },
+
+  /** R110: a feature's close question shows or went (`owner` names it). */
+  setCloseQuestion(owner: string, shown: boolean): void {
+    if (closeQuestions.has(owner) === shown) return;
+    if (shown) closeQuestions.add(owner);
+    else closeQuestions.delete(owner);
+    for (const l of listeners) l();
+  },
+
+  /** R110: a close question is on screen: a feature's, or PRJ's "Close anyway?" (`unsaved`). */
+  closeAsking(): boolean {
+    return closeQuestions.size > 0 || (!!state.project && state.error?.code === 'unsaved');
   },
 
   /** Registers a close guard (see `CloseGuard`); returns its removal. */

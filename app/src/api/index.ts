@@ -174,7 +174,8 @@ export async function appCloseUnguard(): Promise<void> {
   }
 }
 
-/** R109: the UI got `app:close-requested`; one not acked within 3 s closes the app anyway.
+/** R109: the UI got `app:close-requested`; one not acked within 3 s closes the app anyway, and
+ *  R110: an acked one the UI doesn't finish within 10 s too, unless a close question shows.
  *  True if the app really asked (only Rust sends it); false: ignore the event. */
 export async function appCloseAck(): Promise<boolean> {
   try {
@@ -182,6 +183,16 @@ export async function appCloseAck(): Promise<boolean> {
   } catch {
     // Outside the app there is no close to ack.
     return false;
+  }
+}
+
+/** R110: a close question is on screen (`asking`: the app's quit deadline pauses) or went (it
+ *  starts over); `cancel`: it was dismissed, so the quit is off. */
+export async function appCloseAsking(asking: boolean, cancel = false): Promise<void> {
+  try {
+    await invoke('app_close_asking', { asking, cancel });
+  } catch {
+    // Outside the app there is no quit deadline.
   }
 }
 

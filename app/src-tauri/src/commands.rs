@@ -31,6 +31,7 @@ macro_rules! tauri_commands {
                 crate::app_exit,
                 crate::app_close_unguard,
                 crate::app_close_ack,
+                crate::app_close_asking,
             ]
         }
 

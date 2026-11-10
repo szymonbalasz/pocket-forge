@@ -281,6 +281,23 @@ describe('export store', () => {
     expect(h.prj.close).toHaveBeenLastCalledWith(false);
   });
 
+  test('R110 OQ-EXP-09 the export question is a close question on screen until answered', async () => {
+    for (const answer of ['confirm', 'keep', 'ended'] as const) {
+      exportStore.reset();
+      expect(projectStore.closeAsking(), answer).toBe(false);
+      await bound();
+      await exportStore.start();
+      const closing = projectStore.close();
+      expect(projectStore.closeAsking(), answer).toBe(true);
+      if (answer === 'confirm') await exportStore.confirmClose();
+      else if (answer === 'keep') exportStore.keepExporting();
+      else h.emit('export:done', doneEvent('e1'));
+      await closing;
+      expect(projectStore.closeAsking(), answer).toBe(false);
+      if (answer === 'keep') h.emit('export:canceled', { export_id: 'e1' });
+    }
+  });
+
   test('R101 R109 FR-PRJ-21 a second close while the question is open joins the first', async () => {
     const settled = (p: Promise<void>) => {
       let done = false;

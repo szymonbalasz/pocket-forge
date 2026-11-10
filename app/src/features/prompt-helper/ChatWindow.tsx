@@ -434,12 +434,13 @@ export function ChatWindow() {
   const busyElsewhere = !running && [...elsewhere].some((id) => !ours.has(id));
   const readOnly = !!project.read_only;
   const usage = usageLabel(turns, fake);
-  const blocked = !host
-    ? 'Open the Generate panel to chat about this project.'
+  // R110: each reason has its own test id (`prm-chat-blocked-<reason>`).
+  const blocked: Blocked | null = !host
+    ? { reason: 'no-host', text: 'Open the Generate panel to chat about this project.' }
     : offline
-      ? 'Offline: Recheck once the connection is back.'
+      ? { reason: 'offline', text: 'Offline: Recheck once the connection is back.' }
       : busyElsewhere
-        ? ELSEWHERE_REASON
+        ? { reason: 'elsewhere', text: ELSEWHERE_REASON }
         : null;
 
   return (
@@ -565,8 +566,14 @@ function Strip(props: {
   );
 }
 
+/** Why Send is disabled; `reason` names its test id (R110). */
+interface Blocked {
+  reason: 'no-host' | 'offline' | 'elsewhere';
+  text: string;
+}
+
 function Composer(props: {
-  disabledReason: string | null;
+  disabledReason: Blocked | null;
   /** M5: offline after a turn: Recheck lifts the lock once detection succeeds. */
   onRecheck?: () => void;
   running: string | null;
@@ -603,8 +610,11 @@ function Composer(props: {
       />
       <div className="prm-chat-actions">
         {props.disabledReason && (
-          <span className="muted small" data-testid="prm-chat-blocked">
-            {props.disabledReason}
+          <span
+            className="muted small"
+            data-testid={`prm-chat-blocked-${props.disabledReason.reason}`}
+          >
+            {props.disabledReason.text}
           </span>
         )}
         {props.onRecheck && (

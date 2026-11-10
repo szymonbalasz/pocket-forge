@@ -112,7 +112,10 @@ test('FR-PRM-27 without an attached prompt block Send is disabled with the reaso
   render(<ChatWindow />);
   await type('hello');
   expect((id('prm-chat-send') as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.getByText(/Open the Generate panel/)).toBeTruthy();
+  expect(id('prm-chat-blocked-no-host').textContent).toMatch(/Open the Generate panel/);
+  // R110: each reason has its own test id.
+  expect(screen.queryByTestId('prm-chat-blocked-elsewhere')).toBeNull();
+  expect(screen.queryByTestId('prm-chat-blocked-offline')).toBeNull();
   expect(id('prm-chat-host').textContent).toBe('No prompt block');
 });
 
@@ -306,7 +309,9 @@ test('§7 §11 M5 an offline turn locks Send and Retry until Recheck succeeds', 
   await type('ideas');
   fireEvent.click(id('prm-chat-send'));
   await waitFor(() => expect(screen.getByText("Can't reach Anthropic.")).toBeTruthy());
-  expect(screen.getByText(/Offline: Recheck once the connection is back/)).toBeTruthy();
+  expect(id('prm-chat-blocked-offline').textContent).toMatch(
+    /Offline: Recheck once the connection is back/,
+  );
   expect((id('prm-chat-send') as HTMLButtonElement).disabled).toBe(true);
   expect((id('prm-chat-retry') as HTMLButtonElement).disabled).toBe(true);
   fireEvent.click(id('prm-chat-retry'));
@@ -382,13 +387,15 @@ test('FR-PRM-27 night review 9 after a switch, the other project’s finishing t
     expect(fake.callsOf('prm_chat_thread_get').at(-1)?.project_id).toBe(other.project_id),
   );
   await type('a crypt');
-  await waitFor(() => expect(id('prm-chat-blocked').textContent).toMatch(/another project/));
+  await waitFor(() =>
+    expect(id('prm-chat-blocked-elsewhere').textContent).toMatch(/another project/),
+  );
   expect((id('prm-chat-send') as HTMLButtonElement).disabled).toBe(true);
   // A's turn ends: Send is live again for B.
   await waitFor(() => expect((id('prm-chat-send') as HTMLButtonElement).disabled).toBe(false), {
     timeout: 5000,
   });
-  expect(screen.queryByTestId('prm-chat-blocked')).toBeNull();
+  expect(screen.queryByTestId('prm-chat-blocked-elsewhere')).toBeNull();
   expect(fake.callsOf('prm_chat_send')).toHaveLength(1);
 });
 
@@ -405,10 +412,12 @@ test('FR-PRM-27 night review 9 a send refused with turn_active waits, saying why
   await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
   await type('a crypt');
   fireEvent.click(id('prm-chat-send'));
-  await waitFor(() => expect(id('prm-chat-blocked').textContent).toMatch(/another project/));
+  await waitFor(() =>
+    expect(id('prm-chat-blocked-elsewhere').textContent).toMatch(/another project/),
+  );
   expect(screen.queryByTestId('prm-chat-error')).toBeNull();
   expect((id('prm-chat-send') as HTMLButtonElement).disabled).toBe(true);
-  await waitFor(() => expect(screen.queryByTestId('prm-chat-blocked')).toBeNull(), {
+  await waitFor(() => expect(screen.queryByTestId('prm-chat-blocked-elsewhere')).toBeNull(), {
     timeout: 5000,
   });
 });
