@@ -99,3 +99,15 @@
 - After a Dismiss of a job whose fetch failed, it leaves the tracker, so `fetch_failed` isn't visible afterwards: **fine** · keep a row.
 - A References trash file whose move and rollback both failed stays in the trash folder with no item (logged only): **acceptable** · adopt such files at startup.
 - Chat "busy in another project" is UI-only; a core `other_turn_running` field would also cover the first second: **later** · now.
+
+## #61 change requests (2026-11-10)
+
+Merged: Discard all (FR-RGN-46), panel drops (FR-PRJ-55, `project_base_from_file`), docked chat + New chat (FR-PRM-21/46/47), walk-61 fixes. Walk-61: PASS on fake backends; a real Explorer drag onto the panel is left to the owner.
+
+Integrator calls to confirm at the next gate:
+- Discard all: Undo tickets in memory only (a restart drops Undo; Storage → Restore still works, without stars); the notice is the shared trash notice; `invalid` candidates included; Undo restores the job's region/mask inputs.
+- Panel drops: a dropped base keeps its file name in `working/` (`name (2).ext` on a clash); `BaseImage.job_id/candidate_id` optional (absent on disk for a drop); no extra unsaved-changes guard (same as a pick); a Working drop also starts a fresh chat (`dropped`).
+- Chat: `retired_at` / `previous_thread_id` / `started_after` (schema 4.14, add-only); the automatic new chat waits while a turn runs; New chat ends the backend session; dock 320–720 px, max shrinks so the canvas keeps 480 px; `prm_window_open` and the second window's capability removed.
+- Status bar now spans the whole window under every pane (was under the canvas only), so nothing hides at ≥ 1280 px.
+- Open: at 1280 px with the left panel and the dock open the canvas is ~244 px (dock floor 320). **Leave it** · collapse the left panel · float the dock.
+- Walk-61 L3 was a real money-path bug (spend-cap setup asked again on the 2nd submit of a draft): fixed.
