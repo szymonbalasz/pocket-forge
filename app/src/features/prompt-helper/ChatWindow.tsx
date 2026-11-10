@@ -140,11 +140,15 @@ export function ChatWindow() {
     }
   }, []);
 
+  /** BL-43: numbers each thread load, so an older reply that arrives late never overwrites a
+   *  newer one (only the latest load's reply is applied). */
+  const threadSeq = useRef(0);
   const loadThread = useCallback(async (id: string | null) => {
+    const seq = ++threadSeq.current;
     if (!id) return setView(null);
     try {
       const v = await api.chat.thread(id);
-      if (pidRef.current === id)
+      if (seq === threadSeq.current && pidRef.current === id)
         setView((old) => (JSON.stringify(old) === JSON.stringify(v) ? old : v));
     } catch {
       // The project closed meanwhile: the next poll catches up.

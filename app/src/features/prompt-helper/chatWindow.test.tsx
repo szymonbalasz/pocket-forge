@@ -296,6 +296,39 @@ test('FR-PRM-22 §11 an interrupted turn offers Resend; a double click sends onc
   expect(fake.callsOf('prm_chat_send').map((s) => s.text)).toEqual(['ideas', 'ideas']);
 });
 
+test('FR-PRM-22 BL-43 an older thread reply that arrives late never overwrites a newer one', async () => {
+  setup({ chat: { consent: true } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatWindow />);
+  await type('ideas');
+  fireEvent.click(id('prm-chat-send'));
+  await waitFor(() => expect(screen.getAllByTestId('prm-chat-proposal')).toHaveLength(1));
+  await type('next');
+  await waitFor(() => expect((id('prm-chat-send') as HTMLButtonElement).disabled).toBe(false));
+  // Two reloads in a row; the first one's reply (the thread before the turn) arrives last.
+  const w = window as unknown as { __pfMockHandlers: Record<string, (i: never) => unknown> };
+  const get = w.__pfMockHandlers.prm_chat_thread_get!;
+  let releaseOld!: () => void;
+  let n = 0;
+  w.__pfMockHandlers.prm_chat_thread_get = (i: never) => {
+    const v = JSON.parse(JSON.stringify(get(i))) as { thread: { turns: unknown[] } };
+    if (n++ > 0) return v;
+    v.thread.turns = [];
+    return new Promise((r) => (releaseOld = () => r(v)));
+  };
+  act(() => fake.emit('prm:chat-context', { project_id: PID, host: 'rgn' }));
+  await waitFor(() => expect(n).toBe(1));
+  act(() => fake.emit('prm:chat-context', { project_id: PID, host: 'rgn' }));
+  await waitFor(() => expect(n).toBe(2));
+  await act(async () => {
+    releaseOld();
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  w.__pfMockHandlers.prm_chat_thread_get = get;
+  expect(screen.getByText(/You wrote: "ideas"/)).toBeTruthy();
+  expect(screen.queryByText(/Ask for ideas about the prompt/)).toBeNull();
+});
+
 test('FR-PRM-37 L3 a crashed turn shows the stderr tail under Details', async () => {
   setup({ chat: { consent: true, case: 'crash' } });
   await api.chat.contextPublish(PID, 'rgn', {});
