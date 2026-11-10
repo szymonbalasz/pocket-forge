@@ -108,6 +108,18 @@ pub fn rename_with_retry(from: &Path, to: &Path) -> io::Result<()> {
     retry_while_locked(LOCK_RETRY_FOR, || fs::rename(from, to))
 }
 
+/// Reads a file with the FR-PRJ-21 lock retry (≤ 3 s of backoff, then the error). The
+/// `on_read` fault (R110) fails it once, without the retry.
+pub fn read_with_retry(ctx: &Context, path: &Path) -> io::Result<Vec<u8>> {
+    ctx.faults.hit(FaultPoint::OnRead, path)?;
+    let mut bytes = Vec::new();
+    retry_while_locked(LOCK_RETRY_FOR, || {
+        bytes = fs::read(path)?;
+        Ok(())
+    })?;
+    Ok(bytes)
+}
+
 /// Runs `op` until it succeeds, fails with something other than a lock, or `budget` is spent
 /// (backoff from 25 ms, doubling, ≤ 500 ms). FR-PRJ-21.
 fn retry_while_locked(budget: Duration, mut op: impl FnMut() -> io::Result<()>) -> io::Result<()> {

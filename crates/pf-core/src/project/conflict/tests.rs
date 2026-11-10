@@ -647,3 +647,79 @@ fn bl_22_oq_prj_11_either_versions_layers_resolve_while_in_conflict() {
         ErrorCode::UnknownId
     );
 }
+
+/// R110 (walk-r109 M1), FR-PRJ-21, FR-PRJ-35: a `project.json` the commit check can't read (an
+/// exclusive lock, a transient I/O error) is `locked` and the save waits; it's never `conflict`.
+#[test]
+fn r110_fr_prj_21_fr_prj_35_an_unreadable_project_json_is_locked_never_conflict() {
+    for action in [FaultAction::Locked, FaultAction::Error] {
+        let mut s = setup();
+        let job = succeeded(&mut s);
+        s.e.ctx.faults = Faults::parse("on_read:project.json", action).unwrap();
+        // Draft: `locked`, kept in memory as the waiting save.
+        assert_eq!(draft(&mut s, "moss").unwrap_err().code, ErrorCode::Locked);
+        assert!(crate::project::has_unsaved(&s.p));
+        // Mask, Ctrl+S, candidates (accept and job writes go through the same check).
+        let rect = Rect {
+            x: 4,
+            y: 4,
+            w: 8,
+            h: 6,
+        };
+        let err =
+            crate::project::store::put_mask(&s.e.ctx, s.e.install(), &mut s.p, rect, vec![255; 48])
+                .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Locked);
+        let err =
+            crate::project::save_revision(&s.e.ctx, s.e.install(), &mut s.p, None).unwrap_err();
+        assert_eq!(err.code, ErrorCode::Locked);
+        let err =
+            add_candidates(&s.e.ctx, s.e.install(), &mut s.p, job.id, vec![cand(1)]).unwrap_err();
+        assert_eq!(err.code, ErrorCode::Locked);
+        assert!(spool::spoolable(&err));
+        // No conflict was raised: nothing to resolve.
+        assert!(s.p.conflict.is_none(), "{action:?}");
+        assert_eq!(events(&s, "project:conflict"), 0);
+        // Readable again: the waiting save commits on the next retry.
+        s.e.ctx.faults = Faults::none();
+        assert!(!retry_pending(&s.e.ctx, s.e.install(), &mut s.p));
+        assert_eq!(prompt(&s.p.manifest), "moss");
+        assert_eq!(
+            prompt(&read_json::<Manifest>(&s.dir.join("project.json")).unwrap()),
+            "moss"
+        );
+    }
+}
+
+/// R110 (walk-r109 M1) on a real exclusive handle (`FileShare.None`, the walk's method).
+#[cfg(windows)]
+#[test]
+fn r110_fr_prj_21_an_exclusive_handle_on_project_json_is_locked_then_saves() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let open_exclusive = |dir: &std::path::Path| {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(dir.join("project.json"))
+            .unwrap()
+    };
+    let mut s = setup();
+    // Held past the 3 s retry: `locked`, the draft waits, no conflict.
+    let lock = open_exclusive(&s.dir);
+    assert_eq!(draft(&mut s, "moss").unwrap_err().code, ErrorCode::Locked);
+    assert!(s.p.conflict.is_none());
+    assert!(crate::project::has_unsaved(&s.p));
+    drop(lock);
+    assert!(!retry_pending(&s.e.ctx, s.e.install(), &mut s.p));
+    assert_eq!(prompt(&s.p.manifest), "moss");
+    // Released within the retry: the save just goes through.
+    let lock = open_exclusive(&s.dir);
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        drop(lock);
+    });
+    draft(&mut s, "fern").unwrap();
+    release.join().unwrap();
+    assert!(s.p.conflict.is_none());
+    assert_eq!(prompt(&s.p.manifest), "fern");
+}

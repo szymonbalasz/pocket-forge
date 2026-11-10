@@ -78,7 +78,7 @@ pub(crate) fn check_before_commit(ctx: &Context, p: &mut OpenProject) -> CoreRes
         mark(ctx, p, ConflictSource::Copy(copy));
         return Err(conflict_error());
     }
-    match super::check_commit_unchanged(p) {
+    match super::check_commit_unchanged(ctx, p) {
         Err(e) if e.code == ErrorCode::Conflict => {
             mark(ctx, p, ConflictSource::Seq);
             Err(conflict_error())

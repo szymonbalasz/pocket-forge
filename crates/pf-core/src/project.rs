@@ -900,22 +900,31 @@ pub(crate) fn disk_commit(p: &OpenProject) -> Option<(u64, Ulid)> {
     Some((seq, install))
 }
 
-/// FR-PRJ-35: the on-disk commit must still be the one last loaded or written.
-fn check_commit_unchanged(p: &OpenProject) -> CoreResult<()> {
+/// FR-PRJ-35: the on-disk commit must still be the one last loaded or written. R110: a file
+/// that can't be read (a sharing violation or exclusive lock past the retry, a transient I/O
+/// error, a half-written file) is `locked`, so the save waits (FR-PRJ-21); only a readable file
+/// whose commit differs is `conflict`.
+fn check_commit_unchanged(ctx: &Context, p: &OpenProject) -> CoreResult<()> {
     let conflict = || {
         CoreError::new(
             ErrorCode::Conflict,
             "project.json changed on disk (another machine?)",
         )
     };
-    let bytes = match std::fs::read(p.manifest_path()) {
+    let unreadable = |why: &dyn std::fmt::Display| {
+        CoreError::new(
+            ErrorCode::Locked,
+            format!("project.json can't be read right now: {why}"),
+        )
+    };
+    let bytes = match fsx::read_with_retry(ctx, &p.manifest_path()) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound && !p.dir.is_dir() => {
             return Err(folder_moved());
         }
-        Err(_) => return Err(conflict()),
+        Err(e) => return Err(unreadable(&e)),
     };
-    let disk: Value = serde_json::from_slice(&bytes).map_err(|_| conflict())?;
+    let disk: Value = serde_json::from_slice(&bytes).map_err(|e| unreadable(&e))?;
     let seq = disk["commit"]["seq"].as_u64();
     let install = disk["commit"]["install_id"]
         .as_str()
