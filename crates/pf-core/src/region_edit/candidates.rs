@@ -389,6 +389,111 @@ impl Command for RgnJobDiscardRest {
     }
 }
 
+// ---------------------------------------------------------------- rgn_iteration_discard_all
+
+/// `rgn_iteration_discard_all` (#61, FR-RGN-46): every candidate of a result set still in
+/// `results/` to the trash in one commit, starred ones included, never the accepted one. Refused
+/// while the job runs. The output's `undo_id` is what `rgn_iteration_discard_all_undo` takes.
+pub struct RgnIterationDiscardAll;
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DiscardAllOutput {
+    /// Candidate files this sent to the trash.
+    pub trashed: usize,
+    /// The trash item, for the Undo; `null` when there was nothing to discard (no commit).
+    pub undo_id: Option<Ulid>,
+}
+
+impl Command for RgnIterationDiscardAll {
+    const NAME: &'static str = "rgn_iteration_discard_all";
+    type Input = DiscardRestInput;
+    type Output = DiscardAllOutput;
+
+    fn run(core: &Core, input: DiscardRestInput) -> CoreResult<DiscardAllOutput> {
+        let mut guard = core.state();
+        let state = &mut *guard;
+        let install_id = state.settings.install_id;
+        let p = state.project.as_mut().ok_or_else(no_project)?;
+        p.require_writable()?;
+        let job = store::job(p, input.job_id)?;
+        // While the runner drives it, its copy is newer than the store's.
+        let live = state.rgn.runner.job(job.id).map_or(job.state, |j| j.state);
+        if is_active(job.state) || is_active(live) {
+            return Err(CoreError::new(
+                ErrorCode::JobActive,
+                "the job is still running; cancel it first",
+            ));
+        }
+        let Some(done) = store::discard_all(&core.ctx, install_id, p, input.job_id)? else {
+            return Ok(DiscardAllOutput {
+                trashed: 0,
+                undo_id: None,
+            });
+        };
+        let out = DiscardAllOutput {
+            trashed: done.prior.len(),
+            undo_id: Some(done.item_id),
+        };
+        state.rgn.discard_all_undo.insert(done.item_id, done);
+        Ok(out)
+    }
+}
+
+/// `rgn_iteration_discard_all_undo` (#61, FR-RGN-46): the toast's Undo. Restores every candidate
+/// of that Discard all as it was (status and star), plus the job's inputs if they followed, in one
+/// commit. Works once; `unknown_id` when the ticket is gone (another session, already undone, or
+/// the item restored or purged from Storage).
+pub struct RgnIterationDiscardAllUndo;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscardAllUndoInput {
+    pub undo_id: Ulid,
+}
+
+impl Validate for DiscardAllUndoInput {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct DiscardAllUndoOutput {
+    /// Candidates brought back.
+    pub restored: usize,
+}
+
+impl Command for RgnIterationDiscardAllUndo {
+    const NAME: &'static str = "rgn_iteration_discard_all_undo";
+    type Input = DiscardAllUndoInput;
+    type Output = DiscardAllUndoOutput;
+
+    fn run(core: &Core, input: DiscardAllUndoInput) -> CoreResult<DiscardAllUndoOutput> {
+        let mut guard = core.state();
+        let state = &mut *guard;
+        let install_id = state.settings.install_id;
+        let p = state.project.as_mut().ok_or_else(no_project)?;
+        p.require_writable()?;
+        let gone = || {
+            CoreError::new(ErrorCode::UnknownId, "there is nothing to undo").with_field("undo_id")
+        };
+        let undo = state
+            .rgn
+            .discard_all_undo
+            .get(&input.undo_id)
+            .ok_or_else(gone)?;
+        if !p.jobs.contains_key(&undo.job_id) {
+            // A ticket from another project.
+            return Err(gone());
+        }
+        let result = store::undo_discard_all(&core.ctx, install_id, p, undo);
+        if result
+            .as_ref()
+            .map_or_else(|e| e.code == ErrorCode::UnknownId, |_| true)
+        {
+            state.rgn.discard_all_undo.remove(&input.undo_id);
+        }
+        let restored = result?;
+        Ok(DiscardAllUndoOutput { restored })
+    }
+}
+
 // ---------------------------------------------------------------- rgn_patch_retune
 
 /// `rgn_patch_retune` (FR-RGN-29, R3): re-bakes from the untouched candidate into a new layer
@@ -474,6 +579,8 @@ pub struct IterationRow {
     pub state: JobState,
     /// Candidates not in the trash (and not invalid).
     pub kept: usize,
+    /// Candidates Discard all would bin (#61): not accepted, file not in the trash.
+    pub discardable: usize,
     pub returned: usize,
     /// The actual cost when known, else the estimate.
     pub cost: Value,
@@ -549,6 +656,12 @@ impl Command for RgnIterationsList {
                 slug,
                 state: live.state,
                 kept: kept(p, j.id),
+                discardable: p
+                    .manifest
+                    .candidates
+                    .iter()
+                    .filter(|c| store::discardable(c, j.id))
+                    .count(),
                 returned: j.candidate_ids.len(),
                 cost: shown_cost(live),
                 accepted_in_stack: p.manifest.layers.iter().any(|l| l.job_id == Some(j.id)),

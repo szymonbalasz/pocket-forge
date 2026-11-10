@@ -317,3 +317,10 @@
 .prj-result-cands {
   padding-left: var(--pf-space-3);
 }
+
+/* #61: Discard all on an opened iteration. */
+.prj-result-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-left: var(--pf-space-3);
+}

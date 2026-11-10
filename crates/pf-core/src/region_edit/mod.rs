@@ -62,6 +62,9 @@ pub struct RgnState {
     pub caps: std::collections::BTreeMap<String, pf_provider::Capabilities>,
     /// Display names of the `edit_masked` models (`provider_list_models`).
     pub model_names: std::collections::BTreeMap<String, String>,
+    /// Discard all's Undo tickets by trash item id (#61): what each candidate was before. Memory
+    /// only, like the toast that offers the Undo.
+    pub discard_all_undo: std::collections::HashMap<ulid::Ulid, crate::project::store::DiscardAll>,
 }
 
 impl std::fmt::Debug for RgnState {

@@ -33,6 +33,8 @@ export interface ProjectState {
 export interface TrashNotice {
   at: 'results' | 'tracker' | 'storage';
   text: string;
+  /** #61: Discard all's toast offers Undo (puts every result back as it was). */
+  undo?: () => void;
 }
 
 const initial: ProjectState = {

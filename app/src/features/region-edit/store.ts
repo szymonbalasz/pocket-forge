@@ -726,6 +726,12 @@ const TRASH_NOTICE = (n: number): string =>
     ? 'Nothing to discard.'
     : `${n === 1 ? 'Discarded' : `${n} candidates discarded`}: in the trash for 30 days (Storage → Restore).`;
 
+/** #61: Discard all's toast. */
+export const DISCARD_ALL_NOTICE = (n: number): string =>
+  n === 0
+    ? 'Nothing to discard.'
+    : `${n} ${n === 1 ? 'result' : 'results'} in the trash for 30 days`;
+
 // ── Picker (R19) ─────────────────────────────────────────────────────────────────────────────
 
 const pickerHandlers = {
@@ -1507,6 +1513,47 @@ export const rgn = {
       }
       set({ trackerNotice: null });
       projectStore.setTrashNotice({ at: 'tracker', text: TRASH_NOTICE(trashed) });
+    } catch (e) {
+      const err = uiError(e);
+      set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
+    }
+    await Promise.all([refreshProject(), refreshIterations()]);
+  },
+
+  /** #61: "Discard all" of a result set (never the accepted one): one commit, no confirm, a
+   *  toast with Undo. */
+  async discardAll(jobId: string): Promise<void> {
+    try {
+      const { trashed, undo_id } = await api.region.discardAll(jobId);
+      const sel = state.candidates.find((c) => c.id === state.selectedCandidateId);
+      if (sel && sel.job_id === jobId && sel.status !== 'accepted') {
+        set({ selectedCandidateId: null, preview: null });
+        editorBridge.setCompare(null);
+      }
+      set({ trackerNotice: null });
+      projectStore.setTrashNotice({
+        at: 'tracker',
+        text: DISCARD_ALL_NOTICE(trashed),
+        ...(undo_id ? { undo: () => void rgn.undoDiscardAll(undo_id) } : {}),
+      });
+    } catch (e) {
+      const err = uiError(e);
+      set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
+    }
+    await Promise.all([refreshProject(), refreshIterations()]);
+  },
+
+  /** #61: the toast's Undo: every result of that Discard all back as it was, star included. */
+  async undoDiscardAll(undoId: string): Promise<void> {
+    projectStore.setTrashNotice(null);
+    try {
+      const { restored } = await api.region.undoDiscardAll(undoId);
+      set({
+        trackerNotice: {
+          kind: 'info',
+          text: `${restored} ${restored === 1 ? 'result' : 'results'} restored.`,
+        },
+      });
     } catch (e) {
       const err = uiError(e);
       set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
