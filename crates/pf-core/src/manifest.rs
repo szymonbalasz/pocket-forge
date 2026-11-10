@@ -173,13 +173,14 @@ pub struct Layer {
 /// What a base layer records (schema §4.3, FR-GEN-27).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BaseImage {
-    /// `working/NNN <slug> NN.<ext>`.
+    /// `working/NNN <slug> NN.<ext>` (a pick) or `working/<file name>` (a drop, FR-PRJ-55).
     pub file: String,
     pub content_hash: String,
     pub width: u32,
     pub height: u32,
-    pub job_id: Ulid,
-    pub candidate_id: Ulid,
+    /// The picked candidate's job and id; `None` for an image dropped on Working (FR-PRJ-55).
+    pub job_id: Option<Ulid>,
+    pub candidate_id: Option<Ulid>,
 }
 
 impl Layer {
@@ -214,8 +215,8 @@ impl Layer {
         let mut l = Layer::original(id, b.width, b.height);
         l.kind = LayerKind::Base;
         l.file = Some(b.file);
-        l.job_id = Some(b.job_id);
-        l.candidate_id = Some(b.candidate_id);
+        l.job_id = b.job_id;
+        l.candidate_id = b.candidate_id;
         l.content_hash = Some(b.content_hash);
         l.width = Some(b.width);
         l.height = Some(b.height);
@@ -742,8 +743,8 @@ mod tests {
                 content_hash: "sha256:ab".into(),
                 width: 64,
                 height: 32,
-                job_id: id(6),
-                candidate_id: id(7),
+                job_id: Some(id(6)),
+                candidate_id: Some(id(7)),
             },
         );
         let v = serde_json::to_value(&base).unwrap();

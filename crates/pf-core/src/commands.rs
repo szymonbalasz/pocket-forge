@@ -969,6 +969,37 @@ impl Command for ProjectFolderAdd {
     }
 }
 
+/// `project_base_from_file` (FR-PRJ-55, #61): one image file dropped on the Working section
+/// becomes the base image, as one undoable revision (undo = `project_restore_revision(parent)`).
+pub struct ProjectBaseFromFile;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectBaseFromFileInput {
+    pub path: String,
+}
+
+impl Validate for ProjectBaseFromFileInput {
+    fn validate(&self) -> CoreResult<()> {
+        check_path("path", &self.path)
+    }
+}
+
+impl Command for ProjectBaseFromFile {
+    const NAME: &'static str = "project_base_from_file";
+    type Input = ProjectBaseFromFileInput;
+    type Output = project::store::BaseCommit;
+
+    fn run(core: &Core, input: Self::Input) -> CoreResult<project::store::BaseCommit> {
+        let mut state = core.state();
+        let install_id = state.settings.install_id;
+        let p = state.project.as_mut().ok_or_else(no_project)?;
+        project::require_folder(p)?;
+        p.require_writable()?;
+        project::store::base_from_file(&core.ctx, install_id, p, &PathBuf::from(&input.path))
+    }
+}
+
 // ---------------------------------------------------------------- editor
 
 /// EDT `edt_image_open` (FR-EDT-31/32): a whole image of the open project (the original or a
@@ -1105,7 +1136,8 @@ impl Command for EdtMaskRead {
 
 pub use crate::region_edit::candidates::{
     RgnCandidateAccept, RgnCandidateDiscard, RgnCandidatePreview, RgnCandidateStar,
-    RgnIterationsList, RgnJobDiscardRest, RgnPatchRetune,
+    RgnIterationDiscardAll, RgnIterationDiscardAllUndo, RgnIterationsList, RgnJobDiscardRest,
+    RgnPatchRetune,
 };
 /// Region-edit commands live in their own module (region-edit spec §9).
 pub use crate::region_edit::commands::{
@@ -1273,6 +1305,9 @@ registry![
     PrmChatFakeSetCase,
     PrmChatPreview,
     RgnJobFetchAgain,
+    RgnIterationDiscardAll,
+    RgnIterationDiscardAllUndo,
+    ProjectBaseFromFile,
     PrmChatThreadNew,
 ];
 
@@ -1353,6 +1388,27 @@ mod tests {
         assert_eq!(e.code, ErrorCode::NoProject);
         let e = core.dispatch("app_info", json!({"extra": 1})).unwrap_err();
         assert_eq!(e.code, ErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn fr_prj_55_base_from_file_validates_the_path_at_the_boundary() {
+        let (_dir, core) = core();
+        let bad = [
+            json!({"path": "  "}),
+            json!({"path": "a\u{0}b"}),
+            json!({}),
+            json!({"path": "a.png", "x": 1}),
+        ];
+        for input in bad {
+            let e = core
+                .dispatch("project_base_from_file", input.clone())
+                .unwrap_err();
+            assert_eq!(e.code, ErrorCode::InvalidInput, "{input}");
+        }
+        let e = core
+            .dispatch("project_base_from_file", json!({"path": "a.png"}))
+            .unwrap_err();
+        assert_eq!(e.code, ErrorCode::NoProject);
     }
 
     #[test]

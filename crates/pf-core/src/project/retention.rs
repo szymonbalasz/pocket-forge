@@ -126,68 +126,96 @@ pub fn trash_restore(
     p: &mut OpenProject,
     item_id: Ulid,
 ) -> CoreResult<()> {
+    restore_items(ctx, install_id, p, &[item_id], |_| {})
+}
+
+/// [`trash_restore`] of several items in **one** commit (Discard all's Undo, #61), all or nothing:
+/// every item is checked before any file moves, the files move before the commit, and a failed
+/// commit moves them back. `after` adjusts the manifest in the same commit.
+pub(crate) fn restore_items(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    item_ids: &[Ulid],
+    after: impl FnOnce(&mut Manifest),
+) -> CoreResult<()> {
     p.require_writable()?;
-    let item = p
-        .manifest
-        .trash
-        .iter()
-        .find(|t| t.id == item_id)
-        .cloned()
-        .ok_or_else(|| {
-            CoreError::new(ErrorCode::UnknownId, "unknown trash item").with_field("item_id")
-        })?;
-    if !restorable(&item) {
-        let message = if restorable_kind(item.kind) {
-            "the version not kept is already a revision in the history; restore that instead"
-        } else {
-            "this trash item holds files nothing uses; it can't be restored"
-        };
-        return Err(CoreError::new(ErrorCode::NotRestorable, message)
-            .with_field("item_id")
-            .with_detail(json!({ "kind": item.kind })));
-    }
-    for from in &item.files {
-        if p.path(&item.trashed_path(from)).is_file() && p.path(from).exists() {
-            return Err(CoreError::new(
-                ErrorCode::Conflict,
-                format!("{from} exists again; move it away to restore the trashed copy"),
-            )
-            .with_field("item_id"));
+    let mut items = vec![];
+    for &item_id in item_ids {
+        let item = p
+            .manifest
+            .trash
+            .iter()
+            .find(|t| t.id == item_id)
+            .cloned()
+            .ok_or_else(|| {
+                CoreError::new(ErrorCode::UnknownId, "unknown trash item").with_field("item_id")
+            })?;
+        if !restorable(&item) {
+            let message = if restorable_kind(item.kind) {
+                "the version not kept is already a revision in the history; restore that instead"
+            } else {
+                "this trash item holds files nothing uses; it can't be restored"
+            };
+            return Err(CoreError::new(ErrorCode::NotRestorable, message)
+                .with_field("item_id")
+                .with_detail(json!({ "kind": item.kind })));
         }
-    }
-    let mut moved: Vec<&String> = vec![];
-    for from in &item.files {
-        let src = p.path(&item.trashed_path(from));
-        if src.is_file() {
-            fsx::move_file(&src, &p.path(from))?;
-            moved.push(from);
-        }
-    }
-    let result = commit(ctx, install_id, p, |_, _, m, _| {
-        m.trash.retain(|t| t.id != item_id);
-        for c in m.candidates.iter_mut() {
-            if c.trash_id == Some(item_id) {
-                c.trash_id = None;
-                if matches!(
-                    c.status,
-                    CandidateStatus::Trashed | CandidateStatus::Discarded
-                ) {
-                    // A sweep or a discard put it there; back to an ordinary kept result (#56).
-                    c.status = CandidateStatus::Dismissed;
-                }
+        for from in &item.files {
+            if p.path(&item.trashed_path(from)).is_file() && p.path(from).exists() {
+                return Err(CoreError::new(
+                    ErrorCode::Conflict,
+                    format!("{from} exists again; move it away to restore the trashed copy"),
+                )
+                .with_field("item_id"));
             }
         }
-        Ok(())
-    });
+        items.push(item);
+    }
+    let mut moved: Vec<(&TrashItem, &String)> = vec![];
+    let mut failed = None;
+    'files: for item in &items {
+        for from in &item.files {
+            let src = p.path(&item.trashed_path(from));
+            if src.is_file() {
+                if let Err(e) = fsx::move_file(&src, &p.path(from)) {
+                    failed = Some(e);
+                    break 'files;
+                }
+                moved.push((item, from));
+            }
+        }
+    }
+    let result = match failed {
+        Some(e) => Err(e),
+        None => commit(ctx, install_id, p, |_, _, m, _| {
+            m.trash.retain(|t| !item_ids.contains(&t.id));
+            for c in m.candidates.iter_mut() {
+                if c.trash_id.is_some_and(|t| item_ids.contains(&t)) {
+                    c.trash_id = None;
+                    if matches!(
+                        c.status,
+                        CandidateStatus::Trashed | CandidateStatus::Discarded
+                    ) {
+                        // A sweep or a discard put it there; back to an ordinary kept result (#56).
+                        c.status = CandidateStatus::Dismissed;
+                    }
+                }
+            }
+            after(m);
+            Ok(())
+        }),
+    };
     if let Err(e) = result {
         // Not committed: put the files back (the next commit or open retries any that fail).
-        for from in moved {
+        for (item, from) in moved {
             let _ = fsx::move_file(&p.path(from), &p.path(&item.trashed_path(from)));
         }
         return Err(e);
     }
-    let dir = p.path(&format!("{TRASH_DIR}/{item_id}"));
-    remove_empty_tree(&dir);
+    for id in item_ids {
+        remove_empty_tree(&p.path(&format!("{TRASH_DIR}/{id}")));
+    }
     Ok(())
 }
 

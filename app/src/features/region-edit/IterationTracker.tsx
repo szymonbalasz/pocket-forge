@@ -43,6 +43,37 @@ export function useNow(on: boolean): number {
   return now;
 }
 
+/** #61: "Discard all" of a result set: every kept result to the trash (never the accepted one),
+ *  no confirm; the toast offers Undo. Disabled while its job runs or nothing is left. */
+function DiscardAll({ row, state }: { row: RgnIteration; state: RgnIteration['state'] }) {
+  const readOnly = (useProjectState().project?.read_only ?? null) !== null;
+  if (row.n === null) return null;
+  const left = row.discardable ?? 0;
+  const running = isActive(state);
+  return (
+    <button
+      type="button"
+      className="small"
+      data-testid="rgn-tracker-discard-all"
+      data-record-id={row.job_id}
+      disabled={readOnly || running || left === 0}
+      title={
+        running
+          ? 'The job is still running'
+          : left === 0
+            ? 'Nothing left to discard'
+            : `Discard ${left === 1 ? 'the 1 result' : `all ${left} results`}${row.accepted_in_stack || row.kept > left ? ' (not the accepted one)' : ''}: to the trash for 30 days`
+      }
+      onClick={(e) => {
+        e.stopPropagation();
+        void rgn.discardAll(row.job_id);
+      }}
+    >
+      Discard all
+    </button>
+  );
+}
+
 function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined }) {
   const state = shownState(row, live);
   const running = isActive(state);
@@ -150,6 +181,7 @@ function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined 
             Dismiss
           </button>
         )}
+        <DiscardAll row={row} state={state} />
         {fetchFailed && !askDismiss && (
           <button
             type="button"
@@ -320,6 +352,7 @@ export function IterationTracker() {
                       Retry
                     </button>
                   )}
+                  <DiscardAll row={r} state={state} />
                   {state === 'lost' && offersRetry(rows, r) && (
                     <span
                       className="warning"
@@ -342,6 +375,16 @@ export function IterationTracker() {
           role="status"
         >
           {trash.text}
+          {trash.undo && (
+            <button
+              type="button"
+              className="link small"
+              data-testid="rgn-tracker-discard-undo"
+              onClick={trash.undo}
+            >
+              Undo
+            </button>
+          )}
           <button
             type="button"
             className="link small"

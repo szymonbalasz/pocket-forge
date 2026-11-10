@@ -726,6 +726,12 @@ const TRASH_NOTICE = (n: number): string =>
     ? 'Nothing to discard.'
     : `${n === 1 ? 'Discarded' : `${n} candidates discarded`}: in the trash for 30 days (Storage → Restore).`;
 
+/** #61: Discard all's toast. */
+export const DISCARD_ALL_NOTICE = (n: number): string =>
+  n === 0
+    ? 'Nothing to discard.'
+    : `${n} ${n === 1 ? 'result' : 'results'} in the trash for 30 days`;
+
 // ── Picker (R19) ─────────────────────────────────────────────────────────────────────────────
 
 const pickerHandlers = {
@@ -805,8 +811,8 @@ async function previewGenerate(jobId: string, candId: string): Promise<void> {
 
 /** FR-GEN-29: undo = restore the parent revision, redo = the pick's; then PRJ's snapshot is read
  *  again so the canvas follows the bottom image (or goes back to "No image yet"). */
-function pickUndoEntry(parent: string, later: string): UndoEntry {
-  const e = revisionUndoEntry('Pick new image', parent, later);
+function pickUndoEntry(parent: string, later: string, label = 'Pick new image'): UndoEntry {
+  const e = revisionUndoEntry(label, parent, later);
   return {
     ...e,
     undo: async () => {
@@ -865,6 +871,46 @@ async function pickNow(pid: string | null, jobId: string, candidateId: string): 
   // The snapshot isn't refetched on commit: the canvas and the tab strip follow PRJ's.
   await projectStore.reload();
   await Promise.all([refreshProject(), refreshIterations()]);
+}
+
+/** What a drop on Working did (FR-PRJ-55): the panel words the notice. */
+export type DropResult =
+  { ok: true; file: string; patchesDropped: number } | { ok: false; code: string; message: string };
+
+/** FR-PRJ-55 (#61): one image file dropped on the project panel's Working section becomes the
+ *  bottom image as one undoable revision, exactly as a pick does: queued with picks (FR-GEN-29),
+ *  refused while a job runs (R97) or the project is read-only, undo = restore the parent. */
+export function dropNewImage(path: string): Promise<DropResult> {
+  const run = picking.then(() => dropNow(path));
+  picking = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+async function dropNow(path: string): Promise<DropResult> {
+  let out: DropResult;
+  try {
+    // The head right now (the RGN store may not follow this project yet): the undo parent.
+    const parent = (await api.project.get())?.head_revision ?? null;
+    const r = await api.project.baseFromFile(path);
+    if (parent) pushUndo(pickUndoEntry(parent, r.revision_id, 'Drop new image'));
+    out = { ok: true, file: r.file, patchesDropped: r.patches_dropped ?? 0 };
+    if (state.preview) set({ preview: null });
+    editorBridge.setCompare(null);
+  } catch (e) {
+    const err = uiError(e);
+    out = {
+      ok: false,
+      code: isFolderMovedError(e) ? 'folder_moved' : err.code,
+      message: err.message,
+    };
+  }
+  // The canvas and the tab strip follow PRJ's snapshot, as after a pick.
+  await projectStore.reload();
+  await Promise.all([refreshProject(), refreshIterations()]);
+  return out;
 }
 
 /** The accept in flight (FR-RGN-30): a second one of the same candidate while it runs joins
@@ -1507,6 +1553,47 @@ export const rgn = {
       }
       set({ trackerNotice: null });
       projectStore.setTrashNotice({ at: 'tracker', text: TRASH_NOTICE(trashed) });
+    } catch (e) {
+      const err = uiError(e);
+      set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
+    }
+    await Promise.all([refreshProject(), refreshIterations()]);
+  },
+
+  /** #61: "Discard all" of a result set (never the accepted one): one commit, no confirm, a
+   *  toast with Undo. */
+  async discardAll(jobId: string): Promise<void> {
+    try {
+      const { trashed, undo_id } = await api.region.discardAll(jobId);
+      const sel = state.candidates.find((c) => c.id === state.selectedCandidateId);
+      if (sel && sel.job_id === jobId && sel.status !== 'accepted') {
+        set({ selectedCandidateId: null, preview: null });
+        editorBridge.setCompare(null);
+      }
+      set({ trackerNotice: null });
+      projectStore.setTrashNotice({
+        at: 'tracker',
+        text: DISCARD_ALL_NOTICE(trashed),
+        ...(undo_id ? { undo: () => void rgn.undoDiscardAll(undo_id) } : {}),
+      });
+    } catch (e) {
+      const err = uiError(e);
+      set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });
+    }
+    await Promise.all([refreshProject(), refreshIterations()]);
+  },
+
+  /** #61: the toast's Undo: every result of that Discard all back as it was, star included. */
+  async undoDiscardAll(undoId: string): Promise<void> {
+    projectStore.setTrashNotice(null);
+    try {
+      const { restored } = await api.region.undoDiscardAll(undoId);
+      set({
+        trackerNotice: {
+          kind: 'info',
+          text: `${restored} ${restored === 1 ? 'result' : 'results'} restored.`,
+        },
+      });
     } catch (e) {
       const err = uiError(e);
       set({ trackerNotice: { kind: 'error', text: errorText(err.code, err.message) } });

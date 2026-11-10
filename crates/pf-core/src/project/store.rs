@@ -779,6 +779,118 @@ pub fn discard_rest(
     Ok(moved)
 }
 
+/// What a `discard_all` binned, so its Undo puts every candidate back as it was (#61).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscardAll {
+    pub job_id: Ulid,
+    /// The one trash item holding the candidate files.
+    pub item_id: Ulid,
+    /// Each binned candidate's status and star before the discard.
+    pub prior: Vec<(Ulid, CandidateStatus, bool)>,
+}
+
+/// `discard_all` (#61, FR-RGN-46): one commit that discards every candidate of the job still in
+/// `results/`, starred ones included (their star is cleared, #57), never the accepted one; the
+/// files go to the trash as one item, and the job's inputs follow when nothing is kept (#56).
+/// `None`, and no commit, when there is nothing to discard.
+pub fn discard_all(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    job_id: Ulid,
+) -> CoreResult<Option<DiscardAll>> {
+    p.require_writable()?;
+    let job = job(p, job_id)?.clone();
+    let idx: Vec<usize> = (0..p.manifest.candidates.len())
+        .filter(|&i| discardable(&p.manifest.candidates[i], job_id))
+        .collect();
+    if idx.is_empty() {
+        return Ok(None);
+    }
+    let prior = idx
+        .iter()
+        .map(|&i| {
+            let c = &p.manifest.candidates[i];
+            (c.id, c.status, c.starred)
+        })
+        .collect();
+    let first = idx[0];
+    commit(ctx, install_id, p, |ctx, _, m, _| {
+        discard_indices(ctx, m, &idx, "discarded all");
+        trash_inputs_if_all_discarded(ctx, m, &job);
+        Ok(())
+    })?;
+    let item_id = p.manifest.candidates[first]
+        .trash_id
+        .ok_or_else(|| CoreError::internal("discarded without a trash item"))?;
+    Ok(Some(DiscardAll {
+        job_id,
+        item_id,
+        prior,
+    }))
+}
+
+/// A candidate of `job_id` that Discard all bins: not accepted, and its file not in the trash.
+pub fn discardable(c: &Candidate, job_id: Ulid) -> bool {
+    c.job_id == job_id && c.status != CandidateStatus::Accepted && c.trash_id.is_none()
+}
+
+/// The Undo of [`discard_all`] (#61): one commit that brings back every file still in its trash
+/// item, plus the job's region/mask item if the discard trashed them (#56), and gives each
+/// candidate its old status and star. A candidate taken out of the item since (starred from the
+/// trash) is left as it is now. Returns how many candidates came back.
+pub fn undo_discard_all(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    undo: &DiscardAll,
+) -> CoreResult<usize> {
+    p.require_writable()?;
+    if !p.manifest.trash.iter().any(|t| t.id == undo.item_id) {
+        return Err(CoreError::new(
+            ErrorCode::UnknownId,
+            "those results aren't in the trash any more",
+        )
+        .with_field("undo_id"));
+    }
+    let inputs = p
+        .jobs
+        .get(&undo.job_id)
+        .map(JobFile::input_files)
+        .unwrap_or_default();
+    let mut items = vec![undo.item_id];
+    items.extend(
+        p.manifest
+            .trash
+            .iter()
+            .filter(|t| {
+                t.kind == TrashKind::JobInputs && t.files.iter().any(|f| inputs.contains(f))
+            })
+            .map(|t| t.id),
+    );
+    let back: Vec<(Ulid, CandidateStatus, bool)> = undo
+        .prior
+        .iter()
+        .filter(|(id, _, _)| {
+            p.manifest
+                .candidates
+                .iter()
+                .any(|c| c.id == *id && c.trash_id == Some(undo.item_id))
+        })
+        .copied()
+        .collect();
+    let n = back.len();
+    super::retention::restore_items(ctx, install_id, p, &items, |m| {
+        for (id, status, starred) in &back {
+            if let Some(c) = m.candidates.iter_mut().find(|c| c.id == *id) {
+                c.status = *status;
+                c.starred = *starred;
+            }
+        }
+    })?;
+    Ok(n)
+}
+
 /// A baked patch to place: the RGBA PNG (cropped to alpha > 0) and its record fields.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct NewPatch {
@@ -1017,7 +1129,10 @@ pub fn next_purge_at(p: &OpenProject) -> Option<Timestamp> {
 
 mod pick;
 pub(crate) use pick::statuses_follow_base;
-pub use pick::{BaseCommit, pick_base, pick_label, working_name};
+pub use pick::{
+    BaseCommit, base_from_file, drop_label, dropped_working_name, pick_base, pick_label,
+    working_name,
+};
 
 #[cfg(test)]
 pub(crate) mod tests;

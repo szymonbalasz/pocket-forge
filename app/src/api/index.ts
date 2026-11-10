@@ -85,15 +85,33 @@ export function onEvent<E extends keyof Events>(
   return listen<Events[E]>(name, (event) => handler(event.payload));
 }
 
-export type DropEvent = { type: 'over' } | { type: 'leave' } | { type: 'drop'; paths: string[] };
+/** A point in the page, CSS px from the top left (what `document.elementFromPoint` takes). */
+export interface DropPoint {
+  x: number;
+  y: number;
+}
 
-/** Native file drag-and-drop on the window (paths, not File objects). */
+export type DropEvent =
+  | { type: 'over'; position: DropPoint | null }
+  | { type: 'leave' }
+  | { type: 'drop'; paths: string[]; position: DropPoint | null };
+
+/** Tauri gives the drag position in physical px of the webview; the page hit-tests in CSS px. */
+function toPagePoint(p: { x: number; y: number } | undefined): DropPoint | null {
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+  const scale = window.devicePixelRatio || 1;
+  return { x: p.x / scale, y: p.y / scale };
+}
+
+/** Native file drag-and-drop on the window (paths, not File objects), with the drag position
+ *  so a drop can be hit-tested against the page (#61: the project panel's sections). */
 export function onFileDrop(handler: (event: DropEvent) => void): Promise<UnlistenFn> {
   return getCurrentWebview().onDragDropEvent((event) => {
     const p = event.payload;
-    if (p.type === 'drop') handler({ type: 'drop', paths: p.paths });
+    if (p.type === 'drop')
+      handler({ type: 'drop', paths: p.paths, position: toPagePoint(p.position) });
     else if (p.type === 'leave') handler({ type: 'leave' });
-    else handler({ type: 'over' });
+    else handler({ type: 'over', position: toPagePoint(p.position) });
   });
 }
 
@@ -231,6 +249,7 @@ export const api = {
     folderList: (folder: ProjectFolder) => call('project_folder_list', { folder }),
     folderAdd: (folder: ProjectFolder, paths: string[]) =>
       call('project_folder_add', { folder, paths }),
+    baseFromFile: (path: string) => call('project_base_from_file', { path }),
     trashList: () => call('project_trash_list', {}),
     trashRestore: (itemId: string) => call('project_trash_restore', { item_id: itemId }),
     diskUsage: () => call('project_disk_usage', {}),
@@ -294,6 +313,9 @@ export const api = {
       call('rgn_candidate_discard', { job_id: jobId, candidate_id: candidateId }),
     /** #56: "Discard the rest" of a job (one commit, one trash item). */
     discardRest: (jobId: string) => call('rgn_job_discard_rest', { job_id: jobId }),
+    /** #61: "Discard all" of a result set, and its Undo. */
+    discardAll: (jobId: string) => call('rgn_iteration_discard_all', { job_id: jobId }),
+    undoDiscardAll: (undoId: string) => call('rgn_iteration_discard_all_undo', { undo_id: undoId }),
     retune: (layerId: string, blend: Commands['rgn_patch_retune'][0]['blend']) =>
       call('rgn_patch_retune', { layer_id: layerId, blend }),
     iterations: () => call('rgn_iterations_list', {}),

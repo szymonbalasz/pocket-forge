@@ -1,13 +1,17 @@
 // The left project panel (asset-project §7, ui-guidelines): the open project's folders (Working,
 // References, Structure, Parts, Results), then History (revisions) and Storage (disk use, trash).
 // User-owned folders list what's on disk on open, on window focus and on Refresh (FR-PRJ-48).
+// Files dragged from Explorer onto Working, References, Structure or Parts are taken in there
+// (FR-PRJ-55, #61); a drop anywhere else in an open project does nothing.
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Popover } from 'radix-ui';
 
 import {
   api,
+  onFileDrop,
   pickPaths,
   type CandidateRecord,
+  type DropPoint,
   type DiskUsage,
   type FolderFile,
   type RgnIteration,
@@ -17,6 +21,7 @@ import {
   type TrashItem,
 } from '../../api';
 import { IconPlus } from '../../shell/icons';
+import { dropNewImage, PATCHES_KEPT } from '../region-edit';
 import {
   errorOf,
   folderMoved,
@@ -26,7 +31,18 @@ import {
   useProjectState,
 } from '../../store/project';
 import { ConflictView } from './ConflictView';
-import { bytesLabel, dateLabel, revisionLabel, storageLabel, timeLabel } from './format';
+import {
+  bytesLabel,
+  dateLabel,
+  DROP_ONE_IMAGE,
+  dropName,
+  folderDropNotice,
+  revisionLabel,
+  storageLabel,
+  timeLabel,
+  workingDropError,
+  type DropSkip,
+} from './format';
 import './project.css';
 
 const USER_FOLDERS: { id: ProjectFolder; label: string }[] = [
@@ -56,11 +72,143 @@ function useOnFocus(load: () => void): void {
   }, [load]);
 }
 
+// ------------------------------------------------------------------ drops (FR-PRJ-55, #61)
+
+/** The sections a file drag can land on. */
+type DropSection = 'working' | 'references' | 'structure' | 'parts';
+
+const DROP_ATTR = 'data-drop-section';
+
+/** The drop-target section under a page point, or null (elsewhere: the drop does nothing). */
+function sectionAt(pt: DropPoint | null): DropSection | null {
+  if (!pt || typeof document.elementFromPoint !== 'function') return null;
+  const zone = document.elementFromPoint(pt.x, pt.y)?.closest(`[${DROP_ATTR}]`);
+  return (zone?.getAttribute(DROP_ATTR) as DropSection | null | undefined) ?? null;
+}
+
+interface DropNotice {
+  at: DropSection;
+  kind: 'info' | 'error';
+  text: string;
+}
+
+type DropOutcome = Omit<DropNotice, 'at'>;
+
+/** Codes that refuse the whole drop on a user folder (not one file of it). */
+const WHOLE_DROP_ERRORS = new Set(['read_only', 'no_project', 'unknown_folder', 'ipc']);
+
+/** References / Structure / Parts: each file is copied in through `project_folder_add`
+ *  (FR-PRJ-47: its naming, dedupe and errors), one at a time so one bad file skips only itself. */
+async function dropInFolder(
+  folder: ProjectFolder,
+  label: string,
+  paths: string[],
+): Promise<DropOutcome> {
+  const added: string[] = [];
+  const skipped: DropSkip[] = [];
+  let refused: string | null = null;
+  for (const path of paths) {
+    try {
+      await api.project.folderAdd(folder, [path]);
+      added.push(dropName(path));
+    } catch (e) {
+      const { code, message } = errorOf(e);
+      if (isFolderMovedError(e) || WHOLE_DROP_ERRORS.has(code)) {
+        refused = workingDropError('', isFolderMovedError(e) ? 'folder_moved' : code, message);
+        break;
+      }
+      skipped.push({ name: dropName(path), code });
+    }
+  }
+  if (added.length) projectStore.folderChanged(folder);
+  if (refused && !added.length) return { kind: 'error', text: refused };
+  const text = folderDropNotice(label, added, skipped);
+  return {
+    kind: added.length ? 'info' : 'error',
+    text: refused ? `${text} ${refused}` : text,
+  };
+}
+
+/** Working: exactly one image becomes the bottom image, through the pick path (one undoable
+ *  revision, refused while a job runs or on a read-only project). */
+async function dropOnWorking(paths: string[]): Promise<DropOutcome> {
+  if (paths.length !== 1) return { kind: 'error', text: DROP_ONE_IMAGE };
+  const name = dropName(paths[0]!);
+  const r = await dropNewImage(paths[0]!);
+  if (!r.ok) return { kind: 'error', text: workingDropError(name, r.code, r.message) };
+  projectStore.folderChanged('working');
+  const text = `New image dropped: ${name}.`;
+  return {
+    kind: 'info',
+    text: r.patchesDropped ? `${text} ${PATCHES_KEPT(r.patchesDropped)}` : text,
+  };
+}
+
+const SECTION_LABEL: Record<DropSection, string> = {
+  working: 'Working',
+  references: 'References',
+  structure: 'Structure',
+  parts: 'Parts',
+};
+
+/** Listens to native file drags while the project is open: whether one is over the window,
+ *  which section is under the pointer, and what the last drop did. */
+function usePanelDrop(readOnly: boolean): {
+  dragging: boolean;
+  over: DropSection | null;
+  notice: DropNotice | null;
+} {
+  const [dragging, setDragging] = useState(false);
+  const [over, setOver] = useState<DropSection | null>(null);
+  const [notice, setNotice] = useState<DropNotice | null>(null);
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let alive = true;
+    onFileDrop((e) => {
+      if (e.type === 'over') {
+        setDragging(true);
+        setOver(sectionAt(e.position));
+        return;
+      }
+      setDragging(false);
+      setOver(null);
+      if (e.type !== 'drop') return;
+      const at = sectionAt(e.position);
+      if (!at || e.paths.length === 0) return;
+      const run: Promise<DropOutcome> = readOnly
+        ? Promise.resolve({ kind: 'error', text: workingDropError('', 'read_only', '') })
+        : at === 'working'
+          ? dropOnWorking(e.paths)
+          : dropInFolder(at, SECTION_LABEL[at], e.paths);
+      void run.then((n) => {
+        if (alive) setNotice({ ...n, at });
+      });
+    })
+      .then((u) => (alive ? (unlisten = u) : u()))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
+  }, [readOnly]);
+  return { dragging, over, notice };
+}
+
 function OpenProject({ project }: { project: ProjectSnapshot }) {
   const { revision, error } = useProjectState();
   const readOnly = project.read_only !== null;
+  const drop = usePanelDrop(readOnly);
+  const dropProps = (id: DropSection) => ({
+    dropOver: drop.over === id,
+    notice: drop.notice?.at === id ? drop.notice : null,
+  });
   return (
-    <div className="prj-panel" data-testid="prj-panel" data-kind={project.kind}>
+    <div
+      className={`prj-panel${drop.dragging ? ' prj-panel-dragging' : ''}`}
+      data-testid="prj-panel"
+      data-kind={project.kind}
+      data-dragging={drop.dragging ? 'true' : undefined}
+    >
       <header className="prj-panel-header">
         <button
           type="button"
@@ -95,9 +243,22 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
         </div>
       )}
       <Warnings project={project} />
-      <Folder id="working" label="Working" revision={revision} canAdd={false} />
+      <Folder
+        id="working"
+        label="Working"
+        revision={revision}
+        canAdd={false}
+        {...dropProps('working')}
+      />
       {USER_FOLDERS.map((f) => (
-        <Folder key={f.id} id={f.id} label={f.label} revision={revision} canAdd={!readOnly} />
+        <Folder
+          key={f.id}
+          id={f.id}
+          label={f.label}
+          revision={revision}
+          canAdd={!readOnly}
+          {...dropProps(f.id as DropSection)}
+        />
       ))}
       <Results revision={revision} readOnly={readOnly} />
       <History project={project} revision={revision} />
@@ -111,15 +272,18 @@ function Section({
   label,
   count,
   actions,
+  dropzone,
   children,
 }: {
   id: string;
   label: string;
   count?: number;
   actions?: ReactNode;
+  /** FR-PRJ-55: the section takes file drops; `over` = the drag is over it now. */
+  dropzone?: { over: boolean };
   children: ReactNode;
 }) {
-  return (
+  const details = (
     <details className="prj-section" data-testid={`prj-panel-${id}`} open>
       <summary className="prj-section-head">
         <span>{label}</span>
@@ -142,6 +306,17 @@ function Section({
       </summary>
       <div className="prj-section-body">{children}</div>
     </details>
+  );
+  if (!dropzone) return details;
+  return (
+    <div
+      className={`prj-dropzone${dropzone.over ? ' prj-dropzone-over' : ''}`}
+      data-testid={`prj-panel-${id}-dropzone`}
+      data-drop-section={id}
+      data-over={dropzone.over ? 'true' : undefined}
+    >
+      {details}
+    </div>
   );
 }
 
@@ -256,11 +431,16 @@ function Folder({
   label,
   revision,
   canAdd,
+  dropOver,
+  notice,
 }: {
   id: ProjectFolder;
   label: string;
   revision: number;
   canAdd: boolean;
+  dropOver: boolean;
+  /** What the last file drop on this section did (FR-PRJ-55). */
+  notice: DropNotice | null;
 }) {
   const [files, setFiles] = useState<FolderFile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -299,6 +479,7 @@ function Folder({
       id={id}
       label={label}
       count={files?.length}
+      dropzone={{ over: dropOver }}
       actions={
         <>
           {canAdd && <AddFiles folder={id} onAdd={add} />}
@@ -318,6 +499,16 @@ function Folder({
       {error && (
         <p className="error small" data-testid={`prj-panel-${id}-error`}>
           {error}
+        </p>
+      )}
+      {notice && (
+        <p
+          className={`${notice.kind === 'error' ? 'error' : 'muted'} small`}
+          data-testid={`prj-panel-${id}-drop-notice`}
+          data-kind={notice.kind}
+          role="status"
+        >
+          {notice.text}
         </p>
       )}
       {files && files.length === 0 && (
@@ -470,6 +661,37 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
       },
       (e: unknown) => setNotice({ kind: 'error', text: sentence(errorOf(e).message) }),
     );
+  // #61: every kept result of the iteration to the trash (never the accepted one), no confirm;
+  // the notice offers Undo, which puts each back as it was (star included).
+  const undoAll = (undoId: string) => {
+    projectStore.setTrashNotice(null);
+    return api.region.undoDiscardAll(undoId).then(
+      ({ restored }) => {
+        setNotice({
+          kind: 'info',
+          text: `${restored} ${restored === 1 ? 'result' : 'results'} restored.`,
+        });
+        load();
+      },
+      (e: unknown) => setNotice({ kind: 'error', text: sentence(errorOf(e).message) }),
+    );
+  };
+  const discardAll = (it: RgnIteration) =>
+    api.region.discardAll(it.job_id).then(
+      ({ trashed, undo_id }) => {
+        setNotice(null);
+        projectStore.setTrashNotice({
+          at: 'results',
+          text:
+            trashed === 0
+              ? 'Nothing to discard.'
+              : `${trashed} ${trashed === 1 ? 'result' : 'results'} in the trash for 30 days`,
+          ...(undo_id ? { undo: () => void undoAll(undo_id) } : {}),
+        });
+        load();
+      },
+      (e: unknown) => setNotice({ kind: 'error', text: sentence(errorOf(e).message) }),
+    );
   return (
     <Section id="results" label="Results" count={items.length}>
       {notice ? (
@@ -484,6 +706,19 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
         trash?.at === 'results' && (
           <p className="muted small" data-testid="prj-results-notice" role="status">
             {trash.text}
+            {trash.undo && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className="link"
+                  data-testid="prj-results-discard-undo"
+                  onClick={trash.undo}
+                >
+                  Undo
+                </button>
+              </>
+            )}
           </p>
         )
       )}
@@ -514,6 +749,23 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
                       {it.accepted_in_stack ? ' ✓' : ''}
                     </span>
                   </summary>
+                  <div className="prj-result-actions">
+                    <button
+                      type="button"
+                      className="link"
+                      data-testid="prj-results-discard-all"
+                      data-record-id={it.job_id}
+                      disabled={readOnly || running(it.state) || discardable(it, kept) === 0}
+                      title={
+                        running(it.state)
+                          ? 'The job is still running'
+                          : 'Discard all: every result but the accepted one to the trash for 30 days'
+                      }
+                      onClick={() => void discardAll(it)}
+                    >
+                      Discard all
+                    </button>
+                  </div>
                   <ul className="prj-files prj-result-cands">
                     {kept.map((c) => (
                       <li
@@ -554,6 +806,16 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
       )}
     </Section>
   );
+}
+
+/** A job still running (RGN's tracker rule): not terminal and not `fetched`. */
+function running(state: RgnIteration['state']): boolean {
+  return !['fetched', 'failed', 'canceled', 'lost', 'closed'].includes(state);
+}
+
+/** What Discard all would bin (#61): RGN's count, else the listed results but the accepted one. */
+function discardable(it: RgnIteration, kept: CandidateRecord[]): number {
+  return it.discardable ?? kept.filter((c) => c.status !== 'accepted').length;
 }
 
 // ------------------------------------------------------------------ history

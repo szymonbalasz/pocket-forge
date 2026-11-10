@@ -1085,3 +1085,172 @@ fn fr_gen_34_a_locked_project_spools_generate_candidates_until_unlocked() {
     g.pick(job.id, stored[0].id).unwrap();
     assert_eq!(g.p.manifest.layers[0].candidate_id, Some(stored[0].id));
 }
+
+// ---------------------------------------------------------------- FR-PRJ-55 drop on Working
+
+impl G {
+    fn drop_on_working(&mut self, source: &std::path::Path) -> CoreResult<store::BaseCommit> {
+        store::base_from_file(&self.e.ctx, self.e.install(), &mut self.p, source)
+    }
+}
+
+#[test]
+fn fr_prj_55_drop_on_working_is_one_commit_base_layer_write_once_copy_like_a_pick() {
+    let mut g = gen_env(Kind::Map, "Crypt");
+    let (job, c) = g.generate("crypt", &[10, 20]);
+    let picked = g.pick(job.id, c[0].id).unwrap();
+    g.patch();
+    let parent = g.p.manifest.head_revision;
+    let seq_before = g.p.last_commit.unwrap().0;
+    let src_bytes = png_bytes(40, 30, 77);
+    let src = g.e.outside("Sketches/Lower crypt.PNG", &src_bytes);
+
+    let out = g.drop_on_working(&src).unwrap();
+
+    assert_eq!(g.p.last_commit.unwrap().0, seq_before + 1, "one commit");
+    // Copied write-once into working/ under its own name; the source is untouched.
+    assert_eq!(out.file, "working/Lower crypt.png");
+    assert_eq!(std::fs::read(g.dir.join(&out.file)).unwrap(), src_bytes);
+    assert_eq!(std::fs::read(&src).unwrap(), src_bytes);
+    assert!(g.dir.join(&picked.file).is_file(), "the picked copy stays");
+    // The stack is [base layer], with no job or candidate.
+    let m = &g.p.manifest;
+    assert_eq!(m.layers.len(), 1);
+    let base = &m.layers[0];
+    assert_eq!((base.id, base.kind), (out.layer_id, LayerKind::Base));
+    assert_eq!(base.file.as_deref(), Some(out.file.as_str()));
+    assert_eq!((base.job_id, base.candidate_id), (None, None));
+    assert_eq!((base.width, base.height), (Some(40), Some(30)));
+    assert_eq!(
+        base.content_hash.as_deref(),
+        Some(fsx::hash_file(&g.dir.join(&out.file)).unwrap().as_str())
+    );
+    assert_eq!(
+        out.patches_dropped, 1,
+        "the patch stays in history (FR-GEN-28)"
+    );
+    // R84: the earlier base candidate is an ordinary kept result again.
+    assert_eq!(g.status(c[0].id), CandidateStatus::Dismissed);
+    // One `accept` revision labelled with the file name.
+    let head = read_revision(&g.p, m.head_revision).unwrap();
+    assert_eq!(
+        (head.id, head.reason),
+        (out.revision_id, RevisionReason::Accept)
+    );
+    assert_eq!(head.label.as_deref(), Some("Dropped: Lower crypt.PNG"));
+    assert_eq!(head.parent, Some(parent));
+    assert_eq!(head.layers, m.layers);
+    // It survives a reopen (the base hash check passes), and EDT resolves it.
+    let again = g.e.open(&g.dir);
+    assert_eq!(again.manifest.layers, g.p.manifest.layers);
+    assert_eq!(again.read_only, None);
+    assert_eq!(
+        g.p.resolve_image(out.layer_id).unwrap().path,
+        g.dir.join(&out.file)
+    );
+    // Undo = restore the parent: the picked base and its patch come back.
+    restore_revision(&g.e.ctx, g.e.install(), &mut g.p, parent).unwrap();
+    assert_eq!(g.p.manifest.layers.len(), 2);
+    assert_eq!(g.p.manifest.layers[0].candidate_id, Some(c[0].id));
+    assert_eq!(g.status(c[0].id), CandidateStatus::Accepted);
+    assert!(g.dir.join(&out.file).is_file(), "write-once: never deleted");
+    // Redo = restore the drop's revision.
+    restore_revision(&g.e.ctx, g.e.install(), &mut g.p, out.revision_id).unwrap();
+    assert_eq!(
+        g.p.manifest.layers[0].file.as_deref(),
+        Some(out.file.as_str())
+    );
+    assert_eq!(g.status(c[0].id), CandidateStatus::Dismissed);
+}
+
+#[test]
+fn fr_prj_55_drop_on_a_project_with_an_original_keeps_the_original_and_never_shares_its_file() {
+    let e = env();
+    let dir = e.project("Crypt");
+    let p = e.open(&dir);
+    let mut g = G { e, dir, p };
+    let original = g.p.manifest.original.clone().unwrap();
+    let r0 = g.p.manifest.head_revision;
+    // The very same file as the original, dropped back: its own copy, not the original's file.
+    let same = std::fs::read(g.dir.join(&original.file)).unwrap();
+    let src = g.e.outside("again/Crypt.png", &same);
+    let out = g.drop_on_working(&src).unwrap();
+    assert_eq!(out.file, "working/Crypt (2).png");
+    assert_eq!(
+        g.p.manifest.original.as_ref(),
+        Some(&original),
+        "the original stays"
+    );
+    assert!(g.dir.join(&original.file).is_file());
+    let again = g.e.open(&g.dir);
+    assert_eq!(again.read_only, None);
+    assert_eq!(again.manifest.original.as_ref(), Some(&original));
+    // Undo brings the original layer back.
+    restore_revision(&g.e.ctx, g.e.install(), &mut g.p, r0).unwrap();
+    assert_eq!(g.p.manifest.layers[0].kind, LayerKind::Original);
+}
+
+#[test]
+fn fr_prj_55_same_bytes_reuse_the_copy_other_bytes_take_a_free_name() {
+    let mut g = gen_env(Kind::Token, "Goblin");
+    let a = g.e.outside("a/goblin.png", &png_bytes(16, 16, 1));
+    let first = g.drop_on_working(&a).unwrap();
+    let again = g.drop_on_working(&a).unwrap();
+    assert_eq!(again.file, first.file, "the same bytes are reused");
+    let b = g.e.outside("b/goblin.png", &png_bytes(16, 16, 2));
+    let other = g.drop_on_working(&b).unwrap();
+    assert_eq!(other.file, "working/goblin (2).png");
+    assert_eq!(
+        std::fs::read(g.dir.join(&first.file)).unwrap(),
+        png_bytes(16, 16, 1),
+        "never overwritten"
+    );
+    // A JPEG whose name doesn't say so keeps the format's extension; awkward names are sanitised.
+    let j = g.e.outside("c/CON", &jpeg_bytes(8, 8));
+    assert_eq!(g.drop_on_working(&j).unwrap().file, "working/CON_.jpg");
+}
+
+#[test]
+fn fr_prj_55_refusals_change_nothing() {
+    let mut g = gen_env(Kind::Map, "Crypt");
+    let (job, c) = g.generate("crypt", &[10]);
+    g.pick(job.id, c[0].id).unwrap();
+    let head = g.p.manifest.head_revision;
+    let working = tree(&g.dir.join(WORKING_DIR));
+    let cases: Vec<(std::path::PathBuf, ErrorCode)> = vec![
+        (
+            g.e.outside("notes.txt", b"just text"),
+            ErrorCode::Unsupported,
+        ),
+        (
+            g.e.outside("broken.png", &png_bytes(8, 8, 3)[..40]),
+            ErrorCode::Corrupt,
+        ),
+        (g.e.dir.path().join("outside/gone.png"), ErrorCode::NotFound),
+        (g.e.dir.path().join("outside"), ErrorCode::NotFound),
+    ];
+    for (src, code) in cases {
+        let err = g.drop_on_working(&src).unwrap_err();
+        assert_eq!(err.code, code, "{}", src.display());
+    }
+    assert_eq!(g.p.manifest.head_revision, head, "nothing committed");
+    assert_eq!(tree(&g.dir.join(WORKING_DIR)), working, "nothing copied");
+    // R97: refused while a job runs, as a pick is.
+    let running = g.edit_job(&[JobState::Submitted, JobState::Running]);
+    let head = g.p.manifest.head_revision;
+    let ok = g.e.outside("ok.png", &png_bytes(8, 8, 4));
+    let err = g.drop_on_working(&ok).unwrap_err();
+    assert_eq!(err.code, ErrorCode::JobActive);
+    assert_eq!(err.detail["job_id"], json!(running.id));
+    assert_eq!(g.p.manifest.head_revision, head, "nothing committed");
+    assert_eq!(tree(&g.dir.join(WORKING_DIR)), working, "nothing copied");
+    assert_eq!(g.p.manifest.layers[0].candidate_id, Some(c[0].id));
+    // Read-only: refused before anything is written.
+    let mut r = gen_env(Kind::Map, "Read only");
+    r.p.read_only = Some(ReadOnlyReason::NewerVersion);
+    assert_eq!(
+        r.drop_on_working(&ok).unwrap_err().code,
+        ErrorCode::ReadOnly
+    );
+    assert!(tree(&r.dir.join(WORKING_DIR)).is_empty(), "nothing written");
+}

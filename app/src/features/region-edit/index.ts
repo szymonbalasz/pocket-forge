@@ -43,3 +43,5 @@ export { SpendConfirm, type SpendConfirmProps } from './ConfirmDialog';
 export { withinConfirmed, type ConfirmPlan, type SpendEstimate } from './confirm';
 export { amountLabel, costLabel, errorText } from './format';
 export { useActiveJobId, refreshJobs, type UiError } from './store';
+// FR-PRJ-55 (#61): PRJ's panel drops an image on Working through the pick path.
+export { dropNewImage, PATCHES_KEPT, type DropResult } from './store';
