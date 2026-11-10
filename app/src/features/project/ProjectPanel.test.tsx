@@ -707,6 +707,11 @@ test('FR-RGN-46 #61 Results: Discard all bins the opened iteration but the accep
   });
   expect(screen.getByTestId('prj-results-notice').textContent).toMatch(/2 results restored/);
   expect(screen.getAllByTestId('prj-results-candidate')[1]!.textContent).toContain('★');
+  // walk-61 L2: a later Discard all (here the tracker's) replaces the restored notice.
+  act(() =>
+    projectStore.setTrashNotice({ at: 'tracker', text: '2 results in the trash for 30 days' }),
+  );
+  expect(screen.queryByTestId('prj-results-notice')).toBeNull();
   // Disabled while the set's job runs.
   state = 'running';
   act(() => core.emit('project:committed', { seq: 10 }));

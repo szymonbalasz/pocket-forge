@@ -521,6 +521,28 @@ describe('confirm dialog (FR-RGN-14..16, §7)', { timeout: 20_000 }, () => {
     expect(fake.callsOf('rgn_job_submit')[0]!.confirmations).toEqual(['set_cap']);
   });
 
+  test('FR-RGN-16 walk-61 L3: once set, the next submit of the same draft doesn’t ask for the limits again', async () => {
+    const dlg = await ready({ spend: { cap: null, threshold: null } });
+    fireEvent.change(within(dlg).getByTestId('rgn-confirm-cap'), { target: { value: '50' } });
+    fireEvent.change(within(dlg).getByTestId('rgn-confirm-threshold'), { target: { value: '5' } });
+    fireEvent.click(within(dlg).getByTestId('rgn-confirm-ok'));
+    await waitFor(() => expect(fake.callsOf('rgn_job_submit')).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByTestId('rgn-confirm')).toBeNull());
+    act(() => mockControls().finish(2));
+    const submit = () => screen.getByTestId('rgn-panel-submit') as HTMLButtonElement;
+    await waitFor(() => expect(submit().disabled).toBe(false));
+    // The same draft: the estimate from before the limits were set is reused.
+    fireEvent.click(submit());
+    const again = await screen.findByTestId('rgn-confirm');
+    expect(again.dataset.setup).toBe('false');
+    expect(within(again).queryByTestId('rgn-confirm-cap')).toBeNull();
+    expect(again.textContent).toContain('50 CU');
+    fireEvent.click(within(again).getByTestId('rgn-confirm-ok'));
+    await waitFor(() => expect(fake.callsOf('rgn_job_submit')).toHaveLength(2));
+    expect(fake.callsOf('rgn_job_submit')[1]!.confirmations).toEqual([]);
+    expect(fake.callsOf('rgn_spend_set')).toHaveLength(1);
+  });
+
   test('§7 cancel closes without submitting; Esc too', async () => {
     let dlg = await ready({ spend: { cap: 100, threshold: 10 } });
     fireEvent.click(within(dlg).getByTestId('rgn-confirm-cancel'));
@@ -1149,6 +1171,19 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(screen.getAllByTestId('edt-picker-star')[1]!.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(/3 results restored/);
     expect(all().disabled).toBe(false);
+    // walk-61 L2: a later Discard all (here from Results) replaces the restored notice.
+    act(() =>
+      projectStore.setTrashNotice({ at: 'results', text: '3 results in the trash for 30 days' }),
+    );
+    expect(screen.queryByTestId('rgn-tracker-notice')).toBeNull();
+    // And a second Discard all here shows only its own notice.
+    fireEvent.click(all());
+    await waitFor(() => expect(fake.callsOf('rgn_iteration_discard_all')).toHaveLength(2));
+    await waitFor(() =>
+      expect(screen.getAllByTestId('rgn-tracker-notice').map((n) => n.textContent)).toEqual([
+        expect.stringMatching(/^3 results in the trash for 30 days/),
+      ]),
+    );
   });
 });
 

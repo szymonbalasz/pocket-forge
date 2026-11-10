@@ -2,13 +2,16 @@
 // Opened by the prompt block's Chat button or the status-bar toggle, resized by its left-edge
 // handle (DOCK_MIN–DOCK_MAX), and remembered per machine. Once opened it stays mounted while
 // hidden, so a reply keeps streaming into it (hiding never cancels a turn, FR-PRM-35).
+// walk-61 L1: it is never wider than the window allows (`dockMax`): the canvas keeps its room.
+// A smaller window narrows it on screen only; the remembered width stays the user's choice.
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { useDockRoom } from '../../shared/dockRoom';
 import { ChatPanel } from './ChatPanel';
 import {
   commitDockWidth,
-  DOCK_MAX,
   DOCK_MIN,
+  dockMax,
   loadDock,
   previewDockWidth,
   setDockOpen,
@@ -18,7 +21,11 @@ import {
 import './chat.css';
 
 export function ChatDock() {
-  const { open, width } = useDock();
+  const { open, width: stored } = useDock();
+  const max = dockMax(useDockRoom());
+  const width = Math.min(stored, max);
+  const maxRef = useRef(max);
+  maxRef.current = max;
   const [mounted, setMounted] = useState(open);
   useEffect(() => {
     void loadDock();
@@ -38,7 +45,7 @@ export function ChatDock() {
   // The handle is on the left edge: dragging left widens the dock.
   const onPointerMove = useCallback((e: React.PointerEvent) => {
     const s = start.current;
-    if (s) previewDockWidth(s.w - (e.clientX - s.x));
+    if (s) previewDockWidth(s.w - (e.clientX - s.x), maxRef.current);
   }, []);
   const onPointerUp = useCallback(() => {
     if (!start.current) return;
@@ -60,7 +67,7 @@ export function ChatDock() {
         role="separator"
         aria-orientation="vertical"
         aria-valuemin={DOCK_MIN}
-        aria-valuemax={DOCK_MAX}
+        aria-valuemax={max}
         aria-valuenow={width}
         data-testid="prm-dock-resize"
         onPointerDown={onPointerDown}

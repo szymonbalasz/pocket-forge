@@ -1583,16 +1583,17 @@ export const rgn = {
     await Promise.all([refreshProject(), refreshIterations()]);
   },
 
-  /** #61: the toast's Undo: every result of that Discard all back as it was, star included. */
+  /** #61: the toast's Undo: every result of that Discard all back as it was, star included.
+   *  walk-61 L2: "N results restored." is the one trash notice too, so a later discard anywhere
+   *  replaces it instead of showing next to it. */
   async undoDiscardAll(undoId: string): Promise<void> {
     projectStore.setTrashNotice(null);
     try {
       const { restored } = await api.region.undoDiscardAll(undoId);
-      set({
-        trackerNotice: {
-          kind: 'info',
-          text: `${restored} ${restored === 1 ? 'result' : 'results'} restored.`,
-        },
+      set({ trackerNotice: null });
+      projectStore.setTrashNotice({
+        at: 'tracker',
+        text: `${restored} ${restored === 1 ? 'result' : 'results'} restored.`,
       });
     } catch (e) {
       const err = uiError(e);

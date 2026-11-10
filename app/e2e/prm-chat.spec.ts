@@ -39,3 +39,56 @@ test('FR-PRM-20 FR-PRM-21 FR-PRM-27 FR-PRM-29 open the chat panel â†’ consent â†
   await expect(card).toHaveCount(1);
   expect((await calls(page)).some((c) => c.cmd === 'prm_chat_session_end')).toBe(false);
 });
+
+test('FR-PRM-21 walk-61 L1 the dock leaves the canvas 480 px, follows the window and keeps the status bar on one line', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1700, height: 900 });
+  await openRgn(page);
+  await page.getByTestId('prm-block-chat').click();
+  const dock = page.getByTestId('prm-dock');
+  await expect(dock).toBeVisible();
+  const width = async (testId: string) => (await page.getByTestId(testId).boundingBox())!.width;
+  // Drag the handle as far left as it goes: the dock stops where the canvas keeps 480 px.
+  const h = (await page.getByTestId('prm-dock-resize').boundingBox())!;
+  await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(10, h.y + h.height / 2, { steps: 5 });
+  await page.mouse.up();
+  const wide = await width('prm-dock');
+  expect(wide).toBeGreaterThan(400);
+  expect(wide).toBeLessThanOrEqual(720);
+  expect(await width('app-slot-canvas')).toBeGreaterThanOrEqual(479);
+  const bar = page.getByTestId('app-status-bar');
+  expect((await bar.boundingBox())!.height).toBeLessThan(40);
+  // A smaller window: the dock narrows (never below 320), the bar stays one line, the toggle stays.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect.poll(() => width('prm-dock')).toBe(320);
+  expect((await bar.boundingBox())!.height).toBeLessThan(40);
+  await expect(page.getByTestId('prm-dock-toggle')).toBeVisible();
+  // Room again: back to the width the user chose.
+  await page.setViewportSize({ width: 1700, height: 900 });
+  await expect.poll(() => width('prm-dock')).toBe(wide);
+});
+
+test('FR-PRM-21 fix-walk61b at 1280 px nothing in the status bar hides, dock closed or open: the bar spans the window', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await openRgn(page);
+  const bar = page.getByTestId('app-status-bar');
+  const dropped = bar.locator('[data-dropped]');
+  const barWidth = async () => (await bar.boundingBox())!.width;
+  await expect(page.getByTestId('edt-view-fit')).toBeVisible();
+  await expect(page.getByTestId('app-slot-left')).toBeVisible();
+  await expect(page.getByTestId('app-slot-right')).toBeVisible();
+  expect(await barWidth()).toBe(1280);
+  await expect(dropped).toHaveCount(0);
+  // The dock takes width from the canvas, not from the bar.
+  await page.getByTestId('prm-block-chat').click();
+  await expect(page.getByTestId('prm-dock')).toBeVisible();
+  expect(await barWidth()).toBe(1280);
+  await expect(dropped).toHaveCount(0);
+  await expect(page.getByTestId('edt-view-fit')).toBeVisible();
+  await expect(page.getByTestId('prm-dock-toggle')).toBeVisible();
+});

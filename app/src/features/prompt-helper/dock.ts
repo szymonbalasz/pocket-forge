@@ -26,8 +26,14 @@ function set(next: DockState): void {
   for (const l of listeners) l();
 }
 
-export const clampWidth = (w: number): number =>
-  Math.round(Math.min(DOCK_MAX, Math.max(DOCK_MIN, w)));
+export const clampWidth = (w: number, max: number = DOCK_MAX): number =>
+  Math.round(Math.min(max, Math.max(DOCK_MIN, w)));
+
+/** walk-61 L1: the widest the dock may be now. The canvas keeps CANVAS_MIN px (`room`, measured
+ *  by the shell; `null` = unmeasured), but the dock never gets narrower than DOCK_MIN: in a very
+ *  small window it still opens at DOCK_MIN. */
+export const dockMax = (room: number | null): number =>
+  room === null ? DOCK_MAX : Math.max(DOCK_MIN, Math.min(DOCK_MAX, Math.floor(room)));
 
 /** Reads the remembered state (once). */
 export function loadDock(): Promise<void> {
@@ -59,9 +65,9 @@ export function toggleDock(): void {
   setDockOpen(!state.open);
 }
 
-/** While dragging: the width on screen only. */
-export function previewDockWidth(width: number): void {
-  const w = clampWidth(width);
+/** While dragging: the width on screen only, within what the window allows now (`max`). */
+export function previewDockWidth(width: number, max: number = DOCK_MAX): void {
+  const w = clampWidth(width, max);
   if (w !== state.width) set({ ...state, width: w });
 }
 

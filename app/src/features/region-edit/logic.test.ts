@@ -363,6 +363,13 @@ describe('confirm dialog logic (FR-RGN-14..16, §7)', () => {
     expect(ok.saveSpend).toEqual({ cap: 50, threshold: 2 });
     expect(ok.confirmations).toEqual(['set_cap', 'threshold']);
   });
+
+  test('FR-RGN-16 walk-61 L3: limits stored since the estimate was made don’t ask again', () => {
+    const e = est(3, { cap: null, threshold: null, needs: ['set_cap'] });
+    const p = confirmPlan(e, { cap: 50, threshold: 5 }, initialForm({ ...e, cap: 50 }, 5));
+    expect(p).toMatchObject({ setup: false, cap: 50, canConfirm: true, saveSpend: null });
+    expect(p.confirmations).toEqual([]);
+  });
 });
 
 const row = (

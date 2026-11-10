@@ -7,7 +7,7 @@ export const providerFeature: Feature = {
   prefix: 'prv',
   slots: {},
   // Right end of the status bar, after the project's save state (50).
-  status: [{ id: 'chip', priority: 90, Component: ProviderChip }],
+  status: [{ id: 'chip', priority: 90, drop: 4, Component: ProviderChip }],
 };
 
 /** Reloads the chip's status and balance (RGN, after the provider answers again, walk D5). */

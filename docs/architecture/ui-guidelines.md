@@ -32,8 +32,9 @@
 │    │ (project)   │         │                    │ (generate,   │
 │    │             ├─────────┴────────────────────┤  export)     │
 │    │             │ bottom: picker / iterations   │              │
-│    │             │ status bar: zoom, mask, job   │              │
-└────┴─────────────┴──────────────────────────────┴──────────────┘
+├────┴─────────────┴──────────────────────────────┴──────────────┤
+│ status bar: zoom, mask, save, job, export, provider, chat      │
+└────────────────────────────────────────────────────────────────┘
 ```
 - **Section rail** (56 px): Maps, Tokens, Items, **References**, then Settings at the bottom. Owner: asset-project (PRJ). References is not a section: selecting it shows the packs home (reference-packs, REF) in the home slot.
 - **Home** (no project open): a grid of project cards for the selected section (thumbnail of the working image, name, iteration count, last edited) and **+ New**, a menu: **From image…** | **Generate new…** (OQ-GEN-10, GEN's name dialog). Owner: PRJ.
@@ -45,7 +46,7 @@
 - **Generate tab strip** (OQ-GEN-09): **Region edit** (RGN) | **New image** (GEN). RGN's Generate section draws the strip (`gen-tab`, `role="tab"`, ←/→ move) and its own tab; other features add tabs with `registerGenerateTab` (`app/src/shared/generateTabs.ts`). Only the visible tab is mounted (FR-GEN-36). A project with no image shows only New image. A project opens on Region edit, except after **+ New → Generate new…** (New image). Retry on a generate job in the tracker switches to New image.
 - The right panel hides itself while every component in it reports idle through `useSlotIdle(idle)` (`app/src/shared/slot.ts`), for example on Home with no project open (BL-15). A component that doesn't call it keeps the panel open.
 - **Iteration tracker:** the bottom strip lists iterations (`results/NNN`). Owner: RGN, using EDT's picker for the selected iteration.
-- **Status bar** is shared: features register **segments** (EDT zoom and mask, PRJ save state, RGN job state, PRV provider chip) through the feature registry, ordered by a `priority` number. EDT owns the bar itself.
+- **Status bar** is shared: features register **segments** (EDT zoom and mask, PRJ save state, RGN job state, PRV provider chip) through the feature registry, ordered by a `priority` number. EDT owns the bar itself. It spans the whole window under every pane, so at a normal width (≥ 1280 px) every segment shows whatever the panels and the dock do (fix-walk61b). The bar never wraps or clips; only when the window truly is too narrow: the `grow` segment (PRJ save state) truncates, then segments with a `drop` rank hide, lowest first (export progress, job state, EDT view, provider chip); the chat toggle never hides, since with the dock closed it is the way back to the chat (walk-61 L1).
 - Slots live in `app/src/shell/Layout.tsx`; features register into a slot (or a status-bar segment) through the feature registry. A feature never renders into another feature's slot.
 
 ## Behaviour

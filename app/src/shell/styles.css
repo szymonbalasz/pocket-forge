@@ -98,9 +98,17 @@ h2 {
 
 /* ------------------------------------------------------------------ layout */
 
-.pf-layout {
+/* The panes on top, the status bar under all of them (fix-walk61b). */
+.pf-shell {
   display: flex;
+  flex-direction: column;
   height: 100%;
+  min-height: 0;
+}
+
+.pf-layout {
+  flex: 1 1 auto;
+  display: flex;
   min-height: 0;
 }
 
@@ -206,7 +214,10 @@ h2 {
 .pf-status {
   flex: 0 0 auto;
   display: flex;
-  flex-wrap: wrap; /* a narrow centre (left + right panels open) wraps instead of overlapping */
+  /* walk-61 L1: never wraps or clips; the grow segment truncates, then `drop`-ranked segments
+     hide (Layout.tsx fitStatusBar). */
+  flex-wrap: nowrap;
+  overflow: hidden;
   align-items: center;
   gap: var(--pf-space-3);
   min-height: 28px;
@@ -217,18 +228,23 @@ h2 {
 }
 
 .pf-status-segment {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--pf-space-2);
-  min-width: 0;
+  white-space: nowrap;
+}
+
+.pf-status-segment[data-dropped] {
+  display: none;
 }
 
 .pf-status-grow {
-  /* Takes the free space, but never forces a wrap (BL-38): a long text (e.g. "Save failed,
-     project folder moved, retrying") ellipsises so the segments after it (the provider chip)
-     stay on the line. The other segments still wrap rather than overlap. */
+  /* Takes the free space (BL-38): a long text (e.g. "Save failed, project folder moved,
+     retrying") ellipsises so the segments after it (the provider chip) stay on the line. Below
+     its minimum the other segments hide by `drop` rank (walk-61 L1). */
   flex: 1 1 0;
-  min-width: 0;
+  min-width: 6em;
   overflow: hidden;
 }
 

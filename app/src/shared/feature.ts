@@ -15,6 +15,9 @@ export interface StatusSegment {
   id: string;
   priority: number;
   grow?: boolean;
+  /** The bar never wraps (walk-61 L1): when it is too narrow, segments with a `drop` rank hide,
+   *  lowest rank first, until the rest fits. Without one a segment never hides. */
+  drop?: number;
   Component: ComponentType;
 }
 
