@@ -943,3 +943,148 @@ fn r4_resolve_image_covers_candidates_and_their_trashed_copies() {
     let r = s.p.resolve_image(c[1].id).unwrap();
     assert!(r.path.is_file() && r.path.to_string_lossy().contains("trash"));
 }
+
+// ---------------------------------------------------------------- discard all (#61, FR-RGN-46)
+
+impl S {
+    fn discard_all(&mut self, job: Ulid) -> Option<DiscardAll> {
+        discard_all(&self.e.ctx, self.e.install(), &mut self.p, job).unwrap()
+    }
+
+    fn undo(&mut self, undo: &DiscardAll) -> CoreResult<usize> {
+        undo_discard_all(&self.e.ctx, self.e.install(), &mut self.p, undo)
+    }
+}
+
+#[test]
+fn fr_rgn_46_discard_all_bins_starred_skips_accepted_and_undo_restores_the_stars() {
+    let mut s = setup();
+    let (job, c) = s.fetched("moss", 4);
+    set_star(&s.e.ctx, s.e.install(), &mut s.p, c[1].id, true).unwrap();
+    s.accept(job.id, c[0].id).unwrap();
+    let revs = s.p.manifest.revisions.len();
+    let items = s.p.manifest.trash.len();
+    let seq = s.p.manifest.commit.seq;
+    let done = s.discard_all(job.id).unwrap();
+    assert_eq!(done.prior.len(), 3);
+    assert_eq!(s.p.manifest.commit.seq, seq + 1, "one commit");
+    assert_eq!(s.p.manifest.trash.len(), items + 1, "one trash item");
+    assert_eq!(s.p.manifest.revisions.len(), revs, "no revision");
+    assert_eq!(s.cand(c[0].id).status, CandidateStatus::Accepted);
+    for y in &c[1..4] {
+        let x = s.cand(y.id);
+        assert_eq!(x.status, CandidateStatus::Discarded);
+        assert!(!x.starred, "#57: an explicit discard clears the star");
+        assert_eq!(x.trash_id, Some(done.item_id));
+        assert!(!s.dir.join(&x.file).exists());
+    }
+    assert!(
+        s.dir.join(job.dir()).join("region.png").is_file(),
+        "the accepted one keeps the inputs (#56)"
+    );
+    assert!(s.discard_all(job.id).is_none(), "nothing left: no commit");
+    assert_eq!(s.p.manifest.commit.seq, seq + 1);
+    // Undo: one commit, each back as it was.
+    assert_eq!(s.undo(&done).unwrap(), 3);
+    assert_eq!(s.p.manifest.commit.seq, seq + 2);
+    assert_eq!(s.p.manifest.trash.len(), items);
+    let x = s.cand(c[1].id);
+    assert_eq!(
+        (x.status, x.starred, x.trash_id),
+        (CandidateStatus::Dismissed, true, None)
+    );
+    for y in &c[2..4] {
+        let x = s.cand(y.id);
+        assert_eq!((x.status, x.starred), (CandidateStatus::Dismissed, false));
+        assert!(s.dir.join(&x.file).is_file());
+    }
+    assert!(
+        !s.dir
+            .join(TRASH_DIR)
+            .join(done.item_id.to_string())
+            .exists()
+    );
+    assert_eq!(
+        s.undo(&done).unwrap_err().code,
+        ErrorCode::UnknownId,
+        "once"
+    );
+}
+
+#[test]
+fn fr_rgn_46_discard_all_of_a_resolved_set_trashes_the_inputs_and_undo_brings_them_back() {
+    let mut s = setup();
+    let (job, c) = s.fetched("moss", 2);
+    s.dismiss(job.id);
+    let done = s.discard_all(job.id).unwrap();
+    assert_eq!(s.p.manifest.trash.len(), 2, "candidates + inputs");
+    assert!(!s.dir.join(job.dir()).join("region.png").exists());
+    assert_eq!(s.undo(&done).unwrap(), 2);
+    assert!(s.p.manifest.trash.is_empty());
+    assert!(s.dir.join(job.dir()).join("region.png").is_file());
+    assert!(s.dir.join(job.dir()).join("mask.png").is_file());
+    for x in &c {
+        assert_eq!(s.cand(x.id).status, CandidateStatus::Dismissed);
+        assert!(s.dir.join(&x.file).is_file());
+    }
+    s.reopen();
+    assert!(s.p.manifest.trash.is_empty());
+}
+
+#[test]
+fn fr_rgn_46_an_open_set_keeps_new_and_a_candidate_starred_from_the_trash_stays() {
+    let mut s = setup();
+    let (job, c) = s.fetched("moss", 3);
+    let done = s.discard_all(job.id).unwrap();
+    assert!(
+        s.dir.join(job.dir()).join("region.png").is_file(),
+        "unresolved: inputs stay"
+    );
+    // The user stars one back out of the trash before Undo.
+    set_star(&s.e.ctx, s.e.install(), &mut s.p, c[0].id, true).unwrap();
+    assert_eq!(s.undo(&done).unwrap(), 2);
+    let x = s.cand(c[0].id);
+    assert_eq!((x.status, x.starred), (CandidateStatus::Discarded, true));
+    for y in &c[1..3] {
+        assert_eq!(s.cand(y.id).status, CandidateStatus::New, "as it was");
+    }
+}
+
+#[test]
+fn fr_rgn_46_a_crash_mid_commit_is_all_or_nothing() {
+    let mut s = setup();
+    let (job, c) = s.fetched("moss", 3);
+    s.dismiss(job.id);
+    s.e.ctx.faults = Faults::parse("after_temp:project.json", FaultAction::Error).unwrap();
+    assert!(discard_all(&s.e.ctx, s.e.install(), &mut s.p, job.id).is_err());
+    s.e.ctx.faults = Faults::none();
+    s.reopen();
+    assert!(s.p.manifest.trash.is_empty(), "nothing binned");
+    for x in &c {
+        assert_eq!(s.cand(x.id).status, CandidateStatus::Dismissed);
+        assert!(s.dir.join(&x.file).is_file());
+    }
+    // And the Undo: a failed commit leaves every item in the trash.
+    let done = s.discard_all(job.id).unwrap();
+    s.e.ctx.faults = Faults::parse("after_temp:project.json", FaultAction::Error).unwrap();
+    assert!(s.undo(&done).is_err());
+    s.e.ctx.faults = Faults::none();
+    for x in &c {
+        assert!(!s.dir.join(&x.file).exists(), "moved back into the trash");
+    }
+    assert!(!s.dir.join(job.dir()).join("region.png").exists());
+    s.reopen();
+    assert_eq!(s.p.manifest.trash.len(), 2);
+    assert_eq!(s.undo(&done).unwrap(), 3, "the Undo still works after");
+}
+
+#[test]
+fn fr_rgn_46_read_only_refuses_discard_all_and_its_undo() {
+    let mut s = setup();
+    let (job, _) = s.fetched("moss", 2);
+    let done = s.discard_all(job.id).unwrap();
+    s.p.read_only = Some(crate::project::ReadOnlyReason::OriginalChanged);
+    let err = discard_all(&s.e.ctx, s.e.install(), &mut s.p, job.id).unwrap_err();
+    assert_eq!(err.code, ErrorCode::ReadOnly);
+    assert_eq!(s.undo(&done).unwrap_err().code, ErrorCode::ReadOnly);
+}

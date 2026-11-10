@@ -2359,3 +2359,138 @@ fn fr_rgn_28_r109_dismiss_after_a_failed_fetch_fails_the_job_and_keeps_the_handl
     assert_eq!(lab.job(id).state, JobState::Failed);
     assert!(!lab.core.state().rgn.runner.tracked().contains(&id));
 }
+
+// ---------------------------------------------------------------- discard all (#61)
+
+fn iteration_row(lab: &Lab, id: Ulid) -> Value {
+    let rows = lab.core.dispatch("rgn_iterations_list", json!({})).unwrap();
+    rows.as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["job_id"] == json!(id))
+        .unwrap()
+        .clone()
+}
+
+#[test]
+fn fr_rgn_46_discard_all_command_bins_the_set_and_undo_puts_it_back() {
+    let lab = Lab::new();
+    let id = lab.run("kitchen");
+    let c = lab.candidates(id);
+    lab.core
+        .dispatch(
+            "rgn_candidate_star",
+            json!({"job_id": id, "candidate_id": c[1].id, "starred": true}),
+        )
+        .unwrap();
+    accept(&lab, id, c[0].id, blend(48, true)).unwrap();
+    assert_eq!(iteration_row(&lab, id)["discardable"], json!(2));
+    let out = lab
+        .core
+        .dispatch("rgn_iteration_discard_all", json!({"job_id": id}))
+        .unwrap();
+    assert_eq!(out["trashed"], json!(2));
+    let undo_id = out["undo_id"].clone();
+    assert!(undo_id.is_string());
+    let row = iteration_row(&lab, id);
+    assert_eq!(
+        (row["discardable"].clone(), row["kept"].clone()),
+        (json!(0), json!(1))
+    );
+    let after = lab.candidates(id);
+    assert_eq!(
+        after[0].status,
+        CandidateStatus::Accepted,
+        "never the accepted one"
+    );
+    assert!(!after[1].starred && after[1].status == CandidateStatus::Discarded);
+    // Nothing left: no commit, no undo.
+    let again = lab
+        .core
+        .dispatch("rgn_iteration_discard_all", json!({"job_id": id}))
+        .unwrap();
+    assert_eq!(again, json!({"trashed": 0, "undo_id": null}));
+    let out = lab
+        .core
+        .dispatch(
+            "rgn_iteration_discard_all_undo",
+            json!({"undo_id": undo_id}),
+        )
+        .unwrap();
+    assert_eq!(out, json!({"restored": 2}));
+    let back = lab.candidates(id);
+    assert!(
+        back[1].starred && back[1].trash_id.is_none(),
+        "star included"
+    );
+    assert!(lab.project_dir.join(&back[2].file).is_file());
+    assert_eq!(
+        code(lab.core.dispatch(
+            "rgn_iteration_discard_all_undo",
+            json!({"undo_id": undo_id})
+        )),
+        ErrorCode::UnknownId,
+        "an Undo works once"
+    );
+}
+
+#[test]
+fn fr_rgn_46_discard_all_is_refused_while_the_job_runs_and_validates_its_input() {
+    let lab = Lab::new();
+    let done = lab.run("kitchen");
+    let id = lab.submit("again");
+    assert_eq!(
+        code(
+            lab.core
+                .dispatch("rgn_iteration_discard_all", json!({"job_id": id}))
+        ),
+        ErrorCode::JobActive
+    );
+    assert_eq!(
+        code(lab.core.dispatch(
+            "rgn_iteration_discard_all",
+            json!({"job_id": Ulid::from_parts(1, 999)})
+        )),
+        ErrorCode::UnknownId
+    );
+    assert_eq!(
+        code(lab.core.dispatch(
+            "rgn_iteration_discard_all",
+            json!({"job_id": done, "extra": 1})
+        )),
+        ErrorCode::InvalidInput
+    );
+    assert_eq!(
+        code(lab.core.dispatch(
+            "rgn_iteration_discard_all_undo",
+            json!({"undo_id": Ulid::from_parts(1, 999)})
+        )),
+        ErrorCode::UnknownId
+    );
+}
+
+#[test]
+fn fr_rgn_46_read_only_refuses_discard_all_and_undo() {
+    let lab = Lab::new();
+    let id = lab.run("kitchen");
+    let out = lab
+        .core
+        .dispatch("rgn_iteration_discard_all", json!({"job_id": id}))
+        .unwrap();
+    lab.core.state().project.as_mut().unwrap().read_only =
+        Some(crate::project::ReadOnlyReason::OriginalChanged);
+    assert_eq!(
+        code(
+            lab.core
+                .dispatch("rgn_iteration_discard_all", json!({"job_id": id}))
+        ),
+        ErrorCode::ReadOnly
+    );
+    assert_eq!(
+        code(lab.core.dispatch(
+            "rgn_iteration_discard_all_undo",
+            json!({"undo_id": out["undo_id"]})
+        )),
+        ErrorCode::ReadOnly
+    );
+}
