@@ -716,6 +716,12 @@ export interface Commands {
   project_rename: [{ path: string; name: string }, { path: string }];
   project_folder_list: [{ folder: ProjectFolder }, FolderFile[]];
   project_folder_add: [{ folder: ProjectFolder; paths: string[] }, FolderFile[]];
+  /** FR-PRJ-55 (#61): one image dropped on Working becomes the base image (one `accept`
+   *  revision, like a pick); `file` = `working/<file name>`. */
+  project_base_from_file: [
+    { path: string },
+    { layer_id: string; revision_id: string; file: string; patches_dropped: number },
+  ];
   project_trash_list: [Record<string, never>, TrashItem[]];
   project_trash_restore: [{ item_id: string }, Record<string, never>];
   project_disk_usage: [Record<string, never>, DiskUsage];

@@ -712,3 +712,138 @@ test('FR-RGN-46 #61 Results: Discard all bins the opened iteration but the accep
   act(() => core.emit('project:committed', { seq: 10 }));
   await waitFor(() => expect(all().disabled).toBe(true));
 });
+
+// ------------------------------------------------------------------ FR-PRJ-55 drops (#61)
+
+/** jsdom has no layout: the "element under the pointer" is whatever the test points at. */
+let pointedAt: Element | null = null;
+document.elementFromPoint = () => pointedAt;
+const AT = { x: 40, y: 80 };
+const pointAt = (section: string | null) => {
+  pointedAt = section ? screen.getByTestId(`prj-panel-${section}`) : document.body;
+};
+const dragOver = (section: string | null) =>
+  act(async () => {
+    pointAt(section);
+    core.emit('tauri://drag-over', { position: AT });
+  });
+const dropOn = (section: string | null, paths: string[]) =>
+  act(async () => {
+    pointAt(section);
+    core.emit('tauri://drag-drop', { paths, position: AT });
+  });
+const zone = (section: string) => screen.getByTestId(`prj-panel-${section}-dropzone`);
+const notice = (section: string) => screen.findByTestId(`prj-panel-${section}-drop-notice`);
+const dropCalls = () =>
+  core.calls.filter((c) => c.cmd === 'project_folder_add' || c.cmd === 'project_base_from_file');
+
+test('FR-PRJ-55 while files are dragged over the project the four folder sections are drop targets and the one under the pointer is lit', async () => {
+  await openCrypt();
+  for (const s of ['working', 'references', 'structure', 'parts'])
+    expect(zone(s).dataset.over).toBeUndefined();
+  expect(screen.queryByTestId('prj-panel-results-dropzone')).toBeNull();
+  await dragOver('structure');
+  expect(screen.getByTestId('prj-panel').dataset.dragging).toBe('true');
+  expect(zone('structure').dataset.over).toBe('true');
+  expect(zone('working').dataset.over).toBeUndefined();
+  await dragOver('working');
+  expect(zone('working').dataset.over).toBe('true');
+  expect(zone('structure').dataset.over).toBeUndefined();
+  // Over History (not a target): nothing is lit, the drag still shows the targets.
+  await dragOver('history');
+  expect(screen.queryAllByTestId(/-dropzone$/).filter((z) => z.dataset.over)).toEqual([]);
+  expect(screen.getByTestId('prj-panel').dataset.dragging).toBe('true');
+  await act(async () => core.emit('tauri://drag-leave', {}));
+  expect(screen.getByTestId('prj-panel').dataset.dragging).toBeUndefined();
+});
+
+test('FR-PRJ-55 FR-PRJ-47 files dropped on References are copied in one by one, the list refreshes and a notice names what was added and skipped', async () => {
+  const seed = samplePrjSeed(LIB);
+  seed.dirs = { 'D:/art/old sketches': ['D:/art/old sketches/a.png'] };
+  const m = prjMock(seed, { emit: core.emit });
+  core.useHandlers(m.handlers);
+  mock = m.state;
+  render(<ProjectPanel />);
+  await act(() => projectStore.open(CRYPT));
+  await screen.findByTestId('prj-panel');
+  await dropOn('references', ['D:/art/mood.jpg', 'D:/art/old sketches', 'D:/art/notes.txt']);
+  expect(dropCalls().map((c) => c.input)).toEqual([
+    { folder: 'references', paths: ['D:/art/mood.jpg'] },
+    { folder: 'references', paths: ['D:/art/old sketches'] },
+    { folder: 'references', paths: ['D:/art/notes.txt'] },
+  ]);
+  await waitFor(() => expect(files('references')).toEqual(['mood.jpg', 'notes.txt']));
+  const n = await notice('references');
+  expect(n.textContent).toBe(
+    'Added to References: mood.jpg, notes.txt. Skipped: old sketches (not a file).',
+  );
+  expect(n.dataset.kind).toBe('info');
+  expect(screen.queryByTestId('prj-panel-structure-drop-notice')).toBeNull();
+  // Structure and Parts take drops the same way.
+  await dropOn('parts', ['D:/art/door.png']);
+  await waitFor(() => expect(files('parts')).toEqual(['door.png']));
+  expect((await notice('parts')).textContent).toBe('Added to Parts: door.png.');
+});
+
+test('FR-PRJ-55 a drop anywhere else in an open project imports nothing', async () => {
+  await openCrypt();
+  core.calls.length = 0;
+  await dropOn('history', ['D:/art/mood.jpg']);
+  await dropOn(null, ['D:/art/mood.jpg']);
+  expect(dropCalls()).toEqual([]);
+  expect(screen.queryAllByTestId(/-drop-notice$/)).toEqual([]);
+});
+
+test('FR-PRJ-55 one image dropped on Working becomes the bottom image as one revision', async () => {
+  await openCrypt();
+  await dropOn('working', ['D:/art/Lower crypt.png']);
+  expect(dropCalls().map((c) => [c.cmd, c.input])).toEqual([
+    ['project_base_from_file', { path: 'D:/art/Lower crypt.png' }],
+  ]);
+  const n = await notice('working');
+  expect(n.textContent).toBe('New image dropped: Lower crypt.png.');
+  expect(n.dataset.kind).toBe('info');
+  await waitFor(() => expect(files('working')).toEqual(['Crypt.png', 'Lower crypt.png']));
+  await waitFor(() =>
+    expect(projectStore.get().project?.image_path).toBe(`${CRYPT}/working/Lower crypt.png`),
+  );
+  expect(projectStore.get().project?.layers[0]?.kind).toBe('base');
+  const head = screen.getAllByTestId('prj-panel-history-item')[0]!;
+  await waitFor(() => expect(head.dataset.reason).toBe('accept'));
+});
+
+test('FR-PRJ-55 Working refuses more than one file, a running job, a read-only project and a file that is not an image, changing nothing', async () => {
+  await openCrypt({ jobActive: true });
+  await dropOn('working', ['D:/art/a.png', 'D:/art/b.png']);
+  expect((await notice('working')).textContent).toBe('Drop one image on Working.');
+  expect(dropCalls()).toEqual([]);
+  await dropOn('working', ['D:/art/a.png']);
+  await waitFor(async () =>
+    expect((await notice('working')).textContent).toBe(
+      'A job is running in this project. Drop the image when it has finished.',
+    ),
+  );
+  expect(files('working')).toEqual(['Crypt.png']);
+  cleanup();
+  projectStore.reset();
+
+  await openCrypt();
+  await dropOn('working', ['D:/art/notes.txt']);
+  await waitFor(async () =>
+    expect((await notice('working')).textContent).toBe(
+      'notes.txt isn’t a PNG, JPEG or WebP image.',
+    ),
+  );
+  expect((await notice('working')).dataset.kind).toBe('error');
+  expect(projectStore.get().project?.layers[0]?.kind).toBe('original');
+  cleanup();
+  projectStore.reset();
+
+  await openCrypt({ read_only: 'newer_version' });
+  core.calls.length = 0;
+  await dropOn('working', ['D:/art/a.png']);
+  expect((await notice('working')).textContent).toBe('The project is read-only.');
+  await dropOn('references', ['D:/art/a.png']);
+  expect((await notice('references')).textContent).toBe('The project is read-only.');
+  expect(dropCalls()).toEqual([]);
+});

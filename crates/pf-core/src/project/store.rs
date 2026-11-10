@@ -1129,7 +1129,10 @@ pub fn next_purge_at(p: &OpenProject) -> Option<Timestamp> {
 
 mod pick;
 pub(crate) use pick::statuses_follow_base;
-pub use pick::{BaseCommit, pick_base, pick_label, working_name};
+pub use pick::{
+    BaseCommit, base_from_file, drop_label, dropped_working_name, pick_base, pick_label,
+    working_name,
+};
 
 #[cfg(test)]
 pub(crate) mod tests;

@@ -143,6 +143,7 @@ tauri_commands! {
     rgn_job_fetch_again => c::RgnJobFetchAgain,
     rgn_iteration_discard_all => c::RgnIterationDiscardAll,
     rgn_iteration_discard_all_undo => c::RgnIterationDiscardAllUndo,
+    project_base_from_file => c::ProjectBaseFromFile,
 }
 
 #[cfg(test)]

@@ -110,6 +110,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "rgn_job_fetch_again",
     "rgn_iteration_discard_all",
     "rgn_iteration_discard_all_undo",
+    "project_base_from_file",
     "app_ready",
     "prm_window_open",
     "prm_chat_login",
