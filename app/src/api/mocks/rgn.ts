@@ -87,6 +87,8 @@ export function installRgnMock(seed: RgnMockSeed): void {
     opacity: 1,
     visible: true,
   };
+  /** #61: Discard all's Undo tickets (trash id → each candidate as it was). */
+  const undoTickets = new Map<string, { c: Cand; status: string; starred: boolean }[]>();
   const s = {
     spend: 0,
     cap: seed.spend.cap,
@@ -695,6 +697,42 @@ export function installRgnMock(seed: RgnMockSeed): void {
       committed();
       return { trashed };
     },
+    rgn_iteration_discard_all: (input: Rec) => {
+      const j = s.jobs.find((x) => x.id === input.job_id);
+      if (snap.read_only) return fail('read_only', 'The project is read-only.');
+      if (!j) return fail('unknown_id', 'no such job');
+      if (active() === j) return fail('job_active', 'The job is still running.');
+      const all = s.cands.filter(
+        (c) => c.job_id === j.id && c.status !== 'accepted' && !c.trash_id,
+      );
+      if (!all.length) return { trashed: 0, undo_id: null };
+      const tid = id('T');
+      undoTickets.set(
+        tid,
+        all.map((c) => ({ c, status: c.status, starred: c.starred })),
+      );
+      for (const c of all) {
+        c.status = 'discarded';
+        c.starred = false;
+        c.trash_id = tid;
+      }
+      committed();
+      return { trashed: all.length, undo_id: tid };
+    },
+    rgn_iteration_discard_all_undo: (input: Rec) => {
+      if (snap.read_only) return fail('read_only', 'The project is read-only.');
+      const prior = undoTickets.get(String(input.undo_id));
+      if (!prior) return fail('unknown_id', 'there is nothing to undo');
+      undoTickets.delete(String(input.undo_id));
+      const back = prior.filter((p) => p.c.trash_id === input.undo_id);
+      for (const p of back) {
+        p.c.status = p.status;
+        p.c.starred = p.starred;
+        p.c.trash_id = null;
+      }
+      committed();
+      return { restored: back.length };
+    },
     rgn_patch_retune: (input: Rec) => {
       const l = s.layers.find((x) => x.id === input.layer_id);
       if (!l) return fail('source_missing', 'no such layer');
@@ -722,6 +760,7 @@ export function installRgnMock(seed: RgnMockSeed): void {
             slug: j.slug,
             state: j.state,
             kept: mine.filter((c) => c.trash_id === null && c.status !== 'invalid').length,
+            discardable: mine.filter((c) => c.trash_id === null && c.status !== 'accepted').length,
             returned: mine.length,
             cost: { amount: j.cost, unit },
             accepted_in_stack: inStack(j),

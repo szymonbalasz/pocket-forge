@@ -1124,6 +1124,32 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(/2 candidates discarded/);
     expect(screen.queryByTestId('edt-picker-discard-rest')).toBeNull();
   });
+
+  test('FR-RGN-46 #61 Discard all bins the set (starred too), no confirm; Undo restores it with the star', async () => {
+    await submitted();
+    // Disabled while the job runs (no result set yet: no button at all).
+    expect(screen.queryByTestId('rgn-tracker-discard-all')).toBeNull();
+    act(() => mockControls().finish(3));
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(3));
+    fireEvent.click(screen.getAllByTestId('edt-picker-star')[1]!);
+    await waitFor(() => expect(fake.callsOf('rgn_candidate_star')).toHaveLength(1));
+    const all = () => screen.getByTestId('rgn-tracker-discard-all') as HTMLButtonElement;
+    await waitFor(() => expect(all().disabled).toBe(false));
+    fireEvent.click(all());
+    await waitFor(() => expect(fake.callsOf('rgn_iteration_discard_all')).toHaveLength(1));
+    expect(screen.queryByTestId('rgn-confirm-ok')).toBeNull();
+    await waitFor(() => expect(screen.queryAllByTestId('edt-picker-item')).toHaveLength(0));
+    expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(
+      /3 results in the trash for 30 days/,
+    );
+    await waitFor(() => expect(all().disabled).toBe(true));
+    fireEvent.click(screen.getByTestId('rgn-tracker-discard-undo'));
+    await waitFor(() => expect(fake.callsOf('rgn_iteration_discard_all_undo')).toHaveLength(1));
+    await waitFor(() => expect(screen.getAllByTestId('edt-picker-item')).toHaveLength(3));
+    expect(screen.getAllByTestId('edt-picker-star')[1]!.getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(/3 results restored/);
+    expect(all().disabled).toBe(false);
+  });
 });
 
 test('FR-RGN-07 a late model list of the previous project never lands in the next one', async () => {

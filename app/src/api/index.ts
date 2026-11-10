@@ -310,6 +310,9 @@ export const api = {
       call('rgn_candidate_discard', { job_id: jobId, candidate_id: candidateId }),
     /** #56: "Discard the rest" of a job (one commit, one trash item). */
     discardRest: (jobId: string) => call('rgn_job_discard_rest', { job_id: jobId }),
+    /** #61: "Discard all" of a result set, and its Undo. */
+    discardAll: (jobId: string) => call('rgn_iteration_discard_all', { job_id: jobId }),
+    undoDiscardAll: (undoId: string) => call('rgn_iteration_discard_all_undo', { undo_id: undoId }),
     retune: (layerId: string, blend: Commands['rgn_patch_retune'][0]['blend']) =>
       call('rgn_patch_retune', { layer_id: layerId, blend }),
     iterations: () => call('rgn_iterations_list', {}),
