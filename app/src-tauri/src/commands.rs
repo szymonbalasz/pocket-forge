@@ -141,6 +141,7 @@ tauri_commands! {
     prm_chat_fake_set_case => c::PrmChatFakeSetCase,
     prm_chat_preview => c::PrmChatPreview,
     rgn_job_fetch_again => c::RgnJobFetchAgain,
+    project_base_from_file => c::ProjectBaseFromFile,
 }
 
 #[cfg(test)]

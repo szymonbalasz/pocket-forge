@@ -107,6 +107,7 @@
     "allow-prm-chat-fake-set-case",
     "allow-prm-chat-preview",
     "allow-rgn-job-fetch-again",
+    "allow-project-base-from-file",
     "allow-app-ready",
     "allow-prm-window-open",
     "allow-prm-chat-login",

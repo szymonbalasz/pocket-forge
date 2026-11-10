@@ -108,6 +108,7 @@ pub const APP_COMMANDS: &[&str] = &[
     "prm_chat_fake_set_case",
     "prm_chat_preview",
     "rgn_job_fetch_again",
+    "project_base_from_file",
     "app_ready",
     "prm_window_open",
     "prm_chat_login",

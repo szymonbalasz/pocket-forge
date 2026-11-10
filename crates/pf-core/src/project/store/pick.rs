@@ -88,6 +88,23 @@ fn place_base_file(
     Ok((rel, hash))
 }
 
+/// R97: a new bottom image is never committed while a job runs (a region edit job would come
+/// back for another base image). `job_active`, with the running job's id.
+fn require_no_active_job(p: &OpenProject) -> CoreResult<()> {
+    if let Some(active) = p
+        .jobs
+        .values()
+        .find(|j| !j.state.is_terminal() && j.state != JobState::Fetched)
+    {
+        return Err(CoreError::new(
+            ErrorCode::JobActive,
+            "a job is running in this project; pick when it has finished",
+        )
+        .with_detail(serde_json::json!({ "job_id": active.id })));
+    }
+    Ok(())
+}
+
 /// `pick_base` (FR-GEN-27, 28, 30): the pick commit behind `gen_candidate_pick`. Any valid,
 /// non-discarded candidate of a `fetched` job (the first pick: the job is closed) or of a
 /// `closed` one (a re-pick from any iteration, no transition, no spend) can be picked; a file
@@ -104,18 +121,7 @@ pub fn pick_base(
     candidate_id: Ulid,
 ) -> CoreResult<BaseCommit> {
     p.require_writable()?;
-    // R97: never while a job runs (a region edit job would come back for another base image).
-    if let Some(active) = p
-        .jobs
-        .values()
-        .find(|j| !j.state.is_terminal() && j.state != JobState::Fetched)
-    {
-        return Err(CoreError::new(
-            ErrorCode::JobActive,
-            "a job is running in this project; pick when it has finished",
-        )
-        .with_detail(serde_json::json!({ "job_id": active.id })));
-    }
+    require_no_active_job(p)?;
     let job = job(p, job_id)?.clone();
     let idx = candidate_index(&p.manifest, candidate_id)?;
     let cand = p.manifest.candidates[idx].clone();
@@ -167,8 +173,8 @@ pub fn pick_base(
             content_hash,
             width: info.width,
             height: info.height,
-            job_id,
-            candidate_id,
+            job_id: Some(job_id),
+            candidate_id: Some(candidate_id),
         },
     );
     let patches_dropped = p
@@ -214,6 +220,101 @@ pub fn pick_base(
             }
             plan.jobs_after.push(closed);
         }
+        plan.revisions
+            .push(push_revision(ctx, m, RevisionReason::Accept, Some(label)));
+        Ok(())
+    })?;
+    Ok(BaseCommit {
+        layer_id,
+        revision_id: p.manifest.head_revision,
+        file,
+        patches_dropped,
+    })
+}
+
+/// The revision label of a drop on Working: `Dropped: ` + the first 40 chars of the file name.
+pub fn drop_label(file_name: &str) -> String {
+    let head: String = file_name.trim().chars().take(LABEL_PROMPT_CHARS).collect();
+    format!("Dropped: {}", head.trim_end())
+}
+
+/// `working/<file name>` for an image dropped on Working: the stem under FR-PRJ-44, the
+/// extension lower case (the format's when the name has no image extension).
+pub fn dropped_working_name(source: &std::path::Path, format: pf_imaging::ImageFormat) -> String {
+    let stem = source
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let ext = if pf_imaging::has_image_extension(source) {
+        source
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+    } else {
+        format.extension().to_owned()
+    };
+    format!("{WORKING_DIR}/{}.{ext}", naming::sanitise_name(&stem))
+}
+
+/// `base_from_file` (FR-PRJ-55, #61): an image file dropped on the Working section becomes the
+/// project's base image in one commit, as a pick does (FR-GEN-27, 28): the file is copied
+/// write-once to `working/<file name>` (the same bytes already there are reused; other bytes take
+/// a free ` (2)` name), the stack becomes `[base layer]` with no job or candidate, every earlier
+/// base candidate goes back to `dismissed` (R84), and one `accept` revision is labelled
+/// `Dropped: <file name>`. The source is never moved or changed. Fails with `job_active` (R97),
+/// `not_found` (no such file), the creation checks (`unsupported`, `animated`, `too_large`,
+/// `corrupt`, FR-PRJ-06, R33), `not_available_offline` and the commit errors.
+pub fn base_from_file(
+    ctx: &Context,
+    install_id: Ulid,
+    p: &mut OpenProject,
+    source: &std::path::Path,
+) -> CoreResult<BaseCommit> {
+    p.require_writable()?;
+    require_no_active_job(p)?;
+    if !source.is_file() {
+        return Err(CoreError::new(
+            ErrorCode::NotFound,
+            format!("{} is not a file", source.display()),
+        )
+        .with_field("path"));
+    }
+    crate::library::hydrate_if_needed(ctx, source)?;
+    let info = pf_imaging::probe_file_complete(source).map_err(crate::project::probe_error)?;
+    let mut wanted = dropped_working_name(source, info.format);
+    // The original's file is never the base image's too (the rebuild tells them apart, sweep).
+    let original = p.manifest.original.as_ref().map(|o| o.file.clone());
+    if let Some(orig) = original.filter(|o| naming::same_name(o, &wanted)) {
+        let (stem, ext) = wanted.rsplit_once('.').unwrap_or((wanted.as_str(), ""));
+        let free = naming::first_free(stem, |c| {
+            let rel = format!("{c}.{ext}");
+            naming::same_name(&rel, &orig) || p.path(&rel).exists()
+        });
+        wanted = format!("{free}.{ext}");
+    }
+    let (file, content_hash) = place_base_file(ctx, p, source, &wanted)?;
+    let layer_id = ctx.new_id();
+    let layer = Layer::base(
+        layer_id,
+        BaseImage {
+            file: file.clone(),
+            content_hash,
+            width: info.width,
+            height: info.height,
+            job_id: None,
+            candidate_id: None,
+        },
+    );
+    let patches_dropped = p
+        .manifest
+        .layers
+        .iter()
+        .filter(|l| l.kind == LayerKind::Patch)
+        .count();
+    let label = drop_label(&crate::project::folder_name(source));
+    commit(ctx, install_id, p, |ctx, p, m, plan| {
+        m.layers = vec![layer];
+        statuses_follow_base(p, m);
         plan.revisions
             .push(push_revision(ctx, m, RevisionReason::Accept, Some(label)));
         Ok(())
