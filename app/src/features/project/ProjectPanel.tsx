@@ -662,13 +662,15 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
       (e: unknown) => setNotice({ kind: 'error', text: sentence(errorOf(e).message) }),
     );
   // #61: every kept result of the iteration to the trash (never the accepted one), no confirm;
-  // the notice offers Undo, which puts each back as it was (star included).
+  // the notice offers Undo, which puts each back as it was (star included). walk-61 L2: "N
+  // results restored." is the one trash notice too, so a later discard anywhere replaces it.
   const undoAll = (undoId: string) => {
     projectStore.setTrashNotice(null);
     return api.region.undoDiscardAll(undoId).then(
       ({ restored }) => {
-        setNotice({
-          kind: 'info',
+        setNotice(null);
+        projectStore.setTrashNotice({
+          at: 'results',
           text: `${restored} ${restored === 1 ? 'result' : 'results'} restored.`,
         });
         load();

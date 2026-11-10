@@ -1149,6 +1149,19 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(screen.getAllByTestId('edt-picker-star')[1]!.getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByTestId('rgn-tracker-notice').textContent).toMatch(/3 results restored/);
     expect(all().disabled).toBe(false);
+    // walk-61 L2: a later Discard all (here from Results) replaces the restored notice.
+    act(() =>
+      projectStore.setTrashNotice({ at: 'results', text: '3 results in the trash for 30 days' }),
+    );
+    expect(screen.queryByTestId('rgn-tracker-notice')).toBeNull();
+    // And a second Discard all here shows only its own notice.
+    fireEvent.click(all());
+    await waitFor(() => expect(fake.callsOf('rgn_iteration_discard_all')).toHaveLength(2));
+    await waitFor(() =>
+      expect(screen.getAllByTestId('rgn-tracker-notice').map((n) => n.textContent)).toEqual([
+        expect.stringMatching(/^3 results in the trash for 30 days/),
+      ]),
+    );
   });
 });
 
