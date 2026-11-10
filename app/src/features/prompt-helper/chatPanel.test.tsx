@@ -625,7 +625,8 @@ test('BL-41 the panel follows the open project by event, without polling', async
   act(() => fake.emit('prm:chat-context', { project_id: null, host: null }));
   await waitFor(() => expect(id('prm-chat-no-project')).toBeTruthy());
   await new Promise((r) => setTimeout(r, 1200));
-  expect(fake.callsOf('project_get').length).toBe(reads + 1);
+  // walk-61: the event says no project is open; nothing is read for it.
+  expect(fake.callsOf('project_get').length).toBe(reads);
 });
 
 test('BL-42 FR-PRM-26 the strip previews what the next turn sends', async () => {
@@ -771,4 +772,22 @@ test('FR-PRM-21 walk-61 L1 the dock never squeezes the canvas: it narrows with t
   fireEvent.pointerUp(handle, { pointerId: 1 });
   expect(fake.callsOf('prm_chat_settings_put').at(-1)).toEqual({ dock: { width: 500 } });
   act(() => setDockRoom(null));
+});
+
+test('FR-PRM-21 walk-61 ← Home: the turn the close stopped ends without asking for the closed project’s thread', async () => {
+  setup({ chat: { consent: true } });
+  await api.chat.contextPublish(PID, 'rgn', {});
+  render(<ChatPanel />);
+  await waitFor(() => expect(id('prm-chat-host').textContent).toBe('Region edit'));
+  const gets = () => fake.callsOf('prm_chat_thread_get').length;
+  await waitFor(() => expect(gets()).toBeGreaterThan(0));
+  // ← Home: the core says no project is open, then the stopped turn ends.
+  const w = window as unknown as { __pfMockHandlers: Record<string, () => unknown> };
+  w.__pfMockHandlers.project_get = () => null;
+  const before = gets();
+  act(() => fake.emit('prm:chat-context', { project_id: null, host: null }));
+  act(() => fake.emit('prm:chat-turn', { turn_id: 'T1', state: 'canceled', saved: false }));
+  await waitFor(() => expect(id('prm-chat-no-project')).toBeTruthy());
+  await act(async () => undefined);
+  expect(gets()).toBe(before);
 });

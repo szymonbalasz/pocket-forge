@@ -234,7 +234,12 @@ export function ChatPanel({
       }),
       // BL-41: a project opened, closed or switched, or the visible tab changed.
       onEvent('prm:chat-context', (c) => {
-        if (c.project_id !== pidRef.current) void loadProject();
+        if (c.project_id === null) {
+          // walk-61: no project is open now, so there is nothing to fetch. A turn the close
+          // stopped ends after this; it must not ask for the closed project's thread.
+          pidRef.current = null;
+          setProject(null);
+        } else if (c.project_id !== pidRef.current) void loadProject();
         else void loadThread(c.project_id);
       }),
     ];
