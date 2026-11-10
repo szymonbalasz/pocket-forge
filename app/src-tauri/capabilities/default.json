@@ -114,6 +114,7 @@
     "allow-app-exit",
     "allow-app-close-unguard",
     "allow-app-close-ack",
-    "allow-app-close-asking"
+    "allow-app-close-asking",
+    "allow-prm-chat-thread-new"
   ]
 }

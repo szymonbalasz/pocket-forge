@@ -1148,7 +1148,7 @@ pub use crate::prompt::commands::{
 pub use crate::prompt::chat::{
     PrmChatCancel, PrmChatConsent, PrmChatFakeSetCase, PrmChatInsert, PrmChatLogout,
     PrmChatPreview, PrmChatSend, PrmChatSessionEnd, PrmChatSettingsPut, PrmChatStatus,
-    PrmChatThreadGet, PrmContextClear, PrmContextPublish,
+    PrmChatThreadGet, PrmChatThreadNew, PrmContextClear, PrmContextPublish,
 };
 
 // ---------------------------------------------------------------- new-asset generation
@@ -1273,6 +1273,7 @@ registry![
     PrmChatFakeSetCase,
     PrmChatPreview,
     RgnJobFetchAgain,
+    PrmChatThreadNew,
 ];
 
 #[cfg(test)]

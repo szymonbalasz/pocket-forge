@@ -128,6 +128,15 @@ pub struct OpenProject {
     pub conflict: Option<conflict::ConflictSource>,
 }
 
+/// The number (`r<seq>`) of revision `id`, or 0 if the manifest doesn't list it.
+pub(crate) fn revision_seq(p: &OpenProject, id: Ulid) -> u64 {
+    p.manifest
+        .revisions
+        .iter()
+        .find(|r| r.id == id)
+        .map_or(0, |r| r.seq)
+}
+
 /// A draft save kept in memory after `locked` (FR-PRJ-21).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingDraft {

@@ -1038,6 +1038,119 @@ impl Command for PrmChatThreadGet {
     }
 }
 
+/// `prm_chat_thread_new`'s output: the thread now shown, or `null` when nothing changed (the
+/// shown thread has no turns yet, or there is none).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ThreadNewOutput {
+    pub thread_id: Option<Ulid>,
+}
+
+/// `prm_chat_thread_new` (#61, FR-PRM-46): New chat. A fresh thread replaces the shown one;
+/// the old file stays in `.pforge/chat/`, hidden and never swept. Refused (`busy`) while a
+/// turn runs. A thread without turns is kept as it is.
+pub struct PrmChatThreadNew;
+
+impl Command for PrmChatThreadNew {
+    const NAME: &'static str = "prm_chat_thread_new";
+    type Input = ProjectInput;
+    type Output = ThreadNewOutput;
+
+    fn run(core: &Core, input: ProjectInput) -> CoreResult<ThreadNewOutput> {
+        let thread_id = new_thread(core, input.project_id, None)?;
+        Ok(ThreadNewOutput { thread_id })
+    }
+}
+
+/// #61 (FR-PRM-47): after a region edit is accepted or a generated image is picked, the core
+/// starts a fresh thread, only when the shown one has turns. Skipped while a turn runs: the
+/// reply goes on in the thread it was asked in. Never fails the commit that called it.
+pub(crate) fn start_after_commit(
+    core: &Core,
+    project_id: Ulid,
+    reason: thread::StartReason,
+    revision_id: Ulid,
+    seq: u64,
+) {
+    let after = thread::StartedAfter {
+        reason,
+        revision_id,
+        seq,
+    };
+    match new_thread(core, project_id, Some(after)) {
+        Ok(_) => {}
+        Err(e) if e.code == ErrorCode::Busy => {}
+        Err(e) => tracing::warn!(error = %e, "no new chat thread after the commit"),
+    }
+}
+
+/// `prm:chat-thread` (#61): the project's shown thread changed (New chat, or after an accept
+/// or a pick); an open panel reloads it.
+pub const EVENT_THREAD: &str = "prm:chat-thread";
+
+/// Starts a fresh thread for the project (#61): the shown thread is retired (kept, hidden),
+/// the new one names it and why it started, and the backend session ends so the next turn
+/// starts fresh (FR-PRM-35). `Ok(None)`: the shown thread has no turns, nothing changed. A
+/// read-only project's new thread lives in memory (R94); a writable one's is written, or kept
+/// in memory while the file can't be written (§11).
+fn new_thread(
+    core: &Core,
+    pid: Ulid,
+    started_after: Option<thread::StartedAfter>,
+) -> CoreResult<Option<Ulid>> {
+    let (dir, read_only) = open_project(core, pid)?;
+    let _io = lock(&core.chat.thread_io);
+    if lock(&core.chat.rt).running.is_some() {
+        return Err(CoreError::new(
+            ErrorCode::Busy,
+            "wait for the reply to finish, or stop it, before starting a new chat",
+        ));
+    }
+    let memory = lock(&core.chat.rt).memory_of(pid).map(|(t, _)| t);
+    let Some(mut old) = memory.or_else(|| thread::load(&core.ctx, &dir, !read_only, &[]).thread)
+    else {
+        return Ok(None);
+    };
+    if old.turns.is_empty() {
+        return Ok(None);
+    }
+    let now = core.ctx.now();
+    let mut next = Thread::new(core.ctx.new_id(), now, backend_name(core.ctx.chat.mode));
+    next.previous_thread_id = Some(old.id);
+    next.started_after = started_after;
+    if read_only {
+        lock(&core.chat.rt).memory = Some(MemoryThread {
+            project_id: pid,
+            thread: next.clone(),
+            unsaved: Vec::new(),
+        });
+    } else {
+        // The old file keeps its turns and its `updated_at`; `retired_at` hides it. The new
+        // thread's `previous_thread_id` hides it too, should this write fail.
+        old.retired_at = Some(now);
+        if let Err(e) = thread::save(&core.ctx, &dir, &old) {
+            tracing::warn!(error = %e, "the old chat thread wasn't marked retired");
+        }
+        let saved = thread::save(&core.ctx, &dir, &next).is_ok();
+        let mut rt = lock(&core.chat.rt);
+        rt.memory = (!saved).then(|| MemoryThread {
+            project_id: pid,
+            thread: next.clone(),
+            unsaved: Vec::new(),
+        });
+    }
+    // The new chat doesn't carry the old conversation: its first turn starts a fresh session.
+    core.chat.close_detached(Some(pid));
+    core.ctx.emit(
+        EVENT_THREAD,
+        json!({
+            "project_id": pid,
+            "thread_id": next.id,
+            "started_after": next.started_after,
+        }),
+    );
+    Ok(Some(next.id))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SendInput {
@@ -1660,12 +1773,9 @@ impl TurnJob {
                     .memory_of(self.project_id)
                     .filter(|(t, _)| t.id == self.thread.id);
                 let (base, unsaved) = memory.unzip();
+                // By id: the turn finishes into the thread it was sent in, shown or not (#61).
                 let mut thread = base
-                    .or_else(|| {
-                        thread::load(&self.ctx, &self.project_dir, self.writable, &live)
-                            .thread
-                            .filter(|t| t.id == self.thread.id)
-                    })
+                    .or_else(|| thread::load_id(&self.project_dir, self.thread.id, &live))
                     .unwrap_or_else(|| self.thread.clone());
                 finish(&mut thread);
                 let ok = thread::save(&self.ctx, &self.project_dir, &thread).is_ok();

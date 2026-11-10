@@ -1750,3 +1750,199 @@ fn r109_a_quit_with_no_turn_returns_at_once() {
     assert!(t.elapsed() < Duration::from_secs(1));
     assert!(!lab.core.chat.has_session());
 }
+
+// ---------------------------------------------------------------- #61: New chat
+
+fn thread_new(lab: &Lab) -> Result<Value, CoreError> {
+    lab.core
+        .dispatch("prm_chat_thread_new", json!({"project_id": pid(lab)}))
+}
+
+fn chat_files(lab: &Lab) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(thread::chat_dir(&lab.project_dir))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+fn shown(lab: &Lab) -> Thread {
+    serde_json::from_value(thread_view(lab)["thread"].clone()).unwrap()
+}
+
+/// #61: New chat starts a fresh thread; the old file stays in `.pforge/chat/`, hidden, and
+/// the open sweep neither shows it again nor trashes it as a conflict copy.
+#[test]
+fn fr_prm_46_new_chat_starts_a_fresh_thread_and_keeps_the_old_file() {
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "first").unwrap();
+    let old = shown(&lab);
+    assert!(lab.core.chat.has_session());
+
+    let out = thread_new(&lab).unwrap();
+    let new_id: Ulid = serde_json::from_value(out["thread_id"].clone()).unwrap();
+    assert_ne!(new_id, old.id);
+    let now = shown(&lab);
+    assert_eq!(now.id, new_id);
+    assert!(now.turns.is_empty());
+    assert_eq!(now.previous_thread_id, Some(old.id));
+    assert_eq!(now.started_after, None, "a New chat has no divider reason");
+    assert_eq!(
+        events(&lab, super::EVENT_THREAD).last().unwrap()["thread_id"],
+        json!(new_id)
+    );
+    // The old file keeps its turns and is marked retired.
+    let kept = thread::load_id(&lab.project_dir, old.id, &[]).unwrap();
+    assert_eq!(kept.turns.len(), old.turns.len());
+    assert!(kept.retired_at.is_some());
+    assert_eq!(chat_files(&lab).len(), 2);
+    // The next turn starts a fresh backend session in the new thread.
+    assert!(!lab.core.chat.has_session());
+    assert_eq!(thread_view(&lab)["fresh_session_next"], true);
+    let sent = send(&lab, "second").unwrap();
+    assert_eq!(sent["thread_id"], json!(new_id));
+    assert_eq!(sent["fresh_session"], true);
+
+    // Reopening: still the new thread, the old file not swept, no conflict notice.
+    let opened = lab.open();
+    assert_eq!(shown(&lab).id, new_id);
+    assert_eq!(chat_files(&lab).len(), 2);
+    assert!(
+        !opened.to_string().contains("chat_conflict_copy"),
+        "a retired thread isn't a conflict copy"
+    );
+    let state = lab.core.state();
+    let p = state.project.as_ref().unwrap();
+    assert!(
+        !p.manifest
+            .trash
+            .iter()
+            .any(|t| t.kind == crate::manifest::TrashKind::ConflictCopy)
+    );
+}
+
+/// #61: refused while a turn runs; a thread without turns (or none) stays as it is.
+#[test]
+fn fr_prm_46_new_chat_is_refused_while_a_turn_runs_and_skips_an_empty_thread() {
+    let lab = lab();
+    assert_eq!(thread_new(&lab).unwrap()["thread_id"], Value::Null);
+    assert!(chat_files(&lab).is_empty());
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "first").unwrap();
+    let old = shown(&lab);
+    super::lock(&lab.core.chat.rt).running = Some(super::Running {
+        turn_id: Ulid::nil(),
+        user_turn_id: Ulid::nil(),
+        project_id: pid(&lab),
+        cancel: Default::default(),
+        project_closed: false,
+    });
+    assert_eq!(code(thread_new(&lab)), ErrorCode::Busy);
+    super::lock(&lab.core.chat.rt).running = None;
+    assert_eq!(shown(&lab).id, old.id, "nothing changed");
+    assert!(thread_new(&lab).unwrap()["thread_id"].is_string());
+    // The new thread has no turns yet: a second New chat changes nothing.
+    assert_eq!(thread_new(&lab).unwrap()["thread_id"], Value::Null);
+    assert_eq!(chat_files(&lab).len(), 2);
+}
+
+/// #61 / R94: a read-only project's New chat is kept in memory; nothing is written.
+#[test]
+fn fr_prm_46_new_chat_on_a_read_only_project_is_kept_in_memory() {
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "first").unwrap();
+    let before = chat_files(&lab);
+    lab.core.state().project.as_mut().unwrap().read_only =
+        Some(crate::project::ReadOnlyReason::NewerVersion);
+    let out = thread_new(&lab).unwrap();
+    assert_eq!(
+        shown(&lab).id.to_string(),
+        out["thread_id"].as_str().unwrap()
+    );
+    assert_eq!(chat_files(&lab), before, "nothing written");
+}
+
+fn accept_first(lab: &Lab, job: Ulid) -> Value {
+    let cand = lab.candidates(job)[0].id;
+    lab.core
+        .dispatch(
+            "rgn_candidate_accept",
+            json!({"job_id": job, "candidate_id": cand,
+                   "blend": {"feather_px": 8, "colour_match": false}}),
+        )
+        .unwrap()
+}
+
+/// #61: accepting a region edit starts a fresh thread, only when the shown one has turns. It
+/// records why (the divider), and undoing the accept doesn't bring the old thread back.
+#[test]
+fn fr_prm_47_an_accept_starts_a_new_thread_when_the_thread_has_turns() {
+    let lab = lab();
+    let job = lab.run("a kitchen");
+    accept_first(&lab, job);
+    assert!(chat_files(&lab).is_empty(), "no thread, nothing to start");
+
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "how about a hearth").unwrap();
+    let old = shown(&lab);
+    let job = lab.run("a kitchen with a hearth");
+    let out = accept_first(&lab, job);
+    let now = shown(&lab);
+    assert_ne!(now.id, old.id);
+    assert!(now.turns.is_empty());
+    let after = now.started_after.expect("started_after");
+    assert_eq!(after.reason, thread::StartReason::Accepted);
+    assert_eq!(json!(after.revision_id), out["revision_id"]);
+    let snap = lab.core.dispatch("project_get", json!({})).unwrap();
+    let rev = snap["revisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == out["revision_id"])
+        .unwrap()
+        .clone();
+    assert_eq!(json!(after.seq), rev["seq"]);
+    let ev = events(&lab, super::EVENT_THREAD);
+    assert_eq!(ev.last().unwrap()["started_after"]["reason"], "accepted");
+
+    // A second accept on the still empty thread starts nothing.
+    let job = lab.run("a kitchen with a stone floor");
+    accept_first(&lab, job);
+    assert_eq!(shown(&lab).id, now.id);
+
+    // Undo of the accept keeps the new thread.
+    let revs = lab.core.dispatch("project_get", json!({})).unwrap()["revisions"]
+        .as_array()
+        .unwrap()
+        .clone();
+    let parent = revs[revs.len() - 2]["id"].clone();
+    lab.core
+        .dispatch("project_restore_revision", json!({"rev_id": parent}))
+        .unwrap();
+    assert_eq!(shown(&lab).id, now.id);
+}
+
+/// #61: while a turn runs, an accept doesn't start a thread (the reply goes on in its own).
+#[test]
+fn fr_prm_47_an_accept_while_a_turn_runs_keeps_the_thread() {
+    let lab = lab();
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    send(&lab, "first").unwrap();
+    let old = shown(&lab);
+    let job = lab.run("a kitchen");
+    super::lock(&lab.core.chat.rt).running = Some(super::Running {
+        turn_id: Ulid::nil(),
+        user_turn_id: Ulid::nil(),
+        project_id: pid(&lab),
+        cancel: Default::default(),
+        project_closed: false,
+    });
+    accept_first(&lab, job);
+    super::lock(&lab.core.chat.rt).running = None;
+    assert_eq!(shown(&lab).id, old.id);
+}

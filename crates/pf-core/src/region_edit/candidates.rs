@@ -270,6 +270,17 @@ impl Command for RgnCandidateAccept {
         if let Ok(j) = store::job(p, input.job_id) {
             emit_state(&core.ctx, j, None);
         }
+        let project_id = p.manifest.project_id;
+        let seq = crate::project::revision_seq(p, out.revision_id);
+        drop(state);
+        // #61: the chat starts a fresh thread after an accept (PRM FR-PRM-47).
+        crate::prompt::chat::start_after_commit(
+            core,
+            project_id,
+            crate::prompt::chat::thread::StartReason::Accepted,
+            out.revision_id,
+            seq,
+        );
         Ok(out)
     }
 }
