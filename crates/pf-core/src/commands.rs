@@ -1136,7 +1136,8 @@ impl Command for EdtMaskRead {
 
 pub use crate::region_edit::candidates::{
     RgnCandidateAccept, RgnCandidateDiscard, RgnCandidatePreview, RgnCandidateStar,
-    RgnIterationsList, RgnJobDiscardRest, RgnPatchRetune,
+    RgnIterationDiscardAll, RgnIterationDiscardAllUndo, RgnIterationsList, RgnJobDiscardRest,
+    RgnPatchRetune,
 };
 /// Region-edit commands live in their own module (region-edit spec §9).
 pub use crate::region_edit::commands::{
@@ -1304,6 +1305,8 @@ registry![
     PrmChatFakeSetCase,
     PrmChatPreview,
     RgnJobFetchAgain,
+    RgnIterationDiscardAll,
+    RgnIterationDiscardAllUndo,
     ProjectBaseFromFile,
 ];
 

@@ -630,6 +630,89 @@ test('owner #56 Results: each iteration lists its kept candidates with Discard, 
   expect(screen.getByTestId('prj-panel-results-item').textContent).toContain('2 / 3');
 });
 
+test('FR-RGN-46 #61 Results: Discard all bins the opened iteration but the accepted one, Undo puts it back', async () => {
+  await openCrypt();
+  const base = core.handlersSnapshot();
+  const cand = (id: string, index: number, status: string, starred = false) => ({
+    id,
+    job_id: 'J1',
+    index,
+    file: `results/001 kitchen/0${index + 1}.png`,
+    status,
+    starred,
+    trash_id: null as string | null,
+  });
+  const cands = [
+    cand('C1', 0, 'accepted'),
+    cand('C2', 1, 'dismissed', true),
+    cand('C3', 2, 'dismissed'),
+  ];
+  let state = 'closed';
+  const row = () => ({
+    job_id: 'J1',
+    n: 1,
+    dir: 'results/001 kitchen',
+    slug: 'kitchen',
+    state,
+    kept: cands.filter((c) => !c.trash_id).length,
+    returned: 3,
+    discardable: cands.filter((c) => !c.trash_id && c.status !== 'accepted').length,
+    cost: null,
+    accepted_in_stack: true,
+    references: 0,
+    reference_files: [],
+  });
+  core.useHandlers({
+    ...base,
+    rgn_iterations_list: () => [row()],
+    project_get: async (i) => ({ ...((await base.project_get!(i)) as object), candidates: cands }),
+    rgn_iteration_discard_all: () => {
+      for (const c of cands.slice(1)) {
+        c.status = 'discarded';
+        c.starred = false;
+        c.trash_id = 'T1';
+      }
+      return { trashed: 2, undo_id: 'T1' };
+    },
+    rgn_iteration_discard_all_undo: () => {
+      cands[1]!.starred = true;
+      for (const c of cands.slice(1)) {
+        c.status = 'dismissed';
+        c.trash_id = null;
+      }
+      return { restored: 2 };
+    },
+  });
+  act(() => core.emit('project:committed', { seq: 9 }));
+  const rows = () =>
+    screen.queryAllByTestId('prj-results-candidate').map((r) => r.dataset.recordId);
+  await waitFor(() => expect(rows()).toEqual(['C1', 'C2', 'C3']));
+  const all = () => screen.getByTestId('prj-results-discard-all') as HTMLButtonElement;
+  expect(all().disabled).toBe(false);
+  fireEvent.click(all());
+  // No confirm: one call, the accepted one stays.
+  await waitFor(() => expect(rows()).toEqual(['C1']));
+  expect(core.calls.filter((c) => c.cmd === 'rgn_iteration_discard_all')).toHaveLength(1);
+  expect(core.calls.find((c) => c.cmd === 'rgn_iteration_discard_all')?.input).toEqual({
+    job_id: 'J1',
+  });
+  expect(screen.getByTestId('prj-results-notice').textContent).toMatch(
+    /2 results in the trash for 30 days/,
+  );
+  await waitFor(() => expect(all().disabled).toBe(true));
+  fireEvent.click(screen.getByTestId('prj-results-discard-undo'));
+  await waitFor(() => expect(rows()).toEqual(['C1', 'C2', 'C3']));
+  expect(core.calls.find((c) => c.cmd === 'rgn_iteration_discard_all_undo')?.input).toEqual({
+    undo_id: 'T1',
+  });
+  expect(screen.getByTestId('prj-results-notice').textContent).toMatch(/2 results restored/);
+  expect(screen.getAllByTestId('prj-results-candidate')[1]!.textContent).toContain('★');
+  // Disabled while the set's job runs.
+  state = 'running';
+  act(() => core.emit('project:committed', { seq: 10 }));
+  await waitFor(() => expect(all().disabled).toBe(true));
+});
+
 // ------------------------------------------------------------------ FR-PRJ-55 drops (#61)
 
 /** jsdom has no layout: the "element under the pointer" is whatever the test points at. */

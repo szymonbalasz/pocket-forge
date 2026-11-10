@@ -661,6 +661,37 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
       },
       (e: unknown) => setNotice({ kind: 'error', text: sentence(errorOf(e).message) }),
     );
+  // #61: every kept result of the iteration to the trash (never the accepted one), no confirm;
+  // the notice offers Undo, which puts each back as it was (star included).
+  const undoAll = (undoId: string) => {
+    projectStore.setTrashNotice(null);
+    return api.region.undoDiscardAll(undoId).then(
+      ({ restored }) => {
+        setNotice({
+          kind: 'info',
+          text: `${restored} ${restored === 1 ? 'result' : 'results'} restored.`,
+        });
+        load();
+      },
+      (e: unknown) => setNotice({ kind: 'error', text: sentence(errorOf(e).message) }),
+    );
+  };
+  const discardAll = (it: RgnIteration) =>
+    api.region.discardAll(it.job_id).then(
+      ({ trashed, undo_id }) => {
+        setNotice(null);
+        projectStore.setTrashNotice({
+          at: 'results',
+          text:
+            trashed === 0
+              ? 'Nothing to discard.'
+              : `${trashed} ${trashed === 1 ? 'result' : 'results'} in the trash for 30 days`,
+          ...(undo_id ? { undo: () => void undoAll(undo_id) } : {}),
+        });
+        load();
+      },
+      (e: unknown) => setNotice({ kind: 'error', text: sentence(errorOf(e).message) }),
+    );
   return (
     <Section id="results" label="Results" count={items.length}>
       {notice ? (
@@ -675,6 +706,19 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
         trash?.at === 'results' && (
           <p className="muted small" data-testid="prj-results-notice" role="status">
             {trash.text}
+            {trash.undo && (
+              <>
+                {' '}
+                <button
+                  type="button"
+                  className="link"
+                  data-testid="prj-results-discard-undo"
+                  onClick={trash.undo}
+                >
+                  Undo
+                </button>
+              </>
+            )}
           </p>
         )
       )}
@@ -705,6 +749,23 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
                       {it.accepted_in_stack ? ' ✓' : ''}
                     </span>
                   </summary>
+                  <div className="prj-result-actions">
+                    <button
+                      type="button"
+                      className="link"
+                      data-testid="prj-results-discard-all"
+                      data-record-id={it.job_id}
+                      disabled={readOnly || running(it.state) || discardable(it, kept) === 0}
+                      title={
+                        running(it.state)
+                          ? 'The job is still running'
+                          : 'Discard all: every result but the accepted one to the trash for 30 days'
+                      }
+                      onClick={() => void discardAll(it)}
+                    >
+                      Discard all
+                    </button>
+                  </div>
                   <ul className="prj-files prj-result-cands">
                     {kept.map((c) => (
                       <li
@@ -745,6 +806,16 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
       )}
     </Section>
   );
+}
+
+/** A job still running (RGN's tracker rule): not terminal and not `fetched`. */
+function running(state: RgnIteration['state']): boolean {
+  return !['fetched', 'failed', 'canceled', 'lost', 'closed'].includes(state);
+}
+
+/** What Discard all would bin (#61): RGN's count, else the listed results but the accepted one. */
+function discardable(it: RgnIteration, kept: CandidateRecord[]): number {
+  return it.discardable ?? kept.filter((c) => c.status !== 'accepted').length;
 }
 
 // ------------------------------------------------------------------ history

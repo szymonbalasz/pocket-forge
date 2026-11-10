@@ -318,6 +318,13 @@
   padding-left: var(--pf-space-3);
 }
 
+/* #61: Discard all on an opened iteration. */
+.prj-result-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-left: var(--pf-space-3);
+}
+
 /* FR-PRJ-55 (#61): while files are dragged over an open project, Working and the user folders
    show as drop targets; the one under the pointer is lit (the home grid's drop style). */
 .prj-dropzone {

@@ -107,6 +107,8 @@
     "allow-prm-chat-fake-set-case",
     "allow-prm-chat-preview",
     "allow-rgn-job-fetch-again",
+    "allow-rgn-iteration-discard-all",
+    "allow-rgn-iteration-discard-all-undo",
     "allow-project-base-from-file",
     "allow-app-ready",
     "allow-prm-window-open",

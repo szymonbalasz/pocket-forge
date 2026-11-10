@@ -582,6 +582,8 @@ export interface RgnIteration {
   state: JobState;
   kept: number;
   returned: number;
+  /** #61: candidates Discard all would bin (not accepted, not in the trash). */
+  discardable?: number;
   cost: CostValue | null;
   accepted_in_stack: boolean;
   /** `references[]` count for the chip (FR-RGN-45). */
@@ -756,6 +758,10 @@ export interface Commands {
   project_resolve_conflict: [{ keep: ConflictKeep }, RevisionEntry];
   /** #56: "Discard the rest": every candidate of the job but the accepted and starred ones. */
   rgn_job_discard_rest: [{ job_id: string }, { trashed: number }];
+  /** #61: Discard all of a result set (never the accepted one); `undo_id` null = nothing done. */
+  rgn_iteration_discard_all: [{ job_id: string }, { trashed: number; undo_id: string | null }];
+  /** #61: the toast's Undo: every candidate back as it was, star included. */
+  rgn_iteration_discard_all_undo: [{ undo_id: string }, { restored: number }];
   // new-asset-generation §9 (GEN, #59, #60)
   gen_project_create: [{ section: Section; name: string }, { path: string }];
   gen_size_fit: [{ model_id: string; kind: ProjectKind; size: GenSize }, GenSizeFit];
