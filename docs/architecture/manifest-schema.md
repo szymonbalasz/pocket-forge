@@ -107,7 +107,7 @@
 | `rect` | rect | placement of the cropped PNG |
 | `blend` | `{feather_px, colour_match{on, gain[3], offset[3]}}` | fitted gain/offset stored |
 | `retune_of` | ULID \| null | the layer this re-tune replaced (R3: new id + new file) |
-| **base only:** `content_hash`, `width`, `height`, `job_id`, `candidate_id` | hash, int, int, ULID, ULID | the picked file's hash and size, and where it came from (FR-GEN-27); centred, scale 1, rotation 0 |
+| **base only:** `content_hash`, `width`, `height`, `job_id`, `candidate_id` | hash, int, int, ULID, ULID | the picked file's hash and size, and where it came from (FR-GEN-27); centred, scale 1, rotation 0. `job_id` and `candidate_id` are absent for an image dropped on Working (FR-PRJ-55) |
 
 ### 4.4 Mask
 `id`, `file` (`.pforge/masks/<id>.png`), `rect` (the region, inner), `created_at`.
