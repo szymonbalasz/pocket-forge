@@ -21,7 +21,6 @@ use crate::{
     Provider, ProviderError, ReferenceImage, ReferenceRole, block_on,
 };
 
-const GPT2: &str = "model_openai-gpt-image-2";
 const FLARE: &str = "model_openai-gpt-image-2-5-flare";
 const SUNBURST: &str = "model_openai-gpt-image-2-5-sunburst";
 const I45: &str = "model_ideogram-v4-5";
@@ -44,9 +43,9 @@ const KREA: &str = "model_krea-3";
 const RECRAFT: &str = "model_recraft-v4-1";
 
 /// The generate list, in table order (FR-PRV-25).
-const GENERATE_IDS: [&str; 18] = [
-    GPT2, FLARE, SUNBURST, I45, V3B, V3Q, V3T, FLARE26, SUNBURST26, TILING, IV4, FLUX2P, FLUX2M,
-    FLUX3, NANO, SEEDREAM, KREA, RECRAFT,
+const GENERATE_IDS: [&str; 17] = [
+    FLARE, SUNBURST, I45, V3B, V3Q, V3T, FLARE26, SUNBURST26, TILING, IV4, FLUX2P, FLUX2M, FLUX3,
+    NANO, SEEDREAM, KREA, RECRAFT,
 ];
 
 /// A rig with every overlay row (edit and generate) of these models.
@@ -159,14 +158,8 @@ fn fr_gen_06_generate_capabilities_per_recorded_row() {
         max: 3840,
         step: 16,
     });
-    let table: [(&str, Option<u32>, Option<bool>, Slots); 18] = [
+    let table: [(&str, Option<u32>, Option<bool>, Slots); 17] = [
         // model, count max, transparent offered (None = no background control), slots
-        (
-            GPT2,
-            Some(10),
-            Some(false),
-            &[("referenceImages", None, 10, true)],
-        ),
         (
             FLARE,
             Some(10),
@@ -400,15 +393,13 @@ fn fr_gen_05_list_models_generate_gives_the_txt2img_models() {
     let edit_ids: Vec<_> = edit.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(
         edit_ids,
-        [
-            GPT2, FLARE, SUNBURST, I45, PRECISE, V3B, V3Q, V3T, CHAR, FILL
-        ]
+        [FLARE, SUNBURST, I45, PRECISE, V3B, V3Q, V3T, CHAR, FILL]
     );
     assert_eq!(r.t.remaining(), 0);
     let cached = std::fs::read(r.dir.path().join("cache/provider/models.json")).unwrap();
     let file: serde_json::Value = serde_json::from_slice(&cached).unwrap();
     assert!(
-        file["capabilities"][format!("{GPT2}@generate")]["output_size"].is_object(),
+        file["capabilities"][format!("{FLARE}@generate")]["output_size"].is_object(),
         "generate capabilities cached under their own key"
     );
 }
@@ -544,10 +535,10 @@ fn fr_prv_37_named_size_submit_sends_the_mapped_name() {
 #[test]
 fn fr_gen_08_output_backstop_with_zero_network_calls() {
     let cases = [
-        (GPT2, Some(OutputRequest::Wh { w: 1000, h: 1024 })), // not a multiple of 16
-        (GPT2, Some(OutputRequest::Wh { w: 4096, h: 1024 })), // over 3840
+        (FLARE, Some(OutputRequest::Wh { w: 1000, h: 1024 })), // not a multiple of 16
+        (FLARE, Some(OutputRequest::Wh { w: 4096, h: 1024 })), // over 3840
         (
-            GPT2,
+            FLARE,
             Some(OutputRequest::Aspect {
                 aspect: "1:1".into(),
             }),
@@ -607,8 +598,8 @@ fn fr_gen_08_output_backstop_with_zero_network_calls() {
 #[test]
 fn fr_gen_06_edit_rows_are_unchanged_by_the_generate_rows() {
     // The same model keeps its masked-edit capabilities (source, mask, fixed size inputs).
-    let r = rig_all(vec![get_model(GPT2), get_model(GPT2)], &[GPT2]);
-    let edit = block_on(r.p.get_capabilities(GPT2, Operation::EditMasked)).unwrap();
+    let r = rig_all(vec![get_model(FLARE), get_model(FLARE)], &[FLARE]);
+    let edit = block_on(r.p.get_capabilities(FLARE, Operation::EditMasked)).unwrap();
     assert_eq!(edit.operations, [Operation::EditMasked]);
     assert!(edit.output_size.is_none());
     assert!(
@@ -616,7 +607,7 @@ fn fr_gen_06_edit_rows_are_unchanged_by_the_generate_rows() {
             .iter()
             .any(|c| c.role == ControlRole::Source && c.name == "referenceImages")
     );
-    let generate = block_on(r.p.get_capabilities(GPT2, Operation::Generate)).unwrap();
+    let generate = block_on(r.p.get_capabilities(FLARE, Operation::Generate)).unwrap();
     assert!(
         generate
             .controls

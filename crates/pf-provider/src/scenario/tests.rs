@@ -74,7 +74,7 @@ pub(crate) fn get_model(model: &str) -> Exchange {
 }
 
 const V3: &str = "model_ideogram-v3-balanced";
-const GPT: &str = "model_openai-gpt-image-2";
+const GPT: &str = "model_openai-gpt-image-2-5-flare";
 const CHAR: &str = "model_ideogram-character";
 
 #[test]
@@ -128,6 +128,36 @@ fn fr_prv_25_offline_returns_the_cached_list_as_stale() {
     assert_eq!(list.models.len(), 1);
     assert_eq!(r.p.connectivity(), Connectivity::Offline);
     assert_eq!(r.sleeps.delays().len(), 2, "offline is retried (FR-PRV-24)");
+}
+
+/// GPT Image 2 left the overlay (2026-11-11): a cache written while it had a row never offers
+/// it again, offline included, and its cached capabilities are never served (FR-PRV-25).
+#[test]
+fn fr_prv_25_a_model_removed_from_the_overlay_never_comes_back_from_the_cache() {
+    const GONE: &str = "model_openai-gpt-image-2";
+    let offline = || ex(Method::Get, &format!("/models/{V3}"), 0, json!("offline"));
+    let r = rig_with(vec![get_model(V3), offline(), offline(), offline()], &[V3]);
+    block_on(r.p.list_models(&ModelFilter::default())).unwrap();
+    // The cache as an older build wrote it: the gone model listed, with its capabilities.
+    let path = r.dir.path().join("cache/provider/models.json");
+    let mut file: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut gone = file["models"][0].clone();
+    gone["id"] = json!(GONE);
+    file["models"].as_array_mut().unwrap().insert(0, gone);
+    file["capabilities"][GONE] = file["capabilities"][V3].clone();
+    std::fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
+
+    let list = block_on(r.p.list_models_cached(&ModelFilter::default())).unwrap();
+    assert!(list.stale);
+    let ids: Vec<_> = list.models.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, [V3]);
+    assert_eq!(
+        block_on(r.p.get_capabilities(GONE, Operation::EditMasked)).unwrap_err(),
+        ProviderError::InvalidRequest {
+            field: "model_id".into()
+        }
+    );
+    assert_eq!(r.t.remaining(), 0, "no call for the gone model");
 }
 
 #[test]

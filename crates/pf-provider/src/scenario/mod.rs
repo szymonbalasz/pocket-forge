@@ -109,7 +109,6 @@ const APP_FIXTURES: &[(&str, &str, &str)] = fixture_table![
 
 #[cfg(test)]
 const TEST_FIXTURES: &[(&str, &str, &str)] = fixture_table![
-    "model_openai-gpt-image-2" / "get-model",
     "model_openai-gpt-image-2-5-flare" / "get-model",
     "model_openai-gpt-image-2-5-sunburst" / "get-model",
     "model_ideogram-v4-5" / "get-model",
@@ -319,9 +318,15 @@ impl ScenarioProvider {
                     stale: false,
                 })
             }
+            // A cached model no row has any more (removed from the overlay) is never offered.
             Some(ProviderError::Offline | ProviderError::Timeout) => match self.cache.load() {
                 Some(cached) => Ok(ModelList {
-                    models: cached.models.into_iter().filter(offers).collect(),
+                    models: cached
+                        .models
+                        .into_iter()
+                        .filter(|m| self.overlay.iter().any(|r| r.model_id == m.id))
+                        .filter(offers)
+                        .collect(),
                     stale: true,
                 }),
                 None => Err(ProviderError::Offline),
@@ -331,12 +336,19 @@ impl ScenarioProvider {
     }
 
     /// Capabilities for one operation, fresh from the network (the cache when offline). A
-    /// model with no row for that operation → `invalid_request(operation)`.
+    /// model with no row for that operation → `invalid_request(operation)`; a model with no row
+    /// at all (never offered, or removed from the overlay) → `invalid_request(model_id)` with
+    /// no network call and no cache read.
     pub async fn fetch_capabilities(
         &self,
         model_id: &str,
         operation: Operation,
     ) -> ProviderResult<Capabilities> {
+        if !self.overlay.iter().any(|r| r.model_id == model_id) {
+            return Err(ProviderError::InvalidRequest {
+                field: "model_id".into(),
+            });
+        }
         let creds = self.credentials()?;
         match self.fetch_model(&creds, model_id).await {
             Ok(Some((_, all))) => {

@@ -789,8 +789,7 @@ mod tests {
         use ReferenceRole::{Identity, Style};
         type Want = &'static [(&'static str, Option<ReferenceRole>, u32, u32, bool)];
         let style4: Want = &[("styleReferenceImages", Some(Style), 0, 4, false)];
-        let table: [(&str, Want); 13] = [
-            ("model_openai-gpt-image-2", &[]),
+        let table: [(&str, Want); 12] = [
             ("model_openai-gpt-image-2-5-flare", &[]),
             ("model_openai-gpt-image-2-5-sunburst", &[]),
             // 4.5's `referenceImages` carries the source (overlay role), so it is no slot.

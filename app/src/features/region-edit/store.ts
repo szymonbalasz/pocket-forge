@@ -662,8 +662,8 @@ async function loadModels(remembered: Values | null): Promise<void> {
     const { models, stale: cached } = await api.provider.listModels('edit_masked');
     if (stale()) return;
     set({ models, modelsStale: cached, modelsLoading: false });
-    const keep = state.modelId && models.some((m) => m.id === state.modelId) ? state.modelId : null;
-    const id = keep ?? models[0]?.id ?? null;
+    // A saved model the list no longer offers falls back in `selectModel` (FR-RGN-11).
+    const id = (models.length ? state.modelId : null) ?? models[0]?.id ?? null;
     if (id) await selectModel(id, remembered);
     else set({ modelId: null, caps: null, evaluation: null });
   } catch (e) {
@@ -1082,14 +1082,23 @@ function subscribe(): void {
   };
 }
 
-async function selectModel(id: string, remembered: Values | null): Promise<void> {
+/** FR-RGN-11: a remembered model (draft, restored job) that the loaded list no longer offers. */
+const MODEL_GONE = 'The saved model isn’t available; the first one is selected.';
+
+async function selectModel(wanted: string, remembered: Values | null): Promise<void> {
+  // A remembered model the list no longer offers (e.g. removed from the overlay) falls back
+  // to the first offered model, with a notice (FR-RGN-11).
+  const gone = state.models.length > 0 && !state.models.some((m) => m.id === wanted);
+  const id = gone ? state.models[0]!.id : wanted;
   const t = nextToken('caps');
   set({ modelId: id, capsLoading: true, capsError: null, evaluation: null });
   try {
     const caps = await api.provider.getCapabilities(id);
     if (!isCurrent('caps', t)) return;
-    const r = withRemembered(caps, remembered);
-    set({ caps, capsLoading: false, values: r.values, touched: r.touched, notices: r.notices });
+    // The gone model's remembered values don't carry over to another model.
+    const r = withRemembered(caps, gone ? null : remembered);
+    const notices = gone ? [MODEL_GONE, ...r.notices] : r.notices;
+    set({ caps, capsLoading: false, values: r.values, touched: r.touched, notices });
     await Promise.all([evaluate(), refit()]);
   } catch (e) {
     if (!isCurrent('caps', t)) return;

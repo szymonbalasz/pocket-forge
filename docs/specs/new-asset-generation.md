@@ -138,8 +138,7 @@ PRJ owns storage and commits; fields go into [manifest-schema](../architecture/m
 
 | Model | `output_size` | Count | Sketch slot | Reference slots | Transparent |
 |---|---|---|---|---|---|
-| GPT Image 2 | wh 16–3840, step 16 (`width`, `height`, cost-affecting) | `numOutputs` 1–10 | none until the paid check (candidate: first `referenceImages`) | `referenceImages` ≤ 10, no role, cost-affecting | no (`auto`, `opaque`) |
-| GPT Image 2.5 Flare / Sunburst | same | 1–10 | none until the paid check (candidate: first `referenceImages`) | ≤ 16 | yes (`background: transparent`) |
+| GPT Image 2.5 Flare / Sunburst | wh 16–3840, step 16 (`width`, `height`, cost-affecting) | 1–10 | none until the paid check (candidate: first `referenceImages`) | ≤ 16 | yes (`background: transparent`) |
 | Ideogram 4.5 | aspect (`aspectRatio`, 23 ratios) | `numOutputs` 1–8 | none until a paid check | `referenceImages` ≤ 5, no role | no |
 | Ideogram 3 Turbo / Balanced / Quality | aspect (`aspectRatio`, 15 ratios) | none → 1 per job | none | `styleReferenceImages` ≤ 4, style | no |
 | GPT Image 2.6 Flare / Sunburst | wh 16–3840, step 16 | 1–10 | none | `referenceImages` ≤ 10, no role, cost-affecting | yes |

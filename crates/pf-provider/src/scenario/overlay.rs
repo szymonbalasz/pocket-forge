@@ -361,8 +361,10 @@ const TILING_GENERATE: OverlayRow = OverlayRow {
 };
 
 /// The Scenario rows (spec Appendix C; generate rows GEN §10). Edit rows first.
-pub static SCENARIO_ROWS: [OverlayRow; 28] = [
-    gpt("model_openai-gpt-image-2"),
+/// GPT Image 2 (`model_openai-gpt-image-2`) was removed on 2026-11-11: Scenario lists it as
+/// `unlisted` (superseded by 2.6). Old revisions that name it still open; a saved model that
+/// names it falls back (FR-RGN-11, FR-GEN-19).
+pub static SCENARIO_ROWS: [OverlayRow; 26] = [
     gpt("model_openai-gpt-image-2-5-flare"),
     gpt("model_openai-gpt-image-2-5-sunburst"),
     // 4.5 edits the first reference image; a mask needs `aspectRatio: "auto"` (docs).
@@ -393,7 +395,6 @@ pub static SCENARIO_ROWS: [OverlayRow; 28] = [
     // Generate (GEN §10, from the recorded get-model files of 2026-11-08 and 2026-11-11).
     // Character, 4.5 Precise Edit and FLUX.1 Pro Fill list only `img2img`: no generate row.
     // GPT Image 2.6, Ideogram V4 Tiling (edit dry run 32 CU) and the rest: generate only.
-    gpt_generate("model_openai-gpt-image-2"),
     gpt_generate("model_openai-gpt-image-2-5-flare"),
     gpt_generate("model_openai-gpt-image-2-5-sunburst"),
     gpt26_generate("model_openai-gpt-image-2-6-flare"),
