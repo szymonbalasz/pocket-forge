@@ -1,15 +1,15 @@
 {
   "format_version": 1,
   "provider": "scenario",
-  "model": "model_openai-gpt-image-2",
+  "model": "model_openai-gpt-image-2-6-sunburst",
   "case": "dry-run",
-  "recorded_on": "2026-11-08",
+  "recorded_on": "2026-11-11",
   "source": "recorded",
   "exchanges": [
     {
       "request": {
         "method": "GET",
-        "path": "/models/model_openai-gpt-image-2"
+        "path": "/models/model_openai-gpt-image-2-6-sunburst"
       },
       "response": {
         "status": 200,
@@ -33,123 +33,44 @@
               "modelProvider": "OpenAI",
               "subProcessor": "Provider"
             },
-            "createdAt": "2026-04-22T08:57:03.106Z",
+            "createdAt": "2026-11-05T07:56:19.516Z",
             "custom": true,
             "exampleAssetIds": [
-              "asset_zyutsQP8zByJRuFmnTYHPJmU",
-              "asset_KNMnJwer9AVDpQamuLKxmcyT",
-              "asset_QTFCJKGaCknC5hpBLV9AShut",
-              "asset_JUsL7L5u3FCyw7bgkzkNWz48",
-              "asset_5DE3tfSqHDdd7F9uUexxLRVE",
-              "asset_QxSJYcQSd33a1GGtx2uCmrtH",
-              "asset_fGfadMq2S6s8c92cdH5fogqr",
-              "asset_QV2cTe3stXV8YT2FEPaojCWZ",
-              "asset_JLi3xukRM8cv3a2JRSHYFmRg",
-              "asset_gVYKeeYvwdokfhwDMpamevm4",
-              "asset_P7DD6iMForQqyTUePvGwFDuc",
-              "asset_dak1Emr7SrJBCpesUpCxiUsN",
-              "asset_1C9WhvCkuP4eEhbmv9uaeNGS",
-              "asset_NrQ3dbYoQt3faDEUeCuxuhdG",
-              "asset_36kEsYz8abtMjDdEaq6o3DqY",
-              "asset_XVq4jA3xSo7r6QPSosEe2ukH",
-              "asset_WDR4qeo2jGsFrSYwKShdJKT9",
-              "asset_Wmz8Up3HFkcTGdS7D3nw9zs3",
-              "asset_X9dmhs6pZYUFNLoxB1dKYvRx",
-              "asset_9H9nxYjpkEaV8RUAZE7Egd4Y",
-              "asset_SYRhVGsTx8sophFb9VEvFdS3",
-              "asset_x3vMg9ERtN9d8WfXWejsiZZi",
-              "asset_efo8vPsVUApynJX8NndFqo3h",
-              "asset_4AVB1A5Gbj1M8UKaa2Z936Dh",
-              "asset_WpgjbCiNskf3Rgrfj1Bzmbk2",
-              "asset_i8QxwmMkJwX8y9LHs51AFp94",
-              "asset_wYQn46DWGGqFWQa1DpUDMg6P",
-              "asset_o7fDV8a8fXA7xhnR6oYnNo3N",
-              "asset_PS84cJtikBts4kN2uaVwE6Q1",
-              "asset_XoGtnHRnH1YSoDqy91dUaEyw",
-              "asset_k6KwLvkEx3aDfVkHyC2AsPkA",
-              "asset_MvidA7Gv6eek8pF3B7yxh2cQ",
-              "asset_PZENt9p4sAbei5h9uESc6EEA",
-              "asset_QPvy5eRjDTsV29RtPYMd6pmD",
-              "asset_F3mQE5FUcqJ9asykG8Je91UR",
-              "asset_8e7nJxAz3V1fCJJ7KbYYKxxf",
-              "asset_Fq1uyU6FVuvGWokHLa16w1WM",
-              "asset_LikF4TALmZaF325MqUfN9rNa",
-              "asset_h18Nzz18yJX3bWsNomnvsA8k",
-              "asset_qiZXtMdEk18BMdUhDfJ7C4CX",
-              "asset_LKExGciifKc97FLWKPiSnRus",
-              "asset_WbEx3SqNkHgYytGjvzooryWF",
-              "asset_MPiqChWsV72dV6x33uQQYnys",
-              "asset_wakysJYSaG5Lm3TdEiTMmdHs",
-              "asset_Se8Hg2ZvPYXTsEXQB4chx1bo",
-              "asset_cGgAAQk1hfsmTahYtyB9rJK4",
-              "asset_8mc3x5x8291XoeRm6NU4sScZ",
-              "asset_6CQjEULEsv7uYmxCboZfHA7n",
-              "asset_7AY7spZJYC93f7TYX1EFQvzL",
-              "asset_CWScERbmNB13EsJmdvfjou7s",
-              "asset_DC4qrfNyjVFLuTM1AieAeQbs",
-              "asset_Asxc63ddUKCFgZ2aB2F1cjM1",
-              "asset_LWiQGXNXHyXSyCPzhy29dKY2",
-              "asset_2Q74F48S5KmiWPks8H7EjhBD",
-              "asset_6eZg5rdfbV1xXg87cy9QMZZG",
-              "asset_twgvmmUE7mKXFkCLKiY5Rxdk",
-              "asset_HZnzWyH9T8eT9KSM9Mnna7Sj",
-              "asset_cpqEejat1G61GMGzaYC8dH4A",
-              "asset_8iXRCsNQzqtmZomSRxpstour",
-              "asset_BvhQPiXVrZryE5z8YQcUo9hu",
-              "asset_2tLvovir42h7bG6XrzX8egAF",
-              "asset_bWm795EffAvtbdLQYusiqbFp",
-              "asset_DfBDwbZZ6BrorrJiBXmuGnAg",
-              "asset_e69zYT3yj8aeMivu4u51zvqs",
-              "asset_cQFcqVzyuisycmcKWTdsoFr8",
-              "asset_B6dvWWFHSuVaTWREcYoV6PzN",
-              "asset_fomJSW5vSid7MnTKAt9V59Dy",
-              "asset_T5doth1y23GHDNHCTZo6vW6h",
-              "asset_wLNBKiB6N75622QiYb32SQzb",
-              "asset_XVapUYsY22cXqQV54hxGwGxZ",
-              "asset_JUwYdvrdHjKM9MHJJf9vyifA",
-              "asset_ew5mhsUHcXeDCCWYcXJjJ6fm",
-              "asset_6NxePxMhb4D2NXVftMc5LBCk",
-              "asset_yeYYtirqJ5ELMZmQ9hf3DQqZ",
-              "asset_JigjYZWB829jF8uFLxKeHx7E",
-              "asset_acFpHm55Qhcw1CsHm7mbMzV9",
-              "asset_tMokdAGRf39TqNYRH2RcFaDy",
-              "asset_xKkVeizwgFjfuRV3RJ8EAvAa",
-              "asset_g6T53bw5Er8mZMTRrfgALGKE",
-              "asset_VnCeo9WHoTqf1g2EqbNfoqrE",
-              "asset_1YJCdJp6RNqn2N4ApW8wdzp7",
-              "asset_VHb22BGAgEdCYzRK23kiCgDe",
-              "asset_MzjCUQPvevDomGK18KdTnAp6",
-              "asset_mpqA6vphyxvp2gyd6V3A1c6y",
-              "asset_gXMHG7v242WWSvVomqFR14oN",
-              "asset_HBWyYGDCevxBKwGhFntN3ZNy",
-              "asset_oNU7rY4A1rsZT5ndxnh4Lfjp",
-              "asset_3rHouR7YUnYoDAyNdtb5Hbf1",
-              "asset_iuQRfohGWBpEFzwj5HxwSm4A",
-              "asset_saJsVEXduDRsJ6JhS5TG2qGy",
-              "asset_4nh8xQyT6LjWniwjWb5c2JiH",
-              "asset_YpdidbmuVjnZVc8Kyi9pMJU6",
-              "asset_34ou51qY1g9vCnUEJyTtkCZ6",
-              "asset_ExxLHAi75AnCtqe6issDChp1",
-              "asset_i5R4fayn6dZu3cxjPoShbfSY",
-              "asset_dRXeqjgo9W3TWQU72fJ63AmT",
-              "asset_XZHZV7pPcxm681WjQnP3uMVU",
-              "asset_SpwETBMqRsmoQT7EkiKHBsDY",
-              "asset_yCgXL1AjQ6kUG6AU53rj6qir",
-              "asset_5WxoxXrhNtJipLuTmmFaDrLb",
-              "asset_VRfu9cnA4NHJwg7PriS7J41K",
-              "asset_K9rDwXMdchLcg5C3mPGze242",
-              "asset_nxPdkN4qWWQXzUqFghjVopMP",
-              "asset_uQJNpBcCxugUNU62nMkMFAcf",
-              "asset_WMZ5LqEvGrADXh1hho5wW8WT",
-              "asset_F2JknQzM27ma1C73GXeazAfL",
-              "asset_oQx8u1KwTauzAyz67wRaavaP",
-              "asset_YYGa95RTck39bfKx1mYb8iJp"
+              "asset_YVsdR64RxH2fjKtJK6sU24F5",
+              "asset_4jkJjCBy5cKNsZ8fYd11M2qx",
+              "asset_dysypEsjzu45XtKBFGXrSzFD",
+              "asset_1dU9CwxEwwmgdC84aEyS6eZP",
+              "asset_wum1ukd94v11o1g2QyZq1xSM",
+              "asset_6B4NoDWGAwsmMnbTgdzxhVXn",
+              "asset_p2JhscvxfM1c3V6e9CYsaCum",
+              "asset_P45n21HVeytszYxnLkmH7jqA",
+              "asset_5WAAAQRpt2xSBXtzfYPmkpr8",
+              "asset_dGN8fM7bjvwkvimnqBJmPtbF",
+              "asset_672G2Q6Zh5Yip5TwqXGvgUrn",
+              "asset_AcCkgWHqKGEdU3SqiL5bPNPi",
+              "asset_tGwgGd4LJkgACRVWtKGgEirY",
+              "asset_dLt4JYbN6RSbAFvSXH2jBYEr",
+              "asset_3wQYseNDE6g3mPzNUWJWuJ1t",
+              "asset_kwensErygLxuDXeF2WeVtnPi",
+              "asset_FJgRqRkTrofxygJX2z3m5Z9j",
+              "asset_xCGZmM6SeVpQapKQsjXuuK5K",
+              "asset_JjZb5FbYz7HG1uLaxh6XGj2Y",
+              "asset_TybpF1CEpu7tXGHB8LkofMtW",
+              "asset_BhbKnAVeYxmaSPczdmbeq1VX",
+              "asset_thBy2PzNDNZSFCg2uyadG8Hx",
+              "asset_NUhFnsSesJUdUerQAraVKQAz",
+              "asset_iV8UJ3zXaVZZNir7EHzE31K1",
+              "asset_cCkkmNg51uGupa3WmP2jWnCo",
+              "asset_dxddYmZqVYTTwi3aCS2dEiDT",
+              "asset_3dsxFHAH1y9GQyrJyvQRzCqW",
+              "asset_wQnbaR1hqvdK8vDPSR4bP2Cs",
+              "asset_tjvA9Ki4RuEm6VsxTqnoaB6V"
             ],
-            "id": "model_openai-gpt-image-2",
+            "id": "model_openai-gpt-image-2-6-sunburst",
             "inputs": [
               {
                 "costImpact": false,
-                "description": "Text description of desired generation or edit.",
+                "description": "Describe the image you want to create, or how to edit your reference images. Plain, natural language works well.",
                 "label": "Prompt",
                 "maxLength": 32000,
                 "name": "prompt",
@@ -162,15 +83,17 @@
               },
               {
                 "costImpact": true,
-                "description": "Reference images for editing. Each image must be under 50 MB.",
+                "description": "Images to edit or build from (up to 10). Required if you provide a mask or a markup image.",
                 "kind": "image",
                 "label": "Reference Images",
                 "maxLength": 10,
-                "maxSize": 52428800,
                 "name": "referenceImages",
                 "parent": true,
                 "required": {
                   "ifDefined": {
+                    "markup": {
+                      "message": "A reference image is required when a markup image is provided."
+                    },
                     "mask": {
                       "message": "A reference image is required when a mask is provided."
                     }
@@ -181,19 +104,27 @@
               {
                 "backgroundBehavior": "transparent",
                 "costImpact": false,
-                "description": "PNG mask for inpainting, same dimensions as the first reference image. OpenAI uses the alpha channel only: fully transparent pixels are edited, fully opaque pixels are preserved. RGB white/black is ignored if there is no alpha. Export PNG with transparency — do not flatten. If you paint a white-on-black mask, convert the white (edit) region to transparent.",
+                "description": "An optional PNG that marks which parts of the first reference image to change. It uses transparency: fully transparent areas are edited, fully opaque areas are kept. Export a PNG with real transparency (don't flatten it). If you've drawn a white-on-black mask, convert the white \"edit\" areas to transparent first.",
                 "kind": "image",
                 "label": "Mask",
                 "maskFrom": "referenceImages",
-                "maxSize": 52428800,
                 "name": "mask",
+                "parent": true,
+                "type": "file"
+              },
+              {
+                "costImpact": false,
+                "description": "Marks (circles, arrows, scribbles) showing where to make the edit the prompt describes. Sketch them on the first reference image, or upload a PNG of the marks alone on a transparent background. The model removes the marks. It must have the first reference image's aspect ratio and cannot be combined with a mask.",
+                "kind": "image",
+                "label": "Markup Image",
+                "name": "markup",
                 "parent": true,
                 "type": "file"
               },
               {
                 "costImpact": true,
                 "default": 1,
-                "description": "Number of images to generate",
+                "description": "How many images to create from the same prompt (1-10).",
                 "group": "Settings",
                 "label": "Image Count",
                 "max": 10,
@@ -204,7 +135,7 @@
               },
               {
                 "costImpact": true,
-                "description": "Output width in pixels.",
+                "description": "Output width in pixels, in steps of 16 up to 3840. Larger images cost more.",
                 "group": "Settings",
                 "label": "Width",
                 "max": 3840,
@@ -215,7 +146,7 @@
               },
               {
                 "costImpact": true,
-                "description": "Output height in pixels.",
+                "description": "Output height in pixels, in steps of 16 up to 3840. Larger images cost more.",
                 "group": "Settings",
                 "label": "Height",
                 "max": 3840,
@@ -226,14 +157,70 @@
               },
               {
                 "allowedValues": [
+                  "png",
+                  "webp",
+                  "jpeg",
+                  "gif",
+                  "svg"
+                ],
+                "costImpact": true,
+                "default": "png",
+                "description": "The file type. PNG keeps maximum quality; WebP and JPEG are smaller. GIF makes a looping animation (see the GIF settings). SVG makes a vector image, from a prompt only and one image at a time.",
+                "group": "Settings",
+                "label": "Output Format",
+                "name": "outputFormat",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "GIF only: how many animation frames to draw (2-16). Leave unset for 9.",
+                "group": "GIF",
+                "label": "Frame Count",
+                "max": 16,
+                "min": 2,
+                "name": "frameCount",
+                "step": 1,
+                "type": "number"
+              },
+              {
+                "costImpact": false,
+                "description": "GIF only: how long each frame shows, in milliseconds (20-655350). Leave unset for 200.",
+                "group": "GIF",
+                "label": "Frame Duration (ms)",
+                "max": 655350,
+                "min": 20,
+                "name": "frameDurationMs",
+                "step": 10,
+                "type": "number"
+              },
+              {
+                "allowedValues": [
+                  "gpt-5.4-mini",
+                  "gpt-5-mini",
+                  "gpt-5-nano",
+                  "gpt-5",
+                  "gpt-5.5"
+                ],
+                "costImpact": true,
+                "default": "gpt-5.4-mini",
+                "description": "SVG only: the text model that writes the SVG from the rendered image. Larger models cost more.",
+                "group": "SVG",
+                "label": "SVG Model",
+                "name": "svgModel",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
                   "auto",
-                  "high",
+                  "low",
                   "medium",
-                  "low"
+                  "high",
+                  "xhigh",
+                  "max"
                 ],
                 "costImpact": true,
                 "default": "auto",
-                "description": "Generation quality",
+                "description": "How much effort goes into the image. Higher levels look better but cost more; Auto lets the model choose.",
                 "group": "Settings",
                 "label": "Quality",
                 "name": "quality",
@@ -241,28 +228,50 @@
               },
               {
                 "allowedValues": [
+                  "",
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "costImpact": false,
+                "default": "",
+                "description": "How much the model plans the image before drawing it. Lower plans less and can finish faster. Leave unset to let the model choose. It does not change the cost.",
+                "group": "Settings",
+                "label": "Complexity",
+                "name": "complexity",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
                   "auto",
-                  "opaque"
+                  "opaque",
+                  "transparent"
                 ],
                 "costImpact": false,
                 "default": "auto",
-                "description": "Background option.",
+                "description": "Whether the background is solid (Opaque) or see-through (Transparent). Auto lets the model decide.",
                 "group": "Settings",
                 "label": "Background",
                 "name": "background",
                 "type": "string"
               }
             ],
-            "name": "GPT Image 2",
+            "name": "GPT Image 2.6 Sunburst",
             "ownerId": "<user-2>",
             "parameters": {},
-            "privacy": "unlisted",
-            "shortDescription": "GPT Image 2 by OpenAI: strong prompt adherence, crisp text rendering and precise inpainting, up to 4K with flexible quality. No transparent backgrounds; see GPT Image 2.5 Sunburst.",
+            "privacy": "public",
+            "shortDescription": "OpenAI GPT Image 2.6, precision tier for dense text, labels, infographics and exact edits; up to 10 reference images, mask or markup edits, up to 3840 px output.",
             "source": "other",
             "status": "trained",
             "tags": [
+              "GIF",
               "GPT-Image",
+              "Image to Image",
               "OpenAI",
+              "Precision",
+              "SVG",
+              "Text Rendering",
+              "Text to Image",
               "editing",
               "sc:third-party"
             ],
@@ -344,17 +353,39 @@
               "selects": {
                 "background": {
                   "auto": "Auto",
-                  "opaque": "Opaque"
+                  "opaque": "Opaque",
+                  "transparent": "Transparent"
+                },
+                "complexity": {
+                  "high": "High",
+                  "low": "Low",
+                  "medium": "Medium"
+                },
+                "outputFormat": {
+                  "gif": "GIF (animated)",
+                  "jpeg": "JPEG",
+                  "png": "PNG",
+                  "svg": "SVG (vector)",
+                  "webp": "WebP"
                 },
                 "quality": {
                   "auto": "Auto",
                   "high": "High",
                   "low": "Low",
-                  "medium": "Medium"
+                  "max": "Max",
+                  "medium": "Medium",
+                  "xhigh": "Extra High"
+                },
+                "svgModel": {
+                  "gpt-5": "GPT-5",
+                  "gpt-5-mini": "GPT-5 mini",
+                  "gpt-5-nano": "GPT-5 nano",
+                  "gpt-5.4-mini": "GPT-5.4 mini",
+                  "gpt-5.5": "GPT-5.5"
                 }
               }
             },
-            "updatedAt": "2026-10-09T17:44:46.888Z",
+            "updatedAt": "2026-11-06T23:17:43.371Z",
             "userId": "<user-1>"
           }
         }
@@ -487,7 +518,7 @@
     {
       "request": {
         "method": "POST",
-        "path": "/generate/custom/model_openai-gpt-image-2",
+        "path": "/generate/custom/model_openai-gpt-image-2-6-sunburst",
         "query": {
           "dryRun": "true"
         },
@@ -509,9 +540,9 @@
         },
         "body": {
           "costDetails": {
-            "custom-generation": 12
+            "custom-generation": 6
           },
-          "creativeUnitsCost": 12,
+          "creativeUnitsCost": 6,
           "creativeUnitsDiscount": 0
         }
       }

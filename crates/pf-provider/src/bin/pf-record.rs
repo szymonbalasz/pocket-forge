@@ -186,20 +186,28 @@ fn run() -> Result<bool, String> {
 }
 
 /// `get-model` and/or `dry-run` for one model; prints a summary line. True if all went well.
+/// A generate-only model (no edit row) records `get-model` through its generate row and has
+/// no edit `dry-run` (its `dry-run-generate` is [`free_generate`]).
 fn free(ctx: &Ctx, model: &str, case: &str) -> bool {
+    let edit =
+        pf_provider::scenario::scenario_model_ids_for(Operation::EditMasked).any(|m| m == model);
+    if !edit && case == "dry-run" {
+        println!("  {model:<40} no edit row (generate only): no edit dry run");
+        return true;
+    }
     let mut check: Option<ModelCheck> = None;
     if case != "dry-run" {
         let (p, rec) = ctx.session();
-        let c = block_on(real_call::check_model(
-            &p,
-            model,
-            Operation::EditMasked,
-            false,
-        ));
+        let op = if edit {
+            Operation::EditMasked
+        } else {
+            Operation::Generate
+        };
+        let c = block_on(real_call::check_model(&p, model, op, false));
         ctx.save(&rec, model, "get-model", c.found);
         check = Some(c);
     }
-    if case != "get-model" && check.as_ref().is_none_or(ModelCheck::offered) {
+    if edit && case != "get-model" && check.as_ref().is_none_or(ModelCheck::offered) {
         let (p, rec) = ctx.session();
         let c = block_on(real_call::check_model(
             &p,

@@ -391,12 +391,8 @@ async function loadModels(remembered: Values | null): Promise<void> {
     const { models, stale } = await api.provider.listModels('generate');
     if (late()) return;
     set({ models, modelsStale: stale, modelsLoading: false });
-    const keep = state.modelId && models.some((m) => m.id === state.modelId) ? state.modelId : null;
-    if (state.modelId && !keep)
-      set((cur) => ({
-        notices: [...cur.notices, 'The saved model isn’t available; the first one is selected.'],
-      }));
-    const id = keep ?? models[0]?.id ?? null;
+    // A saved model the list no longer offers falls back in `selectModel` (FR-GEN-19).
+    const id = (models.length ? state.modelId : null) ?? models[0]?.id ?? null;
     if (id) await selectModel(id, remembered);
     else set({ modelId: null, caps: null, evaluation: null, fit: null });
   } catch (e) {
@@ -419,13 +415,22 @@ function withKindDefaults(
   return { values: { ...r.values, [bg.name]: 'transparent' }, touched: [...r.touched, bg.name] };
 }
 
-async function selectModel(id: string, remembered: Values | null): Promise<void> {
+async function selectModel(wanted: string, remembered: Values | null): Promise<void> {
+  // A remembered model (draft, restored job) the list no longer offers (e.g. removed from the
+  // overlay) falls back to the first offered model, with a notice (FR-GEN-19, FR-RGN-11).
+  const gone = state.models.length > 0 && !state.models.some((m) => m.id === wanted);
+  const id = gone ? state.models[0]!.id : wanted;
+  if (gone)
+    set((cur) => ({
+      notices: [...cur.notices, 'The saved model isn’t available; the first one is selected.'],
+    }));
   const t = nextToken('caps');
   set({ modelId: id, capsLoading: true, capsError: null, evaluation: null, fit: null });
   try {
     const caps = await api.provider.getCapabilities(id, 'generate');
     if (!isCurrent('caps', t)) return;
-    const r = withKindDefaults(caps, state.kind, withRemembered(caps, remembered));
+    // The gone model's remembered values don't carry over to another model.
+    const r = withKindDefaults(caps, state.kind, withRemembered(caps, gone ? null : remembered));
     // A wh model keeps the long side within its limits (FR-GEN-10).
     const lim = longSideLimits(caps);
     const size =

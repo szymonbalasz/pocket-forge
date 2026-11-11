@@ -1,0 +1,186 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_bfl-flux-2-max-editing",
+  "case": "dry-run-generate",
+  "recorded_on": "2026-11-11",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_bfl-flux-2-max-editing"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "txt2img",
+              "img2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Replicate",
+              "modelProvider": "BFL",
+              "subProcessor": "Replicate"
+            },
+            "createdAt": "2025-11-04T14:33:52.938Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_3EpBsLTb8gazsqwbzs2XUzxU",
+              "asset_ov2eyK5feJWrmmGgznag31Nn",
+              "asset_GuQVREykTiRxSVNXNnnYKS4y",
+              "asset_dFAvxDejvoAzM3pkHkjSGMyZ",
+              "asset_Wa2uXNSYp5uWqWQ34god1K8a",
+              "asset_JcXhf8fFV1e5vziQio7e4whn",
+              "asset_7tAgj58kccvNxNwnMqZshnh9",
+              "asset_gRhVWSxBhu41xe3n3ykSLFSN",
+              "asset_iPpfv1B8sSZdQXxGRQd6P22A",
+              "asset_bkxTqBReKQf3wn1EBjHcTL9f",
+              "asset_cztt9v7awX6x2qaT4Lh55Kot",
+              "asset_SYN7NnxfgcPiybPQdQ4ctZ6K",
+              "asset_MrAng4nMkKELajgrp2WLVuhw",
+              "asset_gF5VzCMHQtMaJeRFmec6ehhH"
+            ],
+            "id": "model_bfl-flux-2-max-editing",
+            "inputs": [
+              {
+                "costImpact": true,
+                "description": "Reference images for style or content guidance",
+                "kind": "image",
+                "label": "Reference images",
+                "maxLength": 8,
+                "name": "referenceImages",
+                "parent": true,
+                "type": "file_array"
+              },
+              {
+                "costImpact": false,
+                "description": "Text prompt for image generation",
+                "label": "Instructions",
+                "maxLength": 2048,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "match_input_image",
+                  "16:9",
+                  "3:2",
+                  "4:3",
+                  "5:4",
+                  "1:1",
+                  "4:5",
+                  "3:4",
+                  "2:3",
+                  "9:16"
+                ],
+                "costImpact": true,
+                "default": "4:3",
+                "description": "Aspect ratio for the generated image. Use 'Auto (Match Input)' to match the first input image's aspect ratio.",
+                "group": "Settings",
+                "label": "Aspect Ratio",
+                "name": "aspectRatio",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "match_input_image",
+                  "0.5 MP",
+                  "1 MP",
+                  "2 MP",
+                  "4 MP"
+                ],
+                "costImpact": true,
+                "default": "1 MP",
+                "description": "Resolution in megapixels. Up to 4 MP is possible, but 2 MP or below is recommended. The maximum image size is 2048x2048, which means that high-resolution images may not respect the resolution if aspect ratio is not 1:1. When Aspect ratio is 'Auto (Match Input)', use Auto to match the input image's resolution (clamped to 0.5-4 MP).",
+                "group": "Settings",
+                "label": "Resolution",
+                "name": "resolution",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "Random seed. Set for reproducible generation",
+                "group": "Settings",
+                "label": "Seed",
+                "name": "seed",
+                "type": "number"
+              }
+            ],
+            "name": "FLUX 2 (Max)",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "FLUX 2 (Max) by Black Forest Labs. Top-tier image editing with up to 8 reference images, up to 4 MP output, and precise consistency across colors, faces, and objects.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Black Forest Labs",
+              "FLux",
+              "editing",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "selects": {
+                "aspectRatio": {
+                  "match_input_image": "Auto (Match Input)"
+                },
+                "resolution": {
+                  "match_input_image": "Auto (Match Input)"
+                }
+              }
+            },
+            "updatedAt": "2026-06-28T10:15:22.426Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/generate/custom/model_bfl-flux-2-max-editing",
+        "query": {
+          "dryRun": "true"
+        },
+        "body": {
+          "aspectRatio": "1:1",
+          "prompt": "a mossy flagstone floor",
+          "seed": 1
+        }
+      },
+      "response": {
+        "status": 269,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "costDetails": {
+            "custom-generation": 11
+          },
+          "creativeUnitsCost": 11,
+          "creativeUnitsDiscount": 0
+        }
+      }
+    }
+  ]
+}

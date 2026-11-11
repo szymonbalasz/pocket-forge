@@ -1,0 +1,262 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_ideogram-v4-tiling",
+  "case": "get-model",
+  "recorded_on": "2026-11-11",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_ideogram-v4-tiling"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "txt2img",
+              "img2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Fal",
+              "modelProvider": "Ideogram",
+              "subProcessor": "Fal"
+            },
+            "createdAt": "2026-06-12T10:03:14.856Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_DjvvdUv2rzgfpqBgR3EPL747",
+              "asset_ANuKKQuNm9rrsa4H18eHWytQ",
+              "asset_PJSqmfrwsJSqAJUBnovmvrsy",
+              "asset_u4zU74k9aFTzDguooeAR4c7Z",
+              "asset_3BiockC3Zfjqp115T71DVoza",
+              "asset_7EydaH4UZUmBvWMQh1hyaqmK",
+              "asset_KVicmJYQpKekM6cHmE7T1bpL",
+              "asset_HrJ1F1gFM1ztS8kca1PH6FdE",
+              "asset_GEqb7PNntRpKVnV76pvVUAeV",
+              "asset_Qmgcmv8Rw6TiSNrdtgBNb6BW",
+              "asset_Q3rYb6SaYK9U71fXYE345N1t",
+              "asset_GyFEJkx2qQ8XZK78rtHo9nLE",
+              "asset_3p577FMPi41kfwMPdLUECF4r",
+              "asset_ujGNUSpXBx4YCBbewk7ig7u3",
+              "asset_5KHxF8wwm2Mab9QHSbeMAknt",
+              "asset_bF1a4bgGQfcaVdEPPrFWWd8y",
+              "asset_U5EoyuRgs5nqdFoyw2MifTod",
+              "asset_DqpWb8AYRLqNfcgfHCTRbWgp",
+              "asset_iMdvs1cDHMC2MwoUYsQBcbfa"
+            ],
+            "id": "model_ideogram-v4-tiling",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Describe the texture or repeating pattern you want. The result is built to repeat seamlessly in the direction you choose.",
+                "label": "Prompt",
+                "maxLength": 2048,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "An optional starting image. When provided, it's transformed into a seamless tile instead of generating one from scratch.",
+                "group": "Reference Image",
+                "kind": "image",
+                "label": "Image",
+                "name": "image",
+                "parent": true,
+                "required": {
+                  "ifDefined": {
+                    "mask": {
+                      "message": "An image is required when a mask is provided."
+                    }
+                  }
+                },
+                "type": "file"
+              },
+              {
+                "costImpact": false,
+                "default": 0.8,
+                "description": "How much the input image changes. Higher values transform it more; lower values keep it closer to the source.",
+                "group": "Reference Image",
+                "label": "Strength",
+                "max": 1,
+                "min": 0,
+                "name": "strength",
+                "step": 0.01,
+                "type": "number"
+              },
+              {
+                "costImpact": false,
+                "description": "An optional black-and-white image marking which parts to redo. White areas are regenerated, black areas are kept. Requires an input image.",
+                "kind": "image",
+                "label": "Mask",
+                "maskFrom": "image",
+                "name": "mask",
+                "parent": true,
+                "type": "file"
+              },
+              {
+                "allowedValues": [
+                  "both",
+                  "horizontal",
+                  "vertical"
+                ],
+                "costImpact": false,
+                "default": "both",
+                "description": "Which directions the pattern repeats seamlessly. Both repeats in every direction; Horizontal repeats left-to-right; Vertical repeats top-to-bottom.",
+                "group": "Settings",
+                "label": "Tiling Mode",
+                "name": "tilingMode",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "portrait_16_9",
+                  "portrait_4_3",
+                  "square",
+                  "square_hd",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ],
+                "costImpact": true,
+                "default": "square_hd",
+                "description": "The size and shape of the generated tile.",
+                "group": "Settings",
+                "label": "Image Size",
+                "name": "imageSize",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "TURBO",
+                  "BALANCED",
+                  "QUALITY"
+                ],
+                "costImpact": true,
+                "default": "BALANCED",
+                "description": "The tradeoff between speed and quality. Turbo is fastest, Quality is sharpest, and Balanced is a good default.",
+                "group": "Settings",
+                "label": "Rendering Speed",
+                "name": "renderingSpeed",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "None",
+                  "Medium",
+                  "Large"
+                ],
+                "costImpact": true,
+                "default": "Medium",
+                "description": "Whether your prompt is automatically enriched with extra detail before generating. None uses your prompt exactly; Medium adds some detail quickly; Large uses Ideogram's Magic Prompt for the richest results.",
+                "group": "Settings",
+                "label": "Expansion Model",
+                "name": "expansionModel",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "none",
+                  "low",
+                  "regular",
+                  "high"
+                ],
+                "costImpact": false,
+                "default": "none",
+                "description": "An extra speed boost on top of the rendering setting. Higher values generate faster but may slightly reduce quality.",
+                "group": "Settings",
+                "label": "Acceleration",
+                "name": "acceleration",
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "default": 1,
+                "description": "How many tiles to create from the same prompt.",
+                "group": "Settings",
+                "label": "Image Count",
+                "max": 4,
+                "min": 1,
+                "name": "numOutputs",
+                "step": 1,
+                "type": "number"
+              },
+              {
+                "costImpact": false,
+                "description": "A number that makes results repeatable. Reusing the same seed and settings produces the same tile; leave it empty for a different result each time.",
+                "group": "Settings",
+                "label": "Seed",
+                "max": 2147483647,
+                "min": 0,
+                "name": "seed",
+                "type": "number"
+              }
+            ],
+            "name": "Ideogram V4 Tiling",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Generate seamless textures and patterns that repeat perfectly in any direction. Prompt from scratch or convert an existing image into a tile, with optional mask inpainting.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Ideogram",
+              "Texture",
+              "sc:texture",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "selects": {
+                "acceleration": {
+                  "high": "High",
+                  "low": "Low",
+                  "none": "None",
+                  "regular": "Regular"
+                },
+                "expansionModel": {
+                  "Large": "Large",
+                  "Medium": "Medium",
+                  "None": "None"
+                },
+                "imageSize": {
+                  "landscape_16_9": "16:9 (1024x576)",
+                  "landscape_4_3": "4:3 (1024x768)",
+                  "portrait_16_9": "9:16 (576x1024)",
+                  "portrait_4_3": "3:4 (768x1024)",
+                  "square": "1:1 (512x512)",
+                  "square_hd": "1:1 HD (1024x1024)"
+                },
+                "tilingMode": {
+                  "both": "Both",
+                  "horizontal": "Horizontal",
+                  "vertical": "Vertical"
+                }
+              }
+            },
+            "updatedAt": "2026-10-09T17:41:16.125Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    }
+  ]
+}

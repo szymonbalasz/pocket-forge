@@ -1,0 +1,214 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_ideogram-v4",
+  "case": "get-model",
+  "recorded_on": "2026-11-11",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_ideogram-v4"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "txt2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Fal",
+              "modelProvider": "Ideogram",
+              "subProcessor": "Fal"
+            },
+            "createdAt": "2026-06-05T09:40:32.445Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_G59wKiYJ3qBryb7TQhzndxhw",
+              "asset_fK4TW7ZNh4Aq2F9cVLqPa9B4",
+              "asset_RHJDMRYy7zZnRYQ6jmrjzVxB",
+              "asset_YGushcEBJKFfNJh8VKC2xTVJ",
+              "asset_YjY21TjM8toUEmeSAuAArriE",
+              "asset_3K6SBjwak7iMSFoZ4FSSSbnU",
+              "asset_ciuexFhdABc7eG7EhoznfddU",
+              "asset_Z6Um6BZkfDYC412UBhwrAxsM",
+              "asset_cvK14p2NjvsSwND4vkirPnax",
+              "asset_iw7ScKrdZiZGSxkZFoqhr9j3",
+              "asset_BpzS1dfEVi1Bp6WTbb9vbssL",
+              "asset_Vwa8UVfA15B18nzFj8HVi37N",
+              "asset_acs9xsfJDR4CJoJQei9hemie",
+              "asset_PpnnqsuUqAfwmarQg9ApqmGV",
+              "asset_MQYhsYa7DVcwvjVFhHCTGEBF",
+              "asset_gCWoHD5GY3TSnrKBLMLv9c1P",
+              "asset_BRT4QWz2uHagHh9CthoBnMqa",
+              "asset_8WETABVXMmXeCNmXzb6i7FLc",
+              "asset_X1iWQe3RNdfohEwxgGq54X2t",
+              "asset_j4773V4ce44Gh3unbZQ5E5RS",
+              "asset_c4WodZcJ3Sg7szTYZhoJLkPF",
+              "asset_RsoGwGskdhnR1gU4SDt3fTCM",
+              "asset_m9zJTV6V95vheSM8QkwCs2SC",
+              "asset_gAc3KcvdkT5PtNi6QRPNRsaK",
+              "asset_Katz2287tBUMShaiVYqmXhzw",
+              "asset_ug8ZRifBwVq1kJJcNTwAPJio",
+              "asset_rMcpMLLip8Am4aMr8YV5NqDA",
+              "asset_N3WEaLF9ihuuh7FJcQaRpYmH",
+              "asset_hzQVwjNBfoVWzPxkqsQejKvV",
+              "asset_EXcPG2qptcD1mTwFZp5jSWpx",
+              "asset_x8iWGGJmSo4ZnrkzhFoAVjgx",
+              "asset_pJLJ3sS311NywNSA321XgXnQ",
+              "asset_nofrSQHZRxgAC3d31irfr7Ft",
+              "asset_LBMG1jGwDo5mwaqfUJ2bkGqJ",
+              "asset_6TRD81LL4auWnHxHyJcTrPhB",
+              "asset_4q9Ev3UYd8HAA67TE8QtAdw9",
+              "asset_f4DQMfUq2gj13vnouKUrAD9G",
+              "asset_VeAaa7ZX55rt5geh6oFKqhwf",
+              "asset_qiiZvjCimQEaZ8FWUBDqdNet"
+            ],
+            "id": "model_ideogram-v4",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Describe the image you want to generate, including subject, style, mood, and any text you want to appear in the image. Ideogram V4 handles in-image text better than most models — be explicit about wording and placement.",
+                "label": "Prompt",
+                "maxLength": 2048,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "portrait_16_9",
+                  "portrait_4_3",
+                  "square",
+                  "square_hd",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ],
+                "costImpact": true,
+                "default": "square_hd",
+                "description": "The dimensions and aspect ratio of the generated image. HD square gives the highest resolution; use portrait or landscape presets to match your intended format.",
+                "group": "Settings",
+                "label": "Image Size",
+                "name": "imageSize",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "TURBO",
+                  "BALANCED",
+                  "QUALITY"
+                ],
+                "costImpact": true,
+                "default": "BALANCED",
+                "description": "The quality-versus-speed tradeoff. Turbo is fastest but less detailed; Quality takes longer and produces sharper results; Balanced is a good default for most use cases.",
+                "group": "Settings",
+                "label": "Rendering Speed",
+                "name": "renderingSpeed",
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "default": true,
+                "description": "When enabled, the model automatically enriches your prompt with additional detail before generating. Useful for short or simple prompts; disable if you want the output to follow your exact wording.",
+                "group": "Settings",
+                "label": "Enable Prompt Expansion",
+                "name": "enablePromptExpansion",
+                "type": "boolean"
+              },
+              {
+                "allowedValues": [
+                  "none",
+                  "low",
+                  "regular",
+                  "high"
+                ],
+                "costImpact": false,
+                "default": "none",
+                "description": "An additional speed boost on top of the rendering tier. Higher acceleration reduces generation time but may slightly affect output quality. Leave at None for best results.",
+                "group": "Settings",
+                "label": "Acceleration",
+                "name": "acceleration",
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "default": 1,
+                "description": "How many images to generate from the same prompt. Useful for exploring variations. Each additional image adds to the cost.",
+                "group": "Settings",
+                "label": "Image Count",
+                "max": 4,
+                "min": 1,
+                "name": "numOutputs",
+                "step": 1,
+                "type": "number"
+              },
+              {
+                "costImpact": false,
+                "description": "A number that locks in the randomness of the generation. Copy the seed from a result you liked to reproduce it exactly, or leave blank for a new result each time.",
+                "group": "Settings",
+                "label": "Seed",
+                "max": 2147483647,
+                "min": 0,
+                "name": "seed",
+                "type": "number"
+              }
+            ],
+            "name": "Ideogram V4",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Ideogram V4 by Ideogram. Best-in-class in-image text rendering for posters, logos, packaging, and menus. Multilingual, six size presets, three speed tiers.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Deprecated",
+              "Ideogram",
+              "deprecated:model_ideogram-v4-5",
+              "sc:legacy",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "selects": {
+                "acceleration": {
+                  "high": "High",
+                  "low": "Low",
+                  "none": "None",
+                  "regular": "Regular"
+                },
+                "imageSize": {
+                  "landscape_16_9": "16:9 (1024x576)",
+                  "landscape_4_3": "4:3 (1024x768)",
+                  "portrait_16_9": "9:16 (576x1024)",
+                  "portrait_4_3": "3:4 (768x1024)",
+                  "square": "1:1 (512x512)",
+                  "square_hd": "1:1 HD (1024x1024)"
+                }
+              }
+            },
+            "updatedAt": "2026-10-09T17:41:13.841Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,143 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_bfl-flux-1-pro-fill",
+  "case": "get-model",
+  "recorded_on": "2026-11-11",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_bfl-flux-1-pro-fill"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "img2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Fal",
+              "modelProvider": "BFL",
+              "subProcessor": "Fal"
+            },
+            "createdAt": "2026-10-23T13:37:41.270Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_vDPq4JEhUrQia6gvHnFwx4Pr",
+              "asset_PSzKQWcp4HPF6Vx2UxKfVop5",
+              "asset_ej9Q8UckycpcPeXFr642xiyA",
+              "asset_v6bizkLkufPdw2H6qRhT9FH8",
+              "asset_ZyT6hviHagLCzLJbtmtRf3Jh",
+              "asset_r4M729ACMjAKhDAkneuqjggK",
+              "asset_xasW9j8kVYEkRQy5mffcMguE",
+              "asset_wdpVsMntHNLTKrWxuUqzRkAF",
+              "asset_3wNbExX1yfdDHmm1HK3nQSJ3",
+              "asset_rVan5ugFej3uq38d37YZ7ggw",
+              "asset_TsnMAu6aSvszaJF8XmhYfP6D",
+              "asset_rZb2N5NLKWDZ67ovy1UkLRW4",
+              "asset_jAuUbffN4c7ayy3Fj8wwbie9",
+              "asset_AWizmGxzseuzfWXc4LADkAsd",
+              "asset_s8TgYVxcN8w3eWNa2novkvJK",
+              "asset_gTngB2HAuFjVpaqJXXjFKYak",
+              "asset_2M4v67LvM5UhyowcNCHiMCcc",
+              "asset_fZDdYwb4Mu3hau6cE9GPAUe4"
+            ],
+            "id": "model_bfl-flux-1-pro-fill",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Text prompt describing what to fill the masked area with",
+                "label": "Prompt",
+                "maxLength": 2048,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "description": "Image to inpaint. Must have the same dimensions as the mask.",
+                "kind": "image",
+                "label": "Image",
+                "maxSize": 10485760,
+                "name": "image",
+                "parent": true,
+                "required": {
+                  "always": true
+                },
+                "type": "file"
+              },
+              {
+                "costImpact": false,
+                "description": "Mask of the area to fill (white is filled, black is kept). Must have the same dimensions as the image.",
+                "kind": "image",
+                "label": "Mask",
+                "maxSize": 10485760,
+                "name": "mask",
+                "parent": true,
+                "required": {
+                  "always": true
+                },
+                "type": "file"
+              },
+              {
+                "costImpact": false,
+                "default": false,
+                "description": "Automatically modify the prompt for more creative generation",
+                "group": "Settings",
+                "label": "Prompt Upsampling",
+                "name": "promptUpsampling",
+                "type": "boolean"
+              },
+              {
+                "costImpact": false,
+                "description": "Random seed. Set for reproducible generation",
+                "group": "Settings",
+                "label": "Seed",
+                "name": "seed",
+                "type": "number"
+              }
+            ],
+            "name": "FLUX.1 Pro Fill",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Inpainting and outpainting with a mask: replace objects, add details, write text on surfaces, swap skies and backgrounds, or extend a photo to a new aspect ratio.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "FLUX",
+              "editing",
+              "image editing",
+              "inpainting",
+              "mask",
+              "outpainting",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "updatedAt": "2026-10-27T16:56:13.307Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    }
+  ]
+}

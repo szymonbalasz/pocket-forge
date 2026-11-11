@@ -380,6 +380,30 @@ test('FR-GEN-32 Retry from the tracker fills the New image tab, flags a changed 
   await estimated();
 });
 
+test('FR-GEN-19 a saved model the list no longer offers falls back to the first one, with a notice', async () => {
+  // A draft from before its model left the list (GPT Image 2, removed 2026-11-11).
+  await setup({
+    draft: {
+      model_id: 'model_openai-gpt-image-2',
+      controls: { quality: 'high' },
+      seed: null,
+      size: null,
+      structure: null,
+      references: null,
+      typed_prompt: 'swamp',
+    },
+  });
+  const first = gen.get().models[0]!.id;
+  expect(gen.get().modelId).toBe(first);
+  expect(gen.get().notices).toContain(
+    'The saved model isn’t available; the first one is selected.',
+  );
+  expect(gen.get().values.quality).toBeUndefined();
+  expect(fake.callsOf('provider_get_capabilities').map((c) => c.model_id)).not.toContain(
+    'model_openai-gpt-image-2',
+  );
+});
+
 test('FR-GEN-19 draft.generate is saved after an edit and restored on open', async () => {
   await setup({
     draft: {

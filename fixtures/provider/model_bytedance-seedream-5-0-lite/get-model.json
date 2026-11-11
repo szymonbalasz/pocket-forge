@@ -1,0 +1,310 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_bytedance-seedream-5-0-lite",
+  "case": "get-model",
+  "recorded_on": "2026-11-11",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_bytedance-seedream-5-0-lite"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "txt2img",
+              "img2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Scenario",
+              "modelProvider": "Bytedance",
+              "subProcessor": "Provider"
+            },
+            "createdAt": "2026-02-24T12:02:01.099Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_fGoT2h6yLk9kp2qaUVWkVmD7",
+              "asset_GRXHiQM47g7DbogvZSdHRQoH",
+              "asset_TkBKHPnaq41X9YmDhxZxjByK",
+              "asset_iXN5h7H4BTEYnb3xLPXAqR4B",
+              "asset_QN9f18QiNWg5goB1uxacBnbn",
+              "asset_TnKN8NFt2Jdi1oeFm6TMxPWR",
+              "asset_MfHGmntcEpf3rHbEB6LEmS9c",
+              "asset_w9eA6eLEKFqxXVTnj7kRgX9u",
+              "asset_MQFMaxoEF2fWN7bRMU21en7U",
+              "asset_qfeV1NYE4ZX4yzzBMGYuJbFo",
+              "asset_cwGaECG2CMxPwxbTXKASQxM4",
+              "asset_8Z3CdNham64DLiMngfftrUtr",
+              "asset_X59ZAQJyqV8E8XbtpkxhTjaa",
+              "asset_Rq34LH4QTqEcWbqDKmm5nJNm",
+              "asset_vBFGDu4kUY6XEG8A49si1HVi",
+              "asset_2Mk3zTerSBmCAdzv6nTHMyKZ",
+              "asset_ec95xm2wPVno74iFqD7WWuXx",
+              "asset_w1Ejah44Aen4wXGPzA4o7ghR",
+              "asset_BzATTLTQxwvjmy3adVXgdPbX",
+              "asset_61T1KRK46g5ZikYHT7a17Fi8",
+              "asset_HAKwizn3UuWco58fofHV9siw",
+              "asset_vDLUtdtFDVR69jAjb5Trf4NX",
+              "asset_33ZaesoYh1ikh9QJdxaK2f3w",
+              "asset_Aek8NR5jr2FDeYmzimkVR8yJ",
+              "asset_wXLr8uiVqbE8vzpXqb1vQXb5",
+              "asset_VitksMhwdmxiSVepNgepgRop",
+              "asset_rcvRigyJp8NEdz5J5YKRiJTA",
+              "asset_sU4cYKzbhrVxXf71ReezoGG8",
+              "asset_Kuo3rqRjRcdXikzS43mnx3B3",
+              "asset_Q9ikSXtr4RiV49jrQ8YyiVpU",
+              "asset_1pzFERGR7NbtjxhRt3qtbWJU"
+            ],
+            "id": "model_bytedance-seedream-5-0-lite",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Text prompt for image generation",
+                "label": "Prompt",
+                "maxLength": 2048,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "default": [],
+                "description": "Input image(s) for image-to-image generation.",
+                "kind": "image",
+                "label": "Reference Images",
+                "maxLength": 14,
+                "name": "referenceImages",
+                "parent": true,
+                "type": "file_array"
+              },
+              {
+                "costImpact": false,
+                "default": 2048,
+                "description": "Custom image width (only used when size is set to 'Custom'). Range: 1024-6240 pixels.",
+                "group": "Settings",
+                "label": "Width",
+                "max": 6240,
+                "min": 1024,
+                "name": "width",
+                "step": 16,
+                "type": "number"
+              },
+              {
+                "costImpact": false,
+                "default": 2048,
+                "description": "Custom image height (only used when size is set to 'Custom'). Range: 1024-6240 pixels.",
+                "group": "Settings",
+                "label": "Height",
+                "max": 6240,
+                "min": 1024,
+                "name": "height",
+                "step": 16,
+                "type": "number"
+              },
+              {
+                "allowedValues": [
+                  "disabled",
+                  "auto"
+                ],
+                "costImpact": true,
+                "default": "disabled",
+                "description": "Off: always generates one image. On: The model may generate a set of related images (story steps, variations, or alternatives), up to your chosen Max Images parameter.",
+                "group": "Sequence Mode",
+                "label": "Generate Multiple Outputs",
+                "name": "sequentialImageGeneration",
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "default": 1,
+                "description": "The maximum number of images the model can generate in one sequence. Total image count (input + generated) cannot exceed 15.",
+                "group": "Sequence Mode",
+                "label": "Max Images",
+                "max": 15,
+                "min": 1,
+                "name": "maxImages",
+                "type": "number"
+              }
+            ],
+            "name": "Seedream 5.0 Lite",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Seedream 5.0 Lite by Bytedance. Fast text-to-image and image editing at 2K, 3K, or 4K. Strong instruction following, multi-reference inputs, and sequence generation.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "bytedance",
+              "editing",
+              "sc:third-party",
+              "seedream"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "resolutionComponent": {
+                "heightInput": "height",
+                "label": "Dimensions",
+                "presets": [
+                  {
+                    "height": 1344,
+                    "label": "2K 3136x1344 (21:9)",
+                    "width": 3136
+                  },
+                  {
+                    "height": 1600,
+                    "label": "2K 2848x1600 (16:9)",
+                    "width": 2848
+                  },
+                  {
+                    "height": 1664,
+                    "label": "2K 2496x1664 (3:2)",
+                    "width": 2496
+                  },
+                  {
+                    "height": 1728,
+                    "label": "2K 2304x1728 (4:3)",
+                    "width": 2304
+                  },
+                  {
+                    "height": 2048,
+                    "label": "2K 2048x2048 (1:1)",
+                    "width": 2048
+                  },
+                  {
+                    "height": 2304,
+                    "label": "2K 1728x2304 (3:4)",
+                    "width": 1728
+                  },
+                  {
+                    "height": 2496,
+                    "label": "2K 1664x2496 (2:3)",
+                    "width": 1664
+                  },
+                  {
+                    "height": 2848,
+                    "label": "2K 1600x2848 (9:16)",
+                    "width": 1600
+                  },
+                  {
+                    "height": 2016,
+                    "label": "3K 4704x2016 (21:9)",
+                    "width": 4704
+                  },
+                  {
+                    "height": 2304,
+                    "label": "3K 4096x2304 (16:9)",
+                    "width": 4096
+                  },
+                  {
+                    "height": 2496,
+                    "label": "3K 3744x2496 (3:2)",
+                    "width": 3744
+                  },
+                  {
+                    "height": 2592,
+                    "label": "3K 3456x2592 (4:3)",
+                    "width": 3456
+                  },
+                  {
+                    "height": 3072,
+                    "label": "3K 3072x3072 (1:1)",
+                    "width": 3072
+                  },
+                  {
+                    "height": 3456,
+                    "label": "3K 2592x3456 (3:4)",
+                    "width": 2592
+                  },
+                  {
+                    "height": 3744,
+                    "label": "3K 2496x3744 (2:3)",
+                    "width": 2496
+                  },
+                  {
+                    "height": 4096,
+                    "label": "3K 2304x4096 (9:16)",
+                    "width": 2304
+                  },
+                  {
+                    "height": 2656,
+                    "label": "4K 6240x2656 (21:9)",
+                    "width": 6240
+                  },
+                  {
+                    "height": 3040,
+                    "label": "4K 5504x3040 (16:9)",
+                    "width": 5504
+                  },
+                  {
+                    "height": 3328,
+                    "label": "4K 4992x3328 (3:2)",
+                    "width": 4992
+                  },
+                  {
+                    "height": 3520,
+                    "label": "4K 4704x3520 (4:3)",
+                    "width": 4704
+                  },
+                  {
+                    "height": 4096,
+                    "label": "4K 4096x4096 (1:1)",
+                    "width": 4096
+                  },
+                  {
+                    "height": 4704,
+                    "label": "4K 3520x4704 (3:4)",
+                    "width": 3520
+                  },
+                  {
+                    "height": 4992,
+                    "label": "4K 3328x4992 (2:3)",
+                    "width": 3328
+                  },
+                  {
+                    "height": 5504,
+                    "label": "4K 3040x5504 (9:16)",
+                    "width": 3040
+                  }
+                ],
+                "widthInput": "width"
+              },
+              "selects": {
+                "sequentialImageGeneration": {
+                  "auto": "On (Sequence)",
+                  "disabled": "Off (Single Image)"
+                },
+                "size": {
+                  "2K": "Medium (2K)",
+                  "3K": "High (3K)",
+                  "4K": "High (4K)"
+                }
+              }
+            },
+            "updatedAt": "2026-06-28T14:04:26.244Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    }
+  ]
+}

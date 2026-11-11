@@ -1224,3 +1224,29 @@ test('FR-RGN-07 a late model list of the previous project never lands in the nex
   expect(rgn.get().values.guidance).toBe(7.5);
   expect(rgn.get().touched).not.toContain('guidance');
 });
+
+test('FR-RGN-11 a saved model the list no longer offers falls back to the first one, with a notice', async () => {
+  polyfillRadix();
+  fake = mockCore();
+  const w = window as unknown as { __pfMockSnapshot: Record<string, unknown> };
+  // A draft from before its model left the list (GPT Image 2, removed 2026-11-11).
+  w.__pfMockSnapshot.draft = { model_id: 'model_openai-gpt-image-2', controls: { guidance: 15 } };
+  projectStore.reset();
+  await act(() => projectStore.open('C:/pf-test/library/Maps/map'));
+  render(
+    <Tooltip.Provider>
+      <GeneratePanel />
+    </Tooltip.Provider>,
+  );
+  await waitFor(() => expect(rgn.get().evaluation).not.toBeNull());
+  const first = (await api.provider.listModels('edit_masked')).models[0]!.id;
+  expect(rgn.get().modelId).toBe(first);
+  expect(rgn.get().notices).toContain(
+    'The saved model isn’t available; the first one is selected.',
+  );
+  // The gone model's remembered values don't carry over.
+  expect(rgn.get().values.guidance).toBe(7.5);
+  expect(fake.callsOf('provider_get_capabilities').map((c) => c.model_id)).not.toContain(
+    'model_openai-gpt-image-2',
+  );
+});

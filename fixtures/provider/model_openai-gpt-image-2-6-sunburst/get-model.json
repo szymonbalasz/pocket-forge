@@ -1,0 +1,395 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_openai-gpt-image-2-6-sunburst",
+  "case": "get-model",
+  "recorded_on": "2026-11-11",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_openai-gpt-image-2-6-sunburst"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "txt2img",
+              "img2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Scenario",
+              "modelProvider": "OpenAI",
+              "subProcessor": "Provider"
+            },
+            "createdAt": "2026-11-05T07:56:19.516Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_YVsdR64RxH2fjKtJK6sU24F5",
+              "asset_4jkJjCBy5cKNsZ8fYd11M2qx",
+              "asset_dysypEsjzu45XtKBFGXrSzFD",
+              "asset_1dU9CwxEwwmgdC84aEyS6eZP",
+              "asset_wum1ukd94v11o1g2QyZq1xSM",
+              "asset_6B4NoDWGAwsmMnbTgdzxhVXn",
+              "asset_p2JhscvxfM1c3V6e9CYsaCum",
+              "asset_P45n21HVeytszYxnLkmH7jqA",
+              "asset_5WAAAQRpt2xSBXtzfYPmkpr8",
+              "asset_dGN8fM7bjvwkvimnqBJmPtbF",
+              "asset_672G2Q6Zh5Yip5TwqXGvgUrn",
+              "asset_AcCkgWHqKGEdU3SqiL5bPNPi",
+              "asset_tGwgGd4LJkgACRVWtKGgEirY",
+              "asset_dLt4JYbN6RSbAFvSXH2jBYEr",
+              "asset_3wQYseNDE6g3mPzNUWJWuJ1t",
+              "asset_kwensErygLxuDXeF2WeVtnPi",
+              "asset_FJgRqRkTrofxygJX2z3m5Z9j",
+              "asset_xCGZmM6SeVpQapKQsjXuuK5K",
+              "asset_JjZb5FbYz7HG1uLaxh6XGj2Y",
+              "asset_TybpF1CEpu7tXGHB8LkofMtW",
+              "asset_BhbKnAVeYxmaSPczdmbeq1VX",
+              "asset_thBy2PzNDNZSFCg2uyadG8Hx",
+              "asset_NUhFnsSesJUdUerQAraVKQAz",
+              "asset_iV8UJ3zXaVZZNir7EHzE31K1",
+              "asset_cCkkmNg51uGupa3WmP2jWnCo",
+              "asset_dxddYmZqVYTTwi3aCS2dEiDT",
+              "asset_3dsxFHAH1y9GQyrJyvQRzCqW",
+              "asset_wQnbaR1hqvdK8vDPSR4bP2Cs",
+              "asset_tjvA9Ki4RuEm6VsxTqnoaB6V"
+            ],
+            "id": "model_openai-gpt-image-2-6-sunburst",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Describe the image you want to create, or how to edit your reference images. Plain, natural language works well.",
+                "label": "Prompt",
+                "maxLength": 32000,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "description": "Images to edit or build from (up to 10). Required if you provide a mask or a markup image.",
+                "kind": "image",
+                "label": "Reference Images",
+                "maxLength": 10,
+                "name": "referenceImages",
+                "parent": true,
+                "required": {
+                  "ifDefined": {
+                    "markup": {
+                      "message": "A reference image is required when a markup image is provided."
+                    },
+                    "mask": {
+                      "message": "A reference image is required when a mask is provided."
+                    }
+                  }
+                },
+                "type": "file_array"
+              },
+              {
+                "backgroundBehavior": "transparent",
+                "costImpact": false,
+                "description": "An optional PNG that marks which parts of the first reference image to change. It uses transparency: fully transparent areas are edited, fully opaque areas are kept. Export a PNG with real transparency (don't flatten it). If you've drawn a white-on-black mask, convert the white \"edit\" areas to transparent first.",
+                "kind": "image",
+                "label": "Mask",
+                "maskFrom": "referenceImages",
+                "name": "mask",
+                "parent": true,
+                "type": "file"
+              },
+              {
+                "costImpact": false,
+                "description": "Marks (circles, arrows, scribbles) showing where to make the edit the prompt describes. Sketch them on the first reference image, or upload a PNG of the marks alone on a transparent background. The model removes the marks. It must have the first reference image's aspect ratio and cannot be combined with a mask.",
+                "kind": "image",
+                "label": "Markup Image",
+                "name": "markup",
+                "parent": true,
+                "type": "file"
+              },
+              {
+                "costImpact": true,
+                "default": 1,
+                "description": "How many images to create from the same prompt (1-10).",
+                "group": "Settings",
+                "label": "Image Count",
+                "max": 10,
+                "min": 1,
+                "name": "numOutputs",
+                "step": 1,
+                "type": "number"
+              },
+              {
+                "costImpact": true,
+                "description": "Output width in pixels, in steps of 16 up to 3840. Larger images cost more.",
+                "group": "Settings",
+                "label": "Width",
+                "max": 3840,
+                "min": 16,
+                "name": "width",
+                "step": 16,
+                "type": "number"
+              },
+              {
+                "costImpact": true,
+                "description": "Output height in pixels, in steps of 16 up to 3840. Larger images cost more.",
+                "group": "Settings",
+                "label": "Height",
+                "max": 3840,
+                "min": 16,
+                "name": "height",
+                "step": 16,
+                "type": "number"
+              },
+              {
+                "allowedValues": [
+                  "png",
+                  "webp",
+                  "jpeg",
+                  "gif",
+                  "svg"
+                ],
+                "costImpact": true,
+                "default": "png",
+                "description": "The file type. PNG keeps maximum quality; WebP and JPEG are smaller. GIF makes a looping animation (see the GIF settings). SVG makes a vector image, from a prompt only and one image at a time.",
+                "group": "Settings",
+                "label": "Output Format",
+                "name": "outputFormat",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "GIF only: how many animation frames to draw (2-16). Leave unset for 9.",
+                "group": "GIF",
+                "label": "Frame Count",
+                "max": 16,
+                "min": 2,
+                "name": "frameCount",
+                "step": 1,
+                "type": "number"
+              },
+              {
+                "costImpact": false,
+                "description": "GIF only: how long each frame shows, in milliseconds (20-655350). Leave unset for 200.",
+                "group": "GIF",
+                "label": "Frame Duration (ms)",
+                "max": 655350,
+                "min": 20,
+                "name": "frameDurationMs",
+                "step": 10,
+                "type": "number"
+              },
+              {
+                "allowedValues": [
+                  "gpt-5.4-mini",
+                  "gpt-5-mini",
+                  "gpt-5-nano",
+                  "gpt-5",
+                  "gpt-5.5"
+                ],
+                "costImpact": true,
+                "default": "gpt-5.4-mini",
+                "description": "SVG only: the text model that writes the SVG from the rendered image. Larger models cost more.",
+                "group": "SVG",
+                "label": "SVG Model",
+                "name": "svgModel",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "auto",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "costImpact": true,
+                "default": "auto",
+                "description": "How much effort goes into the image. Higher levels look better but cost more; Auto lets the model choose.",
+                "group": "Settings",
+                "label": "Quality",
+                "name": "quality",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "",
+                  "low",
+                  "medium",
+                  "high"
+                ],
+                "costImpact": false,
+                "default": "",
+                "description": "How much the model plans the image before drawing it. Lower plans less and can finish faster. Leave unset to let the model choose. It does not change the cost.",
+                "group": "Settings",
+                "label": "Complexity",
+                "name": "complexity",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "auto",
+                  "opaque",
+                  "transparent"
+                ],
+                "costImpact": false,
+                "default": "auto",
+                "description": "Whether the background is solid (Opaque) or see-through (Transparent). Auto lets the model decide.",
+                "group": "Settings",
+                "label": "Background",
+                "name": "background",
+                "type": "string"
+              }
+            ],
+            "name": "GPT Image 2.6 Sunburst",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "OpenAI GPT Image 2.6, precision tier for dense text, labels, infographics and exact edits; up to 10 reference images, mask or markup edits, up to 3840 px output.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "GIF",
+              "GPT-Image",
+              "Image to Image",
+              "OpenAI",
+              "Precision",
+              "SVG",
+              "Text Rendering",
+              "Text to Image",
+              "editing",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "resolutionComponent": {
+                "heightInput": "height",
+                "label": "Dimensions",
+                "presets": [
+                  {
+                    "height": 3360,
+                    "label": "9:21 (1440x3360)",
+                    "width": 1440
+                  },
+                  {
+                    "height": 3840,
+                    "label": "9:16 (2160x3840)",
+                    "width": 2160
+                  },
+                  {
+                    "height": 1920,
+                    "label": "9:16 (1088x1920)",
+                    "width": 1088
+                  },
+                  {
+                    "height": 1536,
+                    "label": "2:3 (1024x1536)",
+                    "width": 1024
+                  },
+                  {
+                    "height": 2048,
+                    "label": "3:4 (1536x2048)",
+                    "width": 1536
+                  },
+                  {
+                    "height": 1024,
+                    "label": "1:1 (1024x1024)",
+                    "width": 1024
+                  },
+                  {
+                    "height": 2048,
+                    "label": "1:1 (2048x2048)",
+                    "width": 2048
+                  },
+                  {
+                    "height": 1536,
+                    "label": "4:3 (2048x1536)",
+                    "width": 2048
+                  },
+                  {
+                    "height": 1024,
+                    "label": "3:2 (1536x1024)",
+                    "width": 1536
+                  },
+                  {
+                    "height": 1152,
+                    "label": "16:9 (2048x1152)",
+                    "width": 2048
+                  },
+                  {
+                    "height": 2160,
+                    "label": "16:9 (3840x2160)",
+                    "width": 3840
+                  },
+                  {
+                    "height": 1440,
+                    "label": "21:9 (3360x1440)",
+                    "width": 3360
+                  },
+                  {
+                    "label": "Auto"
+                  }
+                ],
+                "widthInput": "width"
+              },
+              "selects": {
+                "background": {
+                  "auto": "Auto",
+                  "opaque": "Opaque",
+                  "transparent": "Transparent"
+                },
+                "complexity": {
+                  "high": "High",
+                  "low": "Low",
+                  "medium": "Medium"
+                },
+                "outputFormat": {
+                  "gif": "GIF (animated)",
+                  "jpeg": "JPEG",
+                  "png": "PNG",
+                  "svg": "SVG (vector)",
+                  "webp": "WebP"
+                },
+                "quality": {
+                  "auto": "Auto",
+                  "high": "High",
+                  "low": "Low",
+                  "max": "Max",
+                  "medium": "Medium",
+                  "xhigh": "Extra High"
+                },
+                "svgModel": {
+                  "gpt-5": "GPT-5",
+                  "gpt-5-mini": "GPT-5 mini",
+                  "gpt-5-nano": "GPT-5 nano",
+                  "gpt-5.4-mini": "GPT-5.4 mini",
+                  "gpt-5.5": "GPT-5.5"
+                }
+              }
+            },
+            "updatedAt": "2026-11-06T23:17:43.371Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    }
+  ]
+}

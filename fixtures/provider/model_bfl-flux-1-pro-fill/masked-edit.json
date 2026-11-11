@@ -1,0 +1,708 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_bfl-flux-1-pro-fill",
+  "case": "masked-edit",
+  "recorded_on": "2026-11-11",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_bfl-flux-1-pro-fill"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "img2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Fal",
+              "modelProvider": "BFL",
+              "subProcessor": "Fal"
+            },
+            "createdAt": "2026-10-23T13:37:41.270Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_vDPq4JEhUrQia6gvHnFwx4Pr",
+              "asset_PSzKQWcp4HPF6Vx2UxKfVop5",
+              "asset_ej9Q8UckycpcPeXFr642xiyA",
+              "asset_v6bizkLkufPdw2H6qRhT9FH8",
+              "asset_ZyT6hviHagLCzLJbtmtRf3Jh",
+              "asset_r4M729ACMjAKhDAkneuqjggK",
+              "asset_xasW9j8kVYEkRQy5mffcMguE",
+              "asset_wdpVsMntHNLTKrWxuUqzRkAF",
+              "asset_3wNbExX1yfdDHmm1HK3nQSJ3",
+              "asset_rVan5ugFej3uq38d37YZ7ggw",
+              "asset_TsnMAu6aSvszaJF8XmhYfP6D",
+              "asset_rZb2N5NLKWDZ67ovy1UkLRW4",
+              "asset_jAuUbffN4c7ayy3Fj8wwbie9",
+              "asset_AWizmGxzseuzfWXc4LADkAsd",
+              "asset_s8TgYVxcN8w3eWNa2novkvJK",
+              "asset_gTngB2HAuFjVpaqJXXjFKYak",
+              "asset_2M4v67LvM5UhyowcNCHiMCcc",
+              "asset_fZDdYwb4Mu3hau6cE9GPAUe4"
+            ],
+            "id": "model_bfl-flux-1-pro-fill",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Text prompt describing what to fill the masked area with",
+                "label": "Prompt",
+                "maxLength": 2048,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "description": "Image to inpaint. Must have the same dimensions as the mask.",
+                "kind": "image",
+                "label": "Image",
+                "maxSize": 10485760,
+                "name": "image",
+                "parent": true,
+                "required": {
+                  "always": true
+                },
+                "type": "file"
+              },
+              {
+                "costImpact": false,
+                "description": "Mask of the area to fill (white is filled, black is kept). Must have the same dimensions as the image.",
+                "kind": "image",
+                "label": "Mask",
+                "maxSize": 10485760,
+                "name": "mask",
+                "parent": true,
+                "required": {
+                  "always": true
+                },
+                "type": "file"
+              },
+              {
+                "costImpact": false,
+                "default": false,
+                "description": "Automatically modify the prompt for more creative generation",
+                "group": "Settings",
+                "label": "Prompt Upsampling",
+                "name": "promptUpsampling",
+                "type": "boolean"
+              },
+              {
+                "costImpact": false,
+                "description": "Random seed. Set for reproducible generation",
+                "group": "Settings",
+                "label": "Seed",
+                "name": "seed",
+                "type": "number"
+              }
+            ],
+            "name": "FLUX.1 Pro Fill",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Inpainting and outpainting with a mask: replace objects, add details, write text on surfaces, swap skies and backgrounds, or extend a photo to a new aspect ratio.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "FLUX",
+              "editing",
+              "image editing",
+              "inpainting",
+              "mask",
+              "outpainting",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "updatedAt": "2026-10-27T16:56:13.307Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "room-512.png"
+          },
+          "name": "pocket-forge-source.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "authorId": "<user-3>",
+            "collectionIds": [],
+            "createdAt": "2026-11-08T19:14:00.570Z",
+            "editCapabilities": [
+              "REMOVE_BACKGROUND",
+              "REFINE",
+              "PIXELATE",
+              "PROMPT_EDITING",
+              "UPSCALE",
+              "UPSCALE_360",
+              "DETECTION",
+              "VECTORIZATION",
+              "SEGMENTATION",
+              "REFRAME",
+              "GENERATIVE_FILL"
+            ],
+            "id": "<asset-1>",
+            "kind": "image",
+            "metadata": {
+              "height": 512,
+              "kind": "image",
+              "name": "pocket-forge-source.png",
+              "size": 3031,
+              "type": "uploaded",
+              "width": 512
+            },
+            "mimeType": "image/png",
+            "ownerId": "<user-4>",
+            "privacy": "private",
+            "properties": {
+              "height": 512,
+              "size": 3031,
+              "width": 512
+            },
+            "source": "uploaded",
+            "status": "success",
+            "tags": [],
+            "updatedAt": "2026-11-08T19:14:00.570Z",
+            "url": "fake://asset/2"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "disc-512.png"
+          },
+          "name": "pocket-forge-mask.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "authorId": "<user-3>",
+            "collectionIds": [],
+            "createdAt": "2026-11-08T19:14:12.410Z",
+            "editCapabilities": [
+              "REMOVE_BACKGROUND",
+              "REFINE",
+              "PIXELATE",
+              "PROMPT_EDITING",
+              "UPSCALE",
+              "UPSCALE_360",
+              "DETECTION",
+              "VECTORIZATION",
+              "SEGMENTATION",
+              "REFRAME",
+              "GENERATIVE_FILL"
+            ],
+            "id": "<asset-2>",
+            "kind": "image",
+            "metadata": {
+              "height": 512,
+              "kind": "image",
+              "name": "pocket-forge-mask.png",
+              "size": 2150,
+              "type": "uploaded",
+              "width": 512
+            },
+            "mimeType": "image/png",
+            "ownerId": "<user-4>",
+            "privacy": "private",
+            "properties": {
+              "height": 512,
+              "size": 2150,
+              "width": 512
+            },
+            "source": "uploaded",
+            "status": "success",
+            "tags": [],
+            "updatedAt": "2026-11-08T19:14:12.410Z",
+            "url": "fake://asset/3"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/generate/custom/model_bfl-flux-1-pro-fill",
+        "query": {
+          "dryRun": "true"
+        },
+        "body": {
+          "image": "<asset-1>",
+          "mask": "<asset-2>",
+          "prompt": "a mossy flagstone floor",
+          "seed": 1
+        }
+      },
+      "response": {
+        "status": 269,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "costDetails": {
+            "custom-generation": 10
+          },
+          "creativeUnitsCost": 10,
+          "creativeUnitsDiscount": 0
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/generate/custom/model_bfl-flux-1-pro-fill",
+        "body": {
+          "image": "<asset-1>",
+          "mask": "<asset-2>",
+          "prompt": "a mossy flagstone floor",
+          "seed": 1
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "costDetails": {
+            "custom-generation": 10
+          },
+          "creativeUnitsCost": 10,
+          "creativeUnitsDiscount": 0,
+          "job": {
+            "authorId": "<user-3>",
+            "billing": {
+              "cuCost": 10,
+              "cuDiscount": 0
+            },
+            "createdAt": "2026-11-11T10:29:04.221Z",
+            "jobId": "<job-1>",
+            "jobType": "custom",
+            "metadata": {
+              "assetIds": [],
+              "input": {
+                "image": "<asset-1>",
+                "mask": "<asset-2>",
+                "modelId": "model_bfl-flux-1-pro-fill",
+                "prompt": "a mossy flagstone floor",
+                "seed": 1
+              }
+            },
+            "ownerId": "<user-4>",
+            "progress": 0,
+            "status": "queued",
+            "statusHistory": [
+              {
+                "date": "2026-11-11T10:29:04.221Z",
+                "status": "pending"
+              },
+              {
+                "date": "2026-11-11T10:29:04.333Z",
+                "status": "queued"
+              }
+            ],
+            "updatedAt": "2026-11-11T10:29:04.333Z"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/jobs/<job-1>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "job": {
+            "authorId": "<user-3>",
+            "billing": {
+              "cuCost": 10,
+              "cuDiscount": 0
+            },
+            "createdAt": "2026-11-11T10:29:04.221Z",
+            "jobId": "<job-1>",
+            "jobType": "custom",
+            "metadata": {
+              "assetIds": [],
+              "input": {
+                "image": "<asset-1>",
+                "mask": "<asset-2>",
+                "modelId": "model_bfl-flux-1-pro-fill",
+                "prompt": "a mossy flagstone floor",
+                "seed": 1
+              }
+            },
+            "ownerId": "<user-4>",
+            "progress": 0,
+            "status": "in-progress",
+            "statusHistory": [
+              {
+                "date": "2026-11-11T10:29:04.221Z",
+                "status": "pending"
+              },
+              {
+                "date": "2026-11-11T10:29:04.333Z",
+                "status": "queued"
+              },
+              {
+                "date": "2026-11-11T10:29:07.410Z",
+                "status": "in-progress"
+              }
+            ],
+            "updatedAt": "2026-11-11T10:29:07.410Z"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/jobs/<job-1>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "job": {
+            "authorId": "<user-3>",
+            "billing": {
+              "cuCost": 10,
+              "cuDiscount": 0
+            },
+            "createdAt": "2026-11-11T10:29:04.221Z",
+            "jobId": "<job-1>",
+            "jobType": "custom",
+            "metadata": {
+              "assetIds": [],
+              "input": {
+                "image": "<asset-1>",
+                "mask": "<asset-2>",
+                "modelId": "model_bfl-flux-1-pro-fill",
+                "prompt": "a mossy flagstone floor",
+                "seed": 1
+              }
+            },
+            "ownerId": "<user-4>",
+            "progress": 0,
+            "status": "in-progress",
+            "statusHistory": [
+              {
+                "date": "2026-11-11T10:29:04.221Z",
+                "status": "pending"
+              },
+              {
+                "date": "2026-11-11T10:29:04.333Z",
+                "status": "queued"
+              },
+              {
+                "date": "2026-11-11T10:29:07.410Z",
+                "status": "in-progress"
+              }
+            ],
+            "updatedAt": "2026-11-11T10:29:07.410Z"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/jobs/<job-1>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "job": {
+            "authorId": "<user-3>",
+            "billing": {
+              "cuCost": 10,
+              "cuDiscount": 0
+            },
+            "createdAt": "2026-11-11T10:29:04.221Z",
+            "jobId": "<job-1>",
+            "jobType": "custom",
+            "metadata": {
+              "assetIds": [],
+              "input": {
+                "image": "<asset-1>",
+                "mask": "<asset-2>",
+                "modelId": "model_bfl-flux-1-pro-fill",
+                "prompt": "a mossy flagstone floor",
+                "seed": 1
+              }
+            },
+            "ownerId": "<user-4>",
+            "progress": 0,
+            "status": "in-progress",
+            "statusHistory": [
+              {
+                "date": "2026-11-11T10:29:04.221Z",
+                "status": "pending"
+              },
+              {
+                "date": "2026-11-11T10:29:04.333Z",
+                "status": "queued"
+              },
+              {
+                "date": "2026-11-11T10:29:07.410Z",
+                "status": "in-progress"
+              }
+            ],
+            "updatedAt": "2026-11-11T10:29:07.410Z"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/jobs/<job-1>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "job": {
+            "authorId": "<user-3>",
+            "billing": {
+              "cuCost": 10,
+              "cuDiscount": 0
+            },
+            "createdAt": "2026-11-11T10:29:04.221Z",
+            "jobId": "<job-1>",
+            "jobType": "custom",
+            "metadata": {
+              "assetIds": [
+                "<asset-3>"
+              ],
+              "input": {
+                "image": "<asset-1>",
+                "mask": "<asset-2>",
+                "modelId": "model_bfl-flux-1-pro-fill",
+                "prompt": "a mossy flagstone floor",
+                "seed": 1
+              }
+            },
+            "ownerId": "<user-4>",
+            "progress": 1,
+            "status": "success",
+            "statusHistory": [
+              {
+                "date": "2026-11-11T10:29:04.221Z",
+                "status": "pending"
+              },
+              {
+                "date": "2026-11-11T10:29:04.333Z",
+                "status": "queued"
+              },
+              {
+                "date": "2026-11-11T10:29:07.410Z",
+                "status": "in-progress"
+              },
+              {
+                "date": "2026-11-11T10:29:13.631Z",
+                "status": "success"
+              }
+            ],
+            "updatedAt": "2026-11-11T10:29:13.631Z"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/jobs/<job-1>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "job": {
+            "authorId": "<user-3>",
+            "billing": {
+              "cuCost": 10,
+              "cuDiscount": 0
+            },
+            "createdAt": "2026-11-11T10:29:04.221Z",
+            "jobId": "<job-1>",
+            "jobType": "custom",
+            "metadata": {
+              "assetIds": [
+                "<asset-3>"
+              ],
+              "input": {
+                "image": "<asset-1>",
+                "mask": "<asset-2>",
+                "modelId": "model_bfl-flux-1-pro-fill",
+                "prompt": "a mossy flagstone floor",
+                "seed": 1
+              }
+            },
+            "ownerId": "<user-4>",
+            "progress": 1,
+            "status": "success",
+            "statusHistory": [
+              {
+                "date": "2026-11-11T10:29:04.221Z",
+                "status": "pending"
+              },
+              {
+                "date": "2026-11-11T10:29:04.333Z",
+                "status": "queued"
+              },
+              {
+                "date": "2026-11-11T10:29:07.410Z",
+                "status": "in-progress"
+              },
+              {
+                "date": "2026-11-11T10:29:13.631Z",
+                "status": "success"
+              }
+            ],
+            "updatedAt": "2026-11-11T10:29:13.631Z"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/assets/<asset-3>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "authorId": "<user-3>",
+            "automaticCaptioning": "A square grid pattern features alternating light and dark tiles with a faint circular cylinder shape displayed across the center portion against a dark border.",
+            "collectionIds": [],
+            "createdAt": "2026-11-11T10:29:13.612Z",
+            "description": "A square grid pattern features alternating light and dark tiles with a faint circular cylinder shape displayed across the center portion against a dark border.",
+            "editCapabilities": [
+              "REMOVE_BACKGROUND",
+              "REFINE",
+              "PIXELATE",
+              "PROMPT_EDITING",
+              "UPSCALE",
+              "DETECTION",
+              "VECTORIZATION",
+              "SEGMENTATION",
+              "REFRAME",
+              "GENERATIVE_FILL"
+            ],
+            "id": "<asset-3>",
+            "kind": "image",
+            "metadata": {
+              "baseModelId": "custom",
+              "height": 512,
+              "image": "<asset-1>",
+              "kind": "image",
+              "mask": "<asset-2>",
+              "modelId": "model_bfl-flux-1-pro-fill",
+              "modelType": "custom",
+              "parentId": "<asset-1>",
+              "parentJobId": "<job-1>",
+              "prompt": "asset_1m9R2pAZMuzLNgBcaZECujJs",
+              "rootParentId": "<asset-1>",
+              "seed": 1,
+              "size": 61849,
+              "type": "img2img",
+              "width": 512
+            },
+            "mimeType": "image/jpeg",
+            "nsfw": [],
+            "ownerId": "<user-4>",
+            "privacy": "private",
+            "properties": {
+              "height": 512,
+              "size": 61849,
+              "width": 512
+            },
+            "source": "img2img",
+            "status": "success",
+            "tags": [],
+            "updatedAt": "2026-11-11T10:29:16.028Z",
+            "url": "fake://asset/4"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "fake://asset/4"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "image/jpeg",
+          "etag": "\"b676380a46e478ed61e11c1353ea4a03\""
+        },
+        "body": {
+          "fixture": "candidate-1-512.png"
+        }
+      }
+    }
+  ]
+}
