@@ -31,7 +31,7 @@ cargo run -p pf-provider --features real-call --bin pf-record -- --case masked-e
 - Otherwise it submits, polls until the job finishes (at most 15 minutes), fetches the candidates and writes `masked-edit.json`.
 - `sent.png`, `mask-white-is-edit.png` and `candidate-N.*` go to `.pf-dev/real-call/<model>/`, outside tracked files.
 - For each candidate it prints a mask check, either *edited inside the mask (OK)* or **EDITED OUTSIDE THE MASK** (inverted convention). Open the files and look either way.
-- Optional: repeat with `--model model_openai-gpt-image-2-5-flare` to check the alpha convention. Look at the candidate as well as the verdict: GPT Image 2.6 passed the verdict while filling the masked area with the mask's own pixels (2026-11-11).
+- Look at the candidate as well as the verdict: the verdict measures only how much changed. GPT Image 2.5 Flare and 2.6 passed it while restyling the whole image and filling the masked area with the mask's own pixels (2026-11-11), so no GPT Image model has a masked-edit row and the alpha convention is unconfirmed (provider spec, Appendix C).
 - Then try the same edit in the app (`pnpm dev:real`). The spend cap and confirm dialog apply as usual.
 
 ## Gated tests (optional, never in CI)

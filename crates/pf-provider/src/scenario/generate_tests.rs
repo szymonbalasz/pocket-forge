@@ -385,16 +385,19 @@ fn fr_gen_05_list_models_generate_gives_the_txt2img_models() {
     let ids: Vec<_> = generate.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(ids, GENERATE_IDS);
     assert_eq!(
-        generate[0].operations,
+        generate[2].operations,
         [Operation::Generate, Operation::EditMasked],
         "one entry per model, every operation it offers"
     );
+    assert_eq!(generate[0].id, FLARE);
+    assert_eq!(
+        generate[0].operations,
+        [Operation::Generate],
+        "GPT Image: generate only (paid checks of 2026-11-11)"
+    );
     let edit = list(Operation::EditMasked);
     let edit_ids: Vec<_> = edit.iter().map(|m| m.id.as_str()).collect();
-    assert_eq!(
-        edit_ids,
-        [FLARE, SUNBURST, I45, PRECISE, V3B, V3Q, V3T, CHAR, FILL]
-    );
+    assert_eq!(edit_ids, [I45, PRECISE, V3B, V3Q, V3T, CHAR, FILL]);
     assert_eq!(r.t.remaining(), 0);
     let cached = std::fs::read(r.dir.path().join("cache/provider/models.json")).unwrap();
     let file: serde_json::Value = serde_json::from_slice(&cached).unwrap();
@@ -572,8 +575,8 @@ fn fr_gen_08_output_backstop_with_zero_network_calls() {
         );
         assert_eq!(r.t.seen().len(), 1);
     }
-    // A model with no generate row: `generate` is refused as an operation.
-    let r = rig_all(vec![get_model(CHAR), get_model(CHAR)], &[CHAR]);
+    // A model with no generate row: `generate` is refused as an operation, before any call.
+    let r = rig_all(vec![], &[CHAR]);
     let req = request(
         CHAR,
         OutputRequest::Aspect {
@@ -597,9 +600,9 @@ fn fr_gen_08_output_backstop_with_zero_network_calls() {
 
 #[test]
 fn fr_gen_06_edit_rows_are_unchanged_by_the_generate_rows() {
-    // The same model keeps its masked-edit capabilities (source, mask, fixed size inputs).
-    let r = rig_all(vec![get_model(FLARE), get_model(FLARE)], &[FLARE]);
-    let edit = block_on(r.p.get_capabilities(FLARE, Operation::EditMasked)).unwrap();
+    // The same model keeps its masked-edit capabilities (source, mask, fixed inputs).
+    let r = rig_all(vec![get_model(I45), get_model(I45)], &[I45]);
+    let edit = block_on(r.p.get_capabilities(I45, Operation::EditMasked)).unwrap();
     assert_eq!(edit.operations, [Operation::EditMasked]);
     assert!(edit.output_size.is_none());
     assert!(
@@ -607,7 +610,7 @@ fn fr_gen_06_edit_rows_are_unchanged_by_the_generate_rows() {
             .iter()
             .any(|c| c.role == ControlRole::Source && c.name == "referenceImages")
     );
-    let generate = block_on(r.p.get_capabilities(FLARE, Operation::Generate)).unwrap();
+    let generate = block_on(r.p.get_capabilities(I45, Operation::Generate)).unwrap();
     assert!(
         generate
             .controls

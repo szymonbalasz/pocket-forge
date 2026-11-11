@@ -789,9 +789,8 @@ mod tests {
         use ReferenceRole::{Identity, Style};
         type Want = &'static [(&'static str, Option<ReferenceRole>, u32, u32, bool)];
         let style4: Want = &[("styleReferenceImages", Some(Style), 0, 4, false)];
-        let table: [(&str, Want); 12] = [
-            ("model_openai-gpt-image-2-5-flare", &[]),
-            ("model_openai-gpt-image-2-5-sunburst", &[]),
+        // No GPT Image edit row (paid checks of 2026-11-11, spec Appendix C).
+        let table: [(&str, Want); 10] = [
             // 4.5's `referenceImages` carries the source (overlay role), so it is no slot.
             ("model_ideogram-v4-5", &[]),
             (
@@ -947,8 +946,8 @@ mod tests {
     /// The real recordings (2026-11-08, 2026-11-11) list `txt2img`/`img2img` and never
     /// `inpaint`: masked edit rests on a mask input alone (`maskFrom`, or the overlay's mask
     /// role where the model marks none: FLUX.1 Pro Fill). Without it a real model is not
-    /// offered, and GPT's mask says `backgroundBehavior: transparent`, matching the alpha
-    /// convention.
+    /// offered, and only an alpha-convention row's mask says `backgroundBehavior: transparent`
+    /// (none since GPT Image lost its edit rows, 2026-11-11).
     #[test]
     fn fr_prv_11_real_models_offer_masked_edit_only_with_a_mask_input() {
         for row in SCENARIO_ROWS
