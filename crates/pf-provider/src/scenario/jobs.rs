@@ -571,9 +571,11 @@ impl ScenarioProvider {
                 body.insert(w.to_owned(), json!(sw));
                 body.insert(h.to_owned(), json!(sh));
             }
+            // A named-size input (`imageSize`) gets the ratio's name (FR-PRV-37).
             if let (Some(a), Some(OutputRequest::Aspect { aspect })) = (row.aspect_input, &p.output)
+                && let Some(v) = row.aspect_value(aspect)
             {
-                body.insert(a.to_owned(), json!(aspect));
+                body.insert(a.to_owned(), json!(v));
             }
         }
         Value::Object(body)

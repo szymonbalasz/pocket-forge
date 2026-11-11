@@ -1,0 +1,196 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_bfl-flux-2-pro-editing",
+  "case": "dry-run-generate",
+  "recorded_on": "2026-11-11",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_bfl-flux-2-pro-editing"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "txt2img",
+              "img2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Replicate",
+              "modelProvider": "BFL",
+              "subProcessor": "Replicate"
+            },
+            "createdAt": "2025-11-04T14:33:50.938Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_nK9qFkhM28TRb1BZ2PSpo1mN",
+              "asset_6AHqYz8cAvurTEjJWbc6RSPy",
+              "asset_oiSasgyhqcUom2fXfB8vHhGw",
+              "asset_tJob1LbqggdJqGzeqh8B7cek",
+              "asset_WaQnWgwL2RpBnoABFpYTyRF1",
+              "asset_L6Ywrd2RzXTSkVJjeoXiBarQ",
+              "asset_FCqCMK3EvrqQjTUzTQUhheET",
+              "asset_kkCq2Acyj5KwSr8XKbvWvKQi",
+              "asset_nr8fqHofqKtKtgYtNBfwxxyn",
+              "asset_GZELHnoQuRaSGWiLkh3LVdEr",
+              "asset_uX4ep7kdtPEjQZymonkZ9ioY",
+              "asset_nxkCQUe3txBXAx6K5i6Gr7Up",
+              "asset_fEybZnSkWUjC3DSEkRnYctD2",
+              "asset_RezoBVgXmqDHAKqZdFdWNCeF",
+              "asset_aXMoH37HZX6nTFJMPmjoXUrP"
+            ],
+            "id": "model_bfl-flux-2-pro-editing",
+            "inputs": [
+              {
+                "costImpact": true,
+                "description": "Reference images for style or content guidance",
+                "kind": "image",
+                "label": "Reference images",
+                "maxLength": 8,
+                "name": "referenceImages",
+                "parent": true,
+                "type": "file_array"
+              },
+              {
+                "costImpact": false,
+                "description": "Text prompt for image generation",
+                "label": "Instructions",
+                "maxLength": 2048,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "match_input_image",
+                  "16:9",
+                  "3:2",
+                  "4:3",
+                  "5:4",
+                  "1:1",
+                  "4:5",
+                  "3:4",
+                  "2:3",
+                  "9:16"
+                ],
+                "costImpact": true,
+                "default": "1:1",
+                "description": "Aspect ratio for the generated image. When aspect ratio is 'Match Input Image', use 'Match Input Image' to match the input image's aspect ratio.",
+                "group": "Settings",
+                "label": "Aspect Ratio",
+                "name": "aspectRatio",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "match_input_image",
+                  "0.5 MP",
+                  "1 MP",
+                  "2 MP",
+                  "4 MP"
+                ],
+                "costImpact": true,
+                "default": "1 MP",
+                "description": "Resolution in megapixels. When aspect ratio is 'Auto (Match Input)', use 'Auto (Match Input)' to match the input image's resolution (clamped to 0.5-4 MP).",
+                "group": "Settings",
+                "label": "Resolution",
+                "name": "resolution",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "default": false,
+                "description": "Automatically modify the prompt for more creative generation",
+                "group": "Settings",
+                "label": "Prompt Upsampling",
+                "name": "promptUpsampling",
+                "type": "boolean"
+              },
+              {
+                "costImpact": false,
+                "description": "Random seed. Set for reproducible generation",
+                "group": "Settings",
+                "label": "Seed",
+                "name": "seed",
+                "type": "number"
+              }
+            ],
+            "name": "FLUX 2 (Pro)",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "FLUX 2 (Pro) Edit by Black Forest Labs. Instruction-based image editor with up to 8 reference images, 4 MP output, and flexible aspect ratios.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Black Forest Labs",
+              "Flux",
+              "editing",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "selects": {
+                "aspectRatio": {
+                  "match_input_image": "Auto (Match Input)"
+                },
+                "resolution": {
+                  "match_input_image": "Auto (Match Input)"
+                }
+              }
+            },
+            "updatedAt": "2026-06-28T10:15:21.533Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/generate/custom/model_bfl-flux-2-pro-editing",
+        "query": {
+          "dryRun": "true"
+        },
+        "body": {
+          "aspectRatio": "1:1",
+          "prompt": "a mossy flagstone floor",
+          "seed": 1
+        }
+      },
+      "response": {
+        "status": 269,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "costDetails": {
+            "custom-generation": 5
+          },
+          "creativeUnitsCost": 5,
+          "creativeUnitsDiscount": 0
+        }
+      }
+    }
+  ]
+}

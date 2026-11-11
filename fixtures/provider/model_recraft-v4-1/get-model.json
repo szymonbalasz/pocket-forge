@@ -1,0 +1,242 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_recraft-v4-1",
+  "case": "get-model",
+  "recorded_on": "2026-11-11",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_recraft-v4-1"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "txt2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Fal",
+              "modelProvider": "Recraft AI",
+              "subProcessor": "Fal"
+            },
+            "createdAt": "2026-06-19T06:29:25.949Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_C4NFgUMNnJdVb5my7LCAeoGV",
+              "asset_ktZTPbMEfrVpru9LC9dbaSme",
+              "asset_1yQJDxm9icwQSk2aHWrQtEBG",
+              "asset_L3KkFcE5sY3D44mzE5KcQer6",
+              "asset_fm92rNNpHQsjwKr193mpLR6i",
+              "asset_vemnF5CNseT7VLRQ4tViZgV8",
+              "asset_1UtKbgNrNoHaYAuskvosfQx5",
+              "asset_kinZZoBnRqv1gBuGLW9FrLSY",
+              "asset_saxqbuzP3xEeaFK2ieebG8uH",
+              "asset_3EEvoPN9co8jwstQkQKfaxCT",
+              "asset_oEvhwWJW2cGpToVr6C7KGcgE",
+              "asset_RriMui6AL4Cztv2Ziipw1Bfv",
+              "asset_H4CckTAADr8k9MwR53jTuWTy",
+              "asset_7b8nq2ibYH1fKj4qHvx479Zx",
+              "asset_cDJiRkGXDA5iWUSUEusFhBPE",
+              "asset_EAXsPHpXner92G3vHs5CYjBj",
+              "asset_oMY5xq5XPyHFsye2wMc7xKf3",
+              "asset_A5nMhUHPTTnf75twALWnmauc",
+              "asset_pyebkSXe5mmWXUU65JFLapyR",
+              "asset_mEzGR6qVxsHc5ndZ32mZhc17",
+              "asset_Eb2WzUdiW9pWk4FhA6LZnFkQ",
+              "asset_qhiNs3LQ3h77rnbeorVmh8wz",
+              "asset_fupQbcpnKpX1WtsHPSh2Yzaf",
+              "asset_yAtRP9rQFXjWMXGGUB1Ge9Wb",
+              "asset_C2hqZjPz1CVCo8v67yz72Mbx",
+              "asset_81reTorgr3RRkkKzYTtMcT2h",
+              "asset_b7GJznsaGSagw4vHahRWhjNh",
+              "asset_9whAj1gi4F9nzzRFQ4PT44BJ",
+              "asset_hGCmMbvKuBgXyaShwgzQCNh8",
+              "asset_vNgEYxV43AuyKwbYFsAR8WVw",
+              "asset_gs37pcZeUUixTtRxD5exBuyi",
+              "asset_LzMLePvLNTcVKrTXtSgm1g2f",
+              "asset_XYgqqZghSLTADsaHBNk5NCq2"
+            ],
+            "id": "model_recraft-v4-1",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Describe the image you want to create, including any text that should appear in it.",
+                "label": "Prompt",
+                "maxLength": 10000,
+                "name": "prompt",
+                "prompt": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ],
+                "costImpact": false,
+                "default": "square_hd",
+                "description": "The size and shape of the generated image.",
+                "group": "Settings",
+                "label": "Image Size",
+                "name": "imageSize",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "Red level (0–255) of the background color you want behind the image.",
+                "group": "Background Color",
+                "label": "Red",
+                "max": 255,
+                "min": 0,
+                "name": "backgroundColorR",
+                "step": 1,
+                "type": "number"
+              },
+              {
+                "costImpact": false,
+                "description": "Green level (0–255) of the background color you want behind the image.",
+                "group": "Background Color",
+                "label": "Green",
+                "max": 255,
+                "min": 0,
+                "name": "backgroundColorG",
+                "step": 1,
+                "type": "number"
+              },
+              {
+                "costImpact": false,
+                "description": "Blue level (0–255) of the background color you want behind the image.",
+                "group": "Background Color",
+                "label": "Blue",
+                "max": 255,
+                "min": 0,
+                "name": "backgroundColorB",
+                "step": 1,
+                "type": "number"
+              },
+              {
+                "costImpact": false,
+                "description": "Optional colors to steer the image's palette toward. Add up to ten; the model treats them as preferences, not exact requirements.",
+                "group": "Colors",
+                "inputs": [
+                  {
+                    "costImpact": false,
+                    "description": "Red level (0–255) for this color. All three are needed to define one color.",
+                    "label": "Red",
+                    "max": 255,
+                    "min": 0,
+                    "name": "r",
+                    "required": {
+                      "ifDefined": {
+                        "b": {
+                          "message": "Red color must be defined if Blue color is defined."
+                        },
+                        "g": {
+                          "message": "Red color must be defined if Green color is defined."
+                        }
+                      }
+                    },
+                    "step": 1,
+                    "type": "number"
+                  },
+                  {
+                    "costImpact": false,
+                    "description": "Green level (0–255) for this color. All three are needed to define one color.",
+                    "label": "Green",
+                    "max": 255,
+                    "min": 0,
+                    "name": "g",
+                    "required": {
+                      "ifDefined": {
+                        "b": {
+                          "message": "Green color must be defined if Blue color is defined."
+                        },
+                        "r": {
+                          "message": "Green color must be defined if Red color is defined."
+                        }
+                      }
+                    },
+                    "step": 1,
+                    "type": "number"
+                  },
+                  {
+                    "costImpact": false,
+                    "description": "Blue level (0–255) for this color. All three are needed to define one color.",
+                    "label": "Blue",
+                    "max": 255,
+                    "min": 0,
+                    "name": "b",
+                    "required": {
+                      "ifDefined": {
+                        "g": {
+                          "message": "Blue color must be defined if Green color is defined."
+                        },
+                        "r": {
+                          "message": "Blue color must be defined if Red color is defined."
+                        }
+                      }
+                    },
+                    "step": 1,
+                    "type": "number"
+                  }
+                ],
+                "label": "Colors",
+                "maxLength": 10,
+                "name": "colors",
+                "type": "inputs_array"
+              }
+            ],
+            "name": "Recraft V4.1",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Recraft V4.1 by Recraft AI generates design-ready images with accurate in-image text. Six size presets, palette steering, and background color control.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Recraft",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "selects": {
+                "imageSize": {
+                  "landscape_16_9": "Landscape 16:9",
+                  "landscape_4_3": "Landscape 4:3",
+                  "portrait_16_9": "Portrait 16:9",
+                  "portrait_4_3": "Portrait 4:3",
+                  "square": "Square",
+                  "square_hd": "Square HD"
+                }
+              }
+            },
+            "updatedAt": "2026-10-09T17:41:59.567Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,199 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_bfl-flux-3-image",
+  "case": "get-model",
+  "recorded_on": "2026-11-11",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_bfl-flux-3-image"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "txt2img",
+              "img2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Replicate",
+              "modelProvider": "BFL",
+              "subProcessor": "Replicate"
+            },
+            "createdAt": "2026-10-02T07:53:23.607Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_C5etAhnsH5hMYQKkTzUHLXR9",
+              "asset_oVMCMGcbNFPYSugQcF28NdYW",
+              "asset_FhKcqJBS54n1FKCMzJei3AKY",
+              "asset_9LMc7APuLpGTbrQhgxKBsXqK",
+              "asset_1mCrkENJ3yoJ5cVEaRCSkiHR",
+              "asset_6QaX4CUpMos9wLtANKNB6rNU",
+              "asset_b8g9FUYVKTyRx6hG7vPRvgf6",
+              "asset_xUzZknHhhcsqXKuR2RDdyCMo",
+              "asset_QnSv2SwhdLYWXA3mjUHmxc3a",
+              "asset_5gjmhQ9DKtuXtyn3TfvUNfoU",
+              "asset_Dxwuw1yNpDg3vhkg23GYaL49",
+              "asset_gihwvwS1N8F3fxuZQoUryZ8W",
+              "asset_5GFooDrdzCoh5iDLU1JjKL1b",
+              "asset_nW971rwwbwZwFA6EbyZWJXD6",
+              "asset_5L54LPnzMHuo5WkQrC6RvHyL",
+              "asset_26HNHMrtBjjHvmzHHqnEbw5y",
+              "asset_3dwzzVmiHX7b4dUE65VZXU48",
+              "asset_CDHi9mmPFpqUDZ9YXJ8oeD74",
+              "asset_Q66cNrc3bawMtaZBHPmpVW8x",
+              "asset_mYnLkqFhc9VzSJhrHxrB5JBM",
+              "asset_XLgvivgZVcwMUFkmxNK9WEFd",
+              "asset_pNoKjTr4jP2bio9pxYue9mxG",
+              "asset_XfqMUKHUMa9mvmHWcnX6xX2s",
+              "asset_XSRW1XybFhkDTma487VacBoA",
+              "asset_sgABC7Foe7brQMb9t97XiQQg",
+              "asset_Cae2j9rmZPmqP36TGTTYHCQe",
+              "asset_NxNv3SYrsEWmwiX9ViCNpsNN",
+              "asset_yHTcXdqpPRoEy3A2iyCp5shh",
+              "asset_NADr8hunmbbNNzUS81pFvdsR",
+              "asset_d2m8K6mFTHJSPU2TDncUcVw4",
+              "asset_fdqf7969Ab9XT3bMaTv4qm3p",
+              "asset_gFRqJFZPwQr1nE4rVUbD7CTp",
+              "asset_N7AnbSTwpfNTMmsJQWhF3Qsf",
+              "asset_RAJTPLPn5JJzz9uUMocNAcgb",
+              "asset_RzfQpiBmtuPrHcQbd9bL4uRe",
+              "asset_9emx6ESmk8azAT2Z5z2nzFPq",
+              "asset_KqhE838ifZ3QYLvrj3cwX31F"
+            ],
+            "id": "model_bfl-flux-3-image",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Describe the image to generate, or the edit to apply to the reference images. Refer to them as image 1, image 2, and so on.",
+                "label": "Prompt",
+                "maxLength": 10000,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "Optional images to edit or draw from, in image 1 to image 10 order. When set, the request runs as an edit and the first image drives the Auto aspect ratio. Each must be at least 256 × 256 px and at most 16 megapixels.",
+                "kind": "image",
+                "label": "Reference Images",
+                "maxLength": 10,
+                "name": "referenceImages",
+                "parent": true,
+                "type": "file_array"
+              },
+              {
+                "allowedValues": [
+                  "auto",
+                  "21:9",
+                  "2:1",
+                  "16:9",
+                  "3:2",
+                  "7:5",
+                  "4:3",
+                  "5:4",
+                  "1:1",
+                  "4:5",
+                  "3:4",
+                  "5:7",
+                  "2:3",
+                  "9:16",
+                  "1:2",
+                  "9:21"
+                ],
+                "costImpact": false,
+                "default": "auto",
+                "description": "Aspect ratio of the generated image. Auto picks the ratio from the prompt and the first reference image.",
+                "group": "Settings",
+                "label": "Aspect Ratio",
+                "name": "aspectRatio",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "768sq",
+                  "1k",
+                  "1.5k",
+                  "2k",
+                  "4k"
+                ],
+                "costImpact": true,
+                "default": "1k",
+                "description": "Output resolution tier. Higher tiers cost more, and 4K can take several minutes.",
+                "group": "Settings",
+                "label": "Resolution",
+                "name": "resolution",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "default": false,
+                "description": "When enabled, the model researches the prompt with web and image search before generating. Useful for real-world subjects, places, or styles the model may not know well.",
+                "group": "Settings",
+                "label": "Web Search",
+                "name": "webSearch",
+                "type": "boolean"
+              }
+            ],
+            "name": "FLUX.3 Image",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Create native 4K images with sharp text and precise layouts. FLUX.3 Image also edits and combines up to 10 references for campaigns, product visuals, and game art.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "4K",
+              "BFL",
+              "FLUX.3",
+              "Image",
+              "Image Editing",
+              "Layout Control",
+              "Multi-Reference",
+              "Text Rendering",
+              "Web Search",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "selects": {
+                "aspectRatio": {
+                  "auto": "Auto"
+                },
+                "resolution": {
+                  "1.5k": "1.5K",
+                  "1k": "1K",
+                  "2k": "2K",
+                  "4k": "4K",
+                  "768sq": "768 × 768"
+                }
+              }
+            },
+            "updatedAt": "2026-10-02T15:18:17.552Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    }
+  ]
+}

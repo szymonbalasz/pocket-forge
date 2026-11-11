@@ -73,15 +73,15 @@ fn fr_gen_05_real_generate_rows_and_dry_runs() {
     assert!(bad.is_empty(), "generate rows to fix: {bad:?}");
 }
 
-/// Free: every overlay row is found, offers masked edit, and its dry run returns a cost.
-/// Prints one line per model; fails listing the rows to fix.
+/// Free: every masked-edit overlay row is found, offers masked edit, and its dry run returns a
+/// cost. Prints one line per model; fails listing the rows to fix.
 #[test]
 fn fr_prv_28_real_overlay_rows_and_dry_runs() {
     let Some(p) = provider("fr_prv_28_real_overlay_rows_and_dry_runs") else {
         return;
     };
     let mut bad = vec![];
-    for model in pf_provider::scenario::scenario_model_ids() {
+    for model in pf_provider::scenario::scenario_model_ids_for(Operation::EditMasked) {
         let c = block_on(real_call::check_model(
             &p,
             model,

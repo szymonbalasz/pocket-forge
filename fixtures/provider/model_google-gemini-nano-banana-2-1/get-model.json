@@ -1,0 +1,245 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_google-gemini-nano-banana-2-1",
+  "case": "get-model",
+  "recorded_on": "2026-11-11",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_google-gemini-nano-banana-2-1"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "txt2img",
+              "img2img",
+              "video2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Scenario",
+              "modelProvider": "Google",
+              "subProcessor": "Provider"
+            },
+            "createdAt": "2026-10-07T06:52:07.248Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_svQKixPyaYUtsY2MfGZPUrRK",
+              "asset_ceQD8CNXAr3u3P5pN893X3hj",
+              "asset_suzJ7rWzLLvNF2iV8Zzojb4Y",
+              "asset_Z8ZjPk3nNyshwBeBbxH5huhk",
+              "asset_1QbQbm42EKdtHFpMSAzSXec3",
+              "asset_ttSrxB5GXuTzwUoZNrvYt4Uu",
+              "asset_XTJooTFsREfXThP4SZ3fcJ3w",
+              "asset_yFGLQ91UkwPA6nHP5tgB6w1n",
+              "asset_wgqvYEtp8rUYkqBKa6ADJSMM",
+              "asset_3yc3QnD3HYwhNkUrzpzyz5eE",
+              "asset_kMn2b2UTccCkMcYbHAaXgZ2s",
+              "asset_M8aRbx4VLP89GqCua8Xz7JSb",
+              "asset_VpiBVaXqyv3qTa7923sShsg5",
+              "asset_qNe7Zj1gR7Hvdk7nedK9v7Bv",
+              "asset_CaQ9VEJ4ZeSKFYkdSkZho7rY",
+              "asset_w7Mrir8Z7gmcsoT6PUiseT8R",
+              "asset_Jze9jpLvNqDKYDtpVz9U8iq7",
+              "asset_UgetyLkAtGZhWQVDyk5ZWrvX",
+              "asset_SAawNGiPQZQq5RWXX9UVCYEN",
+              "asset_fjttVrFznk5XMLt67cmzjwz2",
+              "asset_Fy7sEo1Ce6atc6a714oY9CLu",
+              "asset_LdHAwXqAxbLxPw87zMDo4S71",
+              "asset_vmxkMQ9T4LGE8pvpmWTGRc7z",
+              "asset_e297WSdPSxk4sskgXLrQcNFE",
+              "asset_smeuGVDJqsva16VAds6keqvG",
+              "asset_Ge33hUAVvKzvY1BU7qLAu99M",
+              "asset_ZXANoyTaDqg5ipmYP2MeWWpb",
+              "asset_RDatukQWSGXpjhvEmvt2eEGY",
+              "asset_xawaUPv529JEMGGL9ntev6pw",
+              "asset_67UFPEuaHHHeMwc2CYGjS2b5",
+              "asset_eRpWFcnscwphLsz2FJBZGj6p",
+              "asset_vt35Bx5gvLjuFM6Nr45uyWTX",
+              "asset_c9gsEWLVPaTh4pxWUmdLeDW3",
+              "asset_Zk3JFvUZwPrsgT1BewUVCYvw",
+              "asset_3Bv67ZwAKT6yd6d7hyXWzicZ",
+              "asset_2vEGMg2mEgWwsn93p6pgqMHc",
+              "asset_4n3NkrujzbAJFfphXP1bhSAf",
+              "asset_VtDbpKmCXny9EoxWX7TxTjgd",
+              "asset_TMq1T2ob4UYkfuyfRXf7XfJq",
+              "asset_5qBsatKmFtTkw2QnxPUG5WRm",
+              "asset_Rmj6ChXZcXif4ydPrAzHWgv6"
+            ],
+            "id": "model_google-gemini-nano-banana-2-1",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Describe the image to create, or the changes to make to your reference images or video.",
+                "label": "Prompt",
+                "maxLength": 250000,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "description": "Reference images for style or content guidance (up to 14). Mutually exclusive with input video — use reference images or a video, not both.",
+                "kind": "image",
+                "label": "Reference images",
+                "maxLength": 14,
+                "name": "referenceImages",
+                "parent": true,
+                "type": "file_array"
+              },
+              {
+                "costImpact": true,
+                "description": "Optional input video for video to image generation (e.g. a thumbnail from a clip). Mutually exclusive with reference images. Max ~15 MB inline.",
+                "kind": "video",
+                "label": "Input video",
+                "maxSize": 15728640,
+                "name": "video",
+                "parent": true,
+                "type": "file"
+              },
+              {
+                "costImpact": true,
+                "default": 1,
+                "description": "Frame sampling rate for the input video in (0, 24] fps. Lower values sample fewer frames. Defaults to 1.0 fps when unset. Only applies when a video is provided.",
+                "group": "Settings",
+                "label": "Video frame rate",
+                "max": 24,
+                "min": 0.1,
+                "name": "videoFps",
+                "step": 0.1,
+                "type": "number"
+              },
+              {
+                "allowedValues": [
+                  "8:1",
+                  "4:1",
+                  "21:9",
+                  "16:9",
+                  "3:2",
+                  "4:3",
+                  "5:4",
+                  "1:1",
+                  "4:5",
+                  "3:4",
+                  "2:3",
+                  "9:16",
+                  "1:4",
+                  "1:8",
+                  "auto"
+                ],
+                "costImpact": false,
+                "default": "auto",
+                "description": "Shape of the image, including wide panoramic formats up to 8:1 or tall ones up to 1:8.",
+                "group": "Settings",
+                "label": "Aspect Ratio",
+                "name": "aspectRatio",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "1K",
+                  "2K",
+                  "4K"
+                ],
+                "costImpact": true,
+                "default": "1K",
+                "description": "Output size, from 1K up to 4K. Higher resolutions show finer detail but cost more.",
+                "group": "Settings",
+                "label": "Resolution",
+                "name": "resolution",
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "default": false,
+                "description": "Looks up current facts on the web to ground the image, useful for real places, events, or products.",
+                "group": "Settings",
+                "label": "Use Google Search",
+                "name": "useGoogleSearch",
+                "type": "boolean"
+              },
+              {
+                "allowedValues": [
+                  "MINIMAL",
+                  "MEDIUM",
+                  "HIGH"
+                ],
+                "costImpact": false,
+                "default": "HIGH",
+                "description": "How much reasoning goes into planning the image. Higher handles complex prompts better but takes longer.",
+                "group": "Settings",
+                "label": "Thinking Level",
+                "name": "thinkingLevel",
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "default": 1,
+                "description": "How many images to create in one run. More images give more options to choose from.",
+                "group": "Settings",
+                "label": "Image Count",
+                "max": 4,
+                "min": 1,
+                "name": "numOutputs",
+                "step": 1,
+                "type": "number"
+              }
+            ],
+            "name": "Nano Banana 2.1",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Generate and edit images with up to 14 references or a video. Explore 1K, 2K and 4K output, Google Search grounding, and panoramic formats for games and campaigns.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Multi-reference",
+              "Panoramic",
+              "Search Grounding",
+              "Text Rendering",
+              "Video to Image",
+              "editing",
+              "featured",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "selects": {
+                "aspectRatio": {
+                  "auto": "Auto"
+                },
+                "thinkingLevel": {
+                  "HIGH": "High - Best Reasoning",
+                  "MEDIUM": "Medium - Balanced",
+                  "MINIMAL": "Minimal - Fastest"
+                }
+              }
+            },
+            "updatedAt": "2026-10-07T23:57:45.439Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    }
+  ]
+}

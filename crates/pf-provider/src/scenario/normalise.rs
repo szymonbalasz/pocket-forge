@@ -14,7 +14,8 @@
 //! Scenario's `capabilities[]`. `generate` is offered when it lists `txt2img`; source and mask
 //! inputs are dropped (never controls, never sent), and the row's size inputs become
 //! `output_size` (`wh` from the width input's min/max/step, `aspect` from the ratio input's
-//! `w:h` values) and its sketch slot `structure`.
+//! `w:h` values, or the row's ratios whose named size the input lists) and its sketch slot
+//! `structure`. Inputs the row ignores are never controls; its `drop_values` leave `allowed`.
 
 use serde_json::{Map, Value};
 
@@ -258,11 +259,13 @@ pub fn normalise(
         })
         .collect();
     // Source and mask: always sent together when editing, never sent when generating.
+    // Ignored inputs are never sent.
     let unsent = |name: &str| {
-        generate
-            && roles
-                .get(name)
-                .is_some_and(|r| matches!(r, ControlRole::Source | ControlRole::Mask))
+        row.is_some_and(|r| r.ignores(name))
+            || generate
+                && roles
+                    .get(name)
+                    .is_some_and(|r| matches!(r, ControlRole::Source | ControlRole::Mask))
     };
 
     let mut warnings = vec![];
@@ -294,8 +297,9 @@ pub fn normalise(
             warnings.push(format!("input #{i} has no name; ignored"));
             continue;
         };
-        // The adapter fills these itself (overlay `fixed` / `size_inputs`): never a control.
-        if row.is_some_and(|r| r.fills(name)) {
+        // The adapter fills these itself (overlay `fixed` / `size_inputs`) or never sends them
+        // (`ignored`): never a control.
+        if row.is_some_and(|r| r.skips(name)) {
             continue;
         }
         let ty = input.get("type").and_then(Value::as_str).unwrap_or("");
@@ -403,9 +407,17 @@ pub fn normalise(
             allowed: input
                 .get("allowedValues")
                 .and_then(Value::as_array)
-                .cloned()
+                .map(|a| {
+                    a.iter()
+                        .filter(|v| !row.is_some_and(|r| r.drops(name, v)))
+                        .cloned()
+                        .collect()
+                })
                 .unwrap_or_default(),
-            default: input.get("default").filter(|v| !v.is_null()).cloned(),
+            default: input
+                .get("default")
+                .filter(|v| !v.is_null() && !row.is_some_and(|r| r.drops(name, v)))
+                .cloned(),
             required: always,
             cost_affecting,
         });
@@ -413,7 +425,7 @@ pub fn normalise(
 
     rules.retain(|r: &Rule| {
         let filled =
-            row.is_some_and(|row| row.fills(&r.when.control) || row.fills(&r.then.control));
+            row.is_some_and(|row| row.skips(&r.when.control) || row.skips(&r.then.control));
         let known = controls.iter().any(|c| c.name == r.when.control);
         if !known && !filled {
             warnings.push(format!(
@@ -536,17 +548,25 @@ fn output_size_of(
         return Some(OutputSize::Wh { min, max, step });
     }
     if let Some(a) = row.aspect_input {
-        let allowed: Vec<String> = input(a)
+        let values: Vec<&str> = input(a)
             .and_then(|i| i.get("allowedValues"))
             .and_then(Value::as_array)
-            .map(|v| {
-                v.iter()
-                    .filter_map(Value::as_str)
-                    .filter(|s| is_ratio(s))
-                    .map(str::to_owned)
-                    .collect()
-            })
+            .map(|v| v.iter().filter_map(Value::as_str).collect())
             .unwrap_or_default();
+        // Named sizes (`imageSize`): the ratios whose name the model lists, in the row's order.
+        let allowed: Vec<String> = if row.aspect_names.is_empty() {
+            values
+                .into_iter()
+                .filter(|s| is_ratio(s))
+                .map(str::to_owned)
+                .collect()
+        } else {
+            row.aspect_names
+                .iter()
+                .filter(|(_, n)| values.contains(n))
+                .map(|(r, _)| (*r).to_owned())
+                .collect()
+        };
         if allowed.is_empty() {
             warnings.push(format!(
                 "ratio input {a:?} lists no ratio; generate not offered"
@@ -562,7 +582,7 @@ fn output_size_of(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scenario::overlay::{FAKE_ROWS, SCENARIO_ROWS, row_in};
+    use crate::scenario::overlay::{FAKE_ROWS, SCENARIO_ROWS, row_for, row_in};
     use crate::{MaskConvention, ReferenceRole, SoftRule};
     use serde_json::json;
 
@@ -769,7 +789,7 @@ mod tests {
         use ReferenceRole::{Identity, Style};
         type Want = &'static [(&'static str, Option<ReferenceRole>, u32, u32, bool)];
         let style4: Want = &[("styleReferenceImages", Some(Style), 0, 4, false)];
-        let table: [(&str, Want); 12] = [
+        let table: [(&str, Want); 13] = [
             ("model_openai-gpt-image-2", &[]),
             ("model_openai-gpt-image-2-5-flare", &[]),
             ("model_openai-gpt-image-2-5-sunburst", &[]),
@@ -787,6 +807,8 @@ mod tests {
                 "model_ideogram-character",
                 &[("characterReferenceImage", Some(Identity), 1, 1, false)],
             ),
+            // FLUX.1 Pro Fill: `image` is the source; no reference input.
+            ("model_bfl-flux-1-pro-fill", &[]),
             (
                 "fake-white-edit",
                 &[("style_refs", Some(Style), 0, 3, false)],
@@ -923,9 +945,11 @@ mod tests {
         }
     }
 
-    /// The real recordings (2026-11-08) list `txt2img`/`img2img` and never `inpaint`: masked edit
-    /// rests on a `mask` input (`maskFrom`) alone. Without it a real model is not offered, and
-    /// GPT's mask says `backgroundBehavior: transparent`, matching the alpha convention.
+    /// The real recordings (2026-11-08, 2026-11-11) list `txt2img`/`img2img` and never
+    /// `inpaint`: masked edit rests on a mask input alone (`maskFrom`, or the overlay's mask
+    /// role where the model marks none: FLUX.1 Pro Fill). Without it a real model is not
+    /// offered, and GPT's mask says `backgroundBehavior: transparent`, matching the alpha
+    /// convention.
     #[test]
     fn fr_prv_11_real_models_offer_masked_edit_only_with_a_mask_input() {
         for row in SCENARIO_ROWS
@@ -935,7 +959,13 @@ mod tests {
             let rec = crate::scenario::fixture_recording(row.model_id, "get-model").unwrap();
             let body = &rec.exchanges[0].response.body;
             let inputs = body["model"]["inputs"].as_array().unwrap();
-            let mask = inputs.iter().find(|i| i.get("maskFrom").is_some());
+            let is_mask = |i: &Value| {
+                i.get("maskFrom").is_some()
+                    || i["name"]
+                        .as_str()
+                        .is_some_and(|n| row.role_of(n) == Some(ControlRole::Mask))
+            };
+            let mask = inputs.iter().find(|i| is_mask(i));
             let mask = mask.unwrap_or_else(|| panic!("{}: no mask input", row.model_id));
             assert_eq!(
                 mask["backgroundBehavior"] == "transparent",
@@ -947,7 +977,7 @@ mod tests {
             stripped["model"]["inputs"]
                 .as_array_mut()
                 .unwrap()
-                .retain(|i| i.get("maskFrom").is_none());
+                .retain(|i| !is_mask(i));
             stripped["model"]["capabilities"] = json!(["txt2img", "img2img", "inpaint"]);
             let c = normalise(row.model_id, &stripped, Some(row))
                 .unwrap()
@@ -967,6 +997,7 @@ mod tests {
             "model_ideogram-v3-quality",
             "model_ideogram-v3-turbo",
             "model_ideogram-character",
+            "model_bfl-flux-1-pro-fill",
         ];
         for row in SCENARIO_ROWS
             .iter()
@@ -1002,6 +1033,84 @@ mod tests {
             let body = generate.request.body.as_ref().unwrap();
             assert!(body.get("numOutputs").is_none(), "{model}: {body}");
         }
+    }
+
+    /// FLUX.1 Pro Fill's `mask` has no `maskFrom`: the overlay's mask role is enough to offer
+    /// masked edit (FR-PRV-11); without the row the same body is not offered.
+    #[test]
+    fn fr_prv_11_an_overlay_mask_role_needs_no_mask_from() {
+        let id = "model_bfl-flux-1-pro-fill";
+        let rec = crate::scenario::fixture_recording(id, "get-model").unwrap();
+        let body = &rec.exchanges[0].response.body;
+        assert!(
+            body["model"]["inputs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|i| i.get("maskFrom").is_none())
+        );
+        let c = normalise(id, body, row(id)).unwrap().capabilities;
+        assert_eq!(c.operations, [Operation::EditMasked], "{:?}", c.warnings);
+        assert_eq!(
+            c.mask,
+            Some(MaskSupport {
+                convention: MaskConvention::WhiteEdit,
+                soft: SoftRule::Threshold(128)
+            })
+        );
+        assert_eq!(c.max_bytes, 10 * 1024 * 1024);
+        assert!(
+            normalise(id, body, None)
+                .unwrap()
+                .capabilities
+                .operations
+                .is_empty()
+        );
+    }
+
+    /// A named-size ratio input (FR-PRV-37), an ignored input and a dropped value (FR-PRV-10)
+    /// over a synthetic body.
+    #[test]
+    fn fr_prv_37_named_sizes_ignored_inputs_and_dropped_values() {
+        use crate::scenario::overlay::NAMED_SIZES;
+        let body = json!({"capabilities": ["txt2img"], "inputs": [
+            {"name": "prompt", "type": "string", "required": {"always": true}},
+            {"name": "imageSize", "type": "string", "allowedValues": ["auto", "square", "square_hd", "portrait_16_9", "landscape_4_3"], "default": "auto"},
+            {"name": "resolution", "type": "string", "allowedValues": ["match_input_image", "1 MP", "2 MP"], "default": "match_input_image"},
+            {"name": "palette", "type": "inputs_array", "required": {"always": true}},
+            {"name": "tint", "type": "number", "required": {"conditional": {"palette": ["x"]}}}
+        ]});
+        static ROW: std::sync::LazyLock<OverlayRow> = std::sync::LazyLock::new(|| OverlayRow {
+            aspect_input: Some("imageSize"),
+            aspect_names: NAMED_SIZES,
+            size_inputs: None,
+            ignored: &["palette"],
+            drop_values: &[("resolution", "match_input_image")],
+            ..*row_for(&FAKE_ROWS, "fake-gen-aspect", Operation::Generate).unwrap()
+        });
+        let c = normalise("m", &body, Some(&ROW)).unwrap().capabilities;
+        // Only listed names, in the row's order; `auto` and `square` are not offered.
+        assert_eq!(
+            c.output_size,
+            Some(OutputSize::Aspect {
+                allowed: vec!["1:1".into(), "4:3".into(), "9:16".into()]
+            })
+        );
+        assert_eq!(ROW.aspect_value("9:16"), Some("portrait_16_9"));
+        assert_eq!(ROW.aspect_value("2:3"), None);
+        // A required unknown-type input that the row ignores doesn't block the model, and
+        // rules on it are dropped silently.
+        assert_eq!(c.operations, [Operation::Generate], "{:?}", c.warnings);
+        assert!(
+            c.controls
+                .iter()
+                .all(|x| x.name != "palette" && x.name != "imageSize")
+        );
+        assert!(c.rules.is_empty());
+        let res = control(&c, "resolution");
+        assert_eq!(res.allowed, [json!("1 MP"), json!("2 MP")]);
+        assert_eq!(res.default, None, "a dropped default is no default");
+        assert!(c.warnings.is_empty(), "{:?}", c.warnings);
     }
 
     #[test]

@@ -30,6 +30,24 @@ const V3B: &str = "model_ideogram-v3-balanced";
 const V3Q: &str = "model_ideogram-v3-quality";
 const V3T: &str = "model_ideogram-v3-turbo";
 const CHAR: &str = "model_ideogram-character";
+const FLARE26: &str = "model_openai-gpt-image-2-6-flare";
+const SUNBURST26: &str = "model_openai-gpt-image-2-6-sunburst";
+const FILL: &str = "model_bfl-flux-1-pro-fill";
+const TILING: &str = "model_ideogram-v4-tiling";
+const IV4: &str = "model_ideogram-v4";
+const FLUX2P: &str = "model_bfl-flux-2-pro-editing";
+const FLUX2M: &str = "model_bfl-flux-2-max-editing";
+const FLUX3: &str = "model_bfl-flux-3-image";
+const NANO: &str = "model_google-gemini-nano-banana-2-1";
+const SEEDREAM: &str = "model_bytedance-seedream-5-0-lite";
+const KREA: &str = "model_krea-3";
+const RECRAFT: &str = "model_recraft-v4-1";
+
+/// The generate list, in table order (FR-PRV-25).
+const GENERATE_IDS: [&str; 18] = [
+    GPT2, FLARE, SUNBURST, I45, V3B, V3Q, V3T, FLARE26, SUNBURST26, TILING, IV4, FLUX2P, FLUX2M,
+    FLUX3, NANO, SEEDREAM, KREA, RECRAFT,
+];
 
 /// A rig with every overlay row (edit and generate) of these models.
 fn rig_all(exchanges: Vec<Exchange>, models: &[&str]) -> Rig {
@@ -95,7 +113,7 @@ fn ratios(c: &crate::Capabilities) -> Vec<String> {
 }
 
 #[test]
-fn fr_gen_05_generate_rows_exist_only_for_the_seven_txt2img_models() {
+fn fr_gen_05_generate_rows_exist_only_for_the_txt2img_models() {
     let mut with_row: Vec<&str> = SCENARIO_ROWS
         .iter()
         .filter(|r| r.operation == Operation::Generate)
@@ -114,9 +132,10 @@ fn fr_gen_05_generate_rows_exist_only_for_the_seven_txt2img_models() {
         .collect();
     txt2img.sort_unstable();
     assert_eq!(with_row, txt2img);
-    assert_eq!(with_row.len(), 7);
-    // A generate row on an img2img-only model is still not offered (Character, Precise Edit).
-    for model in [CHAR, PRECISE] {
+    assert_eq!(with_row.len(), GENERATE_IDS.len());
+    // A generate row on an img2img-only model is still not offered (Character, Precise Edit,
+    // FLUX.1 Pro Fill).
+    for model in [CHAR, PRECISE, FILL] {
         let row = OverlayRow {
             model_id: model,
             ..*row_for(&SCENARIO_ROWS, V3T, Operation::Generate).unwrap()
@@ -140,7 +159,7 @@ fn fr_gen_06_generate_capabilities_per_recorded_row() {
         max: 3840,
         step: 16,
     });
-    let table: [(&str, Option<u32>, Option<bool>, Slots); 7] = [
+    let table: [(&str, Option<u32>, Option<bool>, Slots); 18] = [
         // model, count max, transparent offered (None = no background control), slots
         (
             GPT2,
@@ -179,6 +198,35 @@ fn fr_gen_06_generate_capabilities_per_recorded_row() {
             None,
             &[("styleReferenceImages", Some(ReferenceRole::Style), 4, false)],
         ),
+        // 2026-11-11 rows.
+        (
+            FLARE26,
+            Some(10),
+            Some(true),
+            &[("referenceImages", None, 10, true)],
+        ),
+        (
+            SUNBURST26,
+            Some(10),
+            Some(true),
+            &[("referenceImages", None, 10, true)],
+        ),
+        // Tiling's `image` is the (dropped) edit source: no slot.
+        (TILING, Some(4), None, &[]),
+        (IV4, Some(4), None, &[]),
+        (FLUX2P, None, None, &[("referenceImages", None, 8, true)]),
+        (FLUX2M, None, None, &[("referenceImages", None, 8, true)]),
+        (FLUX3, None, None, &[("referenceImages", None, 10, false)]),
+        // Nano Banana's `video` is ignored: one slot.
+        (NANO, Some(4), None, &[("referenceImages", None, 14, true)]),
+        (
+            SEEDREAM,
+            None,
+            None,
+            &[("referenceImages", None, 14, false)],
+        ),
+        (KREA, None, None, &[]),
+        (RECRAFT, None, None, &[]),
     ];
     for (model, count, transparent, slots) in table {
         let c = generate_caps(model);
@@ -198,7 +246,15 @@ fn fr_gen_06_generate_capabilities_per_recorded_row() {
                 x.name
             );
             assert!(
-                !["width", "height", "aspectRatio", "mask", "image"].contains(&x.name.as_str()),
+                ![
+                    "width",
+                    "height",
+                    "aspectRatio",
+                    "imageSize",
+                    "mask",
+                    "image"
+                ]
+                .contains(&x.name.as_str()),
                 "{model}: {}",
                 x.name
             );
@@ -240,6 +296,72 @@ fn fr_gen_06_generate_capabilities_per_recorded_row() {
     for model in [V3B, V3Q, V3T] {
         assert_eq!(ratios(&generate_caps(model)).len(), 15, "{model}");
     }
+    // FLUX 2 drops `match_input_image` (9 left), FLUX.3 and Nano Banana drop `auto`.
+    for (model, n) in [(FLUX2P, 9), (FLUX2M, 9), (FLUX3, 15), (NANO, 14)] {
+        let r = ratios(&generate_caps(model));
+        assert_eq!(r.len(), n, "{model}: {r:?}");
+        assert!(r.iter().all(|x| is_ratio(x)), "{model}");
+    }
+    assert_eq!(
+        generate_caps(SEEDREAM).output_size,
+        Some(OutputSize::Wh {
+            min: 1024,
+            max: 6240,
+            step: 16
+        })
+    );
+}
+
+/// Named sizes (integrator ruling 2026-11-11): Krea 3, Ideogram V4 (and Tiling) and Recraft
+/// V4.1 offer the five mapped ratios; `square` and Krea's `auto` are not offered.
+#[test]
+fn fr_prv_37_named_size_models_offer_the_mapped_ratios() {
+    let want = ["1:1", "4:3", "16:9", "3:4", "9:16"];
+    for model in [TILING, IV4, KREA, RECRAFT] {
+        assert_eq!(ratios(&generate_caps(model)), want, "{model}");
+    }
+}
+
+/// FR-PRV-10 drop/ignore rules on the recorded models: FLUX 2 has no `match_input_image`
+/// resolution, GPT 2.6 shows no SVG / GIF / markup inputs, Nano Banana no video, Seedream no
+/// sequential mode, Recraft no `colors`, Tiling no `strength`.
+#[test]
+fn fr_prv_10_ignored_inputs_and_dropped_values_on_the_recorded_models() {
+    for model in [FLUX2P, FLUX2M] {
+        let c = generate_caps(model);
+        let res = c.controls.iter().find(|x| x.name == "resolution").unwrap();
+        assert!(
+            !res.allowed.contains(&json!("match_input_image")),
+            "{model}"
+        );
+        assert_eq!(res.allowed.len(), 4, "{model}");
+        assert_eq!(res.default, Some(json!("1 MP")), "{model}");
+    }
+    let hidden: [(&str, &[&str]); 6] = [
+        (
+            FLARE26,
+            &[
+                "markup",
+                "outputFormat",
+                "frameCount",
+                "frameDurationMs",
+                "svgModel",
+                "complexity",
+            ],
+        ),
+        (NANO, &["video", "videoFps"]),
+        (SEEDREAM, &["sequentialImageGeneration", "maxImages"]),
+        (RECRAFT, &["colors"]),
+        (TILING, &["strength", "image", "mask"]),
+        (KREA, &["imageSize"]),
+    ];
+    for (model, names) in hidden {
+        let c = generate_caps(model);
+        for n in names {
+            assert!(c.controls.iter().all(|x| x.name != *n), "{model}: {n}");
+            assert!(c.slots.iter().all(|x| x.name != *n), "{model}: {n}");
+        }
+    }
 }
 
 #[test]
@@ -255,7 +377,7 @@ fn fr_gen_09_only_w_colon_h_values_are_ratios() {
 }
 
 #[test]
-fn fr_gen_05_list_models_generate_gives_the_seven_txt2img_models() {
+fn fr_gen_05_list_models_generate_gives_the_txt2img_models() {
     let models = unique_ids(&SCENARIO_ROWS);
     let gets = || models.iter().map(|m| get_model(m)).collect::<Vec<_>>();
     let r = rig_all([gets(), gets()].concat(), &models);
@@ -268,13 +390,20 @@ fn fr_gen_05_list_models_generate_gives_the_seven_txt2img_models() {
     };
     let generate = list(Operation::Generate);
     let ids: Vec<_> = generate.iter().map(|m| m.id.as_str()).collect();
-    assert_eq!(ids, [GPT2, FLARE, SUNBURST, I45, V3B, V3Q, V3T]);
+    assert_eq!(ids, GENERATE_IDS);
     assert_eq!(
         generate[0].operations,
         [Operation::Generate, Operation::EditMasked],
         "one entry per model, every operation it offers"
     );
-    assert_eq!(list(Operation::EditMasked).len(), 9, "edit is unchanged");
+    let edit = list(Operation::EditMasked);
+    let edit_ids: Vec<_> = edit.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(
+        edit_ids,
+        [
+            GPT2, FLARE, SUNBURST, I45, PRECISE, V3B, V3Q, V3T, CHAR, FILL
+        ]
+    );
     assert_eq!(r.t.remaining(), 0);
     let cached = std::fs::read(r.dir.path().join("cache/provider/models.json")).unwrap();
     let file: serde_json::Value = serde_json::from_slice(&cached).unwrap();
@@ -367,6 +496,49 @@ fn fr_gen_22_ideogram_generate_body_sends_the_ratio_and_style_references() {
     );
     assert!(rec.0["asset_refs"].get("mask").is_none());
     assert_eq!(r.t.remaining(), 0);
+}
+
+/// FR-PRV-37 named sizes: the asked ratio is sent as its `imageSize` name; a ratio the row
+/// doesn't map is refused before any network call.
+#[test]
+fn fr_prv_37_named_size_submit_sends_the_mapped_name() {
+    let generate_path = format!("/generate/custom/{KREA}");
+    let mut submit = ex(
+        Method::Post,
+        &generate_path,
+        200,
+        json!({"job": {"jobId": "job_1", "status": "queued"}}),
+    );
+    submit.request.body = Some(json!({"imageSize": "", "prompt": ""}));
+    let r = rig_all(vec![get_model(KREA), submit], &[KREA]);
+    let req = request(
+        KREA,
+        OutputRequest::Aspect {
+            aspect: "9:16".into(),
+        },
+    );
+    let rec = block_on(r.p.submit(&req)).unwrap();
+    assert_eq!(
+        rec.0["request"],
+        json!({"imageSize": "portrait_16_9", "prompt": "flooded crypt, torchlight"})
+    );
+    assert_eq!(r.t.remaining(), 0);
+
+    // `2:3` is no named size: refused with zero network calls after the capabilities.
+    let r = rig_all(vec![get_model(KREA)], &[KREA]);
+    let req = request(
+        KREA,
+        OutputRequest::Aspect {
+            aspect: "2:3".into(),
+        },
+    );
+    assert_eq!(
+        block_on(r.p.submit(&req)).unwrap_err(),
+        ProviderError::InvalidRequest {
+            field: "output".into()
+        }
+    );
+    assert_eq!(r.t.seen().len(), 1);
 }
 
 #[test]
@@ -480,6 +652,6 @@ fn fr_gen_05_offline_the_generate_list_is_the_cached_one_marked_stale() {
     assert!(cached.stale, "offline: the cached list, marked stale");
     let ids = |l: &ModelList| l.models.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
     assert_eq!(ids(&cached), ids(&fresh));
-    assert_eq!(ids(&cached), [GPT2, FLARE, SUNBURST, I45, V3B, V3Q, V3T]);
+    assert_eq!(ids(&cached), GENERATE_IDS);
     assert_eq!(r.p.connectivity(), Connectivity::Offline);
 }

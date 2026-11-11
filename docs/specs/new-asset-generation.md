@@ -134,7 +134,7 @@ PRJ owns storage and commits; fields go into [manifest-schema](../architecture/m
 ## 10. Provider interaction
 - **Operation `generate`** (OQ-GEN-01): same route as edits (`POST /generate/custom/{modelId}`, ADR 0001), so estimate (`?dryRun=true`), submit, status, cancel and fetch reuse PRV unchanged. A generate job sends no source and no mask.
 - **PRV amendment** (#60): `list_models{operation: generate}` = models whose Scenario `capabilities[]` lists `txt2img` **and** that have a generate overlay row. `get_capabilities` takes the operation. New capability fields: `output_size` (`{mode: wh, min, max, step}` or `{mode: aspect, allowed[]}`), `structure` (`{slot}` or null), and a `background` role. Roles, `fixed` values and slot roles may differ per operation. Two new fake models (below).
-- **Generate overlay rows** (from the recorded `get-model` files, 2026-11-08):
+- **Generate overlay rows** (from the recorded `get-model` files, 2026-11-08 and 2026-11-11; full list in [provider Appendix C](provider.md#appendix-c-generic-shapes)):
 
 | Model | `output_size` | Count | Sketch slot | Reference slots | Transparent |
 |---|---|---|---|---|---|
@@ -142,9 +142,17 @@ PRJ owns storage and commits; fields go into [manifest-schema](../architecture/m
 | GPT Image 2.5 Flare / Sunburst | same | 1–10 | none until the paid check (candidate: first `referenceImages`) | ≤ 16 | yes (`background: transparent`) |
 | Ideogram 4.5 | aspect (`aspectRatio`, 23 ratios) | `numOutputs` 1–8 | none until a paid check | `referenceImages` ≤ 5, no role | no |
 | Ideogram 3 Turbo / Balanced / Quality | aspect (`aspectRatio`, 15 ratios) | none → 1 per job | none | `styleReferenceImages` ≤ 4, style | no |
+| GPT Image 2.6 Flare / Sunburst | wh 16–3840, step 16 | 1–10 | none | `referenceImages` ≤ 10, no role, cost-affecting | yes |
+| Ideogram V4 / V4 Tiling | aspect (`imageSize`, 5 named sizes) | `numOutputs` 1–4 | none | none | no |
+| FLUX 2 Pro / Max | aspect (`aspectRatio`, 9 ratios) | none → 1 per job | none | `referenceImages` ≤ 8, no role | no |
+| FLUX.3 Image | aspect (`aspectRatio`, 15 ratios) | none → 1 per job | none | `referenceImages` ≤ 10, no role | no |
+| Nano Banana 2.1 | aspect (`aspectRatio`, 14 ratios) | `numOutputs` 1–4 | none | `referenceImages` ≤ 14, no role | no |
+| Seedream 5.0 Lite | wh 1024–6240, step 16 | none → 1 per job | none | `referenceImages` ≤ 14, no role | no |
+| Krea 3 / Recraft V4.1 | aspect (`imageSize`, 5 named sizes) | none → 1 per job | none | none | no |
 
 - No recorded model has a role-tagged structure input. Until a paid check confirms one, `structure` is null on every real row, so the sketch block shows only on the fake model (OQ-GEN-05).
-- Character and 4.5 Precise Edit list only `img2img` and are not offered. Ideogram's `magicPrompt` may rewrite the prompt on the provider side; it is an ordinary control and the job records the prompt as sent.
+- Named sizes (`imageSize`) are offered as the ratios 1:1, 4:3, 16:9, 3:4 and 9:16; the UI is unchanged (FR-PRV-37).
+- Character, 4.5 Precise Edit and FLUX.1 Pro Fill list only `img2img` and are not offered. Ideogram's `magicPrompt` may rewrite the prompt on the provider side; it is an ordinary control and the job records the prompt as sent.
 - **Fake models:** `fake-gen-wh` (wh 64–2048 step 16, count 1–4, a `background` enum with transparent, one slot ≤ 4 that also takes the sketch, cost-affecting +1 CU per image) and `fake-gen-aspect` (ratios 1:1, 3:4, 4:3, 2:3; no count; a style slot ≤ 2), plus `fake-gen-refs` (as `fake-gen-wh` with the slot ≤ 12, for PRM §13 step 7). Candidates are a deterministic pattern from seed, final prompt, reference and sketch hashes, at the sent size; transparent → an alpha disc. Every Appendix D case applies.
 - **Owner recordings needed** (FR-PRV-28 runbook): a free `dry-run-generate` per row; one paid generate with a sketch on GPT 2.5 (confirms the sketch slot and transparency) and one on Ideogram 3 Turbo (≈ 4 CU).
 

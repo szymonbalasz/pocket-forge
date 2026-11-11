@@ -1,0 +1,189 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_krea-3",
+  "case": "get-model",
+  "recorded_on": "2026-11-11",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_krea-3"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "txt2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Fal",
+              "modelProvider": "Krea",
+              "subProcessor": "Fal"
+            },
+            "createdAt": "2026-10-16T11:49:14.876Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_dpz8MzU5yB3igSHkZPZKzGya",
+              "asset_QA164PgCvqtTESki6s1kx7Vc",
+              "asset_BxbeATw1wb2SYQtmMejMTxq1",
+              "asset_2GeFFtF3Ug42Xz925avBnuFv",
+              "asset_xBvbetfVDucjpEahFSSzctsr",
+              "asset_4qWGQikneYJCb1HKoVtZe9vY",
+              "asset_ZMqqxP4dm8aAQ2puTeugeHsF",
+              "asset_d9tQifqyJQ7vEy89T9agquv8",
+              "asset_TJQMiVdkk6SU9fAceM2CLYN9",
+              "asset_adkP5cZz7brWNnMng2gWHETN",
+              "asset_a8bN9QxZuBeqvFbQssgY9Kr2",
+              "asset_WDvjFWnknR9hiaPNnzRZn5W3",
+              "asset_SGN6gQ8DN4Xvm9JKcXXANj8w",
+              "asset_P9xSoqDgCTCnMEPaL75zMHsX",
+              "asset_uVek3sLTqXX1GKT62443GVMB",
+              "asset_VodwV9h2zNoKF9ANqJC31Aae",
+              "asset_zxZjDwX2tJwh79ZAvedZL5mq",
+              "asset_V7eNvLd4JGJ9nKYLNxhTzmB1",
+              "asset_HjvaMgF4KjxCLrAZ3Ax2wFqz",
+              "asset_Y9joZpEZT7B1mQkLsGvpy3T3"
+            ],
+            "id": "model_krea-3",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Describe the image you want to generate, including subject, style, mood, and composition.",
+                "label": "Prompt",
+                "maxLength": 5000,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "berry",
+                  "jam"
+                ],
+                "costImpact": false,
+                "default": "berry",
+                "description": "Berry favors quality; Jam favors speed.",
+                "group": "Settings",
+                "label": "Model",
+                "name": "model",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "auto",
+                  "square_hd",
+                  "square",
+                  "portrait_4_3",
+                  "portrait_16_9",
+                  "landscape_4_3",
+                  "landscape_16_9"
+                ],
+                "costImpact": true,
+                "default": "auto",
+                "description": "Output size and aspect ratio. Auto lets the model pick the aspect ratio at about 2048x2048. Larger images cost more.",
+                "group": "Settings",
+                "label": "Image Size",
+                "name": "imageSize",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "low",
+                  "medium"
+                ],
+                "costImpact": false,
+                "default": "low",
+                "description": "How much effort the model spends planning the prompt before generating. Higher levels are slower.",
+                "group": "Settings",
+                "label": "Reasoning Level",
+                "name": "thinkingLevel",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "What to keep out of the image. Only used by the Berry model.",
+                "group": "Settings",
+                "label": "Negative Prompt",
+                "maxLength": 1024,
+                "name": "negativePrompt",
+                "type": "string"
+              },
+              {
+                "costImpact": false,
+                "description": "Random seed for reproducible generation. Leave blank to use a random seed.",
+                "group": "Settings",
+                "label": "Seed",
+                "max": 2147483647,
+                "min": 0,
+                "name": "seed",
+                "type": "number"
+              }
+            ],
+            "name": "Krea 3",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "Generate polished images from detailed prompts with Krea 3: editorial photos, products, anime, watercolor and pixel art, with crisp text on posters, signs and labels.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Concept Art",
+              "Illustration",
+              "Image",
+              "Krea",
+              "Photorealism",
+              "Pixel Art",
+              "Product Photography",
+              "Text to Image",
+              "Typography",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "selects": {
+                "imageSize": {
+                  "auto": "Auto (about 2048x2048)",
+                  "landscape_16_9": "16:9 (1024x576)",
+                  "landscape_4_3": "4:3 (1024x768)",
+                  "portrait_16_9": "9:16 (576x1024)",
+                  "portrait_4_3": "3:4 (768x1024)",
+                  "square": "1:1 (512x512)",
+                  "square_hd": "1:1 HD (1024x1024)"
+                },
+                "model": {
+                  "berry": "Berry (quality)",
+                  "jam": "Jam (speed)"
+                },
+                "thinkingLevel": {
+                  "low": "Low",
+                  "medium": "Medium"
+                }
+              }
+            },
+            "updatedAt": "2026-10-16T20:32:09.898Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    }
+  ]
+}
