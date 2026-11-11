@@ -120,9 +120,11 @@ const GPT_IGNORED: &[&str] = &[
     "complexity",
 ];
 
-/// GPT Image: PNG, transparent alpha = edit, same size as the first reference image,
-/// 16–3840 px in steps of 16, ≤ 50 MB.
-const fn gpt(model_id: &'static str) -> OverlayRow {
+/// GPT Image: PNG, transparent alpha = edit (the documented convention), same size as the first
+/// reference image, 16–3840 px in steps of 16, ≤ 50 MB. No GPT Image model has an `edit_masked`
+/// row any more (see [`SCENARIO_ROWS`]): the generate rows derive from it, and the tests keep
+/// using it as an edit row that sends the source as a list and the sent size.
+pub(crate) const fn gpt(model_id: &'static str) -> OverlayRow {
     OverlayRow {
         model_id,
         operation: Operation::EditMasked,
@@ -360,13 +362,21 @@ const TILING_GENERATE: OverlayRow = OverlayRow {
     ))
 };
 
-/// The Scenario rows (spec Appendix C; generate rows GEN §10). Edit rows first.
+/// The Scenario rows (spec Appendix C; generate rows GEN §10). A list follows the order in which
+/// models first appear here: GPT Image 2.5's generate rows, then the edit rows, then the rest.
 /// GPT Image 2 (`model_openai-gpt-image-2`) was removed on 2026-11-11: Scenario lists it as
 /// `unlisted` (superseded by 2.6). Old revisions that name it still open; a saved model that
 /// names it falls back (FR-RGN-11, FR-GEN-19).
-pub static SCENARIO_ROWS: [OverlayRow; 26] = [
-    gpt("model_openai-gpt-image-2-5-flare"),
-    gpt("model_openai-gpt-image-2-5-sunburst"),
+///
+/// GPT Image 2.5 Flare / Sunburst lost their `edit_masked` rows on 2026-11-11: the paid check
+/// (Flare, alpha mask) restyled everything outside the mask and filled the masked area with flat
+/// black, the 2.6 failure (`fixtures/provider/model_openai-gpt-image-2-5-flare/masked-edit-alpha.json`,
+/// `fixtures/provider/model_openai-gpt-image-2-6-flare/masked-edit-{alpha,white}.json`). Their
+/// generate rows stay; a saved edit model that names them falls back (FR-RGN-11).
+pub static SCENARIO_ROWS: [OverlayRow; 24] = [
+    // Generate (GEN §10). First, so the generate list (and its first model) keeps its order.
+    gpt_generate("model_openai-gpt-image-2-5-flare"),
+    gpt_generate("model_openai-gpt-image-2-5-sunburst"),
     // 4.5 edits the first reference image; a mask needs `aspectRatio: "auto"` (docs).
     OverlayRow {
         roles: IDEOGRAM_45_ROLES,
@@ -394,9 +404,8 @@ pub static SCENARIO_ROWS: [OverlayRow; 26] = [
     FLUX_FILL,
     // Generate (GEN §10, from the recorded get-model files of 2026-11-08 and 2026-11-11).
     // Character, 4.5 Precise Edit and FLUX.1 Pro Fill list only `img2img`: no generate row.
-    // GPT Image 2.6, Ideogram V4 Tiling (edit dry run 32 CU) and the rest: generate only.
-    gpt_generate("model_openai-gpt-image-2-5-flare"),
-    gpt_generate("model_openai-gpt-image-2-5-sunburst"),
+    // GPT Image 2.5 / 2.6 (paid checks), Ideogram V4 Tiling (edit dry run 32 CU) and the rest:
+    // generate only.
     gpt26_generate("model_openai-gpt-image-2-6-flare"),
     gpt26_generate("model_openai-gpt-image-2-6-sunburst"),
     // 4.5's `referenceImages` are plain references when generating (no role).

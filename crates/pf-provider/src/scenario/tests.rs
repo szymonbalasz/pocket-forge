@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use super::overlay::{SCENARIO_ROWS, row_in};
+use super::overlay::{SCENARIO_ROWS, row_for, row_in};
 use super::*;
 use crate::credentials::MemoryStore;
 use crate::replay::{Exchange, RecordedRequest, RecordedResponse, ReplayTransport};
@@ -32,12 +32,26 @@ pub(crate) fn rig_with(exchanges: Vec<Exchange>, models: &[&str]) -> Rig {
 }
 
 pub(crate) fn rig_over(t: Arc<ReplayTransport>, models: &[&str]) -> Rig {
-    let dir = tempfile::tempdir().unwrap();
-    let sleeps = Arc::new(RecordingSleeper::default());
     let rows = models
         .iter()
         .map(|m| *row_in(&SCENARIO_ROWS, m).unwrap())
         .collect();
+    rig_rows(t, rows)
+}
+
+/// Every Scenario row (edit and generate) of these models.
+pub(crate) fn all_rows_of(models: &[&str]) -> Vec<OverlayRow> {
+    SCENARIO_ROWS
+        .iter()
+        .filter(|r| models.contains(&r.model_id))
+        .copied()
+        .collect()
+}
+
+/// A provider over `t` with exactly these overlay rows.
+pub(crate) fn rig_rows(t: Arc<ReplayTransport>, rows: Vec<OverlayRow>) -> Rig {
+    let dir = tempfile::tempdir().unwrap();
+    let sleeps = Arc::new(RecordingSleeper::default());
     let p = ScenarioProvider::with_overlay(
         ScenarioConfig {
             base_url: BASE.into(),
@@ -74,6 +88,7 @@ pub(crate) fn get_model(model: &str) -> Exchange {
 }
 
 const V3: &str = "model_ideogram-v3-balanced";
+const V3Q: &str = "model_ideogram-v3-quality";
 const GPT: &str = "model_openai-gpt-image-2-5-flare";
 const CHAR: &str = "model_ideogram-character";
 
@@ -84,13 +99,13 @@ fn fr_prv_25_list_models_returns_masked_edit_models_only() {
             get_model(V3),
             ex(
                 Method::Get,
-                &format!("/models/{GPT}"),
+                &format!("/models/{V3Q}"),
                 404,
                 json!({"reason": "Model not found"}),
             ),
             get_model(CHAR),
         ],
-        &[V3, GPT, CHAR],
+        &[V3, V3Q, CHAR],
     );
     let list = block_on(r.p.list_models_cached(&ModelFilter {
         operation: Some(Operation::EditMasked),
@@ -160,6 +175,94 @@ fn fr_prv_25_a_model_removed_from_the_overlay_never_comes_back_from_the_cache() 
     assert_eq!(r.t.remaining(), 0, "no call for the gone model");
 }
 
+/// GPT Image 2.5 lost its masked-edit row (2026-11-11) but keeps its generate row: a cache
+/// written while it had both never offers it for `edit_masked` again, offline included, and its
+/// cached edit capabilities are never served; it is still offered for `generate` (FR-PRV-25).
+#[test]
+fn fr_prv_25_an_operation_removed_from_the_overlay_never_comes_back_from_the_cache() {
+    // Table order: GPT Image 2.5 Flare's generate row comes first.
+    let offline = || ex(Method::Get, &format!("/models/{GPT}"), 0, json!("offline"));
+    let exchanges = vec![get_model(GPT), get_model(V3)];
+    // Two offline lists, three attempts each (FR-PRV-24).
+    let exchanges = [exchanges, (0..6).map(|_| offline()).collect()].concat();
+    let r = rig_rows(
+        Arc::new(ReplayTransport::from_exchanges(BASE, exchanges)),
+        all_rows_of(&[V3, GPT]),
+    );
+    block_on(r.p.list_models(&ModelFilter::default())).unwrap();
+    // The cache as an older build wrote it: GPT offering masked edit, with edit capabilities.
+    let path = r.dir.path().join("cache/provider/models.json");
+    let mut file: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let gpt = file["models"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|m| m["id"] == GPT)
+        .unwrap();
+    assert_eq!(
+        gpt["operations"],
+        json!(["generate"]),
+        "fresh: generate only"
+    );
+    gpt["operations"] = json!(["generate", "edit_masked"]);
+    let edit_key = super::cache::key(GPT, Operation::EditMasked);
+    file["capabilities"][&edit_key] = file["capabilities"][V3].clone();
+    std::fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
+
+    let list = |op| {
+        block_on(r.p.list_models_cached(&ModelFilter {
+            operation: Some(op),
+        }))
+        .unwrap()
+    };
+    let edit = list(Operation::EditMasked);
+    assert!(edit.stale);
+    let ids: Vec<_> = edit.models.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ids, [V3]);
+    let generate = list(Operation::Generate);
+    let gpt = generate.models.iter().find(|m| m.id == GPT).unwrap();
+    assert_eq!(gpt.operations, [Operation::Generate]);
+    assert_eq!(
+        block_on(r.p.get_capabilities(GPT, Operation::EditMasked)).unwrap_err(),
+        ProviderError::InvalidRequest {
+            field: "operation".into()
+        }
+    );
+    assert_eq!(r.t.remaining(), 0, "no call for the removed operation");
+}
+
+/// GPT Image's masked edit is refused before any network call, so neither a list, a
+/// capabilities fetch nor a job can use it (FR-PRV-11, paid checks of 2026-11-11).
+#[test]
+fn fr_prv_11_gpt_image_offers_no_masked_edit() {
+    for model in [
+        GPT,
+        "model_openai-gpt-image-2-5-sunburst",
+        "model_openai-gpt-image-2-6-flare",
+        "model_openai-gpt-image-2-6-sunburst",
+    ] {
+        assert!(
+            row_for(&SCENARIO_ROWS, model, Operation::EditMasked).is_none(),
+            "{model}: no edit row"
+        );
+        assert!(
+            row_for(&SCENARIO_ROWS, model, Operation::Generate).is_some(),
+            "{model}: generate row kept"
+        );
+    }
+    let r = rig_rows(
+        Arc::new(ReplayTransport::from_exchanges(BASE, vec![])),
+        all_rows_of(&[GPT]),
+    );
+    assert_eq!(
+        block_on(r.p.get_capabilities(GPT, Operation::EditMasked)).unwrap_err(),
+        ProviderError::InvalidRequest {
+            field: "operation".into()
+        }
+    );
+    assert!(r.t.seen().is_empty());
+}
+
 #[test]
 fn fr_prv_25_offline_without_a_cache_is_offline() {
     let offline = || ex(Method::Get, &format!("/models/{V3}"), 0, json!("offline"));
@@ -197,19 +300,19 @@ fn fr_prv_25_a_corrupt_cache_is_deleted_and_refetched() {
 
 #[test]
 fn fr_prv_10_get_capabilities_normalises_and_falls_back_to_the_cache_offline() {
-    let offline = || ex(Method::Get, &format!("/models/{GPT}"), 0, json!("offline"));
+    const FILL: &str = "model_bfl-flux-1-pro-fill";
+    let offline = || ex(Method::Get, &format!("/models/{FILL}"), 0, json!("offline"));
     let r = rig_with(
-        vec![get_model(GPT), offline(), offline(), offline()],
-        &[GPT],
+        vec![get_model(FILL), offline(), offline(), offline()],
+        &[FILL],
     );
-    let caps = block_on(r.p.get_capabilities(GPT, Operation::EditMasked)).unwrap();
+    let caps = block_on(r.p.get_capabilities(FILL, Operation::EditMasked)).unwrap();
     assert_eq!(
         caps.mask.unwrap().convention,
-        crate::MaskConvention::AlphaTransparentEdit
+        crate::MaskConvention::WhiteEdit
     );
-    assert!(!caps.seed, "GPT Image lists no seed");
-    assert_eq!(caps.input_px.max, 3840);
-    let again = block_on(r.p.get_capabilities(GPT, Operation::EditMasked)).unwrap();
+    assert_eq!(caps.input_px.max, 2048);
+    let again = block_on(r.p.get_capabilities(FILL, Operation::EditMasked)).unwrap();
     assert_eq!(again, caps);
 }
 
@@ -284,29 +387,35 @@ fn malformed_model_json_skips_the_model_never_panics() {
 
 /// A dry run of a masked edit over `model`'s fixture: the body as sent.
 fn dry_run_body(model: &str) -> serde_json::Map<String, Value> {
-    let r = rig_with(
-        vec![
-            get_model(model),
-            ex(
-                Method::Post,
-                "/assets",
-                200,
-                json!({"asset": {"id": "a_img"}}),
-            ),
-            ex(
-                Method::Post,
-                "/assets",
-                200,
-                json!({"asset": {"id": "a_mask"}}),
-            ),
-            ex(
-                Method::Post,
-                &format!("/generate/custom/{model}?dryRun=true"),
-                269,
-                json!({"creativeUnitsCost": 3}),
-            ),
-        ],
-        &[model],
+    dry_run_body_over(model, *row_in(&SCENARIO_ROWS, model).unwrap())
+}
+
+/// [`dry_run_body`] with an explicit edit row.
+fn dry_run_body_over(model: &str, row: OverlayRow) -> serde_json::Map<String, Value> {
+    let exchanges = vec![
+        get_model(model),
+        ex(
+            Method::Post,
+            "/assets",
+            200,
+            json!({"asset": {"id": "a_img"}}),
+        ),
+        ex(
+            Method::Post,
+            "/assets",
+            200,
+            json!({"asset": {"id": "a_mask"}}),
+        ),
+        ex(
+            Method::Post,
+            &format!("/generate/custom/{model}?dryRun=true"),
+            269,
+            json!({"creativeUnitsCost": 3}),
+        ),
+    ];
+    let r = rig_rows(
+        Arc::new(ReplayTransport::from_exchanges(BASE, exchanges)),
+        vec![row],
     );
     let request = crate::JobRequest {
         operation: Operation::EditMasked,
@@ -325,22 +434,19 @@ fn dry_run_body(model: &str) -> serde_json::Map<String, Value> {
     est.provider.0["request"].as_object().unwrap().clone()
 }
 
-/// GPT Image takes the source as the first of `referenceImages` (the mask applies to it) and
-/// gets the sent size as `width`/`height`, which are never controls (FR-PRV-17, R28).
+/// An edit row like GPT Image's (withheld since 2026-11-11, `overlay::gpt`) takes the source as
+/// the first of `referenceImages` (the mask applies to it) and gets the sent size as
+/// `width`/`height`, which are never controls (FR-PRV-17, R28).
 #[test]
 fn fr_prv_17_gpt_source_is_the_first_reference_image_at_the_sent_size() {
-    let caps = super::normalise::normalise(
-        GPT,
-        &get_model(GPT).response.body,
-        row_in(&SCENARIO_ROWS, GPT),
-    )
-    .unwrap();
+    let row = super::overlay::gpt(GPT);
+    let caps = super::normalise::normalise(GPT, &get_model(GPT).response.body, Some(&row)).unwrap();
     assert!(caps.capabilities.controls.iter().all(|c| c.name != "width"));
     assert_eq!(
         caps.capabilities.input_px.max, 3840,
         "a list's max is a count"
     );
-    let body = dry_run_body(GPT);
+    let body = dry_run_body_over(GPT, row);
     assert_eq!(body["referenceImages"], json!(["a_img"]));
     assert_eq!(body["mask"], json!("a_mask"));
     assert_eq!(

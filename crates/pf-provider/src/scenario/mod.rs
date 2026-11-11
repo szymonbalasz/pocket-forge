@@ -318,13 +318,17 @@ impl ScenarioProvider {
                     stale: false,
                 })
             }
-            // A cached model no row has any more (removed from the overlay) is never offered.
+            // A cached operation no row has any more (removed from the overlay, e.g. GPT Image
+            // 2.5's masked edit) is never offered; a cached model left with none is dropped.
             Some(ProviderError::Offline | ProviderError::Timeout) => match self.cache.load() {
                 Some(cached) => Ok(ModelList {
                     models: cached
                         .models
                         .into_iter()
-                        .filter(|m| self.overlay.iter().any(|r| r.model_id == m.id))
+                        .filter_map(|mut m| {
+                            m.operations.retain(|op| self.has_row(&m.id, *op));
+                            (!m.operations.is_empty()).then_some(m)
+                        })
                         .filter(offers)
                         .collect(),
                     stale: true,
@@ -335,10 +339,18 @@ impl ScenarioProvider {
         }
     }
 
+    /// Whether the overlay has a row for this model and operation.
+    fn has_row(&self, model_id: &str, operation: Operation) -> bool {
+        self.overlay
+            .iter()
+            .any(|r| r.model_id == model_id && r.operation == operation)
+    }
+
     /// Capabilities for one operation, fresh from the network (the cache when offline). A
-    /// model with no row for that operation → `invalid_request(operation)`; a model with no row
-    /// at all (never offered, or removed from the overlay) → `invalid_request(model_id)` with
-    /// no network call and no cache read.
+    /// model with no row at all (never offered, or removed from the overlay) →
+    /// `invalid_request(model_id)`; a model with no row for that operation (e.g. GPT Image's
+    /// masked edit, removed 2026-11-11) → `invalid_request(operation)`. Both with no network
+    /// call and no cache read, so a cached copy never brings the operation back.
     pub async fn fetch_capabilities(
         &self,
         model_id: &str,
@@ -347,6 +359,11 @@ impl ScenarioProvider {
         if !self.overlay.iter().any(|r| r.model_id == model_id) {
             return Err(ProviderError::InvalidRequest {
                 field: "model_id".into(),
+            });
+        }
+        if !self.has_row(model_id, operation) {
+            return Err(ProviderError::InvalidRequest {
+                field: "operation".into(),
             });
         }
         let creds = self.credentials()?;

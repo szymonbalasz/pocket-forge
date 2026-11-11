@@ -1,0 +1,926 @@
+{
+  "format_version": 1,
+  "provider": "scenario",
+  "model": "model_openai-gpt-image-2-5-flare",
+  "case": "masked-edit",
+  "recorded_on": "2026-11-11",
+  "source": "recorded",
+  "exchanges": [
+    {
+      "request": {
+        "method": "GET",
+        "path": "/models/model_openai-gpt-image-2-5-flare"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "model": {
+            "accessRestrictions": 0,
+            "authorId": "<user-1>",
+            "capabilities": [
+              "txt2img",
+              "img2img"
+            ],
+            "collectionIds": [],
+            "complianceMetadata": {
+              "dataProcessingComment": "temporaryRetention",
+              "enterpriseStatus": "Ready",
+              "licenseTerms": "fake://asset/1",
+              "maintainer": "Scenario",
+              "modelProvider": "OpenAI",
+              "subProcessor": "Provider"
+            },
+            "createdAt": "2026-09-09T10:01:30.954Z",
+            "custom": true,
+            "exampleAssetIds": [
+              "asset_CSJZWMs6ueKxHR6JmRYMT1YX",
+              "asset_UUQJMRWTEwj6qUrSBGZj6UUm",
+              "asset_iJNCiYGiRLpRsARRsmwsMytk",
+              "asset_mJf4hsQ8T7UCkuGuYApPFi93",
+              "asset_DvjeDx8KDG9U7P4BGRb33fop",
+              "asset_WY42hJYF21U5ZTznaQFvkbsT",
+              "asset_FL4bt4P3vU9ybHbvydYaCvjv",
+              "asset_JF4hcxkh8tR7NS7PsFAPJZXp",
+              "asset_EUEAq5iUNewqW9AWJUV7fCtH",
+              "asset_vu2Amv2A2M9cpFEy7ddFfJn6",
+              "asset_eASBCSxd6Jt1q2Y3cYG1izj5",
+              "asset_CvSUXiC3sE2s7FDVkeVZ5jkY",
+              "asset_c9T8G6jZAUFAGU3BBcv4pyQq",
+              "asset_xMgxUkJjzwuQnFPqpBGYCabR",
+              "asset_t9kzqh63tfm62fkyU8qHC4SB",
+              "asset_piWLbBmZsUGSAmFQJfLMBQP7",
+              "asset_TdbNKT4XzZKbi6nWBQ3627kY",
+              "asset_hoxvh4cMnW9toFXh2z1dzKqM",
+              "asset_Jzs8DYimd5QYxSPHrFSLDURr",
+              "asset_fzRnFLTjnKS8rQYAZYeUpXXm",
+              "asset_5fkrGNjmQmPktdWTQps2xMRy",
+              "asset_vBHzrugTUeu6CXvATDR948qY",
+              "asset_apYV37QwvZd8BysG3JTUyD1S",
+              "asset_X24QtLpDSvKUvyHfWKgLbGrM",
+              "asset_w47x9oXXTwVeCJwXcf33C6uc",
+              "asset_66zJyQMbnoSthFxYcnZ7Hy8Q",
+              "asset_XLhRvucBMaYBzCmnrpBd3uz2",
+              "asset_TFSQwTkoh95HUtCqQoFDLfMN",
+              "asset_BNbVc5o2yzzjQUxg3X68Wnab",
+              "asset_617EZZS3e6nYUn9S4LfrcbCV",
+              "asset_dpgC4xrb49wrxQG3ByrM4qVk",
+              "asset_469Um8nUCo63QoYhhrDNxtFD"
+            ],
+            "id": "model_openai-gpt-image-2-5-flare",
+            "inputs": [
+              {
+                "costImpact": false,
+                "description": "Describe the image you want to create, or how to edit your reference images. Plain, natural language works well.",
+                "label": "Prompt",
+                "maxLength": 32000,
+                "name": "prompt",
+                "prompt": true,
+                "promptSpark": true,
+                "required": {
+                  "always": true
+                },
+                "type": "string"
+              },
+              {
+                "costImpact": true,
+                "description": "Images to edit or build from (up to 16). Required if you provide a mask.",
+                "kind": "image",
+                "label": "Reference Images",
+                "maxLength": 16,
+                "name": "referenceImages",
+                "parent": true,
+                "required": {
+                  "ifDefined": {
+                    "mask": {
+                      "message": "A reference image is required when a mask is provided."
+                    }
+                  }
+                },
+                "type": "file_array"
+              },
+              {
+                "backgroundBehavior": "transparent",
+                "costImpact": false,
+                "description": "An optional PNG that marks which parts of the first reference image to change. It uses transparency: fully transparent areas are edited, fully opaque areas are kept. Export a PNG with real transparency (don't flatten it). If you've drawn a white-on-black mask, convert the white \"edit\" areas to transparent first.",
+                "kind": "image",
+                "label": "Mask",
+                "maskFrom": "referenceImages",
+                "name": "mask",
+                "parent": true,
+                "type": "file"
+              },
+              {
+                "costImpact": true,
+                "default": 1,
+                "description": "How many images to create from the same prompt (1-10).",
+                "group": "Settings",
+                "label": "Image Count",
+                "max": 10,
+                "min": 1,
+                "name": "numOutputs",
+                "step": 1,
+                "type": "number"
+              },
+              {
+                "costImpact": true,
+                "description": "Output width in pixels, in steps of 16 up to 3840. Larger images cost more.",
+                "group": "Settings",
+                "label": "Width",
+                "max": 3840,
+                "min": 16,
+                "name": "width",
+                "step": 16,
+                "type": "number"
+              },
+              {
+                "costImpact": true,
+                "description": "Output height in pixels, in steps of 16 up to 3840. Larger images cost more.",
+                "group": "Settings",
+                "label": "Height",
+                "max": 3840,
+                "min": 16,
+                "name": "height",
+                "step": 16,
+                "type": "number"
+              },
+              {
+                "allowedValues": [
+                  "auto",
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "costImpact": true,
+                "default": "auto",
+                "description": "How much effort goes into the image. Higher levels look better but cost more; Auto lets the model choose.",
+                "group": "Settings",
+                "label": "Quality",
+                "name": "quality",
+                "type": "string"
+              },
+              {
+                "allowedValues": [
+                  "auto",
+                  "opaque",
+                  "transparent"
+                ],
+                "costImpact": false,
+                "default": "auto",
+                "description": "Whether the background is solid (Opaque) or see-through (Transparent). Auto lets the model decide.",
+                "group": "Settings",
+                "label": "Background",
+                "name": "background",
+                "type": "string"
+              }
+            ],
+            "name": "GPT Image 2.5 Flare",
+            "ownerId": "<user-2>",
+            "parameters": {},
+            "privacy": "public",
+            "shortDescription": "OpenAI GPT Image 2.5 Flare: fast, high-quality text-to-image generation and editing for everyday content, from social posts to product shots and quick creative concepts.",
+            "source": "other",
+            "status": "trained",
+            "tags": [
+              "Character Design",
+              "GPT-Image",
+              "Image to Image",
+              "OpenAI",
+              "Product Photography",
+              "Text Rendering",
+              "Text to Image",
+              "editing",
+              "sc:featured",
+              "sc:third-party"
+            ],
+            "trainingImagePairs": [],
+            "trainingImagesNumber": 0,
+            "trainingProgress": {},
+            "type": "custom",
+            "uiConfig": {
+              "resolutionComponent": {
+                "heightInput": "height",
+                "label": "Dimensions",
+                "presets": [
+                  {
+                    "height": 3360,
+                    "label": "9:21 (1440x3360)",
+                    "width": 1440
+                  },
+                  {
+                    "height": 3840,
+                    "label": "9:16 (2160x3840)",
+                    "width": 2160
+                  },
+                  {
+                    "height": 1920,
+                    "label": "9:16 (1088x1920)",
+                    "width": 1088
+                  },
+                  {
+                    "height": 1536,
+                    "label": "2:3 (1024x1536)",
+                    "width": 1024
+                  },
+                  {
+                    "height": 2048,
+                    "label": "3:4 (1536x2048)",
+                    "width": 1536
+                  },
+                  {
+                    "height": 1024,
+                    "label": "1:1 (1024x1024)",
+                    "width": 1024
+                  },
+                  {
+                    "height": 2048,
+                    "label": "1:1 (2048x2048)",
+                    "width": 2048
+                  },
+                  {
+                    "height": 1536,
+                    "label": "4:3 (2048x1536)",
+                    "width": 2048
+                  },
+                  {
+                    "height": 1024,
+                    "label": "3:2 (1536x1024)",
+                    "width": 1536
+                  },
+                  {
+                    "height": 1152,
+                    "label": "16:9 (2048x1152)",
+                    "width": 2048
+                  },
+                  {
+                    "height": 2160,
+                    "label": "16:9 (3840x2160)",
+                    "width": 3840
+                  },
+                  {
+                    "height": 1440,
+                    "label": "21:9 (3360x1440)",
+                    "width": 3360
+                  },
+                  {
+                    "label": "Auto"
+                  }
+                ],
+                "widthInput": "width"
+              },
+              "selects": {
+                "background": {
+                  "auto": "Auto",
+                  "opaque": "Opaque",
+                  "transparent": "Transparent"
+                },
+                "quality": {
+                  "auto": "Auto",
+                  "high": "High",
+                  "low": "Low",
+                  "max": "Max",
+                  "medium": "Medium",
+                  "xhigh": "Extra High"
+                }
+              }
+            },
+            "updatedAt": "2026-09-18T11:00:20.313Z",
+            "userId": "<user-1>"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "room-512.png"
+          },
+          "name": "pocket-forge-source.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "authorId": "<user-3>",
+            "collectionIds": [],
+            "createdAt": "2026-11-08T19:14:00.570Z",
+            "editCapabilities": [
+              "REMOVE_BACKGROUND",
+              "REFINE",
+              "PIXELATE",
+              "PROMPT_EDITING",
+              "UPSCALE",
+              "UPSCALE_360",
+              "DETECTION",
+              "VECTORIZATION",
+              "SEGMENTATION",
+              "REFRAME",
+              "GENERATIVE_FILL"
+            ],
+            "id": "<asset-1>",
+            "kind": "image",
+            "metadata": {
+              "height": 512,
+              "kind": "image",
+              "name": "pocket-forge-source.png",
+              "size": 3031,
+              "type": "uploaded",
+              "width": 512
+            },
+            "mimeType": "image/png",
+            "ownerId": "<user-4>",
+            "privacy": "private",
+            "properties": {
+              "height": 512,
+              "size": 3031,
+              "width": 512
+            },
+            "source": "uploaded",
+            "status": "success",
+            "tags": [],
+            "updatedAt": "2026-11-08T19:14:00.570Z",
+            "url": "fake://asset/2"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/assets",
+        "body": {
+          "hide": true,
+          "image": {
+            "fixture": "upload.png"
+          },
+          "name": "pocket-forge-mask.png"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "authorId": "<user-3>",
+            "collectionIds": [],
+            "createdAt": "2026-11-08T19:14:01.589Z",
+            "editCapabilities": [
+              "REMOVE_BACKGROUND",
+              "REFINE",
+              "PIXELATE",
+              "PROMPT_EDITING",
+              "UPSCALE",
+              "UPSCALE_360",
+              "DETECTION",
+              "VECTORIZATION",
+              "SEGMENTATION",
+              "REFRAME",
+              "GENERATIVE_FILL"
+            ],
+            "id": "<asset-2>",
+            "kind": "image",
+            "metadata": {
+              "height": 512,
+              "kind": "image",
+              "name": "pocket-forge-mask.png",
+              "size": 4571,
+              "type": "uploaded",
+              "width": 512
+            },
+            "mimeType": "image/png",
+            "ownerId": "<user-4>",
+            "privacy": "private",
+            "properties": {
+              "height": 512,
+              "size": 4571,
+              "width": 512
+            },
+            "source": "uploaded",
+            "status": "success",
+            "tags": [],
+            "updatedAt": "2026-11-08T19:14:01.589Z",
+            "url": "fake://asset/3"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/generate/custom/model_openai-gpt-image-2-5-flare",
+        "query": {
+          "dryRun": "true"
+        },
+        "body": {
+          "height": 512,
+          "mask": "<asset-2>",
+          "numOutputs": 1,
+          "prompt": "a mossy flagstone floor",
+          "referenceImages": [
+            "<asset-1>"
+          ],
+          "width": 512
+        }
+      },
+      "response": {
+        "status": 269,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "costDetails": {
+            "custom-generation": 12
+          },
+          "creativeUnitsCost": 12,
+          "creativeUnitsDiscount": 0
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "POST",
+        "path": "/generate/custom/model_openai-gpt-image-2-5-flare",
+        "body": {
+          "height": 512,
+          "mask": "<asset-2>",
+          "numOutputs": 1,
+          "prompt": "a mossy flagstone floor",
+          "referenceImages": [
+            "<asset-1>"
+          ],
+          "width": 512
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "costDetails": {
+            "custom-generation": 12
+          },
+          "creativeUnitsCost": 12,
+          "creativeUnitsDiscount": 0,
+          "job": {
+            "authorId": "<user-3>",
+            "billing": {
+              "cuCost": 12,
+              "cuDiscount": 0
+            },
+            "createdAt": "2026-11-11T14:35:07.425Z",
+            "jobId": "<job-1>",
+            "jobType": "custom",
+            "metadata": {
+              "assetIds": [],
+              "input": {
+                "height": 512,
+                "mask": "<asset-2>",
+                "modelId": "model_openai-gpt-image-2-5-flare",
+                "numOutputs": 1,
+                "prompt": "a mossy flagstone floor",
+                "referenceImages": [
+                  "<asset-1>"
+                ],
+                "width": 512
+              }
+            },
+            "ownerId": "<user-4>",
+            "progress": 0,
+            "status": "in-progress",
+            "statusHistory": [
+              {
+                "date": "2026-11-11T14:35:07.425Z",
+                "status": "pending"
+              },
+              {
+                "date": "2026-11-11T14:35:07.587Z",
+                "status": "in-progress"
+              }
+            ],
+            "updatedAt": "2026-11-11T14:35:07.587Z"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/jobs/<job-1>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "job": {
+            "authorId": "<user-3>",
+            "billing": {
+              "cuCost": 12,
+              "cuDiscount": 0
+            },
+            "createdAt": "2026-11-11T14:35:07.425Z",
+            "jobId": "<job-1>",
+            "jobType": "custom",
+            "metadata": {
+              "assetIds": [],
+              "input": {
+                "height": 512,
+                "mask": "<asset-2>",
+                "modelId": "model_openai-gpt-image-2-5-flare",
+                "numOutputs": 1,
+                "prompt": "a mossy flagstone floor",
+                "referenceImages": [
+                  "<asset-1>"
+                ],
+                "width": 512
+              }
+            },
+            "ownerId": "<user-4>",
+            "progress": 0,
+            "status": "in-progress",
+            "statusHistory": [
+              {
+                "date": "2026-11-11T14:35:07.425Z",
+                "status": "pending"
+              },
+              {
+                "date": "2026-11-11T14:35:07.587Z",
+                "status": "in-progress"
+              }
+            ],
+            "updatedAt": "2026-11-11T14:35:07.587Z"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/jobs/<job-1>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "job": {
+            "authorId": "<user-3>",
+            "billing": {
+              "cuCost": 12,
+              "cuDiscount": 0
+            },
+            "createdAt": "2026-11-11T14:35:07.425Z",
+            "jobId": "<job-1>",
+            "jobType": "custom",
+            "metadata": {
+              "assetIds": [],
+              "input": {
+                "height": 512,
+                "mask": "<asset-2>",
+                "modelId": "model_openai-gpt-image-2-5-flare",
+                "numOutputs": 1,
+                "prompt": "a mossy flagstone floor",
+                "referenceImages": [
+                  "<asset-1>"
+                ],
+                "width": 512
+              }
+            },
+            "ownerId": "<user-4>",
+            "progress": 0,
+            "status": "in-progress",
+            "statusHistory": [
+              {
+                "date": "2026-11-11T14:35:07.425Z",
+                "status": "pending"
+              },
+              {
+                "date": "2026-11-11T14:35:07.587Z",
+                "status": "in-progress"
+              }
+            ],
+            "updatedAt": "2026-11-11T14:35:07.587Z"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/jobs/<job-1>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "job": {
+            "authorId": "<user-3>",
+            "billing": {
+              "cuCost": 12,
+              "cuDiscount": 0
+            },
+            "createdAt": "2026-11-11T14:35:07.425Z",
+            "jobId": "<job-1>",
+            "jobType": "custom",
+            "metadata": {
+              "assetIds": [],
+              "input": {
+                "height": 512,
+                "mask": "<asset-2>",
+                "modelId": "model_openai-gpt-image-2-5-flare",
+                "numOutputs": 1,
+                "prompt": "a mossy flagstone floor",
+                "referenceImages": [
+                  "<asset-1>"
+                ],
+                "width": 512
+              }
+            },
+            "ownerId": "<user-4>",
+            "progress": 0.03,
+            "status": "in-progress",
+            "statusHistory": [
+              {
+                "date": "2026-11-11T14:35:07.425Z",
+                "status": "pending"
+              },
+              {
+                "date": "2026-11-11T14:35:07.587Z",
+                "status": "in-progress"
+              }
+            ],
+            "updatedAt": "2026-11-11T14:35:13.078Z"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/jobs/<job-1>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "job": {
+            "authorId": "<user-3>",
+            "billing": {
+              "cuCost": 12,
+              "cuDiscount": 0
+            },
+            "createdAt": "2026-11-11T14:35:07.425Z",
+            "jobId": "<job-1>",
+            "jobType": "custom",
+            "metadata": {
+              "assetIds": [],
+              "input": {
+                "height": 512,
+                "mask": "<asset-2>",
+                "modelId": "model_openai-gpt-image-2-5-flare",
+                "numOutputs": 1,
+                "prompt": "a mossy flagstone floor",
+                "referenceImages": [
+                  "<asset-1>"
+                ],
+                "width": 512
+              }
+            },
+            "ownerId": "<user-4>",
+            "progress": 0.05,
+            "status": "in-progress",
+            "statusHistory": [
+              {
+                "date": "2026-11-11T14:35:07.425Z",
+                "status": "pending"
+              },
+              {
+                "date": "2026-11-11T14:35:07.587Z",
+                "status": "in-progress"
+              }
+            ],
+            "updatedAt": "2026-11-11T14:35:18.191Z"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/jobs/<job-1>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "job": {
+            "authorId": "<user-3>",
+            "billing": {
+              "cuCost": 12,
+              "cuDiscount": 0
+            },
+            "createdAt": "2026-11-11T14:35:07.425Z",
+            "jobId": "<job-1>",
+            "jobType": "custom",
+            "metadata": {
+              "assetIds": [
+                "<asset-3>"
+              ],
+              "input": {
+                "height": 512,
+                "mask": "<asset-2>",
+                "modelId": "model_openai-gpt-image-2-5-flare",
+                "numOutputs": 1,
+                "prompt": "a mossy flagstone floor",
+                "referenceImages": [
+                  "<asset-1>"
+                ],
+                "width": 512
+              }
+            },
+            "ownerId": "<user-4>",
+            "progress": 1,
+            "status": "success",
+            "statusHistory": [
+              {
+                "date": "2026-11-11T14:35:07.425Z",
+                "status": "pending"
+              },
+              {
+                "date": "2026-11-11T14:35:07.587Z",
+                "status": "in-progress"
+              },
+              {
+                "date": "2026-11-11T14:35:21.210Z",
+                "status": "success"
+              }
+            ],
+            "updatedAt": "2026-11-11T14:35:21.210Z"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/jobs/<job-1>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "job": {
+            "authorId": "<user-3>",
+            "billing": {
+              "cuCost": 12,
+              "cuDiscount": 0
+            },
+            "createdAt": "2026-11-11T14:35:07.425Z",
+            "jobId": "<job-1>",
+            "jobType": "custom",
+            "metadata": {
+              "assetIds": [
+                "<asset-3>"
+              ],
+              "input": {
+                "height": 512,
+                "mask": "<asset-2>",
+                "modelId": "model_openai-gpt-image-2-5-flare",
+                "numOutputs": 1,
+                "prompt": "a mossy flagstone floor",
+                "referenceImages": [
+                  "<asset-1>"
+                ],
+                "width": 512
+              }
+            },
+            "ownerId": "<user-4>",
+            "progress": 1,
+            "status": "success",
+            "statusHistory": [
+              {
+                "date": "2026-11-11T14:35:07.425Z",
+                "status": "pending"
+              },
+              {
+                "date": "2026-11-11T14:35:07.587Z",
+                "status": "in-progress"
+              },
+              {
+                "date": "2026-11-11T14:35:21.210Z",
+                "status": "success"
+              }
+            ],
+            "updatedAt": "2026-11-11T14:35:21.210Z"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/assets/<asset-3>"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json"
+        },
+        "body": {
+          "asset": {
+            "authorId": "<user-3>",
+            "collectionIds": [],
+            "createdAt": "2026-11-11T14:35:21.189Z",
+            "editCapabilities": [
+              "REMOVE_BACKGROUND",
+              "REFINE",
+              "PIXELATE",
+              "PROMPT_EDITING",
+              "UPSCALE",
+              "DETECTION",
+              "VECTORIZATION",
+              "SEGMENTATION",
+              "REFRAME",
+              "GENERATIVE_FILL"
+            ],
+            "id": "<asset-3>",
+            "kind": "image",
+            "metadata": {
+              "baseModelId": "custom",
+              "height": 512,
+              "kind": "image",
+              "mask": "<asset-2>",
+              "modelId": "model_openai-gpt-image-2-5-flare",
+              "modelType": "custom",
+              "numOutputs": 1,
+              "parentId": "<asset-1>",
+              "parentJobId": "<job-1>",
+              "prompt": "asset_1m9R2pAZMuzLNgBcaZECujJs",
+              "referenceImages": [
+                "<asset-1>"
+              ],
+              "rootParentId": "<asset-1>",
+              "size": 442145,
+              "type": "image-prompt-editing",
+              "width": 512
+            },
+            "mimeType": "image/png",
+            "ownerId": "<user-4>",
+            "privacy": "private",
+            "properties": {
+              "height": 512,
+              "size": 442145,
+              "width": 512
+            },
+            "source": "image-prompt-editing",
+            "status": "success",
+            "tags": [],
+            "updatedAt": "2026-11-11T14:35:21.189Z",
+            "url": "fake://asset/4"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "fake://asset/4"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "image/png",
+          "etag": "\"cd16859ac711be033f216e6bc11bbf41\""
+        },
+        "body": {
+          "fixture": "candidate-1-512.png"
+        }
+      }
+    }
+  ]
+}
