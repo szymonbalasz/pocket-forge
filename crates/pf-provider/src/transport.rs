@@ -270,7 +270,9 @@ impl Sleeper for RuntimeSleeper {
     fn sleep(&self, duration: Duration) -> BoxFuture<'static, ()> {
         match runtime() {
             Ok(rt) => {
-                let handle = rt.spawn(tokio::time::sleep(duration));
+                // Built inside the task: `tokio::time::sleep` needs the runtime's context,
+                // which the caller's thread (`block_on`) doesn't have.
+                let handle = rt.spawn(async move { tokio::time::sleep(duration).await });
                 Box::pin(async move {
                     let _ = handle.await;
                 })
@@ -283,6 +285,15 @@ impl Sleeper for RuntimeSleeper {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The paid recorder polls from a plain thread (`block_on`): a real sleep there must not
+    /// need the caller to be inside the runtime (it panicked after a paid submit).
+    #[test]
+    fn fr_prv_19_runtime_sleeper_works_outside_a_runtime() {
+        let t = std::time::Instant::now();
+        crate::block_on(RuntimeSleeper.sleep(Duration::from_millis(20)));
+        assert!(t.elapsed() >= Duration::from_millis(15));
+    }
 
     #[test]
     fn hosts_and_log_urls() {
