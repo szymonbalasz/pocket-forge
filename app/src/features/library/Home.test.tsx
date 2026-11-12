@@ -658,3 +658,23 @@ test('FR-PRJ-57 R112 walk D3 the deleted project’s card is dropped by project 
   off();
   expect(shown).toEqual([['Harbour']]);
 });
+
+test('FR-PRJ-59 #63 the card’s menu has Open, Open in Explorer, Rename and Delete; Open in Explorer shows the folder', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  fireEvent.contextMenu(cardOf('Crypt'));
+  const menu = await screen.findByTestId('prj-home-card-menu');
+  expect(
+    within(menu)
+      .getAllByRole('menuitem')
+      .map((i) => i.dataset.testid),
+  ).toEqual([
+    'prj-home-card-open',
+    'prj-home-card-reveal',
+    'prj-home-card-rename',
+    'prj-home-card-delete',
+  ]);
+  fireEvent.click(screen.getByTestId('prj-home-card-reveal'));
+  await waitFor(() => expect(mock.reveals).toEqual([`${LIB}/Maps/Crypt`]));
+  expect(projectStore.get().project).toBeNull();
+});

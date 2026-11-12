@@ -705,7 +705,17 @@ export interface Commands {
   rgn_iterations_list: [Record<string, never>, RgnIteration[]];
   export_set_settings: [{ settings: ExportSettingsInput }, ExportSettings];
   export_plan: [{ settings: ExportSettingsInput }, ExportPlan];
-  export_start: [{ settings: ExportSettingsInput; replace: boolean }, { export_id: string }];
+  /** `format_override`: Export as from the canvas menu, a one-off format (FR-EXP-30); `dest`: Save
+   *  as, an absolute path whose extension picks the format (FR-EXP-31). */
+  export_start: [
+    {
+      settings: ExportSettingsInput;
+      replace: boolean;
+      format_override?: ExportFormat;
+      dest?: string;
+    },
+    { export_id: string },
+  ];
   export_cancel: [{ export_id: string }, Record<string, never>];
   project_prefetch_original: [Record<string, never>, { ready?: boolean } | null];
   // asset-project §9 (#44)
@@ -826,6 +836,17 @@ export interface Commands {
   prm_chat_preview: [{ project_id: string; include_images?: boolean }, ChatPreview];
   /** Tauri layer (FR-PRM-45): a console running `claude auth login` for the chat's folder. */
   prm_chat_login: [Record<string, never>, null];
+  /** FR-EXP-32 (#63): one image file to the project's `exports/` (`dest: 'exports'`) or a Save as
+   *  path (its extension picks the format; `format` may be left out). */
+  export_file: [
+    { source: string; format?: ExportFormat; dest: string; replace?: boolean },
+    { export_id: string },
+  ];
+  /** #63: where the save dialog opens: the last Save as folder, else the project's `exports/`,
+   *  with the default name (FR-EXP-14 on the canvas, FR-EXP-32 for a file). */
+  export_save_default: [{ source?: string; format?: ExportFormat }, { path: string }];
+  /** FR-PRJ-59: Explorer at a path inside the library, a file shown selected. */
+  reveal_in_explorer: [{ path: string }, Record<string, never>];
 }
 
 export type CommandName = keyof Commands;

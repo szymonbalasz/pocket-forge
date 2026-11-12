@@ -1,13 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: core IPC, events, drag-and-drop, native open dialogs (#53), and every app command (R96).",
+  "description": "Main window: core IPC, events, drag-and-drop, native open dialogs (#53) and the save dialog (#63), and every app command (R96).",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
     "dialog:allow-open",
+    "dialog:allow-save",
     "allow-app-info",
     "allow-library-get-config",
     "allow-library-set-roots",
@@ -120,6 +121,9 @@
     "allow-prm-chat-thread-new",
     "allow-project-delete",
     "allow-library-trash-list",
-    "allow-library-trash-restore"
+    "allow-library-trash-restore",
+    "allow-export-file",
+    "allow-export-save-default",
+    "allow-reveal-in-explorer"
   ]
 }

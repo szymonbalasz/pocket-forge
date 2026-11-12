@@ -27,7 +27,7 @@ const MAX_PATHS: usize = 10_000;
 const MAX_LABEL_CHARS: usize = 200;
 const MAX_PROMPT_CHARS: usize = 20_000;
 
-fn check_path(field: &str, p: &str) -> CoreResult<()> {
+pub(crate) fn check_path(field: &str, p: &str) -> CoreResult<()> {
     if p.trim().is_empty() {
         return Err(CoreError::invalid(field, "the path is empty"));
     }
@@ -640,6 +640,21 @@ impl Command for LibraryTrashRestore {
         let settings = core.state().settings.clone();
         let path = library::trash::restore(&core.ctx, &settings, input.id)?;
         Ok(PathOutput { path })
+    }
+}
+
+pub struct RevealInExplorer;
+
+impl Command for RevealInExplorer {
+    const NAME: &'static str = "reveal_in_explorer";
+    type Input = PathInput;
+    type Output = Ok_;
+
+    /// FR-PRJ-59: Explorer at a path inside a library root, a file shown selected.
+    fn run(core: &Core, input: PathInput) -> CoreResult<Ok_> {
+        let settings = core.state().settings.clone();
+        library::reveal::reveal(&core.ctx, &settings, std::path::Path::new(&input.path))?;
+        Ok(Ok_ {})
     }
 }
 
@@ -1469,7 +1484,8 @@ pub use crate::project::commands::{
 
 /// Export commands live in their own module (export spec §9).
 pub use crate::export::commands::{
-    ExportCancel, ExportGetSettings, ExportPlan, ExportSetSettings, ExportStart,
+    ExportCancel, ExportFile, ExportGetSettings, ExportPlan, ExportSaveDefault, ExportSetSettings,
+    ExportStart,
 };
 
 // ---------------------------------------------------------------- prompt helper
@@ -1615,6 +1631,9 @@ registry![
     ProjectDelete,
     LibraryTrashList,
     LibraryTrashRestore,
+    ExportFile,
+    ExportSaveDefault,
+    RevealInExplorer,
 ];
 
 #[cfg(test)]

@@ -151,3 +151,27 @@ fn a_panicking_progress_callback_does_not_unwind_into_libwebp() {
     });
     assert!(matches!(r, Err(EncodeError::Failed(_))), "{r:?}");
 }
+
+#[test]
+fn fr_exp_32_webp_rgba_keeps_alpha() {
+    let img = image::RgbaImage::from_fn(64, 48, |x, y| {
+        image::Rgba([
+            (x * 3) as u8,
+            (y * 5) as u8,
+            90,
+            if x < 32 { 0 } else { 255 },
+        ])
+    });
+    let out = encode_webp_rgba(&img, &mut go()).unwrap();
+    assert!(!out.lossless_fallback);
+    let back = image::load_from_memory(&out.bytes).unwrap();
+    assert!(back.color().has_alpha());
+    let back = back.to_rgba8();
+    assert_eq!(back.get_pixel(3, 3)[3], 0);
+    assert_eq!(back.get_pixel(60, 3)[3], 255);
+    let too_big = image::RgbaImage::new(WEBP_MAX_SIDE + 1, 1);
+    assert!(matches!(
+        encode_webp_rgba(&too_big, &mut go()),
+        Err(EncodeError::TooLarge { .. })
+    ));
+}

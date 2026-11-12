@@ -9,7 +9,7 @@ use std::ffi::{c_int, c_void};
 use std::ops::ControlFlow;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use image::RgbImage;
+use image::{RgbImage, RgbaImage};
 use libwebp_sys as sys;
 
 use crate::encode::{EncodeError, Phase, Progress, report};
@@ -121,60 +121,122 @@ impl WebpEncoder for LibWebp {
         mode: WebpMode,
         progress: &mut dyn FnMut(f32) -> ControlFlow<()>,
     ) -> Result<Vec<u8>, EncodeError> {
-        let (w, h) = image.dimensions();
-        let config = config(mode)?;
-        let mut picture = PictureGuard(
-            sys::WebPPicture::new().map_err(|()| EncodeError::Failed("WebPPictureInit".into()))?,
-        );
-        let pic = &mut picture.0;
-        pic.width = w as c_int;
-        pic.height = h as c_int;
-        // Lossless needs ARGB input; lossy converts to YUV on import.
-        pic.use_argb = c_int::from(mode == WebpMode::Lossless);
-        let stride = (w * 3) as c_int;
-        // SAFETY: `image` holds `h` rows of `stride` bytes; libwebp copies them into the picture.
-        if unsafe { sys::WebPPictureImportRGB(pic, image.as_raw().as_ptr(), stride) } == 0 {
-            return Err(EncodeError::OutOfMemory);
-        }
-
-        let mut state = HookState {
-            progress,
-            out: Vec::new(),
-            out_of_memory: false,
-            panicked: false,
-        };
-        let state_ptr = (&mut state as *mut HookState<'_>).cast::<c_void>();
-        pic.writer = Some(write_cb);
-        pic.custom_ptr = state_ptr;
-        pic.progress_hook = Some(progress_cb);
-        pic.user_data = state_ptr;
-
-        // SAFETY: config and picture are valid and initialised; `state` outlives the call and
-        // the callbacks only run on this thread during it (thread_level is 0).
-        let ok = unsafe { sys::WebPEncode(&config, pic) } != 0;
-        if ok {
-            return Ok(state.out);
-        }
-        use sys::WebPEncodingError as E;
-        Err(match pic.error_code {
-            E::VP8_ENC_ERROR_PARTITION0_OVERFLOW | E::VP8_ENC_ERROR_PARTITION_OVERFLOW => {
-                EncodeError::PartitionOverflow
-            }
-            E::VP8_ENC_ERROR_USER_ABORT if state.panicked => {
-                EncodeError::Failed("progress callback panicked".into())
-            }
-            E::VP8_ENC_ERROR_USER_ABORT => EncodeError::Canceled,
-            E::VP8_ENC_ERROR_BAD_WRITE if state.out_of_memory => EncodeError::OutOfMemory,
-            E::VP8_ENC_ERROR_OUT_OF_MEMORY | E::VP8_ENC_ERROR_BITSTREAM_OUT_OF_MEMORY => {
-                EncodeError::OutOfMemory
-            }
-            E::VP8_ENC_ERROR_BAD_DIMENSION => EncodeError::TooLarge {
-                format: ImageFormat::Webp,
-                limit: WEBP_MAX_SIDE,
-            },
-            other => EncodeError::Failed(format!("libwebp: {other:?}")),
-        })
+        encode_pixels(Pixels::Rgb(image), mode, progress)
     }
+}
+
+/// The pixels one encode imports: RGB8 (the export) or RGBA8 (a single file keeps its alpha,
+/// FR-EXP-32).
+#[derive(Clone, Copy)]
+enum Pixels<'a> {
+    Rgb(&'a RgbImage),
+    Rgba(&'a RgbaImage),
+}
+
+/// Encodes `image` (RGBA8, alpha kept) as lossy WebP q90 with libwebp, retrying once as
+/// lossless on a partition overflow, like [`encode_webp`] (FR-EXP-32).
+pub fn encode_webp_rgba(
+    image: &RgbaImage,
+    progress: Progress<'_>,
+) -> Result<WebpOutput, EncodeError> {
+    let (w, h) = image.dimensions();
+    if w > WEBP_MAX_SIDE || h > WEBP_MAX_SIDE {
+        return Err(EncodeError::TooLarge {
+            format: ImageFormat::Webp,
+            limit: WEBP_MAX_SIDE,
+        });
+    }
+    let mut hook = |f: f32| match report(progress, Phase::Encode, f) {
+        Ok(()) => ControlFlow::Continue(()),
+        Err(_) => ControlFlow::Break(()),
+    };
+    let lossy = WebpMode::Lossy {
+        quality: WEBP_QUALITY,
+    };
+    let output = match encode_pixels(Pixels::Rgba(image), lossy, &mut hook) {
+        Ok(bytes) => WebpOutput {
+            bytes,
+            lossless_fallback: false,
+        },
+        Err(EncodeError::PartitionOverflow) => WebpOutput {
+            bytes: encode_pixels(Pixels::Rgba(image), WebpMode::Lossless, &mut hook)?,
+            lossless_fallback: true,
+        },
+        Err(e) => return Err(e),
+    };
+    report(progress, Phase::Encode, 1.0)?;
+    Ok(output)
+}
+
+fn encode_pixels(
+    image: Pixels<'_>,
+    mode: WebpMode,
+    progress: &mut dyn FnMut(f32) -> ControlFlow<()>,
+) -> Result<Vec<u8>, EncodeError> {
+    let (w, h) = match image {
+        Pixels::Rgb(i) => i.dimensions(),
+        Pixels::Rgba(i) => i.dimensions(),
+    };
+    let config = config(mode)?;
+    let mut picture = PictureGuard(
+        sys::WebPPicture::new().map_err(|()| EncodeError::Failed("WebPPictureInit".into()))?,
+    );
+    let pic = &mut picture.0;
+    pic.width = w as c_int;
+    pic.height = h as c_int;
+    // Lossless needs ARGB input; lossy converts to YUV on import.
+    pic.use_argb = c_int::from(mode == WebpMode::Lossless);
+    // SAFETY: the image holds `h` rows of `stride` bytes (3 or 4 per px); libwebp copies
+    // them into the picture.
+    let imported = match image {
+        Pixels::Rgb(i) => unsafe {
+            sys::WebPPictureImportRGB(pic, i.as_raw().as_ptr(), (w * 3) as c_int)
+        },
+        Pixels::Rgba(i) => unsafe {
+            sys::WebPPictureImportRGBA(pic, i.as_raw().as_ptr(), (w * 4) as c_int)
+        },
+    };
+    if imported == 0 {
+        return Err(EncodeError::OutOfMemory);
+    }
+
+    let mut state = HookState {
+        progress,
+        out: Vec::new(),
+        out_of_memory: false,
+        panicked: false,
+    };
+    let state_ptr = (&mut state as *mut HookState<'_>).cast::<c_void>();
+    pic.writer = Some(write_cb);
+    pic.custom_ptr = state_ptr;
+    pic.progress_hook = Some(progress_cb);
+    pic.user_data = state_ptr;
+
+    // SAFETY: config and picture are valid and initialised; `state` outlives the call and
+    // the callbacks only run on this thread during it (thread_level is 0).
+    let ok = unsafe { sys::WebPEncode(&config, pic) } != 0;
+    if ok {
+        return Ok(state.out);
+    }
+    use sys::WebPEncodingError as E;
+    Err(match pic.error_code {
+        E::VP8_ENC_ERROR_PARTITION0_OVERFLOW | E::VP8_ENC_ERROR_PARTITION_OVERFLOW => {
+            EncodeError::PartitionOverflow
+        }
+        E::VP8_ENC_ERROR_USER_ABORT if state.panicked => {
+            EncodeError::Failed("progress callback panicked".into())
+        }
+        E::VP8_ENC_ERROR_USER_ABORT => EncodeError::Canceled,
+        E::VP8_ENC_ERROR_BAD_WRITE if state.out_of_memory => EncodeError::OutOfMemory,
+        E::VP8_ENC_ERROR_OUT_OF_MEMORY | E::VP8_ENC_ERROR_BITSTREAM_OUT_OF_MEMORY => {
+            EncodeError::OutOfMemory
+        }
+        E::VP8_ENC_ERROR_BAD_DIMENSION => EncodeError::TooLarge {
+            format: ImageFormat::Webp,
+            limit: WEBP_MAX_SIDE,
+        },
+        other => EncodeError::Failed(format!("libwebp: {other:?}")),
+    })
 }
 
 fn config(mode: WebpMode) -> Result<sys::WebPConfig, EncodeError> {

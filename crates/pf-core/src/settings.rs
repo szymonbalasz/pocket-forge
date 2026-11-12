@@ -118,6 +118,20 @@ pub struct PromptChatSettings {
     pub extra: BTreeMap<String, Value>,
 }
 
+/// `export` section (EXP, FR-EXP-31, #63): per machine, never a project file.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ExportAppSettings {
+    /// The folder of the last Save as that succeeded; the save dialog opens there next time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_save_dir: Option<PathBuf>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+fn is_default_export(e: &ExportAppSettings) -> bool {
+    *e == ExportAppSettings::default()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     pub schema_version: u32,
@@ -137,6 +151,9 @@ pub struct Settings {
     /// `prompt_chat` section (PRM §8, FR-PRM-20).
     #[serde(default, skip_serializing_if = "is_default_chat")]
     pub prompt_chat: PromptChatSettings,
+    /// `export` section (FR-EXP-31): the last Save as folder.
+    #[serde(default, skip_serializing_if = "is_default_export")]
+    pub export: ExportAppSettings,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -156,6 +173,7 @@ impl Settings {
             region_edit: RegionEditSettings::default(),
             prompt_helpers: None,
             prompt_chat: PromptChatSettings::default(),
+            export: ExportAppSettings::default(),
             extra: BTreeMap::new(),
         }
     }

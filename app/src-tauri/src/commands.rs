@@ -147,6 +147,9 @@ tauri_commands! {
     project_delete => c::ProjectDelete,
     library_trash_list => c::LibraryTrashList,
     library_trash_restore => c::LibraryTrashRestore,
+    export_file => c::ExportFile,
+    export_save_default => c::ExportSaveDefault,
+    reveal_in_explorer => c::RevealInExplorer,
 }
 
 #[cfg(test)]

@@ -61,6 +61,11 @@ fn png_of(img: &RgbImage) -> Vec<u8> {
 }
 
 fn setup_with(img: &RgbImage, faults: Faults) -> T {
+    setup_ctx(img, |ctx| ctx.faults = faults)
+}
+
+/// A project from `img`, opened and decoded; `edit` adjusts the context first (seams).
+fn setup_ctx(img: &RgbImage, edit: impl FnOnce(&mut Context)) -> T {
     let dir = tempfile::tempdir().unwrap();
     let mut ctx = Context::deterministic(dir.path().join("data"), Timestamp(T0));
     ctx.library_override = Some(dir.path().join("lib"));
@@ -69,7 +74,7 @@ fn setup_with(img: &RgbImage, faults: Faults) -> T {
     ctx.ids = Box::new(SequentialIds::default());
     let events = Arc::new(RecordedEvents::default());
     ctx.events = events.clone();
-    ctx.faults = faults;
+    edit(&mut ctx);
     let core = Core::new(ctx).unwrap();
     let src = dir.path().join("Crypt.png");
     std::fs::write(&src, png_of(img)).unwrap();
@@ -993,7 +998,7 @@ fn fr_exp_21_r31_busy_while_an_export_or_a_fetching_job_runs() {
     let id = t.core.state().project.as_ref().unwrap().manifest.project_id;
     t.core.state().exp.running.push(super::Running {
         id: t.core.ctx.new_id(),
-        project_id: id,
+        scope: super::Scope::Project(id),
         cancel: Arc::default(),
     });
     let e = t.start(settings(None, None, "png"), false).unwrap_err();
@@ -1201,13 +1206,16 @@ fn close_hook_cancels_a_running_export() {
     let id = t.core.state().project.as_ref().unwrap().manifest.project_id;
     t.core.state().exp.running.push(super::Running {
         id: t.core.ctx.new_id(),
-        project_id: id,
+        scope: super::Scope::Project(id),
         cancel: cancel.clone(),
     });
     t.core.dispatch("project_close", json!({})).unwrap();
     assert!(cancel.load(Ordering::SeqCst));
     let _ = &t.dir;
 }
+
+#[path = "menu_tests.rs"]
+mod menu;
 
 // ------------------------------------------------------------------ goldens through the core
 

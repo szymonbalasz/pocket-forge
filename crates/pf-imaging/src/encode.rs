@@ -9,7 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 use std::ops::ControlFlow;
 
-use image::RgbImage;
+use image::{RgbImage, RgbaImage};
 
 use crate::compose::{ComposeError, STRIP_H, Strip, StripFlattener};
 use crate::probe::ImageFormat;
@@ -173,6 +173,45 @@ fn png_stream<W: Write>(
         stream.write_all(strip.rgb)?;
         let done = strip.y + strip.height;
         report(progress, phase, done as f32 / height as f32)?;
+    }
+    stream.finish().map_err(png_error)?;
+    writer.finish().map_err(png_error)
+}
+
+/// Encodes PNG RGBA8 from a full buffer, keeping its alpha (FR-EXP-32: a single file exported
+/// as PNG). Same settings as [`encode_png`] otherwise; progress is reported per band as `Encode`.
+pub fn encode_png_rgba<W: Write>(
+    image: &RgbaImage,
+    out: W,
+    progress: Progress<'_>,
+) -> Result<(), EncodeError> {
+    let stop = Cell::new(false);
+    let mut out = GuardedWriter::new(out, &stop);
+    let result = png_rgba_stream(image, &mut out, progress);
+    out.keep_io_error(result)
+}
+
+fn png_rgba_stream<W: Write>(
+    image: &RgbaImage,
+    out: W,
+    progress: Progress<'_>,
+) -> Result<(), EncodeError> {
+    let (width, height) = image.dimensions();
+    let mut encoder = png::Encoder::new(out, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.set_compression(PNG_COMPRESSION);
+    let mut writer = encoder.write_header().map_err(png_error)?;
+    let mut stream = writer.stream_writer().map_err(png_error)?;
+    let row = width as usize * 4;
+    let raw = image.as_raw();
+    let mut y = 0;
+    while y < height {
+        let h = STRIP_H.min(height - y);
+        let start = y as usize * row;
+        stream.write_all(&raw[start..start + h as usize * row])?;
+        y += h;
+        report(progress, Phase::Encode, y as f32 / height as f32)?;
     }
     stream.finish().map_err(png_error)?;
     writer.finish().map_err(png_error)

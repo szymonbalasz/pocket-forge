@@ -2,13 +2,15 @@
 // drop, Recently deleted) and the pack view (name, notes, Add…, Refresh, Delete, image grid with
 // roles). Shown in the canvas slot while References is selected and no project is open.
 import { useEffect, useState } from 'react';
-import { ContextMenu, Popover } from 'radix-ui';
+import { Popover } from 'radix-ui';
 
 import { onFileDrop, pickPaths, type PackCard, type PackImage } from '../../api';
 import { dateLabel } from '../../shared/dates';
 import { useHomeView } from '../../shared/home';
 import { IconPlus, IconReferences } from '../../shell/icons';
 import { useProjectState } from '../../store/project';
+import { ContextMenu } from '../../shared/ContextMenu';
+import { PackImageMenu, revealEntry } from '../export';
 import { DeleteDialog, NameDialog } from './Dialogs';
 import {
   badgeLabel,
@@ -167,92 +169,81 @@ function PackCardView({ card }: { card: PackCard }) {
   const id = card.pack_id;
   return (
     <>
-      <ContextMenu.Root>
-        <ContextMenu.Trigger asChild disabled={!id}>
-          <li
-            className="ref-card"
-            data-testid="ref-home-card"
-            data-record-id={card.id}
-            title={
-              // BL-35: relative to the library root, never the absolute path.
-              id
-                ? (card.rel_path ?? card.name)
-                : `${card.rel_path ?? card.name} (not ready: Pocket Forge couldn’t write pack.json)`
-            }
+      <ContextMenu
+        testId="ref-home-card-menu"
+        itemPrefix="ref-home-card"
+        disabled={!id}
+        entries={[
+          { id: 'rename', label: 'Rename', onSelect: () => setRenaming(true) },
+          revealEntry(card.path),
+          { id: 'delete', label: 'Delete', onSelect: () => setDeleting(true) },
+        ]}
+      >
+        <li
+          className="ref-card"
+          data-testid="ref-home-card"
+          data-record-id={card.id}
+          title={
+            // BL-35: relative to the library root, never the absolute path.
+            id
+              ? (card.rel_path ?? card.name)
+              : `${card.rel_path ?? card.name} (not ready: Pocket Forge couldn’t write pack.json)`
+          }
+        >
+          <button
+            type="button"
+            className="ref-card-body"
+            disabled={!id}
+            onClick={() => id && void refs.open(id)}
+            onKeyDown={(e) => {
+              if (e.key === 'F2' && id) {
+                e.preventDefault();
+                setRenaming(true);
+              }
+            }}
           >
-            <button
-              type="button"
-              className="ref-card-body"
-              disabled={!id}
-              onClick={() => id && void refs.open(id)}
-              onKeyDown={(e) => {
-                if (e.key === 'F2' && id) {
-                  e.preventDefault();
-                  setRenaming(true);
-                }
-              }}
-            >
-              {card.thumb_url && !thumbFailed ? (
-                <img
-                  className="ref-thumb"
-                  src={card.thumb_url}
-                  alt=""
-                  loading="lazy"
-                  data-testid="ref-home-card-thumb"
-                  onError={() => setFailedUrl(card.thumb_url)}
-                />
-              ) : (
-                <span className="ref-thumb ref-thumb-empty" data-testid="ref-home-card-thumb">
-                  <IconReferences size={28} />
-                </span>
-              )}
-              <span className="ref-card-name" data-testid="ref-home-card-name">
-                {card.name}
-              </span>
-              <span className="ref-card-line tabular" data-testid="ref-home-card-count">
-                {imagesLabel(card.image_count)}
-              </span>
-              {card.notes_first_line && (
-                <span className="ref-card-line" data-testid="ref-home-card-notes">
-                  {card.notes_first_line}
-                </span>
-              )}
-            </button>
-            {card.badges.length > 0 && (
-              <span className="ref-badges">
-                {card.badges.map((b) => (
-                  <span
-                    key={b}
-                    className={`ref-badge ref-badge-${b}`}
-                    data-testid="ref-home-card-badge"
-                    data-badge={b}
-                  >
-                    {badgeLabel(b)}
-                  </span>
-                ))}
+            {card.thumb_url && !thumbFailed ? (
+              <img
+                className="ref-thumb"
+                src={card.thumb_url}
+                alt=""
+                loading="lazy"
+                data-testid="ref-home-card-thumb"
+                onError={() => setFailedUrl(card.thumb_url)}
+              />
+            ) : (
+              <span className="ref-thumb ref-thumb-empty" data-testid="ref-home-card-thumb">
+                <IconReferences size={28} />
               </span>
             )}
-          </li>
-        </ContextMenu.Trigger>
-        <ContextMenu.Portal>
-          <ContextMenu.Content className="ref-menu" data-testid="ref-home-card-menu">
-            <ContextMenu.Item
-              className="ref-menu-item"
-              data-testid="ref-home-card-rename"
-              onSelect={() => setRenaming(true)}
-            >
-              Rename
-            </ContextMenu.Item>
-            <ContextMenu.Item
-              className="ref-menu-item"
-              data-testid="ref-home-card-delete"
-              onSelect={() => setDeleting(true)}
-            >
-              Delete
-            </ContextMenu.Item>
-          </ContextMenu.Content>
-        </ContextMenu.Portal>
-      </ContextMenu.Root>
+            <span className="ref-card-name" data-testid="ref-home-card-name">
+              {card.name}
+            </span>
+            <span className="ref-card-line tabular" data-testid="ref-home-card-count">
+              {imagesLabel(card.image_count)}
+            </span>
+            {card.notes_first_line && (
+              <span className="ref-card-line" data-testid="ref-home-card-notes">
+                {card.notes_first_line}
+              </span>
+            )}
+          </button>
+          {card.badges.length > 0 && (
+            <span className="ref-badges">
+              {card.badges.map((b) => (
+                <span
+                  key={b}
+                  className={`ref-badge ref-badge-${b}`}
+                  data-testid="ref-home-card-badge"
+                  data-badge={b}
+                >
+                  {badgeLabel(b)}
+                </span>
+              ))}
+            </span>
+          )}
+        </li>
+      </ContextMenu>
       {id && (
         <>
           <NameDialog
@@ -451,55 +442,58 @@ function ImageCard({ img }: { img: PackImage }) {
   const failed = !!img.thumb_url && failedUrl === img.thumb_url;
   const badge = STATE_BADGE[img.state] ?? null;
   return (
-    <li
-      className="ref-card"
-      data-testid="ref-pack-image"
-      data-record-id={img.file}
-      data-state={img.state}
-    >
-      {img.thumb_url && !failed ? (
-        // Lazy: only visible thumbnails load (FR-REF-14).
-        <img
-          className="ref-thumb"
-          src={img.thumb_url}
-          alt=""
-          loading="lazy"
-          onError={() => setFailedUrl(img.thumb_url ?? null)}
-        />
-      ) : (
-        <span className="ref-thumb ref-thumb-empty">
-          <IconReferences size={24} />
-        </span>
-      )}
-      {badge && (
-        <span className="ref-badges">
-          <span className={`ref-badge ref-badge-${img.state}`} data-testid="ref-pack-image-badge">
-            {badge}
+    // #63: Save as… and Open in Explorer; a pack has no exports/ (REF §7).
+    <PackImageMenu path={img.path}>
+      <li
+        className="ref-card"
+        data-testid="ref-pack-image"
+        data-record-id={img.file}
+        data-state={img.state}
+      >
+        {img.thumb_url && !failed ? (
+          // Lazy: only visible thumbnails load (FR-REF-14).
+          <img
+            className="ref-thumb"
+            src={img.thumb_url}
+            alt=""
+            loading="lazy"
+            onError={() => setFailedUrl(img.thumb_url ?? null)}
+          />
+        ) : (
+          <span className="ref-thumb ref-thumb-empty">
+            <IconReferences size={24} />
           </span>
+        )}
+        {badge && (
+          <span className="ref-badges">
+            <span className={`ref-badge ref-badge-${img.state}`} data-testid="ref-pack-image-badge">
+              {badge}
+            </span>
+          </span>
+        )}
+        <span className="ref-card-name" title={img.file}>
+          {img.file}
         </span>
-      )}
-      <span className="ref-card-name" title={img.file}>
-        {img.file}
-      </span>
-      <div className="ref-image-foot">
-        <RoleSelect
-          value={img.role ?? null}
-          roles={ROLES}
-          allowNone
-          label={`Role of ${img.file}`}
-          testId="ref-pack-image-role"
-          onChange={(role) => void refs.setRole(img.file, role)}
-        />
-        <button
-          type="button"
-          className="link small"
-          data-testid="ref-pack-image-remove"
-          onClick={() => void refs.removeImages([img.file])}
-        >
-          Remove
-        </button>
-      </div>
-    </li>
+        <div className="ref-image-foot">
+          <RoleSelect
+            value={img.role ?? null}
+            roles={ROLES}
+            allowNone
+            label={`Role of ${img.file}`}
+            testId="ref-pack-image-role"
+            onChange={(role) => void refs.setRole(img.file, role)}
+          />
+          <button
+            type="button"
+            className="link small"
+            data-testid="ref-pack-image-remove"
+            onClick={() => void refs.removeImages([img.file])}
+          >
+            Remove
+          </button>
+        </div>
+      </li>
+    </PackImageMenu>
   );
 }
 

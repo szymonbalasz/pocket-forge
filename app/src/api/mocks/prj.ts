@@ -83,6 +83,15 @@ export interface PrjMockState {
   trash: Rec[];
   /** Simulates a file dropped into a project folder in Explorer (FR-PRJ-48). */
   addUserFile(projectPath: string, folder: ProjectFolder, file: FolderFile): void;
+  /** #63: what `reveal_in_explorer` would show, as the fake shell seam records it
+   *  (`/select,<path>` for a file, the folder itself otherwise; FR-PRJ-59). */
+  reveals: string[];
+  /** #63: `export_file` inputs that started, and files written to `exports/` (project-relative
+   *  `exports/<name>` → bytes). */
+  fileExports: Rec[];
+  exported: Record<string, number>;
+  /** #63: the last Save as folder (app data). */
+  lastSaveDir: string | null;
   /** Makes the root (un)available, as a disconnected drive would (FR-PRJ-02). */
   setUnavailable(on: boolean): void;
 }
@@ -98,6 +107,9 @@ export function prjMock(
   const fail = (code: string, message: string, extra: Rec = {}) =>
     Promise.reject({ code, message, ...extra });
   const base = (p: string) => p.split(/[\\/]/).pop() ?? p;
+  const norm = (p: string) => p.replace(/\\/g, '/').toLowerCase();
+  const inLibrary = (p: string) =>
+    !/(^|[\\/])\.\.([\\/]|$)/.test(p) && norm(p).startsWith(`${norm(seed.library)}/`);
   const stem = (p: string) => base(p).replace(/\.[^.]*$/, '');
   let ids = 0;
   const nextId = () => `01JMOCKPRJ${String(++ids).padStart(16, '0')}`;
@@ -118,6 +130,10 @@ export function prjMock(
     projects: new Map(),
     openPath: null,
     trash: [],
+    reveals: [],
+    fileExports: [],
+    exported: {},
+    lastSaveDir: null,
     addUserFile(projectPath, folder, file) {
       const p = state.projects.get(projectPath);
       if (!p) return;
@@ -672,6 +688,92 @@ export function prjMock(
       p.conflict = null;
       p.warnings = (p.warnings as Rec[]).filter((w) => w.code !== 'conflict');
       return rev;
+    },
+    // #63 (FR-PRJ-59): the fake shell seam records instead of starting Explorer.
+    reveal_in_explorer: (input) => {
+      const path = String(input.path);
+      if (!inLibrary(path)) return fail('outside_library', 'the path is outside the library');
+      // A file has an extension here; folders don't (close enough for the UI).
+      state.reveals.push(/\.[A-Za-z0-9]+$/.test(base(path)) ? `/select,${path}` : path);
+      return {};
+    },
+    // #63 (FR-EXP-32): one image file to the open project's exports/ or a Save as path. Progress
+    // and done follow as the core's events; the panel's EXP mock (e2e) replaces export_start.
+    export_file: (input) => {
+      const source = String(input.source);
+      const dest = String(input.dest);
+      if (!inLibrary(source)) return fail('outside_library', 'the path is outside the library');
+      const fromExt = (p: string) =>
+        /\.png$/i.test(p)
+          ? 'png'
+          : /\.jpe?g$/i.test(p)
+            ? 'jpeg'
+            : /\.webp$/i.test(p)
+              ? 'webp'
+              : null;
+      const format = dest === 'exports' ? (input.format as string | undefined) : fromExt(dest);
+      if (!format)
+        return fail('invalid_settings', 'the file name must end in .png, .jpg or .webp', {
+          field: dest === 'exports' ? 'format' : 'dest',
+        });
+      let written = dest;
+      if (dest === 'exports') {
+        const p = open();
+        if (!p || !norm(source).startsWith(`${norm(String(p.path))}/`))
+          return fail('invalid_settings', 'a pack image has no exports folder; use Save as', {
+            field: 'dest',
+          });
+        if (p.read_only) return fail('read_only', 'the project is read-only');
+        const rel = source.slice(String(p.path).length + 1).replace(/\\/g, '/');
+        const m = /^results\/(\d{3,}) [^/]*\/(\d+)\.[^.]+$/.exec(rel);
+        const ext = format === 'jpeg' ? 'jpg' : format;
+        const name = m ? `${p.name}_${m[1]}-${m[2]}.${ext}` : `${p.name}_${stem(rel)}.${ext}`;
+        const relPath = `exports/${name}`;
+        if (relPath in state.exported && input.replace !== true)
+          return fail('exists', `${relPath} exists`, {
+            detail: { path: relPath, bytes: state.exported[relPath], mtime: seed.now },
+          });
+        state.exported[relPath] = 12_300_000;
+        written = `${String(p.path)}/${relPath}`;
+      } else {
+        state.lastSaveDir = dest.replace(/[\\/][^\\/]*$/, '');
+      }
+      state.fileExports.push(input);
+      const id = `01JMOCKEXPFILE${String(state.fileExports.length).padStart(12, '0')}`;
+      setTimeout(
+        () => env.emit('export:progress', { export_id: id, phase: 'encode', fraction: 0.5 }),
+        30,
+      );
+      setTimeout(
+        () =>
+          env.emit('export:done', {
+            export_id: id,
+            path: written,
+            width: 512,
+            height: 640,
+            bytes: 12_300_000,
+            format,
+            fallback: null,
+            record_saved: true,
+          }),
+        80,
+      );
+      return { export_id: id };
+    },
+    export_save_default: (input) => {
+      const p = open();
+      const source = input.source ? String(input.source) : null;
+      const ext =
+        (input.format as string | undefined) === 'jpeg'
+          ? 'jpg'
+          : ((input.format as string | undefined) ?? 'png');
+      const name = source
+        ? p && norm(source).startsWith(`${norm(String(p.path))}/`)
+          ? `${p.name}_${stem(source)}.${ext}`
+          : `${stem(source)}.${ext}`
+        : `${p ? String(p.name) : 'export'}.${ext}`;
+      const dir = state.lastSaveDir ?? (p ? `${String(p.path)}/exports` : null);
+      return { path: dir ? `${dir}/${name}` : name };
     },
     project_relink_original: (input) => {
       const p = open();

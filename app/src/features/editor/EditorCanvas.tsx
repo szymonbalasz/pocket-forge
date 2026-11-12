@@ -12,6 +12,7 @@ import {
   type ProjectSnapshot,
   type TilesDescriptor,
 } from '../../api';
+import { CanvasMenu } from '../export';
 import { actions } from './actions';
 import { useTestHook } from './hook';
 import { dispatchShortcut, isControlKey, isTextTarget, type ShortcutMap } from './shortcuts';
@@ -458,109 +459,112 @@ export function EditorCanvas({ project }: { project: ProjectSnapshot }) {
   const panCursor = tool === 'pan' || spaceHeld;
   return (
     <div className="editor">
-      <div
-        ref={containerRef}
-        className={`editor-canvas${panCursor ? ' editor-canvas-pan' : ''}`}
-        data-testid="edt-canvas-stage"
-        tabIndex={-1}
-        data-image-loaded={loaded ? 'true' : 'false'}
-        data-level={tileStats?.level ?? ''}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        onAuxClick={(e) => e.preventDefault()}
-      >
-        {viewport.w > 0 && viewport.h > 0 && (
-          <Stage
-            ref={stageRef}
-            width={viewport.w}
-            height={viewport.h}
-            x={view.tx}
-            y={view.ty}
-            scaleX={view.scale}
-            scaleY={view.scale}
-            listening={false}
-          >
-            <Layer
-              ref={setTilesLayer}
-              name="tiles"
+      {/* #63: right-click → Save as…, Export as ▸, Open in Explorer (EDT §7). */}
+      <CanvasMenu>
+        <div
+          ref={containerRef}
+          className={`editor-canvas${panCursor ? ' editor-canvas-pan' : ''}`}
+          data-testid="edt-canvas-stage"
+          tabIndex={-1}
+          data-image-loaded={loaded ? 'true' : 'false'}
+          data-level={tileStats?.level ?? ''}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          onAuxClick={(e) => e.preventDefault()}
+        >
+          {viewport.w > 0 && viewport.h > 0 && (
+            <Stage
+              ref={stageRef}
+              width={viewport.w}
+              height={viewport.h}
+              x={view.tx}
+              y={view.ty}
+              scaleX={view.scale}
+              scaleY={view.scale}
               listening={false}
-              imageSmoothingEnabled={view.scale * dpr < 1}
-            />
-            <Layer ref={setPatchesLayer} name="patches" listening={false} />
-            <Layer
-              ref={setMaskLayer}
-              name="mask"
-              listening={false}
-              visible={maskVisible}
-              imageSmoothingEnabled={false}
-            />
-            <Layer ref={setCompareLayer} name="compare" listening={false} />
-          </Stage>
-        )}
-        {tools.overlay}
-        {/* FR-GEN-26: alone, fit to view; holding \ shows the working image. */}
-        {compare?.alone && !flipBefore && <PreviewAlone url={compare.url} />}
-        {compare && !compare.alone && compareMode === 'split' && (
-          <CompareDivider view={view} src={compare} split={split} container={containerRef} />
-        )}
-        {compareError && (
-          <div className="banner banner-error editor-banner" data-testid="edt-compare-error">
-            The candidate could not be shown: {compareError}
-          </div>
-        )}
-        {!loaded && !buildErr && !originalMissing && (
-          <div className="editor-spinner" data-testid="edt-loading" aria-label="Loading" />
-        )}
-        {originalMissing && (
-          <div
-            className="banner banner-warning editor-banner"
-            data-testid="edt-original-missing"
-            role="status"
-          >
-            The original image is missing, so there is nothing to edit. Relink it in the project
-            panel to keep working.
-          </div>
-        )}
-        {buildErr && !originalMissing && (
-          <div
-            className="banner banner-error editor-banner"
-            data-testid="edt-build-error"
-            data-code={buildErr.code}
-          >
-            {buildErrorText(buildErr)}{' '}
-            {canRebuild(buildErr) && (
+            >
+              <Layer
+                ref={setTilesLayer}
+                name="tiles"
+                listening={false}
+                imageSmoothingEnabled={view.scale * dpr < 1}
+              />
+              <Layer ref={setPatchesLayer} name="patches" listening={false} />
+              <Layer
+                ref={setMaskLayer}
+                name="mask"
+                listening={false}
+                visible={maskVisible}
+                imageSmoothingEnabled={false}
+              />
+              <Layer ref={setCompareLayer} name="compare" listening={false} />
+            </Stage>
+          )}
+          {tools.overlay}
+          {/* FR-GEN-26: alone, fit to view; holding \ shows the working image. */}
+          {compare?.alone && !flipBefore && <PreviewAlone url={compare.url} />}
+          {compare && !compare.alone && compareMode === 'split' && (
+            <CompareDivider view={view} src={compare} split={split} container={containerRef} />
+          )}
+          {compareError && (
+            <div className="banner banner-error editor-banner" data-testid="edt-compare-error">
+              The candidate could not be shown: {compareError}
+            </div>
+          )}
+          {!loaded && !buildErr && !originalMissing && (
+            <div className="editor-spinner" data-testid="edt-loading" aria-label="Loading" />
+          )}
+          {originalMissing && (
+            <div
+              className="banner banner-warning editor-banner"
+              data-testid="edt-original-missing"
+              role="status"
+            >
+              The original image is missing, so there is nothing to edit. Relink it in the project
+              panel to keep working.
+            </div>
+          )}
+          {buildErr && !originalMissing && (
+            <div
+              className="banner banner-error editor-banner"
+              data-testid="edt-build-error"
+              data-code={buildErr.code}
+            >
+              {buildErrorText(buildErr)}{' '}
+              {canRebuild(buildErr) && (
+                <button
+                  type="button"
+                  className="link"
+                  data-testid="edt-build-rebuild"
+                  onClick={() => void openTiles(true)}
+                >
+                  Rebuild
+                </button>
+              )}
+            </div>
+          )}
+          {layerError && (
+            <div className="banner banner-error editor-banner" data-testid="edt-layer-error">
+              A layer could not be shown: {layerError}
+            </div>
+          )}
+          {!!tileStats?.failed && !originalMissing && (
+            <div className="editor-badge" data-testid="edt-tiles-error" role="status">
+              Some tiles failed to load.{' '}
               <button
                 type="button"
                 className="link"
-                data-testid="edt-build-rebuild"
+                data-testid="edt-tiles-rebuild"
                 onClick={() => void openTiles(true)}
               >
                 Rebuild
               </button>
-            )}
-          </div>
-        )}
-        {layerError && (
-          <div className="banner banner-error editor-banner" data-testid="edt-layer-error">
-            A layer could not be shown: {layerError}
-          </div>
-        )}
-        {!!tileStats?.failed && !originalMissing && (
-          <div className="editor-badge" data-testid="edt-tiles-error" role="status">
-            Some tiles failed to load.{' '}
-            <button
-              type="button"
-              className="link"
-              data-testid="edt-tiles-rebuild"
-              onClick={() => void openTiles(true)}
-            >
-              Rebuild
-            </button>
-          </div>
-        )}
-      </div>
+            </div>
+          )}
+        </div>
+      </CanvasMenu>
     </div>
   );
 }
