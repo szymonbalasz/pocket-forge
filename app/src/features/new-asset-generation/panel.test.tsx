@@ -367,6 +367,7 @@ test('FR-GEN-32 Retry from the tracker fills the New image tab, flags a changed 
   genControls().changeSketch('a-room.png');
 
   await act(async () => fireEvent.click(await screen.findByTestId('rgn-job-retry')));
+  await act(async () => fireEvent.click(await screen.findByTestId('rgn-job-retry-ask-confirm')));
   await waitFor(() => expect(selectedTab()).toBe('new-image'));
   await waitFor(() =>
     expect(screen.getByTestId<HTMLTextAreaElement>('prm-block-prompt').value).toBe('crypt'),

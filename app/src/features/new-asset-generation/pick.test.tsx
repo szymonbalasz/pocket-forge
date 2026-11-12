@@ -157,6 +157,7 @@ test('FR-GEN-32 walk-p4r L6 the Retry note "filled from the job" ends with the n
   await setup();
   await generate('crypt');
   await act(async () => fireEvent.click(await screen.findByTestId('rgn-job-retry')));
+  await act(async () => fireEvent.click(await screen.findByTestId('rgn-job-retry-ask-confirm')));
   await waitFor(() =>
     expect(screen.getByTestId('gen-panel-info').textContent).toContain('filled from the job'),
   );

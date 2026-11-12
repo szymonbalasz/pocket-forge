@@ -785,6 +785,7 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(retry.nextElementSibling).toBe(hint);
     expect(hint.textContent).toBe('Polling stopped. Check the provider first.');
     fireEvent.click(retry);
+    fireEvent.click(screen.getByTestId('rgn-job-retry-ask-confirm'));
     await waitFor(() =>
       expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).value).toBe(
         'first prompt',
@@ -800,7 +801,15 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     act(() => rgn.setPrompt('changed'));
     act(() => rgn.setMargin(32));
     const before = fake.callsOf('rgn_job_estimate').length;
+    // #64: Retry asks first; Cancel leaves the panel as it is.
     fireEvent.click(screen.getByTestId('rgn-job-retry'));
+    expect(screen.getByTestId('rgn-job-retry-ask')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('rgn-job-retry-ask-cancel'));
+    expect(screen.queryByTestId('rgn-job-retry-ask')).toBeNull();
+    expect(fake.callsOf('rgn_job_retry_draft')).toHaveLength(0);
+    expect(rgn.get().prompt).toBe('changed');
+    fireEvent.click(screen.getByTestId('rgn-job-retry'));
+    fireEvent.click(screen.getByTestId('rgn-job-retry-ask-confirm'));
     await waitFor(() =>
       expect((screen.getByTestId('prm-block-prompt') as HTMLTextAreaElement).value).toBe(
         'first prompt',
@@ -835,6 +844,7 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     fireEvent.click(screen.getByTestId('rgn-panel-blend-instruction'));
     expect(rgn.get().blendInstruction).toBe(true);
     fireEvent.click(screen.getByTestId('rgn-job-retry'));
+    fireEvent.click(screen.getByTestId('rgn-job-retry-ask-confirm'));
     await waitFor(() => expect(rgn.get().modelId).toBe('fake-simple'));
     expect(rgn.get().blendInstruction).toBe(false);
     expect(screen.getByTestId('rgn-panel-model').textContent).toContain('Simple');
@@ -855,6 +865,7 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     await waitFor(() => expect(screen.getByTestId('rgn-job-retry')).toBeTruthy());
     act(() => rgn.setValue('num_samples', 1));
     fireEvent.click(screen.getByTestId('rgn-job-retry'));
+    fireEvent.click(screen.getByTestId('rgn-job-retry-ask-confirm'));
     await waitFor(() => expect(rgn.get().values.num_samples).toBe(4));
     expect(rgn.get().touched).toContain('num_samples');
     // The draft written after the retry keeps it (FR-RGN-11).
@@ -876,6 +887,7 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     await waitFor(() => expect(screen.getByTestId('rgn-job-retry')).toBeTruthy());
     all.controls = all.controls.filter((c) => c.role !== 'candidate_count');
     fireEvent.click(screen.getByTestId('rgn-job-retry'));
+    fireEvent.click(screen.getByTestId('rgn-job-retry-ask-confirm'));
     await waitFor(() =>
       expect(rgn.get().notices.some((n) => n.includes('num samples'))).toBe(true),
     );
@@ -1147,7 +1159,7 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(screen.queryByTestId('edt-picker-discard-rest')).toBeNull();
   });
 
-  test('FR-RGN-46 #61 Discard all bins the set (starred too), no confirm; Undo restores it with the star', async () => {
+  test('FR-RGN-46 #61 Discard all bins the set (starred too) after a confirm (#64); Undo restores it with the star', async () => {
     await submitted();
     // Disabled while the job runs (no result set yet: no button at all).
     expect(screen.queryByTestId('rgn-tracker-discard-all')).toBeNull();
@@ -1157,7 +1169,15 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     await waitFor(() => expect(fake.callsOf('rgn_candidate_star')).toHaveLength(1));
     const all = () => screen.getByTestId('rgn-tracker-discard-all') as HTMLButtonElement;
     await waitFor(() => expect(all().disabled).toBe(false));
+    // #64: it asks first; Cancel bins nothing.
     fireEvent.click(all());
+    expect(screen.getByTestId('rgn-tracker-discard-all-ask').textContent).toMatch(
+      /Discard all 3 results of 001\?/,
+    );
+    fireEvent.click(screen.getByTestId('rgn-tracker-discard-all-ask-cancel'));
+    expect(fake.callsOf('rgn_iteration_discard_all')).toHaveLength(0);
+    fireEvent.click(all());
+    fireEvent.click(screen.getByTestId('rgn-tracker-discard-all-ask-confirm'));
     await waitFor(() => expect(fake.callsOf('rgn_iteration_discard_all')).toHaveLength(1));
     expect(screen.queryByTestId('rgn-confirm-ok')).toBeNull();
     await waitFor(() => expect(screen.queryAllByTestId('edt-picker-item')).toHaveLength(0));
@@ -1178,6 +1198,7 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(screen.queryByTestId('rgn-tracker-notice')).toBeNull();
     // And a second Discard all here shows only its own notice.
     fireEvent.click(all());
+    fireEvent.click(screen.getByTestId('rgn-tracker-discard-all-ask-confirm'));
     await waitFor(() => expect(fake.callsOf('rgn_iteration_discard_all')).toHaveLength(2));
     await waitFor(() =>
       expect(screen.getAllByTestId('rgn-tracker-notice').map((n) => n.textContent)).toEqual([

@@ -128,6 +128,7 @@ test('FR-GEN-32 FR-PRM-10 Retry ticks the job helpers again and badges a changed
   );
   act(() => gen.setPromptHelpers([]));
   await act(async () => fireEvent.click(screen.getByTestId('rgn-job-retry')));
+  await act(async () => fireEvent.click(screen.getByTestId('rgn-job-retry-ask-confirm')));
   await waitFor(() => expect(chip(NO_PEOPLE).getAttribute('aria-pressed')).toBe('true'));
   expect(gen.get().promptHelpers).toEqual([NO_PEOPLE]);
   expect(screen.getByTestId('prm-block-helper-changed').textContent).toBe('changed since 001');
