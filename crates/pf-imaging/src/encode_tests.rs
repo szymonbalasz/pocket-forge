@@ -291,3 +291,31 @@ fn jpeg_refuses_sides_over_65535() {
         })
     ));
 }
+
+#[test]
+fn fr_exp_32_png_rgba_keeps_alpha_and_reports_progress() {
+    let img = RgbaImage::from_fn(70, 1100, |x, y| {
+        image::Rgba([
+            (x * 3) as u8,
+            (y % 256) as u8,
+            9,
+            if x < 35 { 0 } else { 255 },
+        ])
+    });
+    let mut out = Vec::new();
+    let mut reports = Vec::new();
+    encode_png_rgba(&img, &mut out, &mut |p, f| {
+        reports.push((p, f));
+        ControlFlow::Continue(())
+    })
+    .unwrap();
+    let back = image::load_from_memory(&out).unwrap();
+    assert!(back.color().has_alpha());
+    assert_eq!(back.to_rgba8(), img);
+    // One report per band of STRIP_H rows, ending at 1.
+    assert_eq!(reports.len(), 3);
+    assert_eq!(reports.last(), Some(&(Phase::Encode, 1.0)));
+    // A cancel stops it.
+    let err = encode_png_rgba(&img, Vec::new(), &mut |_, _| ControlFlow::Break(())).unwrap_err();
+    assert!(matches!(err, EncodeError::Canceled));
+}

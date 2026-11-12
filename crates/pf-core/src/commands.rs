@@ -27,7 +27,7 @@ const MAX_PATHS: usize = 10_000;
 const MAX_LABEL_CHARS: usize = 200;
 const MAX_PROMPT_CHARS: usize = 20_000;
 
-fn check_path(field: &str, p: &str) -> CoreResult<()> {
+pub(crate) fn check_path(field: &str, p: &str) -> CoreResult<()> {
     if p.trim().is_empty() {
         return Err(CoreError::invalid(field, "the path is empty"));
     }
@@ -1469,7 +1469,8 @@ pub use crate::project::commands::{
 
 /// Export commands live in their own module (export spec §9).
 pub use crate::export::commands::{
-    ExportCancel, ExportGetSettings, ExportPlan, ExportSetSettings, ExportStart,
+    ExportCancel, ExportFile, ExportGetSettings, ExportPlan, ExportSaveDefault, ExportSetSettings,
+    ExportStart,
 };
 
 // ---------------------------------------------------------------- prompt helper
@@ -1615,6 +1616,8 @@ registry![
     ProjectDelete,
     LibraryTrashList,
     LibraryTrashRestore,
+    ExportFile,
+    ExportSaveDefault,
 ];
 
 #[cfg(test)]

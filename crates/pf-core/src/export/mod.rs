@@ -35,11 +35,19 @@ pub use settings::{ExportFormat, ExportSettings, Grid, GridMode, Plan};
 /// Settings are committed this long after the last change (R30, FR-PRJ-19).
 pub const DRAFT_SAVE_AFTER: Duration = Duration::from_secs(2);
 
+/// What a running export holds (FR-EXP-21, 33): one export per asset project, whether from the
+/// panel, a menu or a Save as; a pack image's Save as holds the app-wide pack slot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Scope {
+    Project(Ulid),
+    Pack,
+}
+
 /// A running export (FR-EXP-21: one per asset project).
 #[derive(Debug, Clone)]
 pub(crate) struct Running {
     pub id: Ulid,
-    pub project_id: Ulid,
+    pub scope: Scope,
     pub cancel: Arc<AtomicBool>,
 }
 
@@ -83,7 +91,23 @@ impl ExpState {
 
     /// Whether an export of this project is running (FR-EXP-21).
     pub(crate) fn is_running(&self, project_id: Ulid) -> bool {
-        self.running.iter().any(|r| r.project_id == project_id)
+        self.holds(Scope::Project(project_id))
+    }
+
+    /// Whether an export holds this slot (FR-EXP-33).
+    pub(crate) fn holds(&self, scope: Scope) -> bool {
+        self.running.iter().any(|r| r.scope == scope)
+    }
+
+    /// Cancels every export of a project (a close, rename or delete; never a pack's Save as).
+    fn cancel_project(&self, project_id: Ulid) {
+        for r in self
+            .running
+            .iter()
+            .filter(|r| r.scope == Scope::Project(project_id))
+        {
+            r.cancel.store(true, Ordering::SeqCst);
+        }
     }
 
     pub(crate) fn finish(&mut self, id: Ulid) {
@@ -302,9 +326,7 @@ pub(crate) fn on_project_moving(ctx: &Context, state: &mut State) {
         if let Err(e) = flush_pending(ctx, state, true) {
             tracing::warn!(error = %e, "export settings not saved before the folder moves");
         }
-        for r in state.exp.running.iter().filter(|r| r.project_id == id) {
-            r.cancel.store(true, Ordering::SeqCst);
-        }
+        state.exp.cancel_project(id);
     }
 }
 
@@ -315,9 +337,7 @@ pub(crate) fn on_project_close(ctx: &Context, state: &mut State) {
         if let Err(e) = flush_pending(ctx, state, true) {
             tracing::warn!(error = %e, "export settings not saved on close");
         }
-        for r in state.exp.running.iter().filter(|r| r.project_id == id) {
-            r.cancel.store(true, Ordering::SeqCst);
-        }
+        state.exp.cancel_project(id);
     }
     state.exp.reset();
 }

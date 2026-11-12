@@ -137,6 +137,43 @@ pub fn root_of(ctx: &Context, settings: &Settings, path: &Path) -> Option<PathBu
         .find(|r| same_or_inside(path, r))
 }
 
+/// A canonical path in its usual form: Windows' `\?\` prefix dropped (`\?\C:\x` → `C:\x`,
+/// `\?\UNC\srv\share` → `\srv\share`), so Explorer and the UI read it.
+pub fn plain_path(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\?\UNC\") {
+        return PathBuf::from(format!(r"\{rest}"));
+    }
+    if let Some(rest) = s.strip_prefix(r"\?\") {
+        return PathBuf::from(rest);
+    }
+    p
+}
+
+/// FR-PRJ-59, FR-EXP-32: `path` with `..` and links resolved, if it's inside a configured root
+/// (also resolved). `outside_library` otherwise; `not_found` for a missing path inside a root
+/// (a missing path is checked lexically).
+pub fn resolve_in_library(ctx: &Context, settings: &Settings, path: &Path) -> CoreResult<PathBuf> {
+    let lexical = std::path::absolute(path)
+        .map(|p| normalise(&p))
+        .map_err(|e| CoreError::io("resolving the path", &e))?;
+    let outside = || CoreError::new(ErrorCode::OutsideLibrary, "the path is outside the library");
+    let Ok(real) = std::fs::canonicalize(&lexical).map(plain_path) else {
+        return Err(match root_of(ctx, settings, &lexical) {
+            Some(_) => CoreError::new(
+                ErrorCode::NotFound,
+                format!("{} not found", lexical.display()),
+            ),
+            None => outside(),
+        });
+    };
+    let inside = effective_roots(ctx, settings).into_iter().any(|r| {
+        let root = std::fs::canonicalize(&r).map(plain_path).unwrap_or(r);
+        same_or_inside(&real, &root)
+    });
+    if inside { Ok(real) } else { Err(outside()) }
+}
+
 /// Validates new roots (FR-PRJ-01): each must exist, be a writable folder, and not be nested in
 /// another root or in `<data-dir>`. Each violation is a field-level error (`roots[i]`).
 pub fn validate_roots(ctx: &Context, roots: &[PathBuf]) -> CoreResult<()> {

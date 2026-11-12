@@ -368,3 +368,74 @@ pub fn check_destination(dir: &Path) -> CoreResult<()> {
 pub fn stamp(t: Timestamp) -> Value {
     serde_json::to_value(t).unwrap_or(Value::Null)
 }
+
+/// `invalid_settings{field: dest}` (FR-EXP-31, 32).
+fn invalid_dest(message: impl Into<String>) -> CoreError {
+    CoreError::new(ErrorCode::InvalidSettings, message).with_field("dest")
+}
+
+/// FR-EXP-31: a Save as path from the dialog and the format its extension picks (`.png`,
+/// `.jpg`/`.jpeg`, `.webp`, any case); `invalid_settings{field: dest}` otherwise.
+pub fn save_as_target(dest: &str) -> CoreResult<(std::path::PathBuf, ExportFormat)> {
+    let path = Path::new(dest);
+    if !path.is_absolute() {
+        return Err(invalid_dest("the Save as path must be absolute"));
+    }
+    let format = format_of_extension(path)
+        .ok_or_else(|| invalid_dest("the file name must end in .png, .jpg, .jpeg or .webp"))?;
+    Ok((crate::library::normalise(path), format))
+}
+
+/// FR-EXP-31: the Save as folder must be there (it's never made); `dest_unavailable` otherwise.
+pub fn check_save_dir(path: &Path) -> CoreResult<()> {
+    match path.parent() {
+        Some(dir) if dir.is_dir() => Ok(()),
+        _ => Err(CoreError::new(
+            ErrorCode::DestUnavailable,
+            "the folder isn't there (moved or offline?)",
+        )),
+    }
+}
+
+/// A file name's stem (`01.png` → `01`).
+fn stem(file: &str) -> &str {
+    file.rsplit_once('.').map_or(file, |(s, _)| s)
+}
+
+/// FR-EXP-32: a single file's name in `exports/`. `results/NNN <slug>/NN.<ext>` (a candidate)
+/// → `<project>_<NNN>-<NN>.<ext>`; any other file (`rel`: project-relative, `/`) →
+/// `<project>_<file stem>.<ext>`.
+pub fn file_export_name(project: &str, rel: &str, format: ExportFormat) -> String {
+    let parts: Vec<&str> = rel.split('/').collect();
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    if let [dir, iteration, file] = parts.as_slice()
+        && *dir == crate::manifest::RESULTS_DIR
+    {
+        let nnn = iteration.split(' ').next().unwrap_or("");
+        let nn = stem(file);
+        if nnn.len() >= 3 && digits(nnn) && digits(nn) {
+            return format!("{project}_{nnn}-{nn}.{}", format.ext());
+        }
+    }
+    let file = parts.last().copied().unwrap_or(rel);
+    format!("{project}_{}.{}", stem(file), format.ext())
+}
+
+/// A pack image's (or any non-project file's) Save as name: its own stem (FR-EXP-32).
+pub fn plain_export_name(file: &str, format: ExportFormat) -> String {
+    format!("{}.{}", stem(file), format.ext())
+}
+
+/// The format a file's extension names, if it is one the export writes.
+pub fn format_of_extension(path: &Path) -> Option<ExportFormat> {
+    match path
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("png") => Some(ExportFormat::Png),
+        Some("jpg" | "jpeg") => Some(ExportFormat::Jpeg),
+        Some("webp") => Some(ExportFormat::Webp),
+        _ => None,
+    }
+}

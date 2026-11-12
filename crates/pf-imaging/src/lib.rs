@@ -34,7 +34,7 @@ pub use compose::{
 };
 pub use encode::{
     EncodeError, ImageRows, JPEG_MAX_SIDE, JPEG_QUALITY, Phase, Progress, RowSource, encode_jpeg,
-    encode_png,
+    encode_png, encode_png_rgba,
 };
 pub use probe::{
     ImageFormat, ImageInfo, MAX_SIDE, ProbeError, check_complete, has_image_extension, probe_bytes,
@@ -52,5 +52,5 @@ pub use sizing::{
 };
 pub use webp::{
     LibWebp, WEBP_MAX_SIDE, WEBP_QUALITY, WebpEncoder, WebpMode, WebpOutput, encode_webp,
-    encode_webp_with,
+    encode_webp_rgba, encode_webp_with,
 };

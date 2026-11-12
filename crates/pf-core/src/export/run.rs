@@ -14,7 +14,8 @@ use image::{RgbImage, RgbaImage};
 use pf_imaging::{
     COMPOSE_VERSION, ComposeError, EncodeError, ImageRows, Layer as ImgLayer, LayerStack, LibWebp,
     Phase, Placement, STRIP_H, StripFlattener, WebpEncoder, encode_jpeg, encode_png,
-    encode_webp_with, flatten_full, resize_lanczos3,
+    encode_png_rgba, encode_webp_rgba, encode_webp_with, flatten_full, resize_lanczos3,
+    to_rgb8_flattened,
 };
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -76,20 +77,53 @@ impl std::fmt::Debug for ExportSeams {
     }
 }
 
+/// Where an export is written.
+pub(crate) enum Dest {
+    /// The project's `exports/` (FR-EXP-13): the folder is made if missing and FR-EXP-17's stale
+    /// temps are swept. `record`: `last` is committed after the rename (FR-EXP-27, 30).
+    Exports {
+        path: PathBuf,
+        /// Project-relative (`exports/…`).
+        rel_path: String,
+        record: bool,
+    },
+    /// A path from the save dialog (FR-EXP-31, 32): only this export's own temp is ever removed
+    /// there, nothing is recorded, and the folder becomes the last Save as folder.
+    SaveAs(PathBuf),
+}
+
+impl Dest {
+    pub fn path(&self) -> &Path {
+        match self {
+            Dest::Exports { path, .. } | Dest::SaveAs(path) => path,
+        }
+    }
+}
+
+/// What an export reads.
+pub(crate) enum Input {
+    /// The layer stack (FR-EXP-21: the snapshot taken at start).
+    Stack {
+        project_dir: PathBuf,
+        rescale: bool,
+        original: Arc<RgbImage>,
+        layers: Vec<Layer>,
+        head_revision: Ulid,
+    },
+    /// One image file (FR-EXP-32): `copy` = the bytes as they are (same format), else decoded
+    /// and encoded at its own size.
+    File { path: PathBuf, copy: bool },
+}
+
 /// Everything an export needs, taken at start (FR-EXP-21: the stack snapshot).
 pub(crate) struct ExportJob {
     pub id: Ulid,
-    pub project_id: Ulid,
-    pub project_dir: PathBuf,
-    /// Project-relative destination (`exports/…`).
-    pub rel_path: String,
+    pub scope: super::Scope,
+    pub input: Input,
+    pub dest: Dest,
     pub format: ExportFormat,
     pub width: u32,
     pub height: u32,
-    pub rescale: bool,
-    pub original: Arc<RgbImage>,
-    pub layers: Vec<Layer>,
-    pub head_revision: Ulid,
     pub cancel: Arc<AtomicBool>,
     pub seams: Arc<ExportSeams>,
 }
@@ -215,10 +249,14 @@ impl Reporter<'_> {
 }
 
 /// Decodes the drawn patch layers of the snapshot (FR-EXP-22: none skipped, none partial).
-fn layer_stack(job: &ExportJob, r: &mut Reporter<'_>) -> Result<LayerStack, Stop> {
+fn layer_stack(
+    project_dir: &Path,
+    original: &Arc<RgbImage>,
+    all: &[Layer],
+    r: &mut Reporter<'_>,
+) -> Result<LayerStack, Stop> {
     let mut layers = Vec::new();
-    let drawn: Vec<&Layer> = job
-        .layers
+    let drawn: Vec<&Layer> = all
         .iter()
         .filter(|l| l.kind == LayerKind::Patch && l.visible && l.opacity > 0.0)
         .collect();
@@ -236,7 +274,7 @@ fn layer_stack(job: &ExportJob, r: &mut Reporter<'_>) -> Result<LayerStack, Stop
             .file
             .as_deref()
             .ok_or_else(|| unreadable("it has no file".into()))?;
-        let image: RgbaImage = image::open(job.project_dir.join(file))
+        let image: RgbaImage = image::open(project_dir.join(file))
             .map_err(|e| unreadable(e.to_string()))?
             .to_rgba8();
         layers.push(ImgLayer {
@@ -252,7 +290,7 @@ fn layer_stack(job: &ExportJob, r: &mut Reporter<'_>) -> Result<LayerStack, Stop
         });
         r.check(Phase::Compose, 0.0)?;
     }
-    LayerStack::new(job.original.clone(), &layers).map_err(compose_stop)
+    LayerStack::new(original.clone(), &layers).map_err(compose_stop)
 }
 
 /// FR-EXP-17: removes `.*.pf-tmp-*` files older than an hour in the destination folder.
@@ -321,6 +359,7 @@ fn with_heartbeat<T: Send>(
 /// Encodes into the open temp file.
 fn encode_into(
     job: &ExportJob,
+    rescale: bool,
     stack: &LayerStack,
     file: &File,
     r: &mut Reporter<'_>,
@@ -328,7 +367,7 @@ fn encode_into(
     let seams = &*job.seams;
     let mut out = BufWriter::with_capacity(1 << 20, file);
     let mut progress = |phase: Phase, f: f32| r.report(phase, f);
-    let streams = !job.rescale && job.format != ExportFormat::Webp;
+    let streams = !rescale && job.format != ExportFormat::Webp;
     let mut fallback = false;
     if streams {
         // Strips are flattened as the encoder needs them (ADR 0004, FR-EXP-09).
@@ -347,7 +386,7 @@ fn encode_into(
             }
         })
         .map_err(|e| encode_stop(seams, e))?;
-        let image = if job.rescale {
+        let image = if rescale {
             if progress(Phase::Resize, 0.0).is_break() {
                 return Err(Stop::Canceled);
             }
@@ -406,6 +445,100 @@ fn encode_into(
     Ok(fallback)
 }
 
+/// FR-EXP-32: copies a same-format source into the open temp file, as it is.
+fn copy_into(
+    source: &Path,
+    file: &File,
+    seams: &ExportSeams,
+    r: &mut Reporter<'_>,
+) -> Result<(), Stop> {
+    let mut input = File::open(source).map_err(|e| io_stop(seams, "reading the image", &e))?;
+    let total = input.metadata().map(|m| m.len()).unwrap_or(0).max(1);
+    let mut out = BufWriter::with_capacity(1 << 20, file);
+    let mut buf = vec![0u8; 1 << 20];
+    let mut done = 0u64;
+    loop {
+        let n = io::Read::read(&mut input, &mut buf)
+            .map_err(|e| io_stop(seams, "reading the image", &e))?;
+        if n == 0 {
+            break;
+        }
+        out.write_all(&buf[..n])
+            .map_err(|e| io_stop(seams, "writing the export", &e))?;
+        done += n as u64;
+        r.check(Phase::Write, (done as f32 / total as f32).min(1.0) * 0.5)?;
+    }
+    out.flush()
+        .map_err(|e| io_stop(seams, "writing the export", &e))
+}
+
+/// FR-EXP-32: decodes a source file and encodes it at its own size, with no resample. PNG and
+/// WebP keep its alpha; JPEG flattens it over the flatten colour `#808080` (#60). Returns the
+/// WebP lossless fallback flag.
+fn convert_into(
+    job: &ExportJob,
+    source: &Path,
+    file: &File,
+    r: &mut Reporter<'_>,
+) -> Result<bool, Stop> {
+    let seams = &*job.seams;
+    r.check(Phase::Compose, 0.0)?;
+    let decoded = image::open(source).map_err(|e| {
+        failure(
+            ErrorCode::Corrupt,
+            format!("{} can't be decoded: {e}", source.display()),
+        )
+    })?;
+    r.check(Phase::Compose, 1.0)?;
+    let alpha = decoded.color().has_alpha();
+    let mut out = BufWriter::with_capacity(1 << 20, file);
+    let mut progress = |phase: Phase, f: f32| r.report(phase, f);
+    let mut fallback = false;
+    match job.format {
+        ExportFormat::Png if alpha => {
+            encode_png_rgba(&decoded.into_rgba8(), &mut out, &mut progress)
+                .map_err(|e| encode_stop(seams, e))?;
+        }
+        ExportFormat::Png => {
+            let rgb = decoded.into_rgb8();
+            encode_png(
+                &mut ImageRows::new(&rgb),
+                &mut out,
+                Phase::Encode,
+                &mut progress,
+            )
+            .map_err(|e| encode_stop(seams, e))?;
+        }
+        ExportFormat::Jpeg => {
+            let rgb = to_rgb8_flattened(decoded);
+            encode_jpeg(
+                &mut ImageRows::new(&rgb),
+                &mut out,
+                Phase::Encode,
+                &mut progress,
+            )
+            .map_err(|e| encode_stop(seams, e))?;
+        }
+        ExportFormat::Webp => {
+            let webp = if alpha {
+                encode_webp_rgba(&decoded.into_rgba8(), &mut progress)
+            } else {
+                encode_webp_with(&*seams.webp, &decoded.into_rgb8(), &mut progress)
+            }
+            .map_err(|e| encode_stop(seams, e))?;
+            fallback = webp.lossless_fallback;
+            if progress(Phase::Write, 0.0).is_break() {
+                return Err(Stop::Canceled);
+            }
+            out.write_all(&webp.bytes)
+                .map_err(|e| io_stop(seams, "writing the export", &e))?;
+        }
+    }
+    out.flush()
+        .map_err(|e| io_stop(seams, "writing the export", &e))?;
+    Ok(fallback)
+}
+
 /// A finished export.
 struct Done {
     path: PathBuf,
@@ -422,27 +555,58 @@ fn export(ctx: &Context, job: &ExportJob) -> Result<Done, Stop> {
         reports: AtomicUsize::new(0),
     };
     r.check(Phase::Compose, 0.0)?;
-    let dest = super::settings::abs_path(&job.project_dir, &job.rel_path);
+    let dest = job.dest.path().to_path_buf();
     let dir = dest
         .parent()
         .ok_or_else(|| failure(ErrorCode::Internal, "no destination folder"))?;
-    fs::create_dir_all(dir).map_err(|e| {
-        Stop::Failed(CoreError::new(
-            ErrorCode::DestUnavailable,
-            format!("creating {}: {e}", dir.display()),
-        ))
-    })?;
-    sweep_stale_temps(dir);
-    let stack = layer_stack(job, &mut r)?;
+    let dest_unavailable = |e: String| Stop::Failed(CoreError::new(ErrorCode::DestUnavailable, e));
+    match &job.dest {
+        Dest::Exports { .. } => {
+            fs::create_dir_all(dir)
+                .map_err(|e| dest_unavailable(format!("creating {}: {e}", dir.display())))?;
+            sweep_stale_temps(dir);
+        }
+        // FR-EXP-31: never made, never swept; only this export's temp is removed there.
+        Dest::SaveAs(_) if !dir.is_dir() => {
+            return Err(dest_unavailable(format!("{} is not there", dir.display())));
+        }
+        Dest::SaveAs(_) => {}
+    }
+    let stack = match &job.input {
+        Input::Stack {
+            project_dir,
+            original,
+            layers,
+            ..
+        } => Some(layer_stack(project_dir, original, layers, &mut r)?),
+        Input::File { .. } => None,
+    };
 
     let tmp = crate::fsx::temp_path(ctx, &dest);
     let file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(&tmp)
-        .map_err(|e| io_stop(seams, "creating the temp file", &e))?;
+        .map_err(|e| match (&job.dest, e.kind()) {
+            (Dest::SaveAs(_), io::ErrorKind::PermissionDenied | io::ErrorKind::NotFound) => {
+                dest_unavailable(format!("{} can't be written: {e}", dir.display()))
+            }
+            _ => io_stop(seams, "creating the temp file", &e),
+        })?;
     let result = (|| {
-        let fallback = encode_into(job, &stack, &file, &mut r)?;
+        let fallback = match (&job.input, &stack) {
+            (Input::Stack { rescale, .. }, Some(stack)) => {
+                encode_into(job, *rescale, stack, &file, &mut r)?
+            }
+            (Input::File { path, copy: true }, _) => {
+                copy_into(path, &file, seams, &mut r)?;
+                false
+            }
+            (Input::File { path, .. }, _) => convert_into(job, path, &file, &mut r)?,
+            (Input::Stack { .. }, None) => {
+                return Err(failure(ErrorCode::Internal, "no layer stack"));
+            }
+        };
         r.check(Phase::Write, 0.0)?;
         file.sync_all()
             .map_err(|e| io_stop(seams, "flushing the export", &e))?;
@@ -474,13 +638,26 @@ fn export(ctx: &Context, job: &ExportJob) -> Result<Done, Stop> {
     })
 }
 
-/// Commits `last` (FR-EXP-27) if the project is still open; false if it couldn't.
+/// Commits `last` (FR-EXP-27, 30) if the export records one and its project is still open; false
+/// if it couldn't.
 fn commit_last(ctx: &Context, state: &mut State, job: &ExportJob, done: &Done) -> bool {
+    let (
+        Dest::Exports { rel_path, .. },
+        Input::Stack {
+            layers,
+            head_revision,
+            ..
+        },
+        super::Scope::Project(project_id),
+    ) = (&job.dest, &job.input, job.scope)
+    else {
+        return false;
+    };
     let install_id = state.settings.install_id;
     let Some(p) = state
         .project
         .as_mut()
-        .filter(|p| p.manifest.project_id == job.project_id)
+        .filter(|p| p.manifest.project_id == project_id)
     else {
         return false;
     };
@@ -489,9 +666,9 @@ fn commit_last(ctx: &Context, state: &mut State, job: &ExportJob, done: &Done) -
         "last".into(),
         json!({
             "at": stamp(ctx.now()),
-            "revision_id": job.head_revision,
-            "layers_hash": layers_hash(&job.layers),
-            "path": job.rel_path,
+            "revision_id": head_revision,
+            "layers_hash": layers_hash(layers),
+            "path": rel_path,
             "format": job.format.as_str(),
             "width": job.width,
             "height": job.height,
@@ -510,6 +687,23 @@ fn commit_last(ctx: &Context, state: &mut State, job: &ExportJob, done: &Done) -
     }
 }
 
+/// FR-EXP-31: the folder of a Save as that succeeded becomes the last Save as folder (app data,
+/// never a project file). A failed settings write is only logged: the file is written.
+fn remember_save_dir(ctx: &Context, state: &mut State, path: &Path) {
+    let Some(dir) = path.parent() else {
+        return;
+    };
+    if state.settings.export.last_save_dir.as_deref() == Some(dir) {
+        return;
+    }
+    let mut next = state.settings.clone();
+    next.export.last_save_dir = Some(dir.to_path_buf());
+    match crate::settings::save(ctx, &next) {
+        Ok(()) => state.settings = next,
+        Err(e) => tracing::warn!(error = %e, "the last Save as folder wasn't saved"),
+    }
+}
+
 /// Runs one export to its end and emits `export:done`, `export:failed` or `export:canceled`.
 pub(crate) fn run(ctx: &Context, state: &Mutex<State>, job: ExportJob) {
     let result = export(ctx, &job);
@@ -518,7 +712,15 @@ pub(crate) fn run(ctx: &Context, state: &Mutex<State>, job: ExportJob) {
         Ok(done) => {
             let record_saved = {
                 let mut s = lock();
-                let saved = commit_last(ctx, &mut s, &job, &done);
+                let saved = match &job.dest {
+                    Dest::Exports { record: true, .. } => commit_last(ctx, &mut s, &job, &done),
+                    // Nothing to record (FR-EXP-31, 32).
+                    Dest::Exports { .. } => true,
+                    Dest::SaveAs(path) => {
+                        remember_save_dir(ctx, &mut s, path);
+                        true
+                    }
+                };
                 s.exp.finish(job.id);
                 saved
             };
