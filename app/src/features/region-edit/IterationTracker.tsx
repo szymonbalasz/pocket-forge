@@ -45,7 +45,7 @@ export function useNow(on: boolean): number {
 }
 
 /** #61: "Discard all" of a result set: every kept result to the trash (never the accepted one);
- *  the toast offers Undo. #63: asks first. Disabled while its job runs or nothing is left. */
+ *  the toast offers Undo. #64: asks first. Disabled while its job runs or nothing is left. */
 function DiscardAll({ row, state }: { row: RgnIteration; state: RgnIteration['state'] }) {
   const readOnly = (useProjectState().project?.read_only ?? null) !== null;
   const [asking, setAsking] = useState(false);
@@ -91,7 +91,7 @@ function DiscardAll({ row, state }: { row: RgnIteration; state: RgnIteration['st
   );
 }
 
-/** FR-RGN-21: Retry pre-fills the panel from the job. #63: it asks first, since it replaces
+/** FR-RGN-21: Retry pre-fills the panel from the job. #64: it asks first, since it replaces
  *  what the panel holds now. */
 function RetryButton({ row, className }: { row: RgnIteration; className?: string }) {
   const [asking, setAsking] = useState(false);

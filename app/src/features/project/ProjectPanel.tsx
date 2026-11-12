@@ -759,7 +759,7 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
   const [items, setItems] = useState<RgnIteration[]>([]);
   const [cands, setCands] = useState<CandidateRecord[]>([]);
   const [notice, setNotice] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
-  // #63: the iteration whose Discard all waits for its confirm.
+  // #64: the iteration whose Discard all waits for its confirm.
   const [asking, setAsking] = useState<{ it: RgnIteration; left: number } | null>(null);
   const trash = useProjectState().trashNotice;
   const load = useCallback(() => {
@@ -791,7 +791,7 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
       (e: unknown) => setNotice({ kind: 'error', text: sentence(errorOf(e).message) }),
     );
   // #61: every kept result of the iteration to the trash (never the accepted one), after a
-  // confirm (#63); the notice offers Undo, which puts each back as it was (star included). walk-61 L2: "N
+  // confirm (#64); the notice offers Undo, which puts each back as it was (star included). walk-61 L2: "N
   // results restored." is the one trash notice too, so a later discard anywhere replaces it.
   const undoAll = (undoId: string) => {
     projectStore.setTrashNotice(null);

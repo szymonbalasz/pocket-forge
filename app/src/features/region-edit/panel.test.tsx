@@ -801,7 +801,7 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     act(() => rgn.setPrompt('changed'));
     act(() => rgn.setMargin(32));
     const before = fake.callsOf('rgn_job_estimate').length;
-    // #63: Retry asks first; Cancel leaves the panel as it is.
+    // #64: Retry asks first; Cancel leaves the panel as it is.
     fireEvent.click(screen.getByTestId('rgn-job-retry'));
     expect(screen.getByTestId('rgn-job-retry-ask')).toBeTruthy();
     fireEvent.click(screen.getByTestId('rgn-job-retry-ask-cancel'));
@@ -1159,7 +1159,7 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     expect(screen.queryByTestId('edt-picker-discard-rest')).toBeNull();
   });
 
-  test('FR-RGN-46 #61 Discard all bins the set (starred too) after a confirm (#63); Undo restores it with the star', async () => {
+  test('FR-RGN-46 #61 Discard all bins the set (starred too) after a confirm (#64); Undo restores it with the star', async () => {
     await submitted();
     // Disabled while the job runs (no result set yet: no button at all).
     expect(screen.queryByTestId('rgn-tracker-discard-all')).toBeNull();
@@ -1169,7 +1169,7 @@ describe('job strip, iteration tracker and picker (FR-RGN-18..21, 40)', { timeou
     await waitFor(() => expect(fake.callsOf('rgn_candidate_star')).toHaveLength(1));
     const all = () => screen.getByTestId('rgn-tracker-discard-all') as HTMLButtonElement;
     await waitFor(() => expect(all().disabled).toBe(false));
-    // #63: it asks first; Cancel bins nothing.
+    // #64: it asks first; Cancel bins nothing.
     fireEvent.click(all());
     expect(screen.getByTestId('rgn-tracker-discard-all-ask').textContent).toMatch(
       /Discard all 3 results of 001\?/,

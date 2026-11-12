@@ -699,7 +699,7 @@ test('FR-RGN-46 #61 Results: Discard all bins the opened iteration but the accep
   await waitFor(() => expect(rows()).toEqual(['C1', 'C2', 'C3']));
   const all = () => screen.getByTestId('prj-results-discard-all') as HTMLButtonElement;
   expect(all().disabled).toBe(false);
-  // #63: it asks first; Cancel bins nothing.
+  // #64: it asks first; Cancel bins nothing.
   fireEvent.click(all());
   expect(screen.getByTestId('prj-results-discard-all-ask').textContent).toMatch(
     /Discard all 2 results of 001\?/,

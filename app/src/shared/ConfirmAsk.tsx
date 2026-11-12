@@ -1,4 +1,4 @@
-// A small modal "are you sure?" for one-click actions that are easy to hit by accident (#63:
+// A small modal "are you sure?" for one-click actions that are easy to hit by accident (#64:
 // Retry, Discard all). Cancel has the focus, so Enter or Escape backs out.
 import type { ReactNode, SyntheticEvent } from 'react';
 import { Dialog } from 'radix-ui';
