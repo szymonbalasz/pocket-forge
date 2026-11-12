@@ -264,6 +264,7 @@ Owner of the meaning: [asset-project](../specs/asset-project.md) (FR-PRJ-57, 58,
 | `provider` | `team_id?`, `project_id?` (never credentials; those are in the OS store) | PRV |
 | `region_edit` | `blend_instruction?` (string ≤ 2000 chars; absent = the built-in default text, #55) | RGN |
 | `prompt_helpers` | `helpers[]` in settings order: a built-in is `{id, label?, text?, kinds?, default_on?, hidden?}` (overrides only; `{id}` = unmodified), a user-made one `{id (ULID), label, text, kinds[], default_on, hidden?}`. Absent = the starter set. Invalid → the starter set + a warning; the section is kept until the next save ([prompt-helper](../specs/prompt-helper.md) FR-PRM-01/02, §11) | PRM |
+| `export` | `last_save_dir?` (absolute folder of the last successful Save as, #63; absent or missing on disk = the project's `exports/`) | EXP |
 | `prompt_chat` | `enabled` (bool), `consent?{accepted_at, notice_version}` (set only by `prm_chat_consent`), `claude_path?`, `dock?{open, width}` (the chat panel, 320–720 px, #61; an old `window{x, y, w, h}` is kept as an unknown field and ignored). Absent = off, not consented ([prompt-helper](../specs/prompt-helper.md) FR-PRM-20/21, §8) | PRM |
 
 Corrupt or unreadable → defaults + a warning; the bad file is kept as `settings.corrupt-<UTC>.json`. Unknown sections are kept.

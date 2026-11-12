@@ -109,7 +109,7 @@ scripts/             dev and CI scripts: check, env:init, dev, tauri:smoke, hygi
 - `PF_DATA_DIR` (app data and caches) and `PF_LIBRARY_DIR` (library folder) override the defaults. Dev and test runs always set them to a folder inside the worktree (`.pf-dev/`, which is gitignored).
 - Vite dev port = `5200 + 10 × slot`. `corepack pnpm env:init` claims a free slot and writes `.env.local`, and fails fast if the port is taken.
 - Never run against the real library or real credentials in tests. Dev and test builds default to the **fake provider**; release builds use Scenario (OQ-PRV-20). A real call in a non-release build needs the explicit manual mode.
-- Walkthroughs set **both** `PF_DATA_DIR` and `PF_LIBRARY_DIR`. Test builds also honour `PF_FAULT` (fault injection, e.g. crash after the temp write) and `PF_FAKE_NOW` (clock override). These are never compiled into release builds.
+- Walkthroughs set **both** `PF_DATA_DIR` and `PF_LIBRARY_DIR`. Test builds also honour `PF_FAULT` (fault injection, e.g. crash after the temp write), `PF_FAKE_NOW` (clock override) and `PF_SHELL_LOG` (Open in Explorer writes its arguments to this file instead of launching Explorer, #63; walkthroughs must set it). These are never compiled into release builds.
 
 **Commands**
 
