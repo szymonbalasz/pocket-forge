@@ -67,6 +67,23 @@ impl ImageRegistry {
     pub fn keys(&self) -> impl Iterator<Item = String> + '_ {
         self.images.keys().cloned()
     }
+
+    /// Points every file under the folder `old` at the same file under `new` (the open
+    /// project's folder was renamed, FR-PRJ-56). Keys stay, so URLs the UI holds keep working.
+    pub fn rebase(&mut self, old: &std::path::Path, new: &std::path::Path) {
+        let moved = |p: &mut PathBuf| {
+            if let Ok(rest) = p.strip_prefix(old) {
+                *p = new.join(rest);
+            }
+        };
+        for img in self.images.values_mut() {
+            match &mut img.body {
+                ImageBody::File(p) => moved(p),
+                ImageBody::Copy { src, .. } => moved(src),
+                ImageBody::Bytes(_) => {}
+            }
+        }
+    }
 }
 
 /// A scheme response, independent of any HTTP library.

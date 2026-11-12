@@ -258,6 +258,13 @@ impl Served {
         self.transient.clear();
     }
 
+    /// FR-PRJ-56: the open project's folder was renamed. Its keys stay registered and now read
+    /// from the new folder; the tile pyramids are in the cache and don't move.
+    pub fn rebase(&mut self, old: &Path, new: &Path) {
+        self.images.rebase(old, new);
+        self.library.rebase(old, new);
+    }
+
     pub fn is_building(&self, key: &str) -> bool {
         self.building.contains(key)
     }

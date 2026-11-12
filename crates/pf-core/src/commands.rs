@@ -348,18 +348,132 @@ impl Command for ProjectRename {
     type Input = ProjectRenameInput;
     type Output = PathOutput;
 
-    /// FR-PRJ-45: a closed project only.
+    /// FR-PRJ-45 (a closed project) and FR-PRJ-56 (the open one).
     fn run(core: &Core, input: Self::Input) -> CoreResult<PathOutput> {
-        let state = core.state();
-        let open_dir = state.project.as_ref().map(|p| p.dir.clone());
-        let path = library::rename_project(
-            &core.ctx,
-            &state.settings,
-            &PathBuf::from(&input.path),
-            &input.name,
-            open_dir.as_deref(),
-        )?;
+        let mut state = core.state();
+        let path = PathBuf::from(&input.path);
+        let path = if is_open_project(&state, &path) {
+            rename_open(core, &mut state, &input.name)?
+        } else {
+            library::rename_project(&core.ctx, &state.settings, &path, &input.name)?
+        };
         Ok(PathOutput { path })
+    }
+}
+
+/// True if `path` names the open project's folder. Lexical, so it still answers once the folder
+/// was moved (§11).
+fn is_open_project(state: &crate::core::State, path: &std::path::Path) -> bool {
+    let Ok(path) = std::path::absolute(path) else {
+        return false;
+    };
+    state
+        .project
+        .as_ref()
+        .is_some_and(|p| library::same_folder(&p.dir, &path))
+}
+
+/// R97 for FR-PRJ-56, 57: `job_active` while the open project has an active job. The job would
+/// come back for a folder that is gone.
+fn refuse_active_job_open(state: &crate::core::State, verb: &str) -> CoreResult<()> {
+    let Some(p) = state.project.as_ref() else {
+        return Ok(());
+    };
+    let active = p
+        .jobs
+        .values()
+        .find(|j| crate::region_edit::jobs::is_active(j.state))
+        .map(|j| j.id)
+        .or_else(|| state.rgn.runner.job_in(&p.dir));
+    match active {
+        Some(id) => Err(job_active(id, verb)),
+        None => Ok(()),
+    }
+}
+
+fn job_active(job_id: Ulid, verb: &str) -> CoreError {
+    CoreError::new(
+        ErrorCode::JobActive,
+        format!("A job is running in this project. {verb} it when the job has finished."),
+    )
+    .with_detail(serde_json::json!({ "job_id": job_id }))
+}
+
+/// Releases the open project's files as a close does (EXP's pending settings and running
+/// export, the chat session, the decoded original). The caller decided what happens to a
+/// waiting save. Returns the project and whether its original was being decoded or in memory.
+fn release_open(
+    core: &Core,
+    state: &mut crate::core::State,
+) -> Option<(project::OpenProject, bool)> {
+    crate::export::on_project_close(&core.ctx, state);
+    let p = state.project.take()?;
+    core.chat.on_project_close(p.manifest.project_id);
+    let decoded = p.decoded.is_started();
+    p.decoded.release();
+    Some((p, decoded))
+}
+
+/// Opens `dir` again after [`release_open`] (FR-PRJ-56, 57): the same project, so the served
+/// keys stay. `decode` starts the original's decode again, as the UI asked for it once per
+/// project already.
+fn reopen(
+    core: &Core,
+    state: &mut crate::core::State,
+    dir: &std::path::Path,
+    decode: bool,
+) -> CoreResult<()> {
+    let settings = state.settings.clone();
+    let opened = project::open(&core.ctx, &settings, dir, Some(core.thumbs.clone()));
+    let mut p = match opened {
+        Ok(p) => p,
+        Err(e) => {
+            // Nothing is open any more: the UI reads `project_get` and shows home.
+            core.served().reset(None);
+            core.chat.notify_project(&core.ctx, None);
+            return Err(e);
+        }
+    };
+    crate::region_edit::runner::on_project_open(
+        &core.ctx,
+        settings.install_id,
+        &mut state.rgn,
+        &mut p,
+    );
+    if decode {
+        p.decoded.start(&core.ctx);
+    }
+    core.chat
+        .notify_project(&core.ctx, Some(p.manifest.project_id));
+    state.project = Some(p);
+    Ok(())
+}
+
+/// FR-PRJ-56: renames the open project. Checks, then what waits is saved as a close does (no
+/// force), the files are released, the folder is renamed and the project is opened again. A
+/// folder rename that fails opens it again under its old name.
+fn rename_open(core: &Core, state: &mut crate::core::State, name: &str) -> CoreResult<PathBuf> {
+    let p = state.project.as_mut().ok_or_else(no_project)?;
+    project::require_folder(p)?;
+    let old = p.dir.clone();
+    let Some(target) = library::rename_target(&old, name)? else {
+        return Ok(old);
+    };
+    refuse_active_job_open(state, "Rename")?;
+    refuse_unsaved(core, state)?;
+    let (_, decode) = release_open(core, state).ok_or_else(no_project)?;
+    match crate::fsx::move_dir(&core.ctx, &old, &target) {
+        Ok(()) => {
+            core.served().rebase(&old, &target);
+            reopen(core, state, &target, decode)?;
+            Ok(target)
+        }
+        Err(e) => {
+            if let Err(again) = reopen(core, state, &old, decode) {
+                tracing::warn!(error = %again, "the project didn't open again after a failed rename");
+            }
+            Err(e)
+        }
     }
 }
 
@@ -574,11 +688,8 @@ impl Command for ProjectClose {
         } else {
             refuse_unsaved(core, &mut state)?;
         }
-        crate::export::on_project_close(&core.ctx, &mut state);
-        if let Some(p) = state.project.take() {
-            core.chat.on_project_close(p.manifest.project_id);
+        if release_open(core, &mut state).is_some() {
             core.chat.notify_project(&core.ctx, None);
-            p.decoded.release();
         }
         core.served().reset(None);
         Ok(Ok_ {})

@@ -179,6 +179,30 @@ pub fn move_file(from: &Path, to: &Path) -> CoreResult<()> {
     result.map_err(|e| CoreError::io(format!("moving {}", from.display()), &e))
 }
 
+/// Renames or moves a project folder within one volume (FR-PRJ-56, 57), creating the target's
+/// parent. Fails if `to` exists; a case-only rename of the same folder is allowed. The
+/// `on_move` fault fails it without touching anything.
+pub fn move_dir(ctx: &Context, from: &Path, to: &Path) -> CoreResult<()> {
+    let result = (|| {
+        ctx.faults.hit(FaultPoint::OnMove, from)?;
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let same_folder = from.parent() == to.parent()
+            && from.file_name().zip(to.file_name()).is_some_and(|(a, b)| {
+                a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+            });
+        if !same_folder && to.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "the target exists",
+            ));
+        }
+        rename_with_retry(from, to)
+    })();
+    result.map_err(|e| CoreError::io(format!("moving {}", from.display()), &e))
+}
+
 /// Removes `dir` if it is an empty folder. Never removes anything else.
 pub fn remove_dir_if_empty(dir: &Path) -> bool {
     fs::read_dir(dir).is_ok_and(|mut d| d.next().is_none()) && fs::remove_dir(dir).is_ok()

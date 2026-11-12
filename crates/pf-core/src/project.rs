@@ -1677,4 +1677,6 @@ pub fn folder_add(
 #[cfg(test)]
 mod gen_tests;
 #[cfg(test)]
+mod rename_delete_tests;
+#[cfg(test)]
 mod tests;

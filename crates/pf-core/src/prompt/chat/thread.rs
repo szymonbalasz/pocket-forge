@@ -308,6 +308,11 @@ pub fn load_id(project_dir: &Path, id: Ulid, live: &[Ulid]) -> Option<Thread> {
 
 /// Writes the thread (temp → rename). A `locked` file is retried for up to [`LOCK_RETRY`].
 pub fn save(ctx: &Context, project_dir: &Path, thread: &Thread) -> CoreResult<()> {
+    if !project_dir.is_dir() {
+        // The folder was moved, renamed or deleted (§11, FR-PRJ-56, 57): a late save never
+        // creates it again.
+        return Err(crate::project::folder_moved());
+    }
     let dir = chat_dir(project_dir);
     std::fs::create_dir_all(&dir)
         .map_err(|e| CoreError::io(format!("creating {}", dir.display()), &e))?;

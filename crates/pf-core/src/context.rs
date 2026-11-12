@@ -243,6 +243,8 @@ pub enum FaultPoint {
     AfterLevel(u32),
     /// Before a checked read (`on_read:<file>`): the commit check's `project.json` read (R110).
     OnRead,
+    /// Before a project folder is renamed or moved (`on_move:<folder name>`, FR-PRJ-56, 57).
+    OnMove,
 }
 
 /// What an injected fault does.
@@ -280,7 +282,7 @@ impl Faults {
     }
 
     /// Parses `PF_FAULT`: `<point>[:<file name>]`, point = `after_temp` | `after_rename` |
-    /// `on_read`;
+    /// `on_read` | `on_move`;
     /// or `after_level:<k>` (stop a tile pyramid build once level `k` is complete).
     pub fn parse(spec: &str, action: FaultAction) -> Result<Self, String> {
         if let Some(k) = spec.trim().strip_prefix("after_level:") {
@@ -303,6 +305,7 @@ impl Faults {
             "after_temp" => FaultPoint::AfterTemp,
             "after_rename" => FaultPoint::AfterRename,
             "on_read" => FaultPoint::OnRead,
+            "on_move" => FaultPoint::OnMove,
             other => return Err(format!("PF_FAULT: unknown fault point {other:?}")),
         };
         Ok(Faults {
