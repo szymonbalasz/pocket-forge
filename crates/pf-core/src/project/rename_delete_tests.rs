@@ -422,24 +422,51 @@ fn fr_prj_56_the_rename_adds_no_job_warning_a_normal_continue_wouldnt_show() {
     rename_at(&lab, &sibling(&lab, "Vault"), "Crypt").unwrap_err();
     set_faults(&mut lab, None);
     assert_eq!(get(&lab)["warnings"], json!([]), "after a failed rename");
-    // A warning the project showed before the rename is kept.
+}
+
+/// R112 walk D1: an open reports a Ready (fetched) job as resumable (FR-PRJ-29), and the UI
+/// drops that banner once no job runs. Nothing may bring it back: not a re-read with
+/// `project_get`, and not the reopen inside a rename.
+#[test]
+fn fr_prj_56_a_rename_never_brings_back_resumable_for_a_ready_job_found_on_open() {
+    let lab = Lab::new();
+    let job = lab.run("a mossy well");
+    assert_eq!(lab.job(job).state, crate::job::JobState::Fetched);
     lab.close();
-    let reopened = lab
-        .core
-        .dispatch(
-            "project_open",
-            json!({"path": sibling(&lab, "Vault").to_string_lossy()}),
-        )
-        .unwrap();
-    assert_eq!(reopened["warnings"][0]["code"], "resumable");
-    rename_at(&lab, &sibling(&lab, "Vault"), "Crypt").unwrap();
-    assert_eq!(get(&lab)["warnings"], reopened["warnings"]);
+    let opened = lab.open();
+    assert_eq!(opened["warnings"][0]["code"], "resumable", "FR-PRJ-29");
+    assert_eq!(get(&lab)["warnings"], json!([]), "a re-read");
+    rename(&lab, "Vault").unwrap();
+    assert_eq!(get(&lab)["warnings"], json!([]), "after the rename");
+    // A refused rename reads the project again too.
+    std::fs::create_dir(sibling(&lab, "Taken")).unwrap();
+    rename_at(&lab, &sibling(&lab, "Vault"), "Taken").unwrap_err();
+    assert_eq!(get(&lab)["warnings"], json!([]), "after a refused rename");
+}
+
+/// A job file of the project in `dir`, wherever its folder is now.
+fn job_at(dir: &Path, id: ulid::Ulid) -> crate::job::JobFile {
+    let path = dir
+        .join(crate::manifest::job_dir(id))
+        .join(crate::job::JOB_FILE);
+    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+fn has_candidates_of(snapshot: &Value, job: ulid::Ulid) -> bool {
+    snapshot["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["job_id"] == json!(job))
 }
 
 /// R111, walk M: a job outlives a close. Renaming the closed project would leave the runner
-/// writing to a folder that is gone (the update is spooled and quarantined on reopen).
+/// writing to a folder that is gone (the update is spooled and quarantined on reopen). R112:
+/// that holds only while the runner drives the job. Once it has fetched the results into the
+/// spool it lets go, and the job, which only waits for the project to be opened, refuses
+/// nothing.
 #[test]
-fn fr_prj_45_a_closed_rename_with_a_tracked_job_is_job_active() {
+fn fr_prj_45_a_closed_rename_is_job_active_only_while_the_runner_drives_the_job() {
     let lab = Lab::new();
     let job = lab.submit("a mossy well");
     lab.close();
@@ -457,52 +484,50 @@ fn fr_prj_45_a_closed_rename_with_a_tracked_job_is_job_active() {
     );
     assert_eq!(rename(&lab, "rooms").unwrap(), lab.project_dir);
 
-    // The runner keeps driving it while the project is closed, and the refusal holds.
-    lab.drive();
+    // The runner polls on while the project is closed, and the refusal holds.
+    crate::region_edit::runner::tick(&lab.core, true);
+    assert_eq!(lab.core.state().rgn.runner.tracked(), vec![job]);
     assert_eq!(
         rename(&lab, "Vault").unwrap_err().code,
         ErrorCode::JobActive
     );
-    // Once the job is fetched its results are in the folder, where they belong, and the
-    // rename goes through.
-    lab.open();
+    // It finishes while the project is closed: the results are in the spool, the job file
+    // still says `succeeded`, and the runner has let go (walk D2).
     lab.drive();
-    assert_eq!(lab.job(job).state, crate::job::JobState::Fetched);
-    lab.close();
-    assert!(lab.events_named("project:spool-dropped").is_empty());
+    assert!(lab.core.state().rgn.runner.tracked().is_empty());
+    assert_eq!(lab.job(job).state, crate::job::JobState::Succeeded);
     let new = rename(&lab, "Vault").unwrap();
     assert!(new.join("project.json").is_file() && !lab.project_dir.exists());
+    // The spool is keyed by project id: the results come with the project.
     let opened = lab
         .core
         .dispatch("project_open", json!({"path": new.to_string_lossy()}))
         .unwrap();
-    assert!(
-        opened["candidates"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|c| c["job_id"] == json!(job)),
-        "the candidates came with it: {opened}"
-    );
+    assert!(has_candidates_of(&opened, job), "{opened}");
+    assert_eq!(job_at(&new, job).state, crate::job::JobState::Fetched);
+    assert!(lab.events_named("project:spool-dropped").is_empty());
 }
 
+/// R112: a job file left non-terminal by an earlier session refuses nothing. Nothing in this
+/// session drives it, so nothing writes to the folder; it resumes when the project is opened.
 #[test]
-fn fr_prj_45_a_closed_rename_with_an_active_job_file_is_job_active_after_a_restart() {
+fn fr_prj_45_a_job_file_left_active_by_an_earlier_session_doesnt_refuse_a_closed_rename() {
     let lab = Lab::new();
     let job = lab.submit("a mossy well");
     lab.close();
-    // Nothing drives the job after a restart: its job file still says it is running.
     let lab = lab.restart();
     assert!(lab.core.state().rgn.runner.tracked().is_empty());
-    let err = rename(&lab, "Vault").unwrap_err();
-    assert_eq!(err.code, ErrorCode::JobActive);
-    assert_eq!(err.detail["job_id"], json!(job));
-    assert!(lab.project_dir.is_dir() && !sibling(&lab, "Vault").exists());
-    // Once the job has finished the rename goes through.
-    lab.open();
+    assert!(crate::region_edit::jobs::is_active(lab.job(job).state));
+    let new = rename(&lab, "Vault").unwrap();
+    assert!(new.join("project.json").is_file() && !lab.project_dir.exists());
+    // It resumes in the renamed folder.
+    lab.core
+        .dispatch("project_open", json!({"path": new.to_string_lossy()}))
+        .unwrap();
     lab.drive();
-    lab.close();
-    assert!(rename(&lab, "Vault").unwrap().is_dir());
+    assert_eq!(job_at(&new, job).state, crate::job::JobState::Fetched);
+    assert!(has_candidates_of(&get(&lab), job));
+    assert!(lab.events_named("project:spool-dropped").is_empty());
 }
 
 // ---------------------------------------------------------------- FR-PRJ-57, 58
@@ -553,7 +578,7 @@ fn cards(lab: &Lab, section: &str) -> Vec<String> {
 }
 
 /// Another project, from a generated image; returns its folder.
-fn new_project(lab: &Lab, kind: Kind, name: &str, shade: u8) -> PathBuf {
+pub(crate) fn new_project(lab: &Lab, kind: Kind, name: &str, shade: u8) -> PathBuf {
     let src = lab.dir.path().join("outside").join(format!("{name}.png"));
     image::RgbImage::from_pixel(40, 30, image::Rgb([shade, 90, 40]))
         .save(&src)
@@ -655,16 +680,34 @@ fn fr_prj_57_an_active_job_refuses_the_delete_open_and_closed() {
     lab.close();
     let err = delete(&lab, &lab.project_dir).unwrap_err();
     assert_eq!(err.code, ErrorCode::JobActive);
-    // After a restart nothing drives it: its job file still says so.
-    let lab = lab.restart();
-    let err = delete(&lab, &lab.project_dir).unwrap_err();
-    assert_eq!(err.code, ErrorCode::JobActive);
     assert_eq!(err.detail["job_id"], json!(job));
     assert!(lab.project_dir.is_dir() && item_dirs(&lab).is_empty());
-    // Once the job has finished the delete goes through.
-    lab.open();
-    lab.drive();
+    // R112: after a restart nothing drives it. Its job file still says it is running, and
+    // that refuses nothing.
+    let lab = lab.restart();
+    assert!(crate::region_edit::jobs::is_active(lab.job(job).state));
     delete(&lab, &lab.project_dir).unwrap();
+    assert!(!lab.project_dir.exists());
+}
+
+/// R112, walk D2: a job that finished while its project was closed only waits for the project
+/// to be opened. The delete goes through, and a Restore brings its results back.
+#[test]
+fn fr_prj_57_a_job_that_finished_while_closed_doesnt_refuse_the_delete() {
+    let lab = Lab::new();
+    let job = lab.submit("a mossy well");
+    lab.close();
+    lab.drive();
+    assert!(lab.core.state().rgn.runner.tracked().is_empty());
+    assert_eq!(lab.job(job).state, crate::job::JobState::Succeeded);
+
+    let id = delete(&lab, &lab.project_dir).unwrap();
+    assert!(!lab.project_dir.exists());
+    assert_eq!(restore(&lab, &id).unwrap(), lab.project_dir);
+    let opened = lab.open();
+    assert!(has_candidates_of(&opened, job), "{opened}");
+    assert_eq!(lab.job(job).state, crate::job::JobState::Fetched);
+    assert!(lab.events_named("project:spool-dropped").is_empty());
 }
 
 /// R111: a waiting draft is dropped only once the move has succeeded. Here the draft is really
@@ -693,6 +736,15 @@ fn fr_prj_57_a_failed_delete_of_the_open_project_keeps_its_waiting_draft() {
     };
     assert_eq!(waiting(&lab).as_deref(), Some("waits"));
 
+    // EXP's settings wait too (they ride on the next draft save).
+    lab.core
+        .dispatch(
+            "export_set_settings",
+            json!({ "settings": export_settings() }),
+        )
+        .unwrap();
+    assert!(export_waits(&lab));
+
     let err = delete(&lab, &lab.project_dir).unwrap_err();
     assert_eq!(err.code, ErrorCode::Locked);
     assert_unchanged(&lab, &before);
@@ -701,6 +753,9 @@ fn fr_prj_57_a_failed_delete_of_the_open_project_keeps_its_waiting_draft() {
         Some("waits"),
         "still waiting in memory"
     );
+    assert!(before["draft"]["mask_id"].is_string(), "there is a mask");
+    assert_eq!(get(&lab)["draft"]["mask_id"], before["draft"]["mask_id"]);
+    assert!(export_waits(&lab), "the export settings still wait");
     assert!(item_dirs(&lab).is_empty(), "the item is dropped");
     assert_ne!(lab.manifest()["draft"]["final_prompt"], "waits");
     assert_eq!(lab.core.serve_scheme(&url).status, 200, "still served");
@@ -712,6 +767,61 @@ fn fr_prj_57_a_failed_delete_of_the_open_project_keeps_its_waiting_draft() {
     assert!(!crate::project::has_unsaved(
         lab.core.state().project.as_ref().unwrap()
     ));
+    // So are the export settings, with the save after it.
+    assert!(export_waits(&lab));
+    crate::export::flush_pending(&lab.core.ctx, &mut lab.core.state(), true).unwrap();
+    assert_eq!(lab.manifest()["export"]["target_px_per_square"], 9);
+}
+
+fn export_settings() -> Value {
+    json!({
+        "grid": {"mode": "px", "source_px_per_square": 16.0},
+        "target_px_per_square": 9,
+        "format": "jpeg",
+    })
+}
+
+/// EXP's session settings are waiting to be saved.
+fn export_waits(lab: &Lab) -> bool {
+    let mut state = lab.core.state();
+    let crate::core::State { project, exp, .. } = &mut *state;
+    crate::export::pending_fields(exp, project.as_ref().expect("the project is open")).is_some()
+}
+
+/// R112: a failed delete of the open project keeps EXP's waiting export settings waiting,
+/// whatever kept them from saving. Here the manifest write fails with an error that isn't
+/// `locked`, which a close would log and drop.
+#[test]
+fn fr_prj_57_a_failed_delete_of_the_open_project_keeps_its_export_settings_waiting() {
+    let mut lab = Lab::new();
+    lab.core
+        .dispatch(
+            "export_set_settings",
+            json!({ "settings": export_settings() }),
+        )
+        .unwrap();
+    assert!(export_waits(&lab));
+    let shown = lab.core.dispatch("export_get_settings", json!({})).unwrap();
+    Arc::get_mut(&mut lab.core.ctx).unwrap().faults =
+        Faults::parse("after_temp:project.json", FaultAction::Error)
+            .unwrap()
+            .and(Faults::parse("on_move:rooms", FaultAction::Locked).unwrap());
+
+    let err = delete(&lab, &lab.project_dir).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Locked);
+    assert!(lab.core.state().project.is_some(), "still open");
+    assert!(export_waits(&lab), "the export settings still wait");
+    assert_eq!(
+        lab.core.dispatch("export_get_settings", json!({})).unwrap(),
+        shown
+    );
+    assert!(lab.manifest()["export"].is_null(), "not saved yet");
+
+    // The fault lifts: they are saved with the next save, not lost.
+    set_faults(&mut lab, None);
+    crate::export::flush_pending(&lab.core.ctx, &mut lab.core.state(), true).unwrap();
+    assert_eq!(lab.manifest()["export"]["target_px_per_square"], 9);
+    assert!(!export_waits(&lab));
 }
 
 #[test]
@@ -749,6 +859,25 @@ fn killed_delete(lab: &Lab, dir: &Path) -> String {
     let (item_dir, item) = trash::begin_delete(&lab.core.ctx, &loc).unwrap();
     assert!(item_dir.join("item.json").is_file() && dir.is_dir());
     item.id.to_string()
+}
+
+/// A delete's rollback drops the item it wrote and nothing else: whatever is in the item folder
+/// by then, a project folder is never deleted by a rollback.
+#[test]
+fn fr_prj_57_a_delete_rollback_never_deletes_a_folder_in_the_item() {
+    let lab = Lab::new();
+    lab.close();
+    // The usual rollback: `item.json` and its folder go.
+    let id = killed_delete(&lab, &lab.project_dir);
+    trash::drop_item(&item_dir(&lab, &id)).unwrap();
+    assert!(!item_dir(&lab, &id).exists());
+    // A project folder is in the item (a move that failed after it had begun).
+    let id = delete(&lab, &lab.project_dir).unwrap();
+    let files = tree(&item_dir(&lab, &id).join("rooms"));
+    assert!(!files.is_empty());
+    trash::drop_item(&item_dir(&lab, &id)).unwrap_err();
+    assert!(!item_dir(&lab, &id).join("item.json").exists());
+    assert_eq!(tree(&item_dir(&lab, &id).join("rooms")), files, "whole");
 }
 
 /// R111: startup never moves a project to match an item. The killed delete leaves the project
@@ -1027,8 +1156,10 @@ fn mark_restoring(lab: &Lab, id: &str) {
     .unwrap();
 }
 
+/// R111, R112: startup moves nothing. An interrupted restore (`restored_at` on disk, the folder
+/// still in the trash) only has its `restored_at` cleared, so it is listed again.
 #[test]
-fn fr_prj_58_an_interrupted_restore_is_finished_at_startup() {
+fn fr_prj_58_startup_never_finishes_an_interrupted_restore_it_is_listed_again() {
     let lab = Lab::new();
     lab.close();
     let files = tree(&lab.project_dir);
@@ -1036,6 +1167,13 @@ fn fr_prj_58_an_interrupted_restore_is_finished_at_startup() {
     mark_restoring(&lab, &id);
     assert!(trashed(&lab, "maps").is_empty(), "not listed meanwhile");
     let lab = lab.restart();
+    assert!(!lab.project_dir.exists(), "startup moved nothing");
+    assert!(cards(&lab, "maps").is_empty());
+    assert_eq!(tree(&item_dir(&lab, &id).join("rooms")), files, "whole");
+    assert!(item_json(&lab, &id).get("restored_at").is_none());
+    assert_eq!(trashed(&lab, "maps")[0]["id"].as_str(), Some(id.as_str()));
+    // The user restores it.
+    assert_eq!(restore(&lab, &id).unwrap(), lab.project_dir);
     assert_eq!(tree(&lab.project_dir), files);
     assert!(item_dirs(&lab).is_empty());
 }
@@ -1086,24 +1224,21 @@ fn fr_prj_58_startup_purges_and_emits_trash_purged() {
     assert!(purged[0]["bytes"].as_u64().unwrap() > 0);
 }
 
-/// R111: an interrupted restore that can't be finished at startup has its `restored_at`
-/// cleared. Although it is older than 30 days, that startup's purge leaves it: the user was
+/// R111, R112: startup clears an interrupted restore's `restored_at` and moves nothing.
+/// Although the item is older than 30 days, that startup's purge leaves it: the user was
 /// getting it back.
 #[test]
 fn fr_prj_58_an_interrupted_restore_older_than_30_days_survives_that_startup() {
-    let mut lab = Lab::new();
+    let lab = Lab::new();
     lab.close();
     let files = tree(&lab.project_dir);
     let id = delete(&lab, &lab.project_dir).unwrap();
     mark_restoring(&lab, &id);
     lab.clock.advance(31 * DAY);
-    // The startup can't finish the restore: the move is refused.
-    set_faults(&mut lab, Some(("on_move:rooms", FaultAction::Locked)));
-    let settings = lab.core.state().settings.clone();
-    trash::sweep_startup(&lab.core.ctx, &settings);
-    set_faults(&mut lab, None);
+    let lab = lab.restart();
 
     assert!(lab.events_named("trash:purged").is_empty(), "not purged");
+    assert!(!lab.project_dir.exists(), "startup moved nothing");
     assert_eq!(tree(&item_dir(&lab, &id).join("rooms")), files, "whole");
     let item = item_json(&lab, &id);
     assert!(item.get("restored_at").is_none(), "{item}");
@@ -1114,8 +1249,8 @@ fn fr_prj_58_an_interrupted_restore_older_than_30_days_survives_that_startup() {
     assert_eq!(tree(&lab.project_dir), files);
 }
 
-/// R111: the same, when it can't be finished because the folder isn't in the item (already
-/// moved back, or not synced yet): the item is kept, not dropped and not purged.
+/// R111: the same when the folder isn't in the item (already moved back, or not synced yet):
+/// the item is kept, not dropped and not purged.
 #[test]
 fn fr_prj_58_an_interrupted_restore_without_its_folder_is_kept_at_startup() {
     let lab = Lab::new();
@@ -1198,14 +1333,34 @@ fn fr_prj_58_the_purge_marks_the_item_before_it_deletes() {
     let spared = [id.parse().unwrap()];
     assert_eq!(trash::purge(&lab.core.ctx, &settings, &spared).0, 0);
     assert_eq!(trashed(&lab, "maps").len(), 1);
+
+    // The order, on every platform: the purge is stopped right after the mark is on disk
+    // (the seam fails the write once its rename is done). The item is marked and nothing of
+    // the project is deleted yet.
+    set_faults(
+        &mut lab,
+        Some(("after_rename:item.json", FaultAction::Locked)),
+    );
+    assert_eq!(trash::purge(&lab.core.ctx, &settings, &[]).0, 0);
+    set_faults(&mut lab, None);
+    assert!(item_json(&lab, &id)["purging_at"].is_string(), "marked");
+    assert_eq!(
+        tree(&item_dir(&lab, &id).join("rooms")),
+        files,
+        "nothing was deleted before the mark"
+    );
+    assert!(trashed(&lab, "maps").is_empty(), "never listed again");
+    assert_eq!(restore(&lab, &id).unwrap_err().code, ErrorCode::UnknownId);
+    // The next purge finishes it.
     assert_eq!(trash::purge(&lab.core.ctx, &settings, &[]).0, 1);
     assert!(!item_dir(&lab, &id).exists());
 }
 
-/// "A purge that couldn't finish": a file in the trashed folder is held open.
+/// "A purge that couldn't finish": a file in the trashed folder is held open, so the delete
+/// fails after the mark.
 #[cfg(windows)]
 #[test]
-fn fr_prj_58_purge_keeps_an_item_it_cant_fully_delete() {
+fn fr_prj_58_a_purge_that_cant_delete_a_file_leaves_the_item_marked_and_is_retried() {
     use std::os::windows::fs::OpenOptionsExt;
     let lab = Lab::new();
     lab.close();

@@ -1753,13 +1753,12 @@ struct TurnJob {
 }
 
 impl TurnJob {
-    /// The project's folder as of now: where the turn was sent from, or, once that is gone,
-    /// where a rename of the open project moved it (FR-PRJ-56, R111). The stopped turn then
-    /// ends in the thread file there and survives a close.
+    /// The project's folder as of now: where a rename of the open project moved it, once it
+    /// is there (FR-PRJ-56, R111), else where the turn was sent from. The stopped turn then
+    /// ends in the thread file there and survives a close. The rename's target comes first:
+    /// by the time the turn ends another project may have taken the old name, and the thread
+    /// must never be written into that one.
     fn project_dir_now(&self) -> PathBuf {
-        if self.project_dir.is_dir() {
-            return self.project_dir.clone();
-        }
         lock(&self.rt)
             .moving
             .as_ref()

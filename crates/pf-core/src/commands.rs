@@ -355,9 +355,9 @@ impl Command for ProjectRename {
         let path = if is_open_project(&state, &path) {
             rename_open(core, &mut state, &input.name)?
         } else {
-            // R111: a job of the closed project would come back for a folder that is gone.
+            // R111: a job the runner drives would come back for a folder that is gone.
             library::rename_project_if(&core.ctx, &state.settings, &path, &input.name, |dir| {
-                refuse_active_job_closed(core, &state, dir, "Rename")
+                refuse_active_job_closed(&state, dir, "Rename")
             })?
         };
         Ok(PathOutput { path })
@@ -394,20 +394,18 @@ fn refuse_active_job_open(state: &crate::core::State, verb: &str) -> CoreResult<
     }
 }
 
-/// R97 for a closed project (FR-PRJ-45, 57): `job_active` while the runner still drives a job
-/// of the project in `dir`, or, after a restart, one of its job files says it is active.
+/// R97 for a closed project (FR-PRJ-45, 57): `job_active` while the runner drives a job of the
+/// project in `dir` in this session (it polls or fetches, and would write to the folder).
+/// R112: the job files don't count. One left non-terminal by an earlier session, or a
+/// `succeeded` job whose results are in the spool and which only waits for the project to be
+/// opened, refuses nothing: the runner has let go of it, nothing writes to the folder, and the
+/// spool is keyed by project id.
 fn refuse_active_job_closed(
-    core: &Core,
     state: &crate::core::State,
     dir: &std::path::Path,
     verb: &str,
 ) -> CoreResult<()> {
-    let active = state
-        .rgn
-        .runner
-        .job_in(dir)
-        .or_else(|| library::trash::active_job_on_disk(&core.ctx, dir));
-    match active {
+    match state.rgn.runner.job_in(dir) {
         Some(id) => Err(job_active(id, verb)),
         None => Ok(()),
     }
@@ -450,8 +448,8 @@ fn release_open(
 /// Opens `dir` again after [`release_open`] (FR-PRJ-56): the same project, so the served keys
 /// stay. `decode` starts the original's decode again, as the UI asked for it once per project
 /// already. `was` is the project as it was released: the open adds no job warning it didn't
-/// show (a fetched job reads as `resumable` at an open; the UI drops that when it loads the
-/// project, which it doesn't do here).
+/// show (a fetched job reads as `resumable` at an open, FR-PRJ-29, and not afterwards). If the
+/// folder can't be opened, nothing is open any more and the rest of a close is done.
 fn reopen(
     core: &Core,
     state: &mut crate::core::State,
@@ -464,7 +462,11 @@ fn reopen(
     let mut p = match opened {
         Ok(p) => p,
         Err(e) => {
-            // Nothing is open any more: the UI reads `project_get` and shows home.
+            // Nothing is open any more: the UI reads `project_get` and shows home. What was
+            // kept for a project that stays open goes, as at a close: EXP's session, and the
+            // chat's memory thread, contexts and rename target.
+            crate::export::on_project_close(&core.ctx, state);
+            core.chat.on_project_close(was.manifest.project_id);
             core.served().reset(None);
             core.chat.notify_project(&core.ctx, None);
             return Err(e);
@@ -555,7 +557,7 @@ impl Command for ProjectDelete {
         let item_id = if is_open_project(&state, &loc.dir) {
             delete_open(core, &mut state, &loc)?
         } else {
-            refuse_active_job_closed(core, &state, &loc.dir, "Delete")?;
+            refuse_active_job_closed(&state, &loc.dir, "Delete")?;
             library::trash::delete_project(&core.ctx, &loc)?
         };
         Ok(ItemIdOutput { item_id })
@@ -565,7 +567,9 @@ impl Command for ProjectDelete {
 /// FR-PRJ-57 on the open project: released as FR-PRJ-56 does; a waiting save is tried once and
 /// dropped only once the move has succeeded (the UI asked). A move that fails leaves the
 /// project open as it was, with its waiting changes still in memory (R111): it is put back,
-/// never read again from the folder.
+/// never read again from the folder. EXP's waiting settings are tried once too (by
+/// `release_open`) and keep waiting if they couldn't be saved, whatever the reason (R112): a
+/// close drops them after some failures, and this may not be a close.
 fn delete_open(
     core: &Core,
     state: &mut crate::core::State,
@@ -576,7 +580,6 @@ fn delete_open(
     if let Some(p) = state.project.as_mut() {
         project::retry_pending(&core.ctx, install_id, p);
     }
-    crate::export::unsaved_on_close(&core.ctx, state);
     let (p, decode) = release_open(core, state, Some(None)).ok_or_else(no_project)?;
     match library::trash::delete_project(&core.ctx, loc) {
         Ok(id) => {
@@ -769,7 +772,7 @@ impl Command for ProjectOpen {
         let install_id = settings.install_id;
         // RGN resumes the project's jobs from their job files (FR-RGN-22).
         crate::region_edit::runner::on_project_open(&core.ctx, install_id, &mut state.rgn, &mut p);
-        let snap = p.snapshot();
+        let snap = p.snapshot_at_open();
         crate::export::on_project_close(&core.ctx, &mut state);
         if let Some(old) = state.project.take() {
             // PRM FR-PRM-35: the old project's chat session ends.

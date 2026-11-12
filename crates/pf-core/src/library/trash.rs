@@ -9,7 +9,8 @@
 //! because its folder is missing (a sync may still bring it, or the folder was taken back by
 //! hand). Such an item is never listed, its restore is `not_found`, and only the purge removes
 //! it, 30 days after `trashed_at` (clock seam). A purge marks the item (`purging_at`) before it
-//! deletes, so a half-purged project is never offered for Restore.
+//! deletes, so a half-purged project is never offered for Restore. R112: startup doesn't
+//! finish an interrupted restore either; it clears `restored_at` and the item is listed again.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -22,8 +23,7 @@ use super::{effective_roots, normalise, not_a_project, require_available, root_o
 use crate::context::Context;
 use crate::error::{CoreError, CoreResult, ErrorCode};
 use crate::fsx;
-use crate::job::{JOB_FILE, JobFile};
-use crate::manifest::{Extra, JOBS_DIR, Kind, MANIFEST_FILE, PFORGE_DIR};
+use crate::manifest::{Extra, Kind, MANIFEST_FILE, PFORGE_DIR};
 use crate::naming;
 use crate::settings::Settings;
 use crate::time::Timestamp;
@@ -55,8 +55,8 @@ pub struct TrashItem {
     /// The project's folder name.
     pub name: String,
     pub trashed_at: Timestamp,
-    /// Set first when a restore starts, so an interrupted restore is finished at startup
-    /// instead of being listed again.
+    /// Set first when a restore starts, so the item isn't listed or purged meanwhile. Cleared
+    /// when the restore fails, and at startup for one that was interrupted (R112).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restored_at: Option<Timestamp>,
     /// Set first when the purge starts on the item (R111): it is never listed or restored
@@ -145,25 +145,6 @@ pub fn locate(ctx: &Context, settings: &Settings, path: &Path) -> CoreResult<Pro
     }
 }
 
-/// R97 for a closed project: the id of a job file in an active state (not terminal, not
-/// `fetched`). Cloud-only and unreadable job files are skipped; nothing is hydrated.
-pub fn active_job_on_disk(ctx: &Context, dir: &Path) -> Option<Ulid> {
-    let jobs = dir.join(JOBS_DIR);
-    std::fs::read_dir(&jobs)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter_map(|e| {
-            let file = e.path().join(JOB_FILE);
-            if ctx.fs.is_cloud_only(&file) {
-                return None;
-            }
-            let job: JobFile = serde_json::from_slice(&std::fs::read(&file).ok()?).ok()?;
-            crate::region_edit::jobs::is_active(job.state).then_some(job.id)
-        })
-        .next()
-}
-
 /// `project_id` of a project folder, if its `project.json` says one.
 fn project_id_of(dir: &Path) -> Option<Ulid> {
     let bytes = std::fs::read(dir.join(MANIFEST_FILE)).ok()?;
@@ -199,10 +180,22 @@ pub(crate) fn begin_delete(ctx: &Context, loc: &ProjectLoc) -> CoreResult<(PathB
     let item_dir = trash_dir(&loc.root).join(item.id.to_string());
     if let Err(e) = write_item(ctx, &loc.root, &item_dir, &item) {
         // No item may claim a project the user was told wasn't deleted.
-        let _ = std::fs::remove_dir_all(&item_dir);
+        let _ = drop_item(&item_dir);
         return Err(e);
     }
     Ok((item_dir, item))
+}
+
+/// Drops an item that holds no project: its `item.json` (and a temp file of it), then the item
+/// folder itself, which must be empty by then. Never recursive, so a project folder in the
+/// item, whatever put it there, is never deleted by a rollback; the item folder then stays.
+pub(crate) fn drop_item(item_dir: &Path) -> std::io::Result<()> {
+    for e in std::fs::read_dir(item_dir)?.flatten() {
+        if e.file_type().is_ok_and(|t| !t.is_dir()) {
+            std::fs::remove_file(e.path())?;
+        }
+    }
+    std::fs::remove_dir(item_dir)
 }
 
 /// `project_delete` (FR-PRJ-57) for a closed project: `item.json` first, then the folder moves,
@@ -211,7 +204,10 @@ pub(crate) fn begin_delete(ctx: &Context, loc: &ProjectLoc) -> CoreResult<(PathB
 pub fn delete_project(ctx: &Context, loc: &ProjectLoc) -> CoreResult<Ulid> {
     let (item_dir, item) = begin_delete(ctx, loc)?;
     if let Err(e) = fsx::move_dir(ctx, &loc.dir, &item_dir.join(&item.name)) {
-        let _ = std::fs::remove_dir_all(&item_dir);
+        if let Err(again) = drop_item(&item_dir) {
+            // Left without a folder: never listed, and it ages out.
+            tracing::warn!(item = %item.id, error = %again, "trash item not dropped after a failed delete");
+        }
         return Err(e);
     }
     Ok(item.id)
@@ -308,9 +304,8 @@ fn folder_missing(item: &TrashItem) -> CoreError {
     .with_field("id")
 }
 
-/// Moves the project folder back to its section, then removes the item folder. Also finishes
-/// an interrupted restore at startup. `not_found` if the folder isn't in the item: the item is
-/// never removed for that (R111).
+/// Moves the project folder back to its section, then removes the item folder. `not_found` if
+/// the folder isn't in the item: the item is never removed for that (R111).
 fn finish_restore(
     ctx: &Context,
     root: &Path,
@@ -336,7 +331,7 @@ fn finish_restore(
     };
     let target = section.join(naming::first_free(&item.name, taken));
     fsx::move_dir(ctx, &src, &target)?;
-    if let Err(e) = std::fs::remove_dir_all(item_dir) {
+    if let Err(e) = drop_item(item_dir) {
         // The project is back; the leftover item (no folder) is unlisted and ages out.
         tracing::warn!(item = %item.id, error = %e, "restored trash item folder not removed");
     }
@@ -354,21 +349,19 @@ fn reopen_item(ctx: &Context, root: &Path, item_dir: &Path, item: &TrashItem) {
 
 // ---------------------------------------------------------------- startup
 
-/// Finishes interrupted restores (`restored_at` set) at startup. One that can't be finished
-/// (the move fails, or the folder isn't in the item) has its `restored_at` cleared and is kept.
-/// Returns the items cleared, which this startup's purge leaves alone. Nothing else is touched:
-/// startup never moves a project to match an item and never drops an item (R111).
-pub(crate) fn finish_restores(ctx: &Context, root: &Path) -> Vec<Ulid> {
+/// Interrupted restores (`restored_at` set) at startup: `restored_at` is cleared and nothing
+/// moves (R111, R112), so an item whose folder is still in the trash is listed again and the
+/// user restores it. Returns the items cleared, which this startup's purge leaves alone.
+/// Nothing else is touched: startup never moves a project to match an item and never drops an
+/// item.
+pub(crate) fn clear_interrupted_restores(ctx: &Context, root: &Path) -> Vec<Ulid> {
     let mut cleared = Vec::new();
     for (item_dir, item) in items_of(root) {
         if item.restored_at.is_none() || item.purging_at.is_some() {
             continue;
         }
-        if let Err(e) = finish_restore(ctx, root, &item_dir, &item) {
-            tracing::warn!(item = %item.id, error = %e, "library trash restore not finished");
-            reopen_item(ctx, root, &item_dir, &item);
-            cleared.push(item.id);
-        }
+        reopen_item(ctx, root, &item_dir, &item);
+        cleared.push(item.id);
     }
     cleared
 }
@@ -431,12 +424,12 @@ pub fn purge(ctx: &Context, settings: &Settings, spared: &[Ulid]) -> (usize, u64
     (count, bytes)
 }
 
-/// The startup work for the library trash (FR-PRJ-58): interrupted restores are finished, then
-/// items older than 30 days are purged (`trash:purged{count, bytes}`).
+/// The startup work for the library trash (FR-PRJ-58): interrupted restores are listed again
+/// (nothing moves), then items older than 30 days are purged (`trash:purged{count, bytes}`).
 pub fn sweep_startup(ctx: &Context, settings: &Settings) {
     let mut spared = Vec::new();
     for root in available_roots(ctx, settings) {
-        spared.extend(finish_restores(ctx, &root));
+        spared.extend(clear_interrupted_restores(ctx, &root));
     }
     let (count, bytes) = purge(ctx, settings, &spared);
     if count > 0 {
