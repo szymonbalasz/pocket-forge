@@ -61,10 +61,45 @@ mod tests {
         }
     }
 
+    /// The resolved path as Explorer must get it: the canonical path without Windows' verbatim
+    /// prefix, spelled out here rather than through `plain_path` (walk-63 H2).
     fn real(p: &std::path::Path) -> String {
-        crate::library::plain_path(std::fs::canonicalize(p).unwrap())
-            .display()
-            .to_string()
+        let c = std::fs::canonicalize(p).unwrap().display().to_string();
+        match c.strip_prefix(r"\\?\") {
+            Some(rest) => rest.to_owned(),
+            None => c,
+        }
+    }
+
+    #[test]
+    fn fr_prj_59_explorer_never_gets_a_verbatim_path() {
+        let t = setup();
+        let project = t.lib.join("Maps").join("Crypt");
+        std::fs::create_dir_all(&project).unwrap();
+        let file = project.join("statue.png");
+        std::fs::write(&file, b"png").unwrap();
+        reveal(&t, &project).unwrap();
+        reveal(&t, &file).unwrap();
+        let calls = t.shell.calls();
+        for args in &calls {
+            for a in args {
+                assert!(!a.contains(r"\\?\"), "verbatim path to Explorer: {a}");
+            }
+        }
+        let sep = std::path::MAIN_SEPARATOR;
+        assert!(
+            calls[0][0].ends_with(&format!("Maps{sep}Crypt")),
+            "{calls:?}"
+        );
+        assert!(calls[1][0].starts_with("/select,"), "{calls:?}");
+        assert!(
+            calls[1][0].ends_with(&format!("Maps{sep}Crypt{sep}statue.png")),
+            "{calls:?}"
+        );
+        if cfg!(windows) {
+            // `C:\…`: a drive letter, then `:\`.
+            assert_eq!(&calls[0][0][1..3], r":\", "{calls:?}");
+        }
     }
 
     fn reveal(t: &T, path: impl AsRef<std::path::Path>) -> Result<(), crate::error::CoreError> {

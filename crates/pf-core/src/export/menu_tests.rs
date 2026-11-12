@@ -631,3 +631,21 @@ fn fr_exp_32_the_source_type_is_sniffed_not_taken_from_its_extension() {
         jpeg
     );
 }
+
+#[test]
+fn fr_exp_32_save_default_for_a_project_file_is_a_plain_path() {
+    let t = setup();
+    let src = t.put("references/statue.png", &rgba_png(&half_transparent(8, 8)));
+    let got = t
+        .core
+        .dispatch("export_save_default", json!({"source": src}))
+        .unwrap();
+    let path = got["path"].as_str().unwrap();
+    // walk-63 H2: never Windows' verbatim `\?\` form.
+    assert!(!path.contains(r"\?\"), "{path}");
+    let sep = std::path::MAIN_SEPARATOR;
+    assert!(
+        path.ends_with(&format!("Crypt{sep}exports{sep}Crypt_statue.png")),
+        "{path}"
+    );
+}

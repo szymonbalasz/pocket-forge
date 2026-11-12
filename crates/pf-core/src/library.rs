@@ -138,17 +138,34 @@ pub fn root_of(ctx: &Context, settings: &Settings, path: &Path) -> Option<PathBu
         .find(|r| same_or_inside(path, r))
 }
 
-/// A canonical path in its usual form: Windows' `\?\` prefix dropped (`\?\C:\x` → `C:\x`,
-/// `\?\UNC\srv\share` → `\srv\share`), so Explorer and the UI read it.
+/// A canonical path in its usual form: Windows' verbatim prefix dropped (`\\?\C:\x` → `C:\x`,
+/// `\\?\UNC\srv\share` → `\\srv\share`), so Explorer and the UI read it.
 pub fn plain_path(p: PathBuf) -> PathBuf {
     let s = p.to_string_lossy();
-    if let Some(rest) = s.strip_prefix(r"\?\UNC\") {
-        return PathBuf::from(format!(r"\{rest}"));
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
     }
-    if let Some(rest) = s.strip_prefix(r"\?\") {
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
         return PathBuf::from(rest);
     }
     p
+}
+
+#[cfg(test)]
+mod plain_path_tests {
+    use std::path::PathBuf;
+
+    use super::plain_path;
+
+    #[test]
+    fn fr_prj_59_plain_path_drops_the_verbatim_prefix() {
+        let plain = |s: &str| plain_path(PathBuf::from(s)).to_string_lossy().into_owned();
+        assert_eq!(plain(r"\\?\C:\lib\Maps\Crypt"), r"C:\lib\Maps\Crypt");
+        assert_eq!(plain(r"\\?\UNC\srv\share\lib"), r"\\srv\share\lib");
+        assert_eq!(plain(r"C:\lib\Maps"), r"C:\lib\Maps");
+        assert_eq!(plain(r"\\srv\share\lib"), r"\\srv\share\lib");
+        assert_eq!(plain("/home/lib"), "/home/lib");
+    }
 }
 
 /// FR-PRJ-59, FR-EXP-32: `path` with `..` and links resolved, if it's inside a configured root
