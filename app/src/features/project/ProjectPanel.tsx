@@ -228,7 +228,10 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
             className="link"
             data-testid="prj-panel-delete"
             title="Delete the project. It stays in Recently deleted for 30 days."
-            onClick={() => setDeleting(true)}
+            onClick={() =>
+              // The close guards first (a running export asks), then the confirmation.
+              void projectStore.beforeLeaving().then((ok) => ok && setDeleting(true))
+            }
           >
             Delete
           </button>
@@ -300,6 +303,11 @@ function ProjectName({ project }: { project: ProjectSnapshot }) {
     input.current?.focus();
     input.current?.select();
   }, [editing]);
+  // The field is disabled while the rename runs and loses focus: a refusal gives it back, so
+  // Esc and typing work at once.
+  useEffect(() => {
+    if (error) input.current?.focus();
+  }, [error]);
 
   if (!editing) {
     return (

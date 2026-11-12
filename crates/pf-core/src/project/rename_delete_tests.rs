@@ -267,21 +267,43 @@ fn fr_prj_56_rename_right_after_tiles_and_decode_started_on_real_threads() {
             .decoded
             .is_started()
     );
-    // Let the background work finish before the temp folder goes.
-    for _ in 0..200 {
-        if lab
-            .core
+    // The tile build that was in flight finishes: every level is served from the cache.
+    let tiles = |lab: &Lab| {
+        lab.core
+            .dispatch(
+                "edt_tiles_open",
+                json!({"project_id": snap["project_id"], "image_id": snap["layers"][0]["id"]}),
+            )
+            .unwrap()
+    };
+    let done = |v: &Value| {
+        v["levels"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|l| l["complete"] == true)
+    };
+    let decoded = |lab: &Lab| {
+        lab.core
             .state()
             .project
             .as_ref()
             .unwrap()
             .decoded
             .is_ready()
-        {
+    };
+    for _ in 0..400 {
+        if done(&tiles(&lab)) && decoded(&lab) {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(25));
     }
+    let t = tiles(&lab);
+    assert!(done(&t), "{t}");
+    let base = t["base_url"].as_str().unwrap();
+    let ext = t["levels"][0]["ext"].as_str().unwrap();
+    let tile = format!("{}/0/0_0.{ext}", &base[base.find("/t/").unwrap()..]);
+    assert_eq!(lab.core.serve_scheme(&tile).status, 200);
     lab.close();
     assert!(!lab.project_dir.exists(), "nothing wrote to the old path");
 }
@@ -297,6 +319,49 @@ fn fr_prj_56_a_late_chat_save_never_recreates_the_old_folder() {
     let err = thread::save(&lab.core.ctx, &old, &t).unwrap_err();
     assert!(crate::project::is_folder_moved(&err), "{err:?}");
     assert!(!Path::new(&old).exists());
+}
+
+#[test]
+fn fr_prj_56_the_chat_context_and_export_settings_survive_the_rename() {
+    let lab = Lab::new();
+    let pid = get(&lab)["project_id"].clone();
+    lab.core
+        .dispatch(
+            "prm_context_publish",
+            json!({"project_id": pid, "host": "rgn", "input": lab.draft("moss")}),
+        )
+        .unwrap();
+    let settings = json!({
+        "grid": {"mode": "px", "source_px_per_square": 16.0},
+        "target_px_per_square": 9,
+        "format": "jpeg",
+    });
+    lab.core
+        .dispatch("export_set_settings", json!({ "settings": settings }))
+        .unwrap();
+    let export = lab.core.dispatch("export_get_settings", json!({})).unwrap();
+
+    rename(&lab, "Vault").unwrap();
+    // The UI publishes a context only when it changes: the core still has the one it got.
+    let context = lab.events_named("prm:chat-context");
+    assert_eq!(context.last().unwrap()["host"], "rgn", "{context:?}");
+    assert_eq!(context.last().unwrap()["project_id"], pid);
+    assert_eq!(
+        lab.core.dispatch("export_get_settings", json!({})).unwrap(),
+        export
+    );
+    // A close still drops it.
+    lab.close();
+    lab.core
+        .dispatch(
+            "project_open",
+            json!({"path": sibling(&lab, "Vault").to_string_lossy()}),
+        )
+        .unwrap();
+    assert_eq!(
+        lab.events_named("prm:chat-context").last().unwrap()["host"],
+        Value::Null
+    );
 }
 
 // ---------------------------------------------------------------- FR-PRJ-57, 58

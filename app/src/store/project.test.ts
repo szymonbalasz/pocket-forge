@@ -203,12 +203,15 @@ test('FR-PRJ-56 if nothing is open after a failed rename, home shows', async () 
   expect(projectStore.get().project).toBeNull();
 });
 
-test('FR-PRJ-57 remove asks the guards, deletes the open project and shows home', async () => {
+test('FR-PRJ-57 the guards are asked before the confirmation; remove deletes the open project and shows home', async () => {
   let asked = 0;
   guard(() => {
     asked++;
     return true;
   });
+  expect(await projectStore.beforeLeaving()).toBe(true);
+  expect(asked).toBe(1);
+  expect(cmds()).toEqual([]);
   expect(await projectStore.remove()).toBeNull();
   expect(asked).toBe(1);
   expect(cmds()).toEqual(['project_delete']);

@@ -294,6 +294,20 @@ pub(crate) fn unsaved_on_close(ctx: &Context, state: &mut State) -> bool {
     }
 }
 
+/// PRJ's hook for a rename or move of the open project's folder (FR-PRJ-56, 57): as a close,
+/// pending settings are committed and a running export is canceled (it writes into the
+/// folder), but the session stays, since the project is the same one.
+pub(crate) fn on_project_moving(ctx: &Context, state: &mut State) {
+    if let Some(id) = state.project.as_ref().map(|p| p.manifest.project_id) {
+        if let Err(e) = flush_pending(ctx, state, true) {
+            tracing::warn!(error = %e, "export settings not saved before the folder moves");
+        }
+        for r in state.exp.running.iter().filter(|r| r.project_id == id) {
+            r.cancel.store(true, Ordering::SeqCst);
+        }
+    }
+}
+
 /// PRJ's close hook for EXP: commits pending settings (FR-PRJ-19 "and on close"), cancels a
 /// running export of the project (OQ-EXP-09: the UI already asked) and ends the session.
 pub(crate) fn on_project_close(ctx: &Context, state: &mut State) {

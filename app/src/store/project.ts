@@ -320,12 +320,18 @@ export const projectStore = {
     return null;
   },
 
-  /** FR-PRJ-57: deletes the open project (the UI asked first). It moves to Recently deleted
-   *  and the home grid shows. Returns the error to show, or null. */
+  /** Asks the close guards without closing (FR-PRJ-57: before the delete confirmation shows, so
+   *  a feature's own question, EXP's "Cancel the export and close?", is never hidden behind
+   *  it). Resolves false if a guard cancelled. */
+  beforeLeaving(): Promise<boolean> {
+    return guardsAllow();
+  },
+
+  /** FR-PRJ-57: deletes the open project (the UI asked first, after `beforeLeaving`). It moves
+   *  to Recently deleted and the home grid shows. Returns the error to show, or null. */
   async remove(): Promise<{ code: string; message: string } | null> {
     const p = state.project;
     if (!p) return null;
-    if (!(await guardsAllow()) || state.project?.project_id !== p.project_id) return null;
     try {
       await api.project.delete(p.project_dir);
     } catch (e) {

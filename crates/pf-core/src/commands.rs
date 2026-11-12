@@ -401,14 +401,25 @@ fn job_active(job_id: Ulid, verb: &str) -> CoreError {
 
 /// Releases the open project's files as a close does (EXP's pending settings and running
 /// export, the chat session, the decoded original). The caller decided what happens to a
-/// waiting save. Returns the project and whether its original was being decoded or in memory.
+/// waiting save. `reopens`: the folder is only renamed or moved and the same project opens
+/// again (FR-PRJ-56, 57), so EXP's session and the published chat contexts stay. Returns the
+/// project and whether its original was being decoded or in memory.
 fn release_open(
     core: &Core,
     state: &mut crate::core::State,
+    reopens: bool,
 ) -> Option<(project::OpenProject, bool)> {
-    crate::export::on_project_close(&core.ctx, state);
+    if reopens {
+        crate::export::on_project_moving(&core.ctx, state);
+    } else {
+        crate::export::on_project_close(&core.ctx, state);
+    }
     let p = state.project.take()?;
-    core.chat.on_project_close(p.manifest.project_id);
+    if reopens {
+        core.chat.on_project_moving(p.manifest.project_id);
+    } else {
+        core.chat.on_project_close(p.manifest.project_id);
+    }
     let decoded = p.decoded.is_started();
     p.decoded.release();
     Some((p, decoded))
@@ -461,7 +472,7 @@ fn rename_open(core: &Core, state: &mut crate::core::State, name: &str) -> CoreR
     };
     refuse_active_job_open(state, "Rename")?;
     refuse_unsaved(core, state)?;
-    let (_, decode) = release_open(core, state).ok_or_else(no_project)?;
+    let (_, decode) = release_open(core, state, true).ok_or_else(no_project)?;
     match crate::fsx::move_dir(&core.ctx, &old, &target) {
         Ok(()) => {
             core.served().rebase(&old, &target);
@@ -541,9 +552,12 @@ fn delete_open(
         project::retry_pending(&core.ctx, install_id, p);
     }
     crate::export::unsaved_on_close(&core.ctx, state);
-    let (_, decode) = release_open(core, state).ok_or_else(no_project)?;
+    let (p, decode) = release_open(core, state, true).ok_or_else(no_project)?;
     match library::trash::delete_project(&core.ctx, loc) {
         Ok(id) => {
+            // It is gone for good: the rest of a close.
+            crate::export::on_project_close(&core.ctx, state);
+            core.chat.on_project_close(p.manifest.project_id);
             core.served().reset(None);
             core.chat.notify_project(&core.ctx, None);
             Ok(id)
@@ -809,7 +823,7 @@ impl Command for ProjectClose {
         } else {
             refuse_unsaved(core, &mut state)?;
         }
-        if release_open(core, &mut state).is_some() {
+        if release_open(core, &mut state, false).is_some() {
             core.chat.notify_project(&core.ctx, None);
         }
         core.served().reset(None);

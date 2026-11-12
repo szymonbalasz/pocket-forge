@@ -892,6 +892,8 @@ test('FR-PRJ-56 a taken name shows the error under the name and nothing changes;
   expect((await screen.findByTestId('prj-panel-name-error')).textContent).toContain('taken');
   expect(projectStore.get().project?.name).toBe('Crypt');
   expect(mock.projects.has(CRYPT)).toBe(true);
+  // The field has the focus again, so Esc and typing work at once.
+  await waitFor(() => expect(document.activeElement).toBe(input));
   // Typing clears the error; Esc leaves the name as it was.
   fireEvent.change(input, { target: { value: 'Vault' } });
   expect(screen.queryByTestId('prj-panel-name-error')).toBeNull();
@@ -939,6 +941,32 @@ test('FR-PRJ-57 Delete in the panel asks first: Cancel keeps the project, confir
   expect(screen.queryByTestId('prj-panel')).toBeNull();
   expect(mock.projects.has(CRYPT)).toBe(false);
   expect(mock.trash.map((t) => t.name)).toEqual(['Crypt']);
+});
+
+test('FR-PRJ-57 a feature’s close question comes before the confirmation, never behind it', async () => {
+  await openCrypt();
+  // EXP's "Cancel the export and close?" holds the close guard until it is answered.
+  let answer!: { proceed: () => void; cancel: () => void };
+  const off = projectStore.addCloseGuard((proceed, cancel) => {
+    answer = { proceed, cancel };
+    return false;
+  });
+  try {
+    fireEvent.click(screen.getByTestId('prj-panel-delete'));
+    await act(async () => undefined);
+    expect(screen.queryByTestId('prj-delete-dialog')).toBeNull();
+    // "No": nothing is asked and nothing is deleted.
+    await act(async () => answer.cancel());
+    expect(screen.queryByTestId('prj-delete-dialog')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('prj-panel-delete'));
+    await act(async () => answer.proceed());
+    fireEvent.click(await screen.findByTestId('prj-delete-confirm'));
+    await waitFor(() => expect(projectStore.get().project).toBeNull());
+  } finally {
+    off();
+  }
+  expect(core.names()).toContain('project_delete');
 });
 
 test('FR-PRJ-57 a refused delete says why in the confirmation and the project stays open', async () => {

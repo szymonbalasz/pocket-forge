@@ -227,9 +227,23 @@ impl ChatRuntime {
     /// building its context is stopped here, under the same lock it commits under, so it
     /// never opens a session or keeps a memory thread for the closed project.
     pub fn on_project_close(&self, project_id: Ulid) {
+        self.release_project(project_id, false);
+    }
+
+    /// The open project's folder is being renamed or moved (FR-PRJ-56, 57): as a close, its
+    /// session ends and a running turn is stopped, since both write to the old folder. The
+    /// published contexts stay: the project is the same and the UI publishes them only when
+    /// they change, so the next turn still gets the prompt as it is.
+    pub fn on_project_moving(&self, project_id: Ulid) {
+        self.release_project(project_id, true);
+    }
+
+    fn release_project(&self, project_id: Ulid, keep_contexts: bool) {
         let running = {
             let mut rt = lock(&self.rt);
-            rt.contexts.retain(|(p, _), _| *p != project_id);
+            if !keep_contexts {
+                rt.contexts.retain(|(p, _), _| *p != project_id);
+            }
             if rt
                 .memory
                 .as_ref()
