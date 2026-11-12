@@ -84,9 +84,7 @@ function listen(): void {
       !!p && c.id === p.project_id && (c.path !== p.project_dir || c.name !== p.name);
     if (p && state.cards?.some(stale))
       set({
-        cards: state.cards.map((c) =>
-          stale(c) ? { ...c, path: p.project_dir, name: p.name } : c,
-        ),
+        cards: state.cards.map((c) => (stale(c) ? { ...c, path: p.project_dir, name: p.name } : c)),
       });
   });
 }
