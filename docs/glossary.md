@@ -44,6 +44,7 @@
 | **Project reference** | An image in a project's `references/` folder. |
 | **References block** | The part of the Generate panel that picks the references for a request. |
 | **References trash** | The library-level trash for deleted packs, under `References/.pforge/trash/`. |
+| **Library trash** | The library-level trash for deleted asset projects, under `<library-root>/.pforge/trash/`; emptied after 30 days (#62). |
 | **Reference pack** | A named, reusable set of reference images kept as a folder in `<library-root>/References/<pack>/`, optionally attached to a request (#51). |
 | **Structural sketch** | A drawn or imported image that fixes layout or pose (the *structure* role). |
 | **Art recipe** | Reusable production guidance: style text, approved references, composition constraints, output requirements and tested settings. |

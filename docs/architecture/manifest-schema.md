@@ -45,6 +45,7 @@
       .pforge/thumb.jpg                  pack thumbnail, rebuildable (FR-REF-13)
     .pforge/trash/<item-id>/             References trash: item.json + files, 30-day purge (§4.13)
     .Swords.pf-tmp-<ulid>/               a pack being created (FR-REF-07)
+  .pforge/trash/<item-id>/               library trash: item.json + a deleted project folder, 30-day purge (§4.15)
 <data-dir>/                              local, per machine, never synced (#19)
   settings.json                          §5
   cache/tiles/…                          tile pyramids; key, cap, eviction owned by EDT (R5)
@@ -251,6 +252,9 @@ Owner of the meaning: [prompt-helper](../specs/prompt-helper.md) (PRM, FR-PRM-22
 - PRJ's orphan sweep never touches `.pforge/chat/` (FR-PRJ-20). Conflict copies (FR-PRJ-34): per thread id, the later `updated_at` stays `<id>.json` (settled like `job.json` copies), the other file goes to the trash as `conflict_copy`; so does a thread file that is neither the shown thread (the newest one nothing replaced) nor one it replaced, with the project warning `chat_conflict_copy`. Nothing is merged.
 - The turn images live outside the project, in `<data-dir>/chat/<thread-id>/` (this turn's only; emptied at startup).
 
+### 4.15 Library trash item
+Owner of the meaning: [asset-project](../specs/asset-project.md) (FR-PRJ-57, 58, #62). `<library-root>/.pforge/trash/<item-id>/item.json` = `{schema_version, id, kind: project, project_id, section, name, trashed_at, restored_at?}`, plus the project folder, whole, as `<item-id>/<name>/`. `item.json` is written first (temp → rename); the folder move is one rename and is rolled forward or dropped at startup. Purged 30 days after `trashed_at`; skipped while `restored_at` is set. Unknown fields are kept.
+
 ## 5. `settings.json` (R8)
 | Section | Fields | Owner of the meaning |
 |---|---|---|
@@ -265,7 +269,7 @@ Owner of the meaning: [prompt-helper](../specs/prompt-helper.md) (PRM, FR-PRM-22
 Corrupt or unreadable → defaults + a warning; the bad file is kept as `settings.corrupt-<UTC>.json`. Unknown sections are kept.
 
 ## 6. Versioning and migration
-- `schema_version` is an integer on `project.json`, `job.json`, revision files, `settings.json`, `pack.json` and References trash `item.json`. v1 is the first (redefined in place by #44 before any real project existed).
+- `schema_version` is an integer on `project.json`, `job.json`, revision files, `settings.json`, `pack.json`, References trash `item.json` and library trash `item.json`. v1 is the first (redefined in place by #44 before any real project existed).
 - Load runs pure migrations vN → vN+1 in order. A mutable file is written migrated at its next write; the pre-migration manifest is kept once as `.pforge/project.v<N>.json`. Write-once files are migrated in memory only.
 - Newer than supported → the project opens **read-only** ("Made by a newer Pocket Forge"); nothing is written (FR-PRJ-26).
 - Each migration has a fixture from the previous version and a `fr_prj_25_*` test.
