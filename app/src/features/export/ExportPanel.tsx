@@ -10,6 +10,7 @@ import { projectHasImage } from '../../shared/generateTabs';
 import { useProjectState } from '../../store/project';
 import { exportStore, useExportState } from './store';
 import {
+  closeQuestion,
   fileNameOf,
   formatBytes,
   formHasSource,
@@ -365,13 +366,15 @@ export function ExportPanel() {
               role="alert"
               data-testid="exp-panel-close-ask"
             >
-              <span>Cancel the export and close?</span>
+              <span data-testid="exp-panel-close-question">
+                {closeQuestion(s.closeWhy).question}
+              </span>
               <button
                 type="button"
                 data-testid="exp-panel-close-confirm"
                 onClick={() => void exportStore.confirmClose()}
               >
-                Cancel export and close
+                {closeQuestion(s.closeWhy).confirm}
               </button>
               <button
                 type="button"

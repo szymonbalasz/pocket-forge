@@ -247,3 +247,130 @@ test('FR-PRJ-03 #53 + New uses the native image dialog when it is available', as
   await expect(cards(page)).toHaveCount(4);
   await expect(page.getByTestId('prj-home-new-paths')).toHaveCount(0);
 });
+
+test('FR-PRJ-56 rename from the panel name keeps the project open with its view, painted mask and typed prompt; a taken name is refused', async ({
+  page,
+}) => {
+  await card(page, 'Crypt').getByRole('button').click();
+  const stage = page.getByTestId('edt-canvas-stage');
+  await expect(stage).toHaveAttribute('data-image-loaded', 'true');
+  // Zoom in, so "the view stays" means something.
+  const box = (await stage.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.6);
+  await page.mouse.wheel(0, -300);
+  await expect.poll(async () => (await view(page)).scale).toBeGreaterThan(0);
+  const before = await view(page);
+
+  // A region, a painted mask and a typed prompt: what a rename must leave as it is.
+  const drag = async (from: [number, number], to: [number, number]) => {
+    const at = ([x, y]: [number, number]) => ({
+      x: box.x + before.tx + x * before.scale,
+      y: box.y + before.ty + y * before.scale,
+    });
+    const [a, b] = [at(from), at(to)];
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    await page.mouse.move(b.x, b.y, { steps: 8 });
+    await page.mouse.up();
+  };
+  const region = () => page.evaluate(() => window.__pfTest!.region!() as unknown);
+  const mask = () =>
+    page.evaluate(() => window.__pfTest!.mask!() as { hash: string; sum: number } | null);
+  // Inside the part of the image the zoomed view shows.
+  const inView = (fx: number, fy: number): [number, number] => [
+    Math.round((box.width * fx - before.tx) / before.scale),
+    Math.round((box.height * fy - before.ty) / before.scale),
+  ];
+  await page.keyboard.press('r');
+  await drag(inView(0.3, 0.3), inView(0.7, 0.7));
+  await expect.poll(async () => await region()).not.toBeNull();
+  await page.keyboard.press('b');
+  await drag(inView(0.4, 0.4), inView(0.6, 0.6));
+  await expect.poll(async () => (await mask())?.sum ?? 0).toBeGreaterThan(0);
+  const [regionBefore, maskBefore] = [await region(), await mask()];
+  const prompt = page.getByTestId('prm-block-prompt');
+  await prompt.fill('moss on the stones');
+
+  await page.getByTestId('prj-panel-name').click();
+  const input = page.getByTestId('prj-panel-name-input');
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue('Crypt');
+  await input.fill('GRID-MAP');
+  await input.press('Enter');
+  await expect(page.getByTestId('prj-panel-name-error')).toContainText('taken');
+  await input.press('Escape');
+  await expect(page.getByTestId('prj-panel-name')).toHaveText('Crypt');
+
+  await page.getByTestId('prj-panel-name').click();
+  await input.fill('Old Crypt');
+  await input.press('Enter');
+  await expect(page.getByTestId('prj-panel-name')).toHaveText('Old Crypt');
+  const renames = (await calls(page)).filter((c) => c.cmd === 'project_rename');
+  expect(renames.at(-1)?.args).toEqual({
+    input: { path: projectPath('maps', 'Crypt'), name: 'Old Crypt' },
+  });
+  // Still open: the same canvas and view, Saved, no folder-moved banner, never closed.
+  await expect(stage).toHaveAttribute('data-image-loaded', 'true');
+  expect(await view(page)).toEqual(before);
+  // The mask as painted (the same bytes), its region and the prompt as typed.
+  expect(await mask()).toEqual(maskBefore);
+  expect(await region()).toEqual(regionBefore);
+  await expect(prompt).toHaveValue('moss on the stones');
+  await expect(page.getByTestId('prj-status-save')).toHaveAttribute('data-state', 'saved');
+  await expect(page.getByTestId('prj-panel-reopen-home')).toHaveCount(0);
+  expect((await calls(page)).some((c) => c.cmd === 'project_close')).toBe(false);
+  // Home lists it under its new name.
+  await page.getByTestId('prj-panel-close').click();
+  await expect(card(page, 'Old Crypt')).toHaveCount(1);
+  await expect(card(page, 'Crypt')).toHaveCount(0);
+});
+
+test('FR-PRJ-57 FR-PRJ-58 delete with the confirmation from the panel and the card; Recently deleted and Restore', async ({
+  page,
+}) => {
+  await expect(cards(page)).toHaveCount(2);
+  await expect(page.getByTestId('prj-trash-list')).toHaveCount(0);
+
+  // From the left panel: Cancel keeps it, confirm deletes it and the home grid shows.
+  await card(page, 'Crypt').getByRole('button').click();
+  await page.getByTestId('prj-panel-delete').click();
+  await expect(page.getByTestId('prj-delete-dialog')).toContainText(
+    'Delete Crypt?It stays in Recently deleted for 30 days.',
+  );
+  await page.getByTestId('prj-delete-cancel').click();
+  await expect(page.getByTestId('prj-delete-dialog')).toHaveCount(0);
+  await expect(page.getByTestId('prj-panel-name')).toHaveText('Crypt');
+  await page.getByTestId('prj-panel-delete').click();
+  await page.getByTestId('prj-delete-confirm').click();
+  await expect(page.getByTestId('prj-home-dropzone')).toBeVisible();
+  await expect(card(page, 'Crypt')).toHaveCount(0);
+  await expect(cards(page)).toHaveCount(1);
+  const trash = page.getByTestId('prj-trash-item');
+  await expect(trash).toHaveCount(1);
+  await expect(trash.first().getByTestId('prj-trash-name')).toHaveText('Crypt');
+  const deletes = (await calls(page)).filter((c) => c.cmd === 'project_delete');
+  expect(deletes.map((c) => c.args)).toEqual([{ input: { path: projectPath('maps', 'Crypt') } }]);
+
+  // From the card's context menu.
+  await card(page, 'grid-map').click({ button: 'right' });
+  await page.getByTestId('prj-home-card-delete').click();
+  await expect(page.getByTestId('prj-delete-dialog')).toContainText('Delete grid-map?');
+  await page.getByTestId('prj-delete-confirm').click();
+  await expect(cards(page)).toHaveCount(0);
+  await expect(page.getByTestId('prj-home-empty')).toBeVisible();
+  // Newest first.
+  await expect(trash.getByTestId('prj-trash-name')).toHaveText(['grid-map', 'Crypt']);
+  await expect(trash.first()).toHaveAttribute('data-record-id', /^01JMOCKPRJ/);
+
+  // Another section has none; Restore brings the card back and it opens.
+  await page.getByTestId('prj-rail-tokens').click();
+  await expect(cards(page)).toHaveCount(1);
+  await expect(page.getByTestId('prj-trash-list')).toHaveCount(0);
+  await page.getByTestId('prj-rail-maps').click();
+  await trash.filter({ hasText: 'Crypt' }).getByTestId('prj-trash-restore').click();
+  await expect(card(page, 'Crypt')).toHaveCount(1);
+  await expect(trash.getByTestId('prj-trash-name')).toHaveText(['grid-map']);
+  await card(page, 'Crypt').getByRole('button').click();
+  await expect(page.getByTestId('prj-panel-name')).toHaveText('Crypt');
+  await expect(page.getByTestId('edt-canvas-stage')).toHaveAttribute('data-image-loaded', 'true');
+});

@@ -51,11 +51,19 @@ const initial: ProjectState = {
 let state: ProjectState = initial;
 const listeners = new Set<() => void>();
 let listening = false;
+/** Why the close guards are asked: the project closes, it is renamed and stays open
+ *  (FR-PRJ-56), or it is deleted (FR-PRJ-57). A question is worded for each (R111, R112);
+ *  apart from the wording a delete is a close. */
+export type LeaveReason = 'close' | 'rename' | 'delete';
 /** A feature's say before the open project closes, ahead of PRJ's own `unsaved` check (EXP's
  *  "Cancel the export and close?", EDT's last mask submit, R55). Returns true to allow it now;
  *  false to hold the close and later call `proceed` (once) or `cancel`. */
-export type CloseGuard = (proceed: () => void, cancel: () => void) => boolean;
+export type CloseGuard = (proceed: () => void, cancel: () => void, why: LeaveReason) => boolean;
 const closeGuards = new Set<CloseGuard>();
+/** Told the folder and the id of the open project that was just deleted, before home shows
+ *  (FR-PRJ-57). The id is what identifies it: a path kept from before a rename is out of date. */
+export type DeletedListener = (projectDir: string, projectId: string) => void;
+const deletedListeners = new Set<DeletedListener>();
 /** R110: the features whose close question is on screen (EXP's "Cancel the export and close?"). */
 const closeQuestions = new Set<string>();
 
@@ -68,11 +76,11 @@ const resolvedListeners = new Set<ResolvedListener>();
 
 /** Asks the guards in turn; a held guard's `proceed` asks the ones after it. Runs `go` once all
  *  allowed it, `cancel` if one cancels. */
-function askGuards(go: () => void, cancel: () => void): void {
+function askGuards(go: () => void, cancel: () => void, why: LeaveReason = 'close'): void {
   const list = [...closeGuards];
   const from = (start: number): void => {
     for (const [i, guard] of list.entries()) {
-      if (i >= start && !guard(() => from(i + 1), cancel)) return;
+      if (i >= start && !guard(() => from(i + 1), cancel, why)) return;
     }
     go();
   };
@@ -210,6 +218,33 @@ async function openNow(path: string): Promise<boolean> {
   }
 }
 
+/** Asks the close guards before the open project is renamed or deleted (FR-PRJ-56, 57): the
+ *  debounced drafts and the last mask are flushed, and a running export asks first. Resolves
+ *  false if a guard cancelled. */
+function guardsAllow(why: LeaveReason): Promise<boolean> {
+  return new Promise((resolve) =>
+    askGuards(
+      () => resolve(true),
+      () => resolve(false),
+      why,
+    ),
+  );
+}
+
+/** Takes the core's snapshot after a rename or a refused delete (FR-PRJ-56, 57). The project is
+ *  the same one, so features keep their state (mask, prompt, view). If nothing is open any more
+ *  (the reopen failed), home shows. */
+async function resync(): Promise<void> {
+  try {
+    const project = await api.project.get();
+    if (project) set({ project });
+    else set({ project: null, save: initial.save, trashNotice: null });
+  } catch (e) {
+    set({ error: errorOf(e) });
+  }
+  bump();
+}
+
 /** `close` once the guards allowed it. */
 async function closeNow(force: boolean): Promise<void> {
   try {
@@ -273,6 +308,53 @@ export const projectStore = {
    *  whether a project is still open). */
   async close(force = false): Promise<void> {
     return new Promise((resolve) => askGuards(() => void closeNow(force).then(resolve), resolve));
+  },
+
+  /** FR-PRJ-56: renames the open project from the left panel. The project stays open under
+   *  its new name with its history; no folder-moved banner, and the mask, prompt and view stay.
+   *  Returns the error to show under the name, or null (also when nothing changed). */
+  async rename(name: string): Promise<{ code: string; message: string } | null> {
+    const p = state.project;
+    const wanted = name.trim();
+    if (!p || wanted === p.name) return null;
+    if (!(await guardsAllow('rename')) || state.project?.project_id !== p.project_id) return null;
+    try {
+      await api.project.rename(p.project_dir, wanted);
+    } catch (e) {
+      // All or nothing: it is still open under its old name (or, if that failed too, closed).
+      await resync();
+      return errorOf(e);
+    }
+    await resync();
+    return null;
+  },
+
+  /** Registers a `DeletedListener`; returns its removal. */
+  onDeleted(listener: DeletedListener): () => void {
+    deletedListeners.add(listener);
+    return () => deletedListeners.delete(listener);
+  },
+
+  /** FR-PRJ-57: deletes the open project. The UI asked first ("Delete <name>?"), and only now,
+   *  after the user confirmed, the close guards run (the drafts are flushed, a running export
+   *  asks), so cancelling the confirmation changes nothing (R111). It moves to Recently deleted
+   *  and the home grid shows. Returns the error to show, or null (also when a guard cancelled:
+   *  the project stays open). */
+  async remove(): Promise<{ code: string; message: string } | null> {
+    const p = state.project;
+    if (!p) return null;
+    if (!(await guardsAllow('delete')) || state.project?.project_id !== p.project_id) return null;
+    try {
+      await api.project.delete(p.project_dir);
+    } catch (e) {
+      await resync();
+      return errorOf(e);
+    }
+    // Before home shows: nothing asks for an image of the deleted project again.
+    for (const l of deletedListeners) l(p.project_dir, p.project_id);
+    set({ project: null, save: initial.save, error: null, trashNotice: null });
+    bump();
+    return null;
   },
 
   /** Re-reads the open project (after a restore, relink, …). */

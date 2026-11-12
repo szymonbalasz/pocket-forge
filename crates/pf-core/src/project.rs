@@ -234,10 +234,30 @@ pub struct ProjectSnapshot {
 }
 
 impl OpenProject {
-    /// The warnings as of now. `resumable` (FR-PRJ-29) names only jobs found on open that are
-    /// still running: a job this session started never counts, and the warning ends with the
-    /// last of them (walk-p4r L1).
-    fn live_warnings(&self) -> Vec<Warning> {
+    /// The warnings as of now (`project_get`). `resumable` (FR-PRJ-29) names only jobs found on
+    /// open that are still running: a job this session started never counts, and the warning
+    /// ends with the last of them (walk-p4r L1). A `fetched` job has nothing left to resume, so
+    /// it doesn't count here: the UI drops the banner once no job runs, and a later re-read
+    /// (after a rename, a save, a refused delete) must not bring it back (R112 walk D1).
+    pub(crate) fn live_warnings(&self) -> Vec<Warning> {
+        self.warnings_where(|s| !s.is_terminal() && s != crate::job::JobState::Fetched)
+    }
+
+    /// The warnings `project_open` answers with (FR-PRJ-29): every non-terminal job found on
+    /// open is resumable, a `fetched` one too.
+    fn open_warnings(&self) -> Vec<Warning> {
+        self.warnings_where(|s| !s.is_terminal())
+    }
+
+    /// `project_open`'s snapshot: as [`OpenProject::snapshot`], with the open's own warnings.
+    pub fn snapshot_at_open(&self) -> ProjectSnapshot {
+        ProjectSnapshot {
+            warnings: self.open_warnings(),
+            ..self.snapshot()
+        }
+    }
+
+    fn warnings_where(&self, resumable: impl Fn(crate::job::JobState) -> bool) -> Vec<Warning> {
         let mut out = Vec::with_capacity(self.warnings.len());
         for w in &self.warnings {
             if w.code != "resumable" {
@@ -250,7 +270,7 @@ impl OpenProject {
                 .flatten()
                 .filter_map(|j| {
                     let id: Ulid = j["job_id"].as_str()?.parse().ok()?;
-                    let job = self.jobs.get(&id).filter(|f| !f.state.is_terminal())?;
+                    let job = self.jobs.get(&id).filter(|f| resumable(f.state))?;
                     Some(serde_json::json!({ "job_id": id, "state": job.state }))
                 })
                 .collect();
@@ -1676,5 +1696,7 @@ pub fn folder_add(
 
 #[cfg(test)]
 mod gen_tests;
+#[cfg(test)]
+pub(crate) mod rename_delete_tests;
 #[cfg(test)]
 mod tests;

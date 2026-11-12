@@ -348,17 +348,297 @@ impl Command for ProjectRename {
     type Input = ProjectRenameInput;
     type Output = PathOutput;
 
-    /// FR-PRJ-45: a closed project only.
+    /// FR-PRJ-45 (a closed project) and FR-PRJ-56 (the open one).
     fn run(core: &Core, input: Self::Input) -> CoreResult<PathOutput> {
-        let state = core.state();
-        let open_dir = state.project.as_ref().map(|p| p.dir.clone());
-        let path = library::rename_project(
-            &core.ctx,
-            &state.settings,
-            &PathBuf::from(&input.path),
-            &input.name,
-            open_dir.as_deref(),
-        )?;
+        let mut state = core.state();
+        let path = PathBuf::from(&input.path);
+        let path = if is_open_project(&state, &path) {
+            rename_open(core, &mut state, &input.name)?
+        } else {
+            // R111: a job the runner drives would come back for a folder that is gone.
+            library::rename_project_if(&core.ctx, &state.settings, &path, &input.name, |dir| {
+                refuse_active_job_closed(&state, dir, "Rename")
+            })?
+        };
+        Ok(PathOutput { path })
+    }
+}
+
+/// True if `path` names the open project's folder. Lexical, so it still answers once the folder
+/// was moved (§11).
+fn is_open_project(state: &crate::core::State, path: &std::path::Path) -> bool {
+    let Ok(path) = std::path::absolute(path) else {
+        return false;
+    };
+    state
+        .project
+        .as_ref()
+        .is_some_and(|p| library::same_folder(&p.dir, &path))
+}
+
+/// R97 for FR-PRJ-56, 57: `job_active` while the open project has an active job. The job would
+/// come back for a folder that is gone.
+fn refuse_active_job_open(state: &crate::core::State, verb: &str) -> CoreResult<()> {
+    let Some(p) = state.project.as_ref() else {
+        return Ok(());
+    };
+    let active = p
+        .jobs
+        .values()
+        .find(|j| crate::region_edit::jobs::is_active(j.state))
+        .map(|j| j.id)
+        .or_else(|| state.rgn.runner.job_in(&p.dir));
+    match active {
+        Some(id) => Err(job_active(id, verb)),
+        None => Ok(()),
+    }
+}
+
+/// R97 for a closed project (FR-PRJ-45, 57): `job_active` while the runner drives a job of the
+/// project in `dir` in this session (it polls or fetches, and would write to the folder).
+/// R112: the job files don't count. One left non-terminal by an earlier session, or a
+/// `succeeded` job whose results are in the spool and which only waits for the project to be
+/// opened, refuses nothing: the runner has let go of it, nothing writes to the folder, and the
+/// spool is keyed by project id.
+fn refuse_active_job_closed(
+    state: &crate::core::State,
+    dir: &std::path::Path,
+    verb: &str,
+) -> CoreResult<()> {
+    match state.rgn.runner.job_in(dir) {
+        Some(id) => Err(job_active(id, verb)),
+        None => Ok(()),
+    }
+}
+
+fn job_active(job_id: Ulid, verb: &str) -> CoreError {
+    CoreError::new(
+        ErrorCode::JobActive,
+        format!("A job is running in this project. {verb} it when the job has finished."),
+    )
+    .with_detail(serde_json::json!({ "job_id": job_id }))
+}
+
+/// Releases the open project's files as a close does (EXP's pending settings and running
+/// export, the chat session, the decoded original). The caller decided what happens to a
+/// waiting save. `moving`: the folder is only renamed (to that path) or moved to the trash
+/// (`None`) and the same project stays or opens again (FR-PRJ-56, 57), so EXP's session and
+/// what the chat holds for it stay. Returns the project and whether its original was being
+/// decoded or in memory.
+fn release_open(
+    core: &Core,
+    state: &mut crate::core::State,
+    moving: Option<Option<&std::path::Path>>,
+) -> Option<(project::OpenProject, bool)> {
+    if moving.is_some() {
+        crate::export::on_project_moving(&core.ctx, state);
+    } else {
+        crate::export::on_project_close(&core.ctx, state);
+    }
+    let p = state.project.take()?;
+    match moving {
+        Some(to) => core.chat.on_project_moving(p.manifest.project_id, to),
+        None => core.chat.on_project_close(p.manifest.project_id),
+    }
+    let decoded = p.decoded.is_started();
+    p.decoded.release();
+    Some((p, decoded))
+}
+
+/// Opens `dir` again after [`release_open`] (FR-PRJ-56): the same project, so the served keys
+/// stay. `decode` starts the original's decode again, as the UI asked for it once per project
+/// already. `was` is the project as it was released: the open adds no job warning it didn't
+/// show (a fetched job reads as `resumable` at an open, FR-PRJ-29, and not afterwards). If the
+/// folder can't be opened, nothing is open any more and the rest of a close is done.
+fn reopen(
+    core: &Core,
+    state: &mut crate::core::State,
+    dir: &std::path::Path,
+    decode: bool,
+    was: &project::OpenProject,
+) -> CoreResult<()> {
+    let settings = state.settings.clone();
+    let opened = project::open(&core.ctx, &settings, dir, Some(core.thumbs.clone()));
+    let mut p = match opened {
+        Ok(p) => p,
+        Err(e) => {
+            // Nothing is open any more: the UI reads `project_get` and shows home. What was
+            // kept for a project that stays open goes, as at a close: EXP's session, and the
+            // chat's memory thread, contexts and rename target.
+            crate::export::on_project_close(&core.ctx, state);
+            core.chat.on_project_close(was.manifest.project_id);
+            core.served().reset(None);
+            core.chat.notify_project(&core.ctx, None);
+            return Err(e);
+        }
+    };
+    crate::region_edit::runner::on_project_open(
+        &core.ctx,
+        settings.install_id,
+        &mut state.rgn,
+        &mut p,
+    );
+    let shown = was.live_warnings();
+    p.warnings.retain(|w| {
+        !matches!(w.code, "resumable" | "lost") || shown.iter().any(|s| s.code == w.code)
+    });
+    if decode {
+        p.decoded.start(&core.ctx);
+    }
+    core.chat
+        .notify_project(&core.ctx, Some(p.manifest.project_id));
+    state.project = Some(p);
+    Ok(())
+}
+
+/// FR-PRJ-56: renames the open project. Checks, then what waits is saved as a close does (no
+/// force), the files are released, the folder is renamed and the project is opened again. A
+/// folder rename that fails opens it again under its old name.
+fn rename_open(core: &Core, state: &mut crate::core::State, name: &str) -> CoreResult<PathBuf> {
+    let p = state.project.as_mut().ok_or_else(no_project)?;
+    project::require_folder(p)?;
+    let old = p.dir.clone();
+    let Some(target) = library::rename_target(&old, name)? else {
+        return Ok(old);
+    };
+    refuse_active_job_open(state, "Rename")?;
+    refuse_unsaved(core, state, Leaving::Rename)?;
+    let (was, decode) = release_open(core, state, Some(Some(&target))).ok_or_else(no_project)?;
+    match crate::fsx::move_dir(&core.ctx, &old, &target) {
+        Ok(()) => {
+            core.served().rebase(&old, &target);
+            reopen(core, state, &target, decode, &was)?;
+            Ok(target)
+        }
+        Err(e) => {
+            core.chat.on_project_not_moved(was.manifest.project_id);
+            if let Err(again) = reopen(core, state, &old, decode, &was) {
+                tracing::warn!(error = %again, "the project didn't open again after a failed rename");
+            }
+            Err(e)
+        }
+    }
+}
+
+// ---------------------------------------------------------------- delete, library trash (#62)
+
+pub struct ProjectDelete;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectDeleteInput {
+    /// The project folder.
+    pub path: String,
+}
+
+impl Validate for ProjectDeleteInput {
+    fn validate(&self) -> CoreResult<()> {
+        check_path("path", &self.path)
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ItemIdOutput {
+    /// The library trash item (`library_trash_restore` takes it).
+    pub item_id: Ulid,
+}
+
+impl Command for ProjectDelete {
+    const NAME: &'static str = "project_delete";
+    type Input = ProjectDeleteInput;
+    type Output = ItemIdOutput;
+
+    /// FR-PRJ-57: the folder moves, whole, to the library trash. The open project is closed
+    /// first; `job_active` while it has an active job (R97), open or closed.
+    fn run(core: &Core, input: Self::Input) -> CoreResult<ItemIdOutput> {
+        let mut state = core.state();
+        let settings = state.settings.clone();
+        let loc = library::trash::locate(&core.ctx, &settings, &PathBuf::from(&input.path))?;
+        let item_id = if is_open_project(&state, &loc.dir) {
+            delete_open(core, &mut state, &loc)?
+        } else {
+            refuse_active_job_closed(&state, &loc.dir, "Delete")?;
+            library::trash::delete_project(&core.ctx, &loc)?
+        };
+        Ok(ItemIdOutput { item_id })
+    }
+}
+
+/// FR-PRJ-57 on the open project: released as FR-PRJ-56 does; a waiting save is tried once and
+/// dropped only once the move has succeeded (the UI asked). A move that fails leaves the
+/// project open as it was, with its waiting changes still in memory (R111): it is put back,
+/// never read again from the folder. EXP's waiting settings are tried once too (by
+/// `release_open`) and keep waiting if they couldn't be saved, whatever the reason (R112): a
+/// close drops them after some failures, and this may not be a close.
+fn delete_open(
+    core: &Core,
+    state: &mut crate::core::State,
+    loc: &library::trash::ProjectLoc,
+) -> CoreResult<Ulid> {
+    refuse_active_job_open(state, "Delete")?;
+    let install_id = state.settings.install_id;
+    if let Some(p) = state.project.as_mut() {
+        project::retry_pending(&core.ctx, install_id, p);
+    }
+    let (p, decode) = release_open(core, state, Some(None)).ok_or_else(no_project)?;
+    match library::trash::delete_project(&core.ctx, loc) {
+        Ok(id) => {
+            // It is gone for good: the rest of a close.
+            crate::export::on_project_close(&core.ctx, state);
+            core.chat.on_project_close(p.manifest.project_id);
+            core.served().reset(None);
+            core.chat.notify_project(&core.ctx, None);
+            Ok(id)
+        }
+        Err(e) => {
+            if decode {
+                p.decoded.start(&core.ctx);
+            }
+            core.chat
+                .notify_project(&core.ctx, Some(p.manifest.project_id));
+            state.project = Some(p);
+            Err(e)
+        }
+    }
+}
+
+pub struct LibraryTrashList;
+
+impl Command for LibraryTrashList {
+    const NAME: &'static str = "library_trash_list";
+    type Input = SectionOnly;
+    type Output = Vec<library::trash::TrashEntry>;
+
+    /// FR-PRJ-58: Recently deleted of one section, newest first.
+    fn run(core: &Core, input: SectionOnly) -> CoreResult<Self::Output> {
+        let settings = core.state().settings.clone();
+        library::trash::list(&core.ctx, &settings, input.section.into())
+    }
+}
+
+pub struct LibraryTrashRestore;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LibraryTrashRestoreInput {
+    /// The library trash item.
+    pub id: Ulid,
+}
+
+impl Validate for LibraryTrashRestoreInput {}
+
+impl Command for LibraryTrashRestore {
+    const NAME: &'static str = "library_trash_restore";
+    type Input = LibraryTrashRestoreInput;
+    type Output = PathOutput;
+
+    /// FR-PRJ-58: back to its section in the same root; the restored project folder.
+    fn run(core: &Core, input: Self::Input) -> CoreResult<PathOutput> {
+        // Like a creation: one at a time, so two never race for a name, and without the state
+        // lock (the same lock order as `project_create`).
+        let _one_at_a_time = core.create_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let settings = core.state().settings.clone();
+        let path = library::trash::restore(&core.ctx, &settings, input.id)?;
         Ok(PathOutput { path })
     }
 }
@@ -481,7 +761,7 @@ impl Command for ProjectOpen {
     fn run(core: &Core, input: Self::Input) -> CoreResult<ProjectSnapshot> {
         let mut state = core.state();
         // The open project's waiting save is never dropped by opening another (FR-PRJ-21).
-        refuse_unsaved(core, &mut state)?;
+        refuse_unsaved(core, &mut state, Leaving::Close)?;
         let settings = state.settings.clone();
         let mut p = project::open(
             &core.ctx,
@@ -492,7 +772,7 @@ impl Command for ProjectOpen {
         let install_id = settings.install_id;
         // RGN resumes the project's jobs from their job files (FR-RGN-22).
         crate::region_edit::runner::on_project_open(&core.ctx, install_id, &mut state.rgn, &mut p);
-        let snap = p.snapshot();
+        let snap = p.snapshot_at_open();
         crate::export::on_project_close(&core.ctx, &mut state);
         if let Some(old) = state.project.take() {
             // PRM FR-PRM-35: the old project's chat session ends.
@@ -506,10 +786,18 @@ impl Command for ProjectOpen {
     }
 }
 
+/// Why the open project's waiting save is asked about: the message offers to close anyway only
+/// for a close (`force`); a rename has no force and says so (FR-PRJ-56, R111).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Leaving {
+    Close,
+    Rename,
+}
+
 /// FR-PRJ-21: closing the open project (to close or to open another) must not lose what only
 /// lives in memory. One last try at the waiting draft and EXP's pending settings, then
 /// `unsaved` with the reason if something still waits.
-fn refuse_unsaved(core: &Core, state: &mut crate::core::State) -> CoreResult<()> {
+fn refuse_unsaved(core: &Core, state: &mut crate::core::State, why: Leaving) -> CoreResult<()> {
     let install_id = state.settings.install_id;
     if let Some(p) = state.project.as_mut() {
         // One last try. Spooled writes are on disk already (FR-PRJ-40); only an in-memory
@@ -524,22 +812,27 @@ fn refuse_unsaved(core: &Core, state: &mut crate::core::State) -> CoreResult<()>
     {
         // Says why, without paths (walkthrough D3).
         let moved = p.warnings.iter().any(|w| w.code == project::FOLDER_MOVED);
-        let (reason, message) = if moved {
+        let (reason, cause) = if moved {
             (
                 project::FOLDER_MOVED,
-                "Your latest changes aren't saved: the project folder was moved or renamed. Close anyway?",
+                "Your latest changes aren't saved: the project folder was moved or renamed.",
             )
         } else if p.conflict.is_some() {
             (
                 "conflict",
-                "Your latest changes aren't saved: this project was also changed on another machine. Close anyway?",
+                "Your latest changes aren't saved: this project was also changed on another machine.",
             )
         } else {
             (
                 "locked",
-                "Your latest changes aren't saved yet: the file is locked. Close anyway?",
+                "Your latest changes aren't saved yet: the file is locked.",
             )
         };
+        let then = match why {
+            Leaving::Close => "Close anyway?",
+            Leaving::Rename => "The name can't change until they are saved.",
+        };
+        let message = format!("{cause} {then}");
         return Err(CoreError::new(ErrorCode::Unsaved, message)
             .with_detail(serde_json::json!({ "reason": reason })));
     }
@@ -572,13 +865,10 @@ impl Command for ProjectClose {
         if input.force {
             crate::export::unsaved_on_close(&core.ctx, &mut state);
         } else {
-            refuse_unsaved(core, &mut state)?;
+            refuse_unsaved(core, &mut state, Leaving::Close)?;
         }
-        crate::export::on_project_close(&core.ctx, &mut state);
-        if let Some(p) = state.project.take() {
-            core.chat.on_project_close(p.manifest.project_id);
+        if release_open(core, &mut state, None).is_some() {
             core.chat.notify_project(&core.ctx, None);
-            p.decoded.release();
         }
         core.served().reset(None);
         Ok(Ok_ {})
@@ -1322,6 +1612,9 @@ registry![
     RgnIterationDiscardAllUndo,
     ProjectBaseFromFile,
     PrmChatThreadNew,
+    ProjectDelete,
+    LibraryTrashList,
+    LibraryTrashRestore,
 ];
 
 #[cfg(test)]

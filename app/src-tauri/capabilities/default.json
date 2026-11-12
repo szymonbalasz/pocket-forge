@@ -117,6 +117,9 @@
     "allow-app-close-unguard",
     "allow-app-close-ack",
     "allow-app-close-asking",
-    "allow-prm-chat-thread-new"
+    "allow-prm-chat-thread-new",
+    "allow-project-delete",
+    "allow-library-trash-list",
+    "allow-library-trash-restore"
   ]
 }

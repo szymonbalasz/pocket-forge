@@ -713,7 +713,13 @@ export interface Commands {
   project_create: [{ section: Section; paths: string[] }, { items: CreateItem[] }];
   project_create_cancel: [Record<string, never>, Record<string, never>];
   project_create_from_clipboard: [{ section: Section; data_b64: string }, { path: string }];
+  /** A closed project (FR-PRJ-45) or the open one (FR-PRJ-56: the UI then reads `project_get`). */
   project_rename: [{ path: string; name: string }, { path: string }];
+  /** FR-PRJ-57: the folder moves to the library trash; the open project is closed first. */
+  project_delete: [{ path: string }, { item_id: string }];
+  /** FR-PRJ-58: Recently deleted of one section, newest first, and Restore. */
+  library_trash_list: [{ section: Section }, LibraryTrashItem[]];
+  library_trash_restore: [{ id: string }, { path: string }];
   project_folder_list: [{ folder: ProjectFolder }, FolderFile[]];
   project_folder_add: [{ folder: ProjectFolder; paths: string[] }, FolderFile[]];
   /** FR-PRJ-55 (#61): one image dropped on Working becomes the base image (one `accept`
@@ -876,6 +882,9 @@ export interface Events {
   'project:conflict': Record<string, never>;
   'project:recovered': Record<string, never>;
   'project:thumb-updated': { project_id: string };
+  /** A 30-day purge: a project's own trash (`project_id`, FR-PRJ-32) or the library trash at
+   *  startup (no `project_id`, FR-PRJ-58). */
+  'trash:purged': { project_id?: string; count: number; bytes: number };
   'ref:packs-changed': Record<string, never> | null;
   'ref:add-progress': { done: number; total: number };
   'ref:thumb-updated': { pack_id: string };
@@ -1155,6 +1164,17 @@ export type PackAddItem =
   | { status: 'added'; source: string; file: string }
   | { status: 'already_in_pack'; source: string; file: string }
   | { status: 'skipped'; source: string; reason: SkipReason };
+
+/** A Recently deleted project (FR-PRJ-58): a library trash item. */
+export interface LibraryTrashItem {
+  id: string;
+  /** The project's folder name. */
+  name: string;
+  section: Section;
+  trashed_at: string;
+  /** When it will be purged (30 days). */
+  purge_at: string;
+}
 
 /** A Recently deleted row (FR-REF-12). */
 export interface RefTrashItem {

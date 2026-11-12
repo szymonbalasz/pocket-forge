@@ -3,6 +3,7 @@ import { describe, expect, test } from 'vitest';
 import type { ExportPlan } from '../../api';
 import {
   ago,
+  closeQuestion,
   emptyForm,
   errorText,
   formatBytes,
@@ -225,5 +226,20 @@ describe('export panel view', () => {
     // Compose done, resize just started: not back to 0.
     expect(overallFraction(w, 'resize', 0)).toBeCloseTo(0.35);
     expect(overallFraction(w, 'encode', 0.5)).toBeCloseTo(0.775);
+  });
+});
+
+test('FR-PRJ-56 FR-PRJ-57 R111 R112 walk D5 the export question is worded for a close, a rename and a delete', () => {
+  expect(closeQuestion('close')).toEqual({
+    question: 'Cancel the export and close?',
+    confirm: 'Cancel export and close',
+  });
+  expect(closeQuestion('rename')).toEqual({
+    question: 'Cancel the export and rename?',
+    confirm: 'Cancel export and rename',
+  });
+  expect(closeQuestion('delete')).toEqual({
+    question: 'Cancel the export and delete?',
+    confirm: 'Cancel export and delete',
   });
 });

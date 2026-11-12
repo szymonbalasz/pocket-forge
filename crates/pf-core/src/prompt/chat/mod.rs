@@ -141,6 +141,9 @@ struct Rt {
     /// §7 / R94: a read-only project's thread lives here (nothing is written); so does a
     /// writable project's while its thread file can't be written (locked, §11).
     memory: Option<MemoryThread>,
+    /// FR-PRJ-56: the open project's folder is being renamed to this one. A turn stopped by
+    /// the rename ends in its thread there, not in the folder it was sent from.
+    moving: Option<(Ulid, PathBuf)>,
 }
 
 impl Rt {
@@ -227,18 +230,47 @@ impl ChatRuntime {
     /// building its context is stopped here, under the same lock it commits under, so it
     /// never opens a session or keeps a memory thread for the closed project.
     pub fn on_project_close(&self, project_id: Ulid) {
+        self.release_project(project_id, None);
+    }
+
+    /// The open project's folder is being renamed or moved (FR-PRJ-56, 57): as a close, its
+    /// session ends and a running turn is stopped, since both write to the old folder. The
+    /// project is the same one, so what the chat holds for it stays (R111): the published
+    /// contexts (the UI publishes them only when they change) and the memory thread, the only
+    /// copy of a read-only project's thread. The stopped turn ends in that thread; a writable
+    /// project's, which can't be written to the old folder any more, is kept in memory until
+    /// the next save.
+    /// `to` is the folder's new path (a rename), or `None` (a delete: it goes to the trash).
+    pub fn on_project_moving(&self, project_id: Ulid, to: Option<&Path>) {
+        self.release_project(project_id, Some(to));
+    }
+
+    /// The folder didn't move after all (FR-PRJ-56: the rename failed): the project is where it
+    /// was.
+    pub fn on_project_not_moved(&self, project_id: Ulid) {
+        let mut rt = lock(&self.rt);
+        if rt.moving.as_ref().is_some_and(|(p, _)| *p == project_id) {
+            rt.moving = None;
+        }
+    }
+
+    fn release_project(&self, project_id: Ulid, moving: Option<Option<&Path>>) {
         let running = {
             let mut rt = lock(&self.rt);
-            rt.contexts.retain(|(p, _), _| *p != project_id);
-            if rt
-                .memory
-                .as_ref()
-                .is_some_and(|m| m.project_id == project_id)
-            {
-                rt.memory = None;
+            rt.moving = moving.flatten().map(|to| (project_id, to.to_path_buf()));
+            let moving = moving.is_some();
+            if !moving {
+                rt.contexts.retain(|(p, _), _| *p != project_id);
+                if rt
+                    .memory
+                    .as_ref()
+                    .is_some_and(|m| m.project_id == project_id)
+                {
+                    rt.memory = None;
+                }
             }
             if let Some(r) = rt.running.as_mut().filter(|r| r.project_id == project_id) {
-                r.project_closed = true;
+                r.project_closed = !moving;
                 r.cancel.cancel();
             }
             rt.running.as_ref().map(|r| r.project_id)
@@ -1721,6 +1753,19 @@ struct TurnJob {
 }
 
 impl TurnJob {
+    /// The project's folder as of now: where a rename of the open project moved it, once it
+    /// is there (FR-PRJ-56, R111), else where the turn was sent from. The stopped turn then
+    /// ends in the thread file there and survives a close. The rename's target comes first:
+    /// by the time the turn ends another project may have taken the old name, and the thread
+    /// must never be written into that one.
+    fn project_dir_now(&self) -> PathBuf {
+        lock(&self.rt)
+            .moving
+            .as_ref()
+            .filter(|(p, to)| *p == self.project_id && to.is_dir())
+            .map_or_else(|| self.project_dir.clone(), |(_, to)| to.clone())
+    }
+
     fn run(self) {
         let ctx = self.ctx.clone();
         let turn_id = self.turn_id;
@@ -1803,10 +1848,15 @@ impl TurnJob {
                 let (base, unsaved) = memory.unzip();
                 // By id: the turn finishes into the thread it was sent in, shown or not (#61).
                 let mut thread = base
-                    .or_else(|| thread::load_id(&self.project_dir, self.thread.id, &live))
+                    .or_else(|| thread::load_id(&self.project_dir_now(), self.thread.id, &live))
                     .unwrap_or_else(|| self.thread.clone());
                 finish(&mut thread);
-                let ok = thread::save(&self.ctx, &self.project_dir, &thread).is_ok();
+                let dir = self.project_dir_now();
+                let ok = thread::save(&self.ctx, &dir, &thread).is_ok() || {
+                    // The folder was renamed between the look and the write (FR-PRJ-56).
+                    let now = self.project_dir_now();
+                    now != dir && thread::save(&self.ctx, &now, &thread).is_ok()
+                };
                 let mut rt = lock(&self.rt);
                 let closed = rt
                     .running

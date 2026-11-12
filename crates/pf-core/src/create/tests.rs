@@ -318,27 +318,12 @@ fn fr_prj_45_rename_a_closed_project() {
     let e = env();
     let dir = e.project("Crypt");
     e.project("Taken");
-    let rename = |name: &str, open: Option<&Path>| {
-        library::rename_project(&e.ctx, &e.settings, &dir, name, open)
-    };
-    assert_eq!(
-        rename("taken", None).unwrap_err().code,
-        ErrorCode::NameTaken
-    );
-    assert_eq!(
-        rename("a:b", None).unwrap_err().code,
-        ErrorCode::InvalidName
-    );
-    assert_eq!(
-        rename("CON", None).unwrap_err().code,
-        ErrorCode::InvalidName
-    );
-    assert_eq!(
-        rename("Vault", Some(&dir)).unwrap_err().code,
-        ErrorCode::ProjectOpen
-    );
+    let rename = |name: &str| library::rename_project(&e.ctx, &e.settings, &dir, name);
+    assert_eq!(rename("taken").unwrap_err().code, ErrorCode::NameTaken);
+    assert_eq!(rename("a:b").unwrap_err().code, ErrorCode::InvalidName);
+    assert_eq!(rename("CON").unwrap_err().code, ErrorCode::InvalidName);
     let before = std::fs::read(dir.join(MANIFEST_FILE)).unwrap();
-    let new = rename("Vault", None).unwrap();
+    let new = rename("Vault").unwrap();
     assert_eq!(new, e.lib().join("Maps/Vault"));
     assert_eq!(
         std::fs::read(new.join(MANIFEST_FILE)).unwrap(),
@@ -346,6 +331,6 @@ fn fr_prj_45_rename_a_closed_project() {
         "nothing inside changes"
     );
     e.open(&new);
-    let case_only = library::rename_project(&e.ctx, &e.settings, &new, "VAULT", None).unwrap();
+    let case_only = library::rename_project(&e.ctx, &e.settings, &new, "VAULT").unwrap();
     assert!(case_only.ends_with("VAULT"));
 }

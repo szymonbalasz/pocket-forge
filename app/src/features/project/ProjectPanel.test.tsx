@@ -1,6 +1,6 @@
 // PRJ left panel and status segment against the mocked PRJ commands (api/mocks/prj.ts).
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import {
   prjMock,
@@ -12,6 +12,13 @@ import { installTestCore } from '../../api/mocks/testCore';
 import { projectStore } from '../../store/project';
 import { ProjectPanel } from './ProjectPanel';
 import { ProjectStatus } from './ProjectStatus';
+
+// RGN's active job as the panel reads it (R97): null unless a test sets one.
+const rgnJob = vi.hoisted(() => ({ id: null as string | null }));
+vi.mock('../region-edit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../region-edit')>()),
+  useActiveJobId: () => rgnJob.id,
+}));
 
 const core = installTestCore();
 const LIB = 'C:/pf-mock/library';
@@ -39,7 +46,10 @@ async function openCrypt(patch: Partial<PrjMockProject> = {}) {
 const files = (folder: string) =>
   screen.queryAllByTestId(`prj-panel-${folder}-file`).map((f) => f.dataset.recordId);
 
-beforeEach(() => projectStore.reset());
+beforeEach(() => {
+  projectStore.reset();
+  rgnJob.id = null;
+});
 afterEach(cleanup);
 
 test('FR-PRJ-48 FR-PRJ-12 the panel lists Working and the user folders on open', async () => {
@@ -851,4 +861,183 @@ test('FR-PRJ-55 Working refuses more than one file, a running job, a read-only p
   await dropOn('references', ['D:/art/a.png']);
   expect((await notice('references')).textContent).toBe('The project is read-only.');
   expect(dropCalls()).toEqual([]);
+});
+
+// ── FR-PRJ-56, 57 (#62): rename and delete from the left panel ─────────────────────────────
+
+const startRename = async () => {
+  fireEvent.click(screen.getByTestId('prj-panel-name'));
+  return screen.findByTestId<HTMLInputElement>('prj-panel-name-input');
+};
+
+test('FR-PRJ-56 the name is edited in place: Enter renames the folder and the project stays open with its history', async () => {
+  await openCrypt();
+  const before = projectStore.get().project!;
+  const input = await startRename();
+  expect(input.value).toBe('Crypt');
+  fireEvent.change(input, { target: { value: 'Old Crypt' } });
+  fireEvent.submit(input.form!);
+  await waitFor(() => expect(screen.getByTestId('prj-panel-name').textContent).toBe('Old Crypt'));
+  expect(screen.queryByTestId('prj-panel-name-input')).toBeNull();
+  expect(core.calls.filter((c) => c.cmd === 'project_rename').map((c) => c.input)).toEqual([
+    { path: CRYPT, name: 'Old Crypt' },
+  ]);
+  expect(mock.openPath).toBe(`${LIB}/Maps/Old Crypt`);
+  const after = projectStore.get().project!;
+  expect(after.project_id).toBe(before.project_id);
+  expect(after.revisions).toEqual(before.revisions);
+  // No folder-moved banner, and the save segment still says Saved.
+  expect(screen.queryByTestId('prj-panel-warning')).toBeNull();
+  expect(screen.queryByTestId('prj-panel-reopen-home')).toBeNull();
+  expect(screen.queryByTestId('prj-error')).toBeNull();
+  expect(screen.getByTestId('prj-status-save').dataset.state).toBe('saved');
+  expect(core.names()).not.toContain('project_close');
+});
+
+test('FR-PRJ-56 a taken name shows the error under the name and nothing changes; Esc cancels', async () => {
+  await openCrypt();
+  const input = await startRename();
+  fireEvent.change(input, { target: { value: 'harbour' } });
+  fireEvent.submit(input.form!);
+  expect((await screen.findByTestId('prj-panel-name-error')).textContent).toContain('taken');
+  expect(projectStore.get().project?.name).toBe('Crypt');
+  expect(mock.projects.has(CRYPT)).toBe(true);
+  // The field has the focus again, so Esc and typing work at once.
+  await waitFor(() => expect(document.activeElement).toBe(input));
+  // Typing clears the error; Esc leaves the name as it was.
+  fireEvent.change(input, { target: { value: 'Vault' } });
+  expect(screen.queryByTestId('prj-panel-name-error')).toBeNull();
+  fireEvent.keyDown(input, { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByTestId('prj-panel-name-input')).toBeNull());
+  expect(screen.getByTestId('prj-panel-name').textContent).toBe('Crypt');
+  expect(core.calls.filter((c) => c.cmd === 'project_rename')).toHaveLength(1);
+});
+
+test('FR-PRJ-56 a running job refuses the rename with its reason; a read-only project can be renamed', async () => {
+  await openCrypt({ jobActive: true });
+  let input = await startRename();
+  fireEvent.change(input, { target: { value: 'Vault' } });
+  fireEvent.submit(input.form!);
+  expect((await screen.findByTestId('prj-panel-name-error')).textContent).toContain(
+    'A job is running',
+  );
+  expect(projectStore.get().project?.name).toBe('Crypt');
+  cleanup();
+  projectStore.reset();
+
+  await openCrypt({ read_only: 'newer_version' });
+  input = await startRename();
+  fireEvent.change(input, { target: { value: 'Vault' } });
+  fireEvent.submit(input.form!);
+  await waitFor(() => expect(screen.getByTestId('prj-panel-name').textContent).toBe('Vault'));
+  expect(projectStore.get().project?.read_only).toBe('newer_version');
+});
+
+test('FR-PRJ-57 Delete in the panel asks first: Cancel keeps the project, confirm deletes it and home shows', async () => {
+  await openCrypt();
+  fireEvent.click(screen.getByTestId('prj-panel-delete'));
+  const dialog = await screen.findByTestId('prj-delete-dialog');
+  expect(dialog.textContent).toContain('Delete Crypt?');
+  expect(dialog.textContent).toContain('It stays in Recently deleted for 30 days.');
+  fireEvent.click(screen.getByTestId('prj-delete-cancel'));
+  await waitFor(() => expect(screen.queryByTestId('prj-delete-dialog')).toBeNull());
+  expect(core.names()).not.toContain('project_delete');
+  expect(projectStore.get().project?.name).toBe('Crypt');
+
+  fireEvent.click(screen.getByTestId('prj-panel-delete'));
+  fireEvent.click(await screen.findByTestId('prj-delete-confirm'));
+  await waitFor(() => expect(projectStore.get().project).toBeNull());
+  expect(core.calls.find((c) => c.cmd === 'project_delete')?.input).toEqual({ path: CRYPT });
+  expect(screen.queryByTestId('prj-panel')).toBeNull();
+  expect(mock.projects.has(CRYPT)).toBe(false);
+  expect(mock.trash.map((t) => t.name)).toEqual(['Crypt']);
+});
+
+test('FR-PRJ-57 R111 the confirmation comes first: Cancel asks no guard and sends no command', async () => {
+  await openCrypt();
+  let asked = 0;
+  const off = projectStore.addCloseGuard(() => {
+    asked++;
+    return true;
+  });
+  try {
+    core.calls.length = 0;
+    fireEvent.click(screen.getByTestId('prj-panel-delete'));
+    await screen.findByTestId('prj-delete-dialog');
+    expect(asked).toBe(0);
+    fireEvent.click(screen.getByTestId('prj-delete-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('prj-delete-dialog')).toBeNull());
+    await act(async () => undefined);
+    // Nothing was asked (no export was cancelled) and nothing was sent.
+    expect(asked).toBe(0);
+    expect(core.names()).toEqual([]);
+    expect(projectStore.get().project?.name).toBe('Crypt');
+  } finally {
+    off();
+  }
+});
+
+test('FR-PRJ-57 R111 the close questions come only after Confirm, with the confirmation out of their way', async () => {
+  await openCrypt();
+  // EXP's "Cancel the export and close?" holds the close guard until it is answered.
+  let answer: { proceed: () => void; cancel: () => void } | null = null;
+  const reasons: string[] = [];
+  const off = projectStore.addCloseGuard((proceed, cancel, why) => {
+    answer = { proceed, cancel };
+    reasons.push(why);
+    return false;
+  });
+  try {
+    fireEvent.click(screen.getByTestId('prj-panel-delete'));
+    await screen.findByTestId('prj-delete-dialog');
+    expect(answer).toBeNull();
+    fireEvent.click(screen.getByTestId('prj-delete-confirm'));
+    await waitFor(() => expect(answer).not.toBeNull());
+    // The modal confirmation is gone, so the question in the export panel can be answered,
+    // and Delete can't be pressed again over it.
+    expect(screen.queryByTestId('prj-delete-dialog')).toBeNull();
+    expect(screen.getByTestId<HTMLButtonElement>('prj-panel-delete').disabled).toBe(true);
+    expect(core.names()).not.toContain('project_delete');
+    // "Keep exporting": nothing is deleted and the project stays open.
+    await act(async () => answer!.cancel());
+    expect(core.names()).not.toContain('project_delete');
+    expect(screen.queryByTestId('prj-delete-dialog')).toBeNull();
+    expect(projectStore.get().project?.name).toBe('Crypt');
+    expect(screen.getByTestId<HTMLButtonElement>('prj-panel-delete').disabled).toBe(false);
+
+    answer = null;
+    fireEvent.click(screen.getByTestId('prj-panel-delete'));
+    fireEvent.click(await screen.findByTestId('prj-delete-confirm'));
+    await waitFor(() => expect(answer).not.toBeNull());
+    await act(async () => answer!.proceed());
+    await waitFor(() => expect(projectStore.get().project).toBeNull());
+  } finally {
+    off();
+  }
+  // R112: the guards are told it is a delete, so EXP words its question for one.
+  expect(reasons).toEqual(['delete', 'delete']);
+  expect(core.names()).toContain('project_delete');
+});
+
+test('FR-PRJ-57 R97 while a job runs Delete is disabled and says why, without opening the confirmation', async () => {
+  rgnJob.id = 'job-1';
+  await openCrypt({ jobActive: true });
+  const del = screen.getByTestId<HTMLButtonElement>('prj-panel-delete');
+  expect(del.disabled).toBe(true);
+  expect(del.title).toContain('A job is running');
+  fireEvent.click(del);
+  expect(screen.queryByTestId('prj-delete-dialog')).toBeNull();
+  expect(core.names()).not.toContain('project_delete');
+});
+
+test('FR-PRJ-57 a refused delete says why in the confirmation and the project stays open', async () => {
+  await openCrypt({ jobActive: true });
+  fireEvent.click(screen.getByTestId('prj-panel-delete'));
+  fireEvent.click(await screen.findByTestId('prj-delete-confirm'));
+  expect((await screen.findByTestId('prj-delete-error')).textContent).toContain('A job is running');
+  expect(projectStore.get().project?.name).toBe('Crypt');
+  expect(mock.trash).toEqual([]);
+  fireEvent.click(screen.getByTestId('prj-delete-cancel'));
+  await waitFor(() => expect(screen.queryByTestId('prj-delete-dialog')).toBeNull());
+  expect(screen.getByTestId('prj-panel')).toBeTruthy();
 });

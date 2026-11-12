@@ -10,6 +10,7 @@ import {
   onEvent,
   type CreateItem,
   type LibraryConfig,
+  type LibraryTrashItem,
   type ProjectCard,
   type Section,
 } from '../../api';
@@ -20,6 +21,8 @@ export interface LibraryState {
   config: LibraryConfig | null;
   /** The section's cards, newest first (FR-PRJ-49); null until loaded. */
   cards: ProjectCard[] | null;
+  /** Recently deleted of the section, newest first (FR-PRJ-58); null until loaded. */
+  trash: LibraryTrashItem[] | null;
   /** `library_unavailable` or another listing error (FR-PRJ-02). */
   listError: { code: string; message: string } | null;
   /** Creation in progress (FR-PRJ-11): `import:progress` counts. */
@@ -34,6 +37,7 @@ const initial: LibraryState = {
   section: 'maps',
   config: null,
   cards: null,
+  trash: null,
   listError: null,
   creating: null,
   summary: null,
@@ -62,6 +66,27 @@ function listen(): void {
   );
   // A background thumbnail landed (FR-PRJ-50): reload the grid.
   on(onEvent('project:thumb-updated', () => void libraryStore.refresh()));
+  // The library trash's 30-day purge (FR-PRJ-58) runs when the core starts, before this UI
+  // listens: the first listing is already the purged one, so `trash:purged` isn't heard here.
+  // The open project was deleted from the left panel (FR-PRJ-57): its card goes before home
+  // shows, so home never asks for the thumbnail of a folder that is gone.
+  // By project id: the card kept from before the open may still have the folder as it was
+  // named then (R112 walk D3).
+  projectStore.onDeleted((path, projectId) => {
+    const gone = (c: ProjectCard) => c.id === projectId || c.path === path;
+    if (state.cards?.some(gone)) set({ cards: state.cards.filter((c) => !gone(c)) });
+  });
+  // The open project was renamed from the left panel (FR-PRJ-56): its card follows, so home
+  // never shows the old name or asks for a thumbnail in the folder as it was named.
+  projectStore.subscribe(() => {
+    const p = projectStore.get().project;
+    const stale = (c: ProjectCard) =>
+      !!p && c.id === p.project_id && (c.path !== p.project_dir || c.name !== p.name);
+    if (p && state.cards?.some(stale))
+      set({
+        cards: state.cards.map((c) => (stale(c) ? { ...c, path: p.project_dir, name: p.name } : c)),
+      });
+  });
 }
 
 /** Base64 of raw bytes, in chunks (pasted image data, FR-PRJ-10). */
@@ -84,6 +109,10 @@ export const libraryStore = {
   reset(): void {
     set(initial);
   },
+  /** Test helper: rewrites the cached cards (a listing that is out of date). */
+  patchCardsForTest(patch: (card: ProjectCard) => ProjectCard): void {
+    if (state.cards) set({ cards: state.cards.map(patch) });
+  },
 
   /** Loads the config, then the selected section's cards. */
   async init(): Promise<void> {
@@ -96,18 +125,22 @@ export const libraryStore = {
     }
   },
 
-  /** Reloads the selected section's cards (FR-PRJ-49). */
+  /** Reloads the selected section's cards (FR-PRJ-49) and its Recently deleted (FR-PRJ-58). */
   async refresh(): Promise<void> {
     const section = state.section;
     // The newest listing wins: a late one (a thumbnail refresh) never replaces a newer one.
     const seq = ++refreshSeq;
     const current = () => seq === refreshSeq && state.section === section;
+    // The grid never waits for, or fails with, the trash list.
+    const trash = api.library.trashList(section).catch(() => [] as LibraryTrashItem[]);
     try {
       const cards = await api.library.listProjects(section);
       if (current()) set({ cards, listError: null });
     } catch (e) {
       if (current()) set({ cards: [], listError: errorOf(e) });
     }
+    const items = await trash;
+    if (current()) set({ trash: items });
   },
 
   /** Rail: picks a section. With a project open, it closes first (back to the home grid). */
@@ -117,7 +150,7 @@ export const libraryStore = {
       if (projectStore.get().project) return; // close refused (`unsaved`)
     }
     if (section === state.section && state.cards) return;
-    set({ section, cards: null, listError: null, summary: null });
+    set({ section, cards: null, trash: null, listError: null, summary: null });
     await libraryStore.refresh();
   },
 
@@ -198,6 +231,28 @@ export const libraryStore = {
     } catch (e) {
       return errorOf(e);
     }
+  },
+
+  /** FR-PRJ-57: deletes a project from its card (the UI asked first). It moves to Recently
+   *  deleted. Returns the error to show, or null. */
+  async remove(card: ProjectCard): Promise<{ code: string; message: string } | null> {
+    try {
+      await api.project.delete(card.path);
+      await libraryStore.refresh();
+      return null;
+    } catch (e) {
+      return errorOf(e);
+    }
+  },
+
+  /** FR-PRJ-58: restores a Recently deleted project to its section. */
+  async restore(itemId: string): Promise<void> {
+    try {
+      await api.library.trashRestore(itemId);
+    } catch (e) {
+      projectStore.setError(errorOf(e));
+    }
+    await libraryStore.refresh();
   },
 };
 

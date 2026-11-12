@@ -17,6 +17,8 @@ use crate::naming;
 use crate::settings::Settings;
 use crate::time::Timestamp;
 
+pub mod trash;
+
 /// Creation temp folders older than this are removed at startup (FR-PRJ-09, R35).
 pub const STALE_TEMP_DIR_AGE: Duration = Duration::from_secs(3600);
 
@@ -402,24 +404,49 @@ pub fn require_project_folder(
     Ok(path)
 }
 
+/// True if `a` and `b` name the same folder (lexically; case-insensitive where the filesystem
+/// usually is).
+pub fn same_folder(a: &Path, b: &Path) -> bool {
+    same_or_inside(a, b) && same_or_inside(b, a)
+}
+
 /// `project_rename` (FR-PRJ-45): renames a closed project's folder. Nothing inside changes.
+/// The open project is renamed by the command (FR-PRJ-56).
 pub fn rename_project(
     ctx: &Context,
     settings: &Settings,
     path: &Path,
     name: &str,
-    open_dir: Option<&Path>,
+) -> CoreResult<PathBuf> {
+    rename_project_if(ctx, settings, path, name, |_| Ok(()))
+}
+
+/// [`rename_project`] with a last check of the project folder, run once the name is known to
+/// be valid, free and new, just before the folder is renamed (`job_active`, R111).
+pub fn rename_project_if(
+    ctx: &Context,
+    settings: &Settings,
+    path: &Path,
+    name: &str,
+    allowed: impl FnOnce(&Path) -> CoreResult<()>,
 ) -> CoreResult<PathBuf> {
     let dir = require_project_folder(ctx, settings, path)?;
     if !dir.join(MANIFEST_FILE).is_file() {
         return Err(not_a_project(&dir));
     }
-    if open_dir.is_some_and(|o| same_or_inside(o, &dir) && same_or_inside(&dir, o)) {
-        return Err(CoreError::new(
-            ErrorCode::ProjectOpen,
-            "close the project before renaming it",
-        ));
+    match rename_target(&dir, name)? {
+        Some(target) => {
+            allowed(&dir)?;
+            fsx::move_dir(ctx, &dir, &target)?;
+            Ok(target)
+        }
+        None => Ok(dir),
     }
+}
+
+/// The FR-PRJ-44 checks of a rename (FR-PRJ-45, 56): `invalid_name`, `name_taken`. Returns the
+/// new folder, or `None` when `name` is the current one. Nothing is written.
+pub fn rename_target(dir: &Path, name: &str) -> CoreResult<Option<PathBuf>> {
     if !naming::is_valid_name(name) {
         return Err(CoreError::new(
             ErrorCode::InvalidName,
@@ -438,7 +465,7 @@ pub fn rename_project(
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     if current == name {
-        return Ok(dir);
+        return Ok(None);
     }
     let taken = std::fs::read_dir(parent)
         .map_err(|e| CoreError::io("reading the section folder", &e))?
@@ -452,10 +479,7 @@ pub fn rename_project(
         )
         .with_field("name"));
     }
-    let target = parent.join(name);
-    fsx::rename_with_retry(&dir, &target)
-        .map_err(|e| CoreError::io(format!("renaming {}", dir.display()), &e))?;
-    Ok(target)
+    Ok(Some(parent.join(name)))
 }
 
 pub fn not_a_project(dir: &Path) -> CoreError {

@@ -208,6 +208,14 @@ impl Runner {
         self.jobs.insert(cur.job.id, cur);
     }
 
+    /// A job the runner drives for the project in `dir`, open or closed (R97, FR-PRJ-56, 57).
+    pub fn job_in(&self, dir: &std::path::Path) -> Option<Ulid> {
+        self.jobs
+            .values()
+            .find(|t| crate::library::same_folder(&t.project_dir, dir))
+            .map(|t| t.job.id)
+    }
+
     /// Jobs the runner drives (for tests and the tracker).
     pub fn tracked(&self) -> Vec<Ulid> {
         self.jobs.keys().copied().collect()

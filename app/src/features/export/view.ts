@@ -308,3 +308,12 @@ export function overallFraction(
   }
   return Math.min(1, done);
 }
+
+/** The question a running export asks before the project closes, is renamed or is deleted
+ *  (OQ-EXP-09, R111, R112), and its confirm button. */
+export function closeQuestion(why: 'close' | 'rename' | 'delete'): {
+  question: string;
+  confirm: string;
+} {
+  return { question: `Cancel the export and ${why}?`, confirm: `Cancel export and ${why}` };
+}

@@ -11,7 +11,7 @@ import {
   type ExportPlan,
   type ExportSettingsInput,
 } from '../../api';
-import { projectStore } from '../../store/project';
+import { projectStore, type LeaveReason } from '../../store/project';
 import {
   emptyForm,
   errorText,
@@ -56,6 +56,9 @@ export interface ExportState {
   focusTick: number;
   /** The project is closing while an export runs: "Cancel the export and close?" (EXP §7). */
   closeAsk: boolean;
+  /** What the question is asked for: a close, a rename of the open project ("Cancel the
+   *  export and rename?", FR-PRJ-56, R111) or its delete ("… and delete?", FR-PRJ-57, R112). */
+  closeWhy: LeaveReason;
 }
 
 const initial: ExportState = {
@@ -72,6 +75,7 @@ const initial: ExportState = {
   error: null,
   focusTick: 0,
   closeAsk: false,
+  closeWhy: 'close',
 };
 
 let state: ExportState = initial;
@@ -91,10 +95,12 @@ let runSeq = 0;
 const retired = new Set<string>();
 
 /** PRJ close guard: hold the close while an export runs and ask first (OQ-EXP-09). */
-function closeGuard(proceed: () => void, cancel: () => void): boolean {
+function closeGuard(proceed: () => void, cancel: () => void, why: LeaveReason): boolean {
   if (!state.run) return true;
+  // A close that joins a rename's question (or the other way round) is asked as a close.
+  const closeWhy = held.length > 0 && state.closeWhy !== why ? 'close' : why;
   held.push({ proceed, cancel });
-  set({ closeAsk: true, expanded: true });
+  set({ closeAsk: true, closeWhy, expanded: true });
   return false;
 }
 

@@ -84,6 +84,11 @@ impl DecodedOriginal {
         matches!(*self.lock(), State::Ready(_))
     }
 
+    /// True once a decode was asked for (running, done or failed) and not released since.
+    pub fn is_started(&self) -> bool {
+        !matches!(*self.lock(), State::Idle)
+    }
+
     /// The pixels, or `original_unavailable` while the decode runs (starting it if needed), or
     /// the decode's error (`corrupt`, `io`, …). A failed decode isn't run again until
     /// [`release`](Self::release) (project close).

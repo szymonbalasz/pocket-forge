@@ -230,6 +230,9 @@ pub struct Served {
     transient: VecDeque<(String, usize)>,
     /// Pyramid keys with a build in flight (idempotent `edt_tiles_open`).
     building: HashSet<String>,
+    /// Renames of the open project's folder (FR-PRJ-56), oldest first: a build in flight finds
+    /// its source again under the new name.
+    moved: Vec<(PathBuf, PathBuf)>,
     /// The disk cache cap (tests lower it).
     pub cap_bytes: u64,
 }
@@ -243,6 +246,7 @@ impl Default for Served {
             library: ImageRegistry::default(),
             transient: VecDeque::new(),
             building: HashSet::new(),
+            moved: Vec::new(),
             cap_bytes: CACHE_CAP_BYTES,
         }
     }
@@ -256,6 +260,26 @@ impl Served {
         self.pyramids.clear();
         self.images.clear();
         self.transient.clear();
+        self.moved.clear();
+    }
+
+    /// FR-PRJ-56: the open project's folder was renamed. Its keys stay registered and now read
+    /// from the new folder; the tile pyramids are in the cache and don't move.
+    pub fn rebase(&mut self, old: &Path, new: &Path) {
+        self.images.rebase(old, new);
+        self.library.rebase(old, new);
+        self.moved.push((old.to_path_buf(), new.to_path_buf()));
+    }
+
+    /// Where a file of the open project is now, if its folder was renamed since (FR-PRJ-56).
+    fn moved_to(&self, path: &Path) -> Option<PathBuf> {
+        let mut now = None;
+        for (old, new) in &self.moved {
+            if let Ok(rest) = now.as_deref().unwrap_or(path).strip_prefix(old) {
+                now = Some(new.join(rest));
+            }
+        }
+        now
     }
 
     pub fn is_building(&self, key: &str) -> bool {
@@ -489,13 +513,46 @@ struct BuildJob {
 }
 
 impl BuildJob {
-    fn run(mut self) {
+    /// Builds the levels still missing.
+    fn build(&mut self) -> Result<(), pyramid::BuildError> {
         let needed: Vec<bool> = self.file.levels.iter().map(|l| !l.complete).collect();
         let size = (self.file.width, self.file.height);
         let (src, dir) = (self.src.clone(), self.dir.clone());
-        let result = pyramid::build(&src, &dir, size, &needed, &mut |level| {
+        pyramid::build(&src, &dir, size, &needed, &mut |level| {
             self.level_done(level)
-        });
+        })
+    }
+
+    /// FR-PRJ-56: the source is gone because the open project's folder was renamed while this
+    /// build was starting: the same file under the new name. Waits a moment for the rename to
+    /// be recorded (it is, right after the folder moved); `None` once the pyramid isn't wanted.
+    fn moved_source(&self) -> Option<PathBuf> {
+        for _ in 0..20 {
+            if self.src.exists() {
+                return None;
+            }
+            {
+                let s = lock(&self.served);
+                if !s.pyramids.contains_key(&self.key) {
+                    return None;
+                }
+                if let Some(now) = s.moved_to(&self.src).filter(|p| p.exists()) {
+                    return Some(now);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        None
+    }
+
+    fn run(mut self) {
+        let mut result = self.build();
+        if result.is_err()
+            && let Some(src) = self.moved_source()
+        {
+            self.src = src;
+            result = self.build();
+        }
         let in_use = {
             let mut s = lock(&self.served);
             s.building.remove(&self.key);

@@ -2010,3 +2010,188 @@ fn fr_prm_47_a_dropped_base_image_starts_a_new_thread() {
         "dropped"
     );
 }
+
+// ---------------------------------------------------------------- FR-PRJ-56 (R111): a rename
+
+fn rename_open(lab: &Lab, name: &str) -> std::path::PathBuf {
+    let out = lab
+        .core
+        .dispatch(
+            "project_rename",
+            json!({"path": lab.project_dir.to_string_lossy(), "name": name}),
+        )
+        .unwrap();
+    std::path::PathBuf::from(out["path"].as_str().unwrap())
+}
+
+/// R111: a read-only project's thread lives in memory only. A rename keeps the project open,
+/// so the thread stays as it was; a close still drops it.
+#[test]
+fn fr_prj_56_a_thread_held_only_in_memory_survives_the_rename() {
+    let lab = lab();
+    lab.close();
+    let manifest = lab.project_dir.join("project.json");
+    let mut m: Value = serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+    m["schema_version"] = json!(99);
+    std::fs::write(&manifest, serde_json::to_vec_pretty(&m).unwrap()).unwrap();
+    assert_eq!(lab.open()["read_only"], "newer_version");
+
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    assert_eq!(send(&lab, "kept in memory").unwrap()["saved"], false);
+    let before = thread_view(&lab);
+    assert_eq!(before["thread"]["turns"].as_array().unwrap().len(), 2);
+    assert_eq!(before["unsaved_turn_ids"].as_array().unwrap().len(), 2);
+
+    let new = rename_open(&lab, "Vault");
+    let after = thread_view(&lab);
+    assert_eq!(after["thread"], before["thread"], "the same thread");
+    assert_eq!(after["unsaved_turn_ids"], before["unsaved_turn_ids"]);
+    assert!(
+        !thread::chat_dir(&new).exists() && !lab.project_dir.exists(),
+        "nothing is written"
+    );
+    // The next turn continues it.
+    send(&lab, "again").unwrap();
+    assert_eq!(
+        thread_view(&lab)["thread"]["turns"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+    // A close drops it, as before.
+    lab.close();
+    lab.core
+        .dispatch("project_open", json!({"path": new.to_string_lossy()}))
+        .unwrap();
+    let view = thread_view(&lab);
+    assert_eq!(view["thread"], Value::Null, "{view}");
+    assert_eq!(view["unsaved_turn_ids"], json!([]));
+}
+
+/// R111: a chat turn running when the open project is renamed is stopped as a close stops it
+/// ("Stopped."), and it ends in its thread: nothing is written to the old folder.
+#[test]
+fn fr_prj_56_a_running_chat_turn_is_stopped_by_the_rename_and_ends_in_its_thread() {
+    let (lab, out) = streaming_turn();
+    let new = rename_open(&lab, "Vault");
+    wait_for(&lab, super::EVENT_TURN);
+    let end = events(&lab, super::EVENT_TURN)[0].clone();
+    assert_eq!(end["turn_id"], out["turn_id"]);
+    assert_eq!(end["state"], "canceled");
+    for _ in 0..200 {
+        if lab.core.chat.running_turn().is_none() && !lab.core.chat.has_session() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(lab.core.chat.running_turn().is_none(), "the turn ended");
+    assert!(!lab.core.chat.has_session(), "the session ended");
+
+    let view = thread_view(&lab);
+    let turns = view["thread"]["turns"].as_array().unwrap().clone();
+    assert_eq!(turns.len(), 2, "{view}");
+    assert_eq!(turns[0]["state"], "done");
+    assert_eq!(turns[1]["id"], out["turn_id"]);
+    assert_eq!(turns[1]["state"], "canceled");
+    assert_eq!(turns[1]["text"], "first part");
+    // It ended in the thread file, in the folder as it is named now: nothing waits in memory
+    // and the old folder isn't recreated.
+    assert_eq!(view["unsaved_turn_ids"], json!([]), "{view}");
+    assert!(!lab.project_dir.exists(), "the old folder isn't recreated");
+    // So it survives a close: on reopen it reads "Stopped." (canceled), never `interrupted`.
+    lab.close();
+    lab.core
+        .dispatch("project_open", json!({"path": new.to_string_lossy()}))
+        .unwrap();
+    let turns = thread_view(&lab)["thread"]["turns"].clone();
+    assert_eq!(turns[1]["id"], out["turn_id"]);
+    assert_eq!(turns[1]["state"], "canceled");
+    assert_eq!(turns[1]["text"], "first part");
+}
+
+/// Second review 3: the folder was renamed but the project can't be opened again, so nothing
+/// is open any more. The chat lets go of the project as a close does: its memory thread, its
+/// contexts and the rename's target don't outlive it.
+#[test]
+fn fr_prj_56_a_rename_whose_reopen_fails_closes_the_chat_for_the_project() {
+    use crate::context::FakeFsAttributes;
+    let fs = Arc::new(FakeFsAttributes::default());
+    let lab = Lab::with_context(|c| c.fs = Box::new(fs.clone()));
+    consent(&lab);
+    lab.close();
+    let manifest = lab.project_dir.join("project.json");
+    let mut m: Value = serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+    m["schema_version"] = json!(99);
+    std::fs::write(&manifest, serde_json::to_vec_pretty(&m).unwrap()).unwrap();
+    assert_eq!(lab.open()["read_only"], "newer_version");
+    publish(&lab, "rgn", lab.draft("a kitchen"));
+    assert_eq!(send(&lab, "kept in memory").unwrap()["saved"], false);
+    assert!(super::lock(&lab.core.chat.rt).memory.is_some());
+
+    // The renamed folder can't be opened: its manifest is only in the cloud, and we're offline.
+    let new = lab.project_dir.parent().unwrap().join("Vault");
+    fs.cloud_only
+        .lock()
+        .unwrap()
+        .insert(new.join("project.json"));
+    fs.offline.store(true, std::sync::atomic::Ordering::Relaxed);
+    let err = lab
+        .core
+        .dispatch(
+            "project_rename",
+            json!({"path": lab.project_dir.to_string_lossy(), "name": "Vault"}),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotAvailableOffline);
+    assert!(new.is_dir() && !lab.project_dir.exists(), "it was renamed");
+    assert_eq!(
+        lab.core.dispatch("project_get", json!({})).unwrap(),
+        Value::Null,
+        "nothing is open"
+    );
+    let rt = super::lock(&lab.core.chat.rt);
+    assert!(rt.memory.is_none(), "the memory thread is dropped");
+    assert!(rt.contexts.is_empty(), "the contexts are dropped");
+    assert!(rt.moving.is_none());
+}
+
+/// Second review 4: a turn stopped by a rename ends in the renamed folder, even if another
+/// project has taken the old name by the time it ends.
+#[test]
+fn fr_prj_56_a_turn_stopped_by_the_rename_never_ends_in_a_project_that_took_the_old_name() {
+    use crate::test_support::tree;
+    let (lab, out) = streaming_turn();
+    let old = lab.project_dir.clone();
+    // The stopped turn can't write its thread until this is released.
+    let io = lab.core.chat.thread_io.clone();
+    let held = io.lock().unwrap();
+    let new = rename_open(&lab, "Vault");
+    let other = crate::project::rename_delete_tests::new_project(
+        &lab,
+        crate::manifest::Kind::Map,
+        "rooms",
+        50,
+    );
+    assert_eq!(other, old, "another project took the old name");
+    let before = tree(&other);
+    drop(held);
+    for _ in 0..400 {
+        if lab.core.chat.running_turn().is_none() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(lab.core.chat.running_turn().is_none(), "the turn ended");
+    assert_eq!(tree(&other), before, "nothing is written into that project");
+    let view = thread_view(&lab);
+    let turns = view["thread"]["turns"].as_array().unwrap().clone();
+    assert_eq!(turns.len(), 2, "{view}");
+    assert_eq!(turns[1]["id"], out["turn_id"]);
+    assert_eq!(turns[1]["state"], "canceled");
+    assert_eq!(view["unsaved_turn_ids"], json!([]), "{view}");
+    assert!(
+        thread::chat_dir(&new).is_dir(),
+        "it ended in the renamed folder"
+    );
+}

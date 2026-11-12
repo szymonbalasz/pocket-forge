@@ -629,6 +629,18 @@ test('BL-41 the panel follows the open project by event, without polling', async
   expect(fake.callsOf('project_get').length).toBe(reads);
 });
 
+test('FR-PRJ-56 R112 walk D4 the header follows a rename of the open project', async () => {
+  setup({ chat: { consent: true } });
+  render(<ChatPanel />);
+  await waitFor(() => expect(id('prm-chat-title').textContent).toBe(baseSnapshot().name));
+  // The main window renamed the open project: the same project, under a new name. The core
+  // says so with `prm:chat-context` (the project and host are unchanged).
+  const w = window as unknown as { __pfMockHandlers: Record<string, () => unknown> };
+  w.__pfMockHandlers.project_get = () => ({ ...baseSnapshot(), name: 'Vault' });
+  act(() => fake.emit('prm:chat-context', { project_id: PID, host: null }));
+  await waitFor(() => expect(id('prm-chat-title').textContent).toBe('Vault'));
+});
+
 test('BL-42 FR-PRM-26 the strip previews what the next turn sends', async () => {
   setup({ chat: { consent: true } });
   await api.chat.contextPublish(PID, 'rgn', {});
