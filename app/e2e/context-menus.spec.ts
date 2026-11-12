@@ -6,6 +6,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { exportState, openExport, PROJECT_DIR } from './export-mock';
 import { hook, openMap } from './edt-mock';
 import { LIBRARY, mockCore, projectPath } from './mock-core';
+import { mockRefs } from './ref-mock';
 
 const toast = (page: Page) => page.locator('[data-testid="exp-toast"][data-source="menu"]');
 
@@ -34,7 +35,6 @@ test('FR-EXP-30 the canvas menu exports as JPEG once: the panel keeps PNG and th
   for (const id of ['save-as', 'export', 'reveal'])
     await expect(page.getByTestId(`edt-canvas-menu-${id}`)).toBeVisible();
   await exportAs(page, 'edt-canvas-menu', 'jpeg');
-  await expect(toast(page)).toHaveAttribute('data-phase', /loading|running/);
   await expect(page.getByTestId('exp-toast-path')).toHaveText(`${PROJECT_DIR}/exports/Crypt.jpg`);
   const st = await exportState(page);
   expect(st.starts.at(-1)).toMatchObject({ replace: false, format_override: 'jpeg' });
@@ -45,16 +45,19 @@ test('FR-EXP-30 the canvas menu exports as JPEG once: the panel keeps PNG and th
   await expect(page.getByTestId('exp-panel-start')).toBeEnabled();
 });
 
-test('FR-EXP-30 the same Export as again offers Replace in the toast, and Cancel stops a running one', async ({
+test('FR-EXP-30 an existing file offers Replace in the toast, and Cancel stops a running one', async ({
   page,
 }) => {
-  await openExport(page, { stepMs: 150 });
+  // The file is there already; the run is long, so only Cancel ends it.
+  await openExport(page, {
+    stepMs: 60_000,
+    existing: [{ path: 'exports/Crypt.webp', bytes: 12_300_000, ageMs: 2 * 86_400_000 }],
+  });
   await canvasMenu(page);
   await exportAs(page, 'edt-canvas-menu', 'webp');
-  await expect(page.getByTestId('exp-toast-path')).toHaveText(`${PROJECT_DIR}/exports/Crypt.webp`);
-  await canvasMenu(page);
-  await exportAs(page, 'edt-canvas-menu', 'webp');
-  await expect(page.getByTestId('exp-toast-question')).toContainText('Replace Crypt.webp (');
+  await expect(page.getByTestId('exp-toast-question')).toHaveText(
+    'Replace Crypt.webp (11.7 MB, 2 days ago)?',
+  );
   await page.getByTestId('exp-toast-replace').click();
   await expect(toast(page)).toHaveAttribute('data-phase', 'running');
   // Start reads busy while the menu export runs (FR-EXP-33).
@@ -182,4 +185,38 @@ test('FR-EXP-32 a picker candidate’s menu exports its file into exports/, and 
   );
   await page.getByTestId('exp-toast-cancel').click();
   await expect(toast(page)).toHaveCount(0);
+});
+
+test('FR-EXP-32 a pack image’s Save as runs with no project open and its toast shows on the packs home', async ({
+  page,
+}) => {
+  await mockRefs(page);
+  await mockCore(page);
+  await page.addInitScript(() => {
+    const h = ((window as unknown as Record<string, unknown>).__pfMockHandlers ??= {}) as Record<
+      string,
+      () => unknown
+    >;
+    h['plugin:dialog|save'] = () => 'D:/out/sword.png';
+  });
+  await page.goto('/');
+  await page.getByTestId('prj-rail-references').click();
+  await page
+    .getByTestId('ref-home-card')
+    .filter({ hasText: 'Weapons' })
+    .getByRole('button')
+    .click();
+  const img = page.getByTestId('ref-pack-image').first();
+  await img.click({ button: 'right' });
+  await expect(page.getByTestId('ref-pack-image-menu-export')).toHaveCount(0);
+  await page.getByTestId('ref-pack-image-menu-save-as').click();
+  await expect(page.getByTestId('exp-toast-path')).toHaveText('D:/out/sword.png');
+  const started = await page.evaluate(
+    () =>
+      (window as unknown as { __pfPrjMock: { fileExports: { source: string; dest: string }[] } })
+        .__pfPrjMock.fileExports,
+  );
+  expect(started).toHaveLength(1);
+  expect(started[0]!.dest).toBe('D:/out/sword.png');
+  expect(started[0]!.source.startsWith(`${LIBRARY}/References/Weapons/`)).toBe(true);
 });

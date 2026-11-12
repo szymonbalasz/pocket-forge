@@ -483,12 +483,17 @@ fn convert_into(
 ) -> Result<bool, Stop> {
     let seams = &*job.seams;
     r.check(Phase::Compose, 0.0)?;
-    let decoded = image::open(source).map_err(|e| {
-        failure(
-            ErrorCode::Corrupt,
-            format!("{} can't be decoded: {e}", source.display()),
-        )
-    })?;
+    // By content, as the command's checks were (a WebP named `.jpg` is a WebP).
+    let decoded = image::ImageReader::open(source)
+        .and_then(|r| r.with_guessed_format())
+        .map_err(|e| io_stop(seams, "reading the image", &e))?
+        .decode()
+        .map_err(|e| {
+            failure(
+                ErrorCode::Corrupt,
+                format!("{} can't be decoded: {e}", source.display()),
+            )
+        })?;
     r.check(Phase::Compose, 1.0)?;
     let alpha = decoded.color().has_alpha();
     let mut out = BufWriter::with_capacity(1 << 20, file);

@@ -613,3 +613,21 @@ impl T {
         image::open(path).unwrap().to_rgb8()
     }
 }
+
+#[test]
+fn fr_exp_32_the_source_type_is_sniffed_not_taken_from_its_extension() {
+    let t = setup();
+    // JPEG bytes in a file named `.png`.
+    let jpeg = crate::test_support::jpeg_bytes(16, 12);
+    let src = t.put("references/photo.png", &jpeg);
+    t.export_file(&src, Some("webp"), "exports", false).unwrap();
+    assert_eq!(t.last_event("export:done")["width"], 16);
+    let webp = t.project.join("exports").join("Crypt_photo.webp");
+    assert_eq!(sniff(&webp), Some(pf_imaging::ImageFormat::Webp));
+    // The same type as its content: a byte copy.
+    t.export_file(&src, Some("jpeg"), "exports", false).unwrap();
+    assert_eq!(
+        std::fs::read(t.project.join("exports").join("Crypt_photo.jpg")).unwrap(),
+        jpeg
+    );
+}
