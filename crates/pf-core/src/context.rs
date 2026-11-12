@@ -271,7 +271,10 @@ struct FaultRule {
 pub struct Faults {
     #[cfg_attr(
         not(debug_assertions),
-        expect(dead_code, reason = "`hit` compiles to nothing in release builds")
+        allow(
+            dead_code,
+            reason = "`hit` compiles to nothing in release builds; `and` still reads it"
+        )
     )]
     rules: Vec<FaultRule>,
 }

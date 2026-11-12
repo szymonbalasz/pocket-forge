@@ -2095,10 +2095,17 @@ fn fr_prj_56_a_running_chat_turn_is_stopped_by_the_rename_and_ends_in_its_thread
     assert_eq!(turns[1]["id"], out["turn_id"]);
     assert_eq!(turns[1]["state"], "canceled");
     assert_eq!(turns[1]["text"], "first part");
-    // Saved before the folder moved, or kept in memory for the next save: never lost, and
-    // never written to the old folder.
-    let unsaved = view["unsaved_turn_ids"].as_array().unwrap().len();
-    assert!(unsaved == 0 || unsaved == 2, "{view}");
+    // It ended in the thread file, in the folder as it is named now: nothing waits in memory
+    // and the old folder isn't recreated.
+    assert_eq!(view["unsaved_turn_ids"], json!([]), "{view}");
     assert!(!lab.project_dir.exists(), "the old folder isn't recreated");
-    assert!(new.join("project.json").is_file());
+    // So it survives a close: on reopen it reads "Stopped." (canceled), never `interrupted`.
+    lab.close();
+    lab.core
+        .dispatch("project_open", json!({"path": new.to_string_lossy()}))
+        .unwrap();
+    let turns = thread_view(&lab)["thread"]["turns"].clone();
+    assert_eq!(turns[1]["id"], out["turn_id"]);
+    assert_eq!(turns[1]["state"], "canceled");
+    assert_eq!(turns[1]["text"], "first part");
 }

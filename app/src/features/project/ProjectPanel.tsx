@@ -199,6 +199,8 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
   const { revision, error } = useProjectState();
   const readOnly = project.read_only !== null;
   const [deleting, setDeleting] = useState(false);
+  // The confirmed delete is on its way (a close question may be showing meanwhile).
+  const [removing, setRemoving] = useState(false);
   // R97: a delete is refused while a job runs; say so on the button instead of after Confirm.
   const jobRunning = useActiveJobId() !== null;
   const drop = usePanelDrop(readOnly);
@@ -229,7 +231,7 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
             type="button"
             className="link"
             data-testid="prj-panel-delete"
-            disabled={jobRunning}
+            disabled={jobRunning || removing}
             title={
               jobRunning
                 ? 'A job is running in this project. Delete it when the job has finished.'
@@ -251,7 +253,9 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
           // questions are asked (a running export asks in its own panel) and comes back only
           // to say why a delete was refused.
           setDeleting(false);
+          setRemoving(true);
           const refused = await projectStore.remove();
+          setRemoving(false);
           if (refused) setDeleting(true);
           return refused;
         }}

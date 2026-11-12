@@ -959,11 +959,12 @@ fn fr_prj_58_a_restore_whose_move_is_refused_is_listed_again() {
     assert_eq!(restore(&lab, &id).unwrap(), lab.project_dir);
 }
 
-/// Makes the real folder move of a restore fail: on Windows a file in the folder is held open
-/// without delete sharing (like a scanner); elsewhere the item folder is made read-only.
-/// Returns what undoes it, or `None` where the OS wouldn't refuse (a root user).
+/// Makes the real folder move of a restore fail, with `item.json` still writable: on Windows a
+/// file in the folder is held open without delete sharing (like a scanner); elsewhere the
+/// section folder, where it would go, is made read-only. Returns what undoes it, or `None`
+/// where the OS wouldn't refuse (a root user).
 #[cfg(windows)]
-fn block_move(item: &Path, name: &str) -> Option<Box<dyn FnOnce()>> {
+fn block_move(item: &Path, name: &str, _section: &Path) -> Option<Box<dyn FnOnce()>> {
     use std::os::windows::fs::OpenOptionsExt;
     let held = std::fs::OpenOptions::new()
         .read(true)
@@ -974,20 +975,20 @@ fn block_move(item: &Path, name: &str) -> Option<Box<dyn FnOnce()>> {
 }
 
 #[cfg(unix)]
-fn block_move(item: &Path, _name: &str) -> Option<Box<dyn FnOnce()>> {
+fn block_move(_item: &Path, _name: &str, section: &Path) -> Option<Box<dyn FnOnce()>> {
     use std::os::unix::fs::PermissionsExt;
-    let item = item.to_path_buf();
+    let section = section.to_path_buf();
     let set = |dir: &Path, mode: u32| {
         std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode)).unwrap()
     };
-    set(&item, 0o555);
-    if std::fs::write(item.join("probe"), b"").is_ok() {
+    set(&section, 0o555);
+    if std::fs::write(section.join("probe"), b"").is_ok() {
         // Permissions don't bind this user (root).
-        let _ = std::fs::remove_file(item.join("probe"));
-        set(&item, 0o755);
+        let _ = std::fs::remove_file(section.join("probe"));
+        set(&section, 0o755);
         return None;
     }
-    Some(Box::new(move || set(&item, 0o755)))
+    Some(Box::new(move || set(&section, 0o755)))
 }
 
 /// A restore that fails part-way: `restored_at` is on disk and the real folder move fails.
@@ -997,7 +998,8 @@ fn fr_prj_58_a_restore_that_fails_is_listed_again() {
     lab.close();
     let files = tree(&lab.project_dir);
     let id = delete(&lab, &lab.project_dir).unwrap();
-    let Some(unblock) = block_move(&item_dir(&lab, &id), "rooms") else {
+    let section = lab.project_dir.parent().unwrap().to_path_buf();
+    let Some(unblock) = block_move(&item_dir(&lab, &id), "rooms", &section) else {
         return;
     };
     let err = restore(&lab, &id).unwrap_err();

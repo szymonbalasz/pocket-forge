@@ -423,24 +423,24 @@ fn job_active(job_id: Ulid, verb: &str) -> CoreError {
 
 /// Releases the open project's files as a close does (EXP's pending settings and running
 /// export, the chat session, the decoded original). The caller decided what happens to a
-/// waiting save. `reopens`: the folder is only renamed or moved and the same project opens
-/// again (FR-PRJ-56, 57), so EXP's session and the published chat contexts stay. Returns the
-/// project and whether its original was being decoded or in memory.
+/// waiting save. `moving`: the folder is only renamed (to that path) or moved to the trash
+/// (`None`) and the same project stays or opens again (FR-PRJ-56, 57), so EXP's session and
+/// what the chat holds for it stay. Returns the project and whether its original was being
+/// decoded or in memory.
 fn release_open(
     core: &Core,
     state: &mut crate::core::State,
-    reopens: bool,
+    moving: Option<Option<&std::path::Path>>,
 ) -> Option<(project::OpenProject, bool)> {
-    if reopens {
+    if moving.is_some() {
         crate::export::on_project_moving(&core.ctx, state);
     } else {
         crate::export::on_project_close(&core.ctx, state);
     }
     let p = state.project.take()?;
-    if reopens {
-        core.chat.on_project_moving(p.manifest.project_id);
-    } else {
-        core.chat.on_project_close(p.manifest.project_id);
+    match moving {
+        Some(to) => core.chat.on_project_moving(p.manifest.project_id, to),
+        None => core.chat.on_project_close(p.manifest.project_id),
     }
     let decoded = p.decoded.is_started();
     p.decoded.release();
@@ -501,7 +501,7 @@ fn rename_open(core: &Core, state: &mut crate::core::State, name: &str) -> CoreR
     };
     refuse_active_job_open(state, "Rename")?;
     refuse_unsaved(core, state, Leaving::Rename)?;
-    let (was, decode) = release_open(core, state, true).ok_or_else(no_project)?;
+    let (was, decode) = release_open(core, state, Some(Some(&target))).ok_or_else(no_project)?;
     match crate::fsx::move_dir(&core.ctx, &old, &target) {
         Ok(()) => {
             core.served().rebase(&old, &target);
@@ -509,6 +509,7 @@ fn rename_open(core: &Core, state: &mut crate::core::State, name: &str) -> CoreR
             Ok(target)
         }
         Err(e) => {
+            core.chat.on_project_not_moved(was.manifest.project_id);
             if let Err(again) = reopen(core, state, &old, decode, &was) {
                 tracing::warn!(error = %again, "the project didn't open again after a failed rename");
             }
@@ -576,7 +577,7 @@ fn delete_open(
         project::retry_pending(&core.ctx, install_id, p);
     }
     crate::export::unsaved_on_close(&core.ctx, state);
-    let (p, decode) = release_open(core, state, true).ok_or_else(no_project)?;
+    let (p, decode) = release_open(core, state, Some(None)).ok_or_else(no_project)?;
     match library::trash::delete_project(&core.ctx, loc) {
         Ok(id) => {
             // It is gone for good: the rest of a close.
@@ -863,7 +864,7 @@ impl Command for ProjectClose {
         } else {
             refuse_unsaved(core, &mut state, Leaving::Close)?;
         }
-        if release_open(core, &mut state, false).is_some() {
+        if release_open(core, &mut state, None).is_some() {
             core.chat.notify_project(&core.ctx, None);
         }
         core.served().reset(None);

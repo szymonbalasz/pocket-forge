@@ -993,14 +993,17 @@ test('FR-PRJ-57 R111 the close questions come only after Confirm, with the confi
     expect(answer).toBeNull();
     fireEvent.click(screen.getByTestId('prj-delete-confirm'));
     await waitFor(() => expect(answer).not.toBeNull());
-    // The modal confirmation is gone, so the question in the export panel can be answered.
+    // The modal confirmation is gone, so the question in the export panel can be answered,
+    // and Delete can't be pressed again over it.
     expect(screen.queryByTestId('prj-delete-dialog')).toBeNull();
+    expect(screen.getByTestId<HTMLButtonElement>('prj-panel-delete').disabled).toBe(true);
     expect(core.names()).not.toContain('project_delete');
     // "Keep exporting": nothing is deleted and the project stays open.
     await act(async () => answer!.cancel());
     expect(core.names()).not.toContain('project_delete');
     expect(screen.queryByTestId('prj-delete-dialog')).toBeNull();
     expect(projectStore.get().project?.name).toBe('Crypt');
+    expect(screen.getByTestId<HTMLButtonElement>('prj-panel-delete').disabled).toBe(false);
 
     answer = null;
     fireEvent.click(screen.getByTestId('prj-panel-delete'));

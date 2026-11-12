@@ -569,6 +569,24 @@ test('FR-PRJ-58 R111 an item without its folder or with a purge begun is not lis
   expect(screen.queryByTestId('prj-trash-list')).toBeNull();
 });
 
+test('FR-PRJ-45 R111 a closed project with a running job refuses the rename on its card with the reason', async () => {
+  const seed = samplePrjSeed(LIB);
+  seed.projects[0] = { ...seed.projects[0]!, jobActive: true };
+  setup(seed);
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  const name = seed.projects[0]!.name;
+  fireEvent.contextMenu(cardOf(name));
+  fireEvent.click(await screen.findByTestId('prj-home-card-rename'));
+  const input = await screen.findByTestId<HTMLInputElement>('prj-home-card-rename-input');
+  fireEvent.change(input, { target: { value: 'Vault' } });
+  fireEvent.submit(input.form!);
+  expect((await screen.findByTestId('prj-home-card-rename-error')).textContent).toContain(
+    'A job is running in this project. Rename it when the job has finished.',
+  );
+  expect(mock.projects.has(`${LIB}/Maps/${name}`)).toBe(true);
+  expect(cardOf(name)).toBeTruthy();
+});
+
 test('FR-PRJ-57 the card of a project deleted from the left panel is gone before home shows', async () => {
   setup();
   await waitFor(() => expect(cards()).toHaveLength(2));
