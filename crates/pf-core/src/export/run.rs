@@ -549,6 +549,10 @@ struct Done {
     path: PathBuf,
     bytes: u64,
     fallback: bool,
+    /// The size written: the flatten's own size when nothing is resampled (walk-63 L2: a
+    /// read-only project's changed original can differ from the manifest's size).
+    width: u32,
+    height: u32,
 }
 
 fn export(ctx: &Context, job: &ExportJob) -> Result<Done, Stop> {
@@ -636,10 +640,16 @@ fn export(ctx: &Context, job: &ExportJob) -> Result<Done, Stop> {
     }
     let bytes = fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
     let _ = r.report(Phase::Write, 1.0);
+    let (width, height) = match (&job.input, &stack) {
+        (Input::Stack { rescale: false, .. }, Some(stack)) => stack.dimensions(),
+        _ => (job.width, job.height),
+    };
     Ok(Done {
         path: dest,
         bytes,
         fallback,
+        width,
+        height,
     })
 }
 
@@ -675,8 +685,8 @@ fn commit_last(ctx: &Context, state: &mut State, job: &ExportJob, done: &Done) -
             "layers_hash": layers_hash(layers),
             "path": rel_path,
             "format": job.format.as_str(),
-            "width": job.width,
-            "height": job.height,
+            "width": done.width,
+            "height": done.height,
             "bytes": done.bytes,
             "fallback": if done.fallback { Value::from("lossless") } else { Value::Null },
             "strip_h": STRIP_H,
@@ -734,8 +744,8 @@ pub(crate) fn run(ctx: &Context, state: &Mutex<State>, job: ExportJob) {
                 json!({
                     "export_id": job.id,
                     "path": done.path,
-                    "width": job.width,
-                    "height": job.height,
+                    "width": done.width,
+                    "height": done.height,
                     "bytes": done.bytes,
                     "format": job.format.as_str(),
                     "fallback": if done.fallback { Value::from("lossless") } else { Value::Null },

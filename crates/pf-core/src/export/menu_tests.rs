@@ -649,3 +649,32 @@ fn fr_exp_32_save_default_for_a_project_file_is_a_plain_path() {
         "{path}"
     );
 }
+
+#[test]
+fn fr_exp_31_walk_63_l2_done_reports_the_size_written() {
+    // A read-only project whose original changed: the decoded file (64×48) isn't the
+    // manifest's size (32×24). Save as writes the decoded size, and says so.
+    let t = setup();
+    {
+        let mut s = t.core.state();
+        let p = s.project.as_mut().unwrap();
+        p.read_only = Some(ReadOnlyReason::OriginalChanged);
+        let o = p.manifest.original.as_mut().unwrap();
+        o.width = 32;
+        o.height = 24;
+    }
+    let dest = t.outside().join("crypt-ro.png");
+    t.core
+        .dispatch(
+            "export_start",
+            json!({"settings": settings(None, None, "png"), "replace": false, "dest": dest}),
+        )
+        .unwrap();
+    let done = t.last_event("export:done");
+    let written = image::open(&dest).unwrap().dimensions();
+    assert_eq!(written, (64, 48));
+    assert_eq!(
+        (done["width"].as_u64(), done["height"].as_u64()),
+        (Some(64), Some(48))
+    );
+}
