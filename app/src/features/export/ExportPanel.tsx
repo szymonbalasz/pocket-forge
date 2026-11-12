@@ -8,6 +8,7 @@ import type { ExportFormat } from '../../api';
 import { useSlotIdle } from '../../shared/slot';
 import { projectHasImage } from '../../shared/generateTabs';
 import { useProjectState } from '../../store/project';
+import { MenuToastView } from './Menus';
 import { exportStore, useExportState } from './store';
 import {
   closeQuestion,
@@ -180,6 +181,7 @@ export function ExportPanel() {
     format: form.format,
     running: !!run,
     blocked: !!s.fieldError || !!s.planError,
+    menuBusy: s.menuBusy,
   });
   const note = plan ? replaceNote(plan, Date.now()) : null;
   const panelState = !project
@@ -465,10 +467,15 @@ export function ExportPanel() {
 /** Status-bar segment: export progress while one runs (ui-guidelines: long operations). */
 export function ExportStatus() {
   const { run } = useExportState();
-  if (!run) return null;
   return (
-    <span className="small tabular" data-testid="exp-status-progress">
-      Exporting {Math.round(run.overall * 100)} %
-    </span>
+    <>
+      {run && (
+        <span className="small tabular" data-testid="exp-status-progress">
+          Exporting {Math.round(run.overall * 100)} %
+        </span>
+      )}
+      {/* #63: the menu exports' toast lives with the always-mounted status bar. */}
+      <MenuToastView />
+    </>
   );
 }

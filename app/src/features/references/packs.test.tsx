@@ -605,3 +605,32 @@ test('FR-REF-28 walk R5: what a listing moves to the trash is listed by the same
     '01JMOCKTRASHLOSER000000000',
   );
 });
+
+test('FR-PRJ-59 #63 a pack card opens in Explorer; a pack image has Save as and Open in Explorer, no Export as', async () => {
+  setup();
+  const revealed: string[] = [];
+  core.useHandlers({
+    ...core.handlersSnapshot(),
+    reveal_in_explorer: (i) => {
+      revealed.push(String(i.path));
+      return {};
+    },
+  });
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  fireEvent.contextMenu(card('Weapons'));
+  for (const id of ['rename', 'reveal', 'delete'])
+    expect(await screen.findByTestId(`ref-home-card-${id}`)).toBeTruthy();
+  fireEvent.click(screen.getByTestId('ref-home-card-reveal'));
+  await waitFor(() => expect(revealed).toEqual(['C:/pf-mock/library/References/Weapons']));
+
+  fireEvent.click(within(card('Weapons')).getByRole('button'));
+  await waitFor(() => expect(images()).toHaveLength(3));
+  const img = screen.getAllByTestId('ref-pack-image')[0]!;
+  fireEvent.contextMenu(img);
+  await screen.findByTestId('ref-pack-image-menu');
+  expect(screen.getByTestId('ref-pack-image-menu-save-as')).toBeTruthy();
+  expect(screen.queryByTestId('ref-pack-image-menu-export')).toBeNull();
+  fireEvent.click(screen.getByTestId('ref-pack-image-menu-reveal'));
+  await waitFor(() => expect(revealed).toHaveLength(2));
+  expect(revealed[1]).toMatch(/^C:\/pf-mock\/library\/References\/Weapons\/.+\.(png|jpe?g|webp)$/);
+});

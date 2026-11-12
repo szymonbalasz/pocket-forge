@@ -1041,3 +1041,90 @@ test('FR-PRJ-57 a refused delete says why in the confirmation and the project st
   await waitFor(() => expect(screen.queryByTestId('prj-delete-dialog')).toBeNull());
   expect(screen.getByTestId('prj-panel')).toBeTruthy();
 });
+
+test('FR-PRJ-59 the name’s menu: Open in Explorer shows the project folder, Rename edits in place, Delete asks first', async () => {
+  await openCrypt();
+  fireEvent.contextMenu(screen.getByTestId('prj-panel-name'));
+  fireEvent.click(await screen.findByTestId('prj-panel-menu-reveal'));
+  await waitFor(() => expect(mock.reveals).toEqual([CRYPT]));
+  fireEvent.contextMenu(screen.getByTestId('prj-panel-name'));
+  fireEvent.click(await screen.findByTestId('prj-panel-menu-rename'));
+  expect(await screen.findByTestId('prj-panel-name-input')).toBeTruthy();
+  fireEvent.keyDown(screen.getByTestId('prj-panel-name-input'), { key: 'Escape' });
+  fireEvent.contextMenu(await screen.findByTestId('prj-panel-name'));
+  fireEvent.click(await screen.findByTestId('prj-panel-menu-delete'));
+  expect((await screen.findByTestId('prj-delete-dialog')).textContent).toContain('Delete Crypt?');
+  expect(core.names()).not.toContain('project_delete');
+});
+
+test('FR-PRJ-59 FR-EXP-32 images in the folder lists and kept results get Save as, Export as and Open in Explorer; other files only Open in Explorer', async () => {
+  await openCrypt({
+    folders: {
+      references: [
+        { name: 'mood.jpg', bytes: 2048, mtime: '2026-11-01T00:00:00Z', image: true },
+        { name: 'notes.txt', bytes: 12, mtime: '2026-11-01T00:00:00Z', image: false },
+      ],
+    },
+  });
+  await waitFor(() => expect(files('references')).toEqual(['mood.jpg', 'notes.txt']));
+  const [img, txt] = screen.getAllByTestId('prj-panel-references-file');
+  fireEvent.contextMenu(img!);
+  await screen.findByTestId('prj-panel-file-menu');
+  for (const id of ['save-as', 'export', 'reveal'])
+    expect(screen.getByTestId(`prj-panel-file-menu-${id}`)).toBeTruthy();
+  fireEvent.click(screen.getByTestId('prj-panel-file-menu-reveal'));
+  await waitFor(() => expect(mock.reveals).toEqual([`/select,${CRYPT}/references/mood.jpg`]));
+  fireEvent.contextMenu(txt!);
+  await screen.findByTestId('prj-panel-file-menu');
+  expect(screen.queryByTestId('prj-panel-file-menu-save-as')).toBeNull();
+  expect(screen.queryByTestId('prj-panel-file-menu-export')).toBeNull();
+  expect(screen.getByTestId('prj-panel-file-menu-reveal')).toBeTruthy();
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+
+  // A kept candidate in Results.
+  const base = core.handlersSnapshot();
+  core.useHandlers({
+    ...base,
+    rgn_iterations_list: () => [
+      {
+        job_id: 'J1',
+        n: 1,
+        dir: 'results/001 kitchen',
+        slug: 'kitchen',
+        state: 'closed',
+        kept: 1,
+        returned: 1,
+        cost: null,
+        accepted_in_stack: false,
+        references: 0,
+        reference_files: [],
+      },
+    ],
+    project_get: async (i) => ({
+      ...((await base.project_get!(i)) as object),
+      candidates: [
+        {
+          id: 'C1',
+          job_id: 'J1',
+          index: 0,
+          file: 'results/001 kitchen/01.png',
+          status: 'dismissed',
+          starred: false,
+          trash_id: null,
+        },
+      ],
+    }),
+  });
+  act(() => core.emit('project:committed', { seq: 9 }));
+  const cand = await screen.findByTestId('prj-results-candidate');
+  fireEvent.contextMenu(cand);
+  await screen.findByTestId('prj-results-menu');
+  expect(screen.getByTestId('prj-results-menu-save-as')).toBeTruthy();
+  fireEvent.click(screen.getByTestId('prj-results-menu-export'));
+  fireEvent.click(await screen.findByTestId('prj-results-menu-export-png'));
+  await waitFor(() =>
+    expect(mock.fileExports).toEqual([
+      { source: `${CRYPT}/results/001 kitchen/01.png`, dest: 'exports', format: 'png' },
+    ]),
+  );
+});

@@ -9,3 +9,7 @@ export const exportFeature: Feature = {
   // After the project's save state (50), before the provider chip (90).
   status: [{ id: 'progress', priority: 60, drop: 1, Component: ExportStatus }],
 };
+
+// #63: the image menus other features place, and the menu exports' store (tests).
+export { CanvasMenu, FileMenu, PackImageMenu, revealEntry } from './Menus';
+export { menuExport } from './menu';

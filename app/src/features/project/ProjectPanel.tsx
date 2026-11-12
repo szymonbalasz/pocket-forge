@@ -20,7 +20,9 @@ import {
   type RevisionEntry,
   type TrashItem,
 } from '../../api';
+import { ContextMenu } from '../../shared/ContextMenu';
 import { IconPlus } from '../../shell/icons';
+import { FileMenu, revealEntry } from '../export';
 import { DeleteProjectDialog } from '../library';
 import { dropNewImage, PATCHES_KEPT, useActiveJobId } from '../region-edit';
 import {
@@ -242,7 +244,10 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
             Delete
           </button>
         </div>
-        <ProjectName project={project} />
+        <ProjectName
+          project={project}
+          onDelete={jobRunning || removing ? null : () => setDeleting(true)}
+        />
       </header>
       <DeleteProjectDialog
         open={deleting}
@@ -307,7 +312,14 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
 /** The project's name, edited in place (FR-PRJ-56): click it, Enter commits, Esc cancels. The
  *  project stays open under its new name; a refusal (`name_taken`, `job_active`, …) shows under
  *  the field and nothing changes. */
-function ProjectName({ project }: { project: ProjectSnapshot }) {
+function ProjectName({
+  project,
+  onDelete,
+}: {
+  project: ProjectSnapshot;
+  /** The panel's Delete (FR-PRJ-57); null while it's disabled. */
+  onDelete: (() => void) | null;
+}) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(project.name);
   const [error, setError] = useState<string | null>(null);
@@ -325,22 +337,39 @@ function ProjectName({ project }: { project: ProjectSnapshot }) {
     if (error) input.current?.focus();
   }, [error]);
 
+  const startEditing = () => {
+    setValue(project.name);
+    setError(null);
+    setEditing(true);
+  };
   if (!editing) {
+    // #63, FR-PRJ-59: right-click → Open in Explorer, Rename, Delete.
     return (
       <h2 className="prj-panel-name">
-        <button
-          type="button"
-          className="prj-panel-name-button"
-          data-testid="prj-panel-name"
-          title={`${project.project_dir}\nClick to rename`}
-          onClick={() => {
-            setValue(project.name);
-            setError(null);
-            setEditing(true);
-          }}
+        <ContextMenu
+          testId="prj-panel-menu"
+          entries={[
+            revealEntry(project.project_dir),
+            // Radix gives focus back to the trigger as the menu closes; edit after that.
+            { id: 'rename', label: 'Rename', onSelect: () => requestAnimationFrame(startEditing) },
+            {
+              id: 'delete',
+              label: 'Delete',
+              onSelect: () => onDelete?.(),
+              disabled: onDelete ? null : 'A job is running in this project',
+            },
+          ]}
         >
-          {project.name}
-        </button>
+          <button
+            type="button"
+            className="prj-panel-name-button"
+            data-testid="prj-panel-name"
+            title={`${project.project_dir}\nClick to rename`}
+            onClick={startEditing}
+          >
+            {project.name}
+          </button>
+        </ContextMenu>
       </h2>
     );
   }
@@ -571,7 +600,9 @@ function Folder({
   const [files, setFiles] = useState<FolderFile[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const seq = useProjectState().folders[id] ?? 0;
+  const { folders, project } = useProjectState();
+  const seq = folders[id] ?? 0;
+  const dir = project?.project_dir ?? '';
   const load = useCallback(() => {
     api.project.folderList(id).then(
       (f) => {
@@ -645,28 +676,35 @@ function Folder({
       {files && files.length > 0 && (
         <ul className="prj-files">
           {files.map((f) => (
-            <li
+            // #63: Save as…, Export as ▸ and Open in Explorer (FR-EXP-32, FR-PRJ-59).
+            <FileMenu
               key={f.name}
-              className="prj-file"
-              data-testid={`prj-panel-${id}-file`}
-              data-record-id={f.name}
-              data-image={f.image ? 'true' : undefined}
-              title={`${f.name} · ${bytesLabel(f.bytes)}`}
+              testId="prj-panel-file-menu"
+              path={`${dir}/${id}/${f.name}`}
+              image={f.image}
             >
-              {f.image ? (
-                f.thumb_url ? (
-                  <img className="prj-file-thumb" src={f.thumb_url} alt="" loading="lazy" />
+              <li
+                className="prj-file"
+                data-testid={`prj-panel-${id}-file`}
+                data-record-id={f.name}
+                data-image={f.image ? 'true' : undefined}
+                title={`${f.name} · ${bytesLabel(f.bytes)}`}
+              >
+                {f.image ? (
+                  f.thumb_url ? (
+                    <img className="prj-file-thumb" src={f.thumb_url} alt="" loading="lazy" />
+                  ) : (
+                    <span className="prj-file-thumb prj-file-thumb-empty" aria-hidden="true" />
+                  )
                 ) : (
-                  <span className="prj-file-thumb prj-file-thumb-empty" aria-hidden="true" />
-                )
-              ) : (
-                <span className="prj-file-icon" aria-hidden="true">
-                  ·
-                </span>
-              )}
-              <span className="prj-file-name">{f.name}</span>
-              <span className="prj-file-size tabular">{bytesLabel(f.bytes)}</span>
-            </li>
+                  <span className="prj-file-icon" aria-hidden="true">
+                    ·
+                  </span>
+                )}
+                <span className="prj-file-name">{f.name}</span>
+                <span className="prj-file-size tabular">{bytesLabel(f.bytes)}</span>
+              </li>
+            </FileMenu>
           ))}
         </ul>
       )}
@@ -758,7 +796,8 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
   const [items, setItems] = useState<RgnIteration[]>([]);
   const [cands, setCands] = useState<CandidateRecord[]>([]);
   const [notice, setNotice] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
-  const trash = useProjectState().trashNotice;
+  const { trashNotice: trash, project } = useProjectState();
+  const projectDir = project?.project_dir ?? '';
   const load = useCallback(() => {
     // The active job before it has candidates has no number or folder yet: not a result.
     api.region.iterations().then(
@@ -896,34 +935,41 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
                   </div>
                   <ul className="prj-files prj-result-cands">
                     {kept.map((c) => (
-                      <li
+                      // #63: Save as…, Export as ▸, Open in Explorer (FR-EXP-32, FR-PRJ-59).
+                      <FileMenu
                         key={c.id}
-                        className="prj-file"
-                        data-testid="prj-results-candidate"
-                        data-record-id={c.id}
-                        data-status={c.status}
-                        title={c.file}
+                        testId="prj-results-menu"
+                        path={`${projectDir}/${c.file}`}
+                        image
                       >
-                        <span className="prj-file-name">
-                          {c.file.split('/').pop()}
-                          {c.status === 'accepted' ? ' ✓' : ''}
-                          {c.starred ? ' ★' : ''}
-                        </span>
-                        <button
-                          type="button"
-                          className="link"
-                          data-testid="prj-results-discard"
-                          disabled={readOnly || c.status === 'accepted'}
-                          title={
-                            c.status === 'accepted'
-                              ? 'The accepted candidate can’t be discarded'
-                              : 'Discard: to the trash for 30 days'
-                          }
-                          onClick={() => void discard(c)}
+                        <li
+                          className="prj-file"
+                          data-testid="prj-results-candidate"
+                          data-record-id={c.id}
+                          data-status={c.status}
+                          title={c.file}
                         >
-                          Discard
-                        </button>
-                      </li>
+                          <span className="prj-file-name">
+                            {c.file.split('/').pop()}
+                            {c.status === 'accepted' ? ' ✓' : ''}
+                            {c.starred ? ' ★' : ''}
+                          </span>
+                          <button
+                            type="button"
+                            className="link"
+                            data-testid="prj-results-discard"
+                            disabled={readOnly || c.status === 'accepted'}
+                            title={
+                              c.status === 'accepted'
+                                ? 'The accepted candidate can’t be discarded'
+                                : 'Discard: to the trash for 30 days'
+                            }
+                            onClick={() => void discard(c)}
+                          >
+                            Discard
+                          </button>
+                        </li>
+                      </FileMenu>
                     ))}
                   </ul>
                 </details>

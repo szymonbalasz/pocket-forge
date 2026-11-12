@@ -745,6 +745,13 @@ const pickerHandlers = {
  *  that aren't starred. */
 const withDiscardRest = { ...pickerHandlers, onDiscardRest: () => void rgn.discardRest() };
 
+/** A candidate's file, absolute, for the picker item's menu (#63). */
+function candidateFile(all: CandidateRecord[], id: string): string | null {
+  const dir = projectStore.get().project?.project_dir;
+  const file = all.find((c) => c.id === id)?.file;
+  return dir && file ? `${dir}/${file}` : null;
+}
+
 function syncPicker(): void {
   const s = state;
   const jobId = s.selectedJobId;
@@ -765,6 +772,7 @@ function syncPicker(): void {
         ? { url: s.preview.url, rect: s.preview.rect, alone: s.preview.alone }
         : null,
     warning: c.aspectWarning ? ASPECT_WARNING : null,
+    file: candidateFile(s.candidates, c.id),
   }));
   const selected = list.some((c) => c.id === s.selectedCandidateId) ? s.selectedCandidateId : null;
   const rest = list.some((c) => c.accepted) && list.some((c) => !c.accepted && !c.starred);

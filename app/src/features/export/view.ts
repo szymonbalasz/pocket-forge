@@ -194,12 +194,15 @@ export type OriginalState =
 
 export interface StartState {
   enabled: boolean;
-  label: 'Export' | 'Replace';
+  label: 'Export' | 'Replace' | 'Busy';
   /** Why Start is disabled (shown under it), or null. */
   reason: string | null;
 }
 
 /** Start's label and whether it can run (FR-EXP-15, FR-EXP-28, FR-EXP-29). */
+/** Start's reason while a menu export runs (#63). */
+export const MENU_BUSY = 'Another export of this project is running';
+
 export function startState(input: {
   hasProject: boolean;
   /** FR-GEN-03: a project made by Generate new before its first pick. */
@@ -210,6 +213,8 @@ export function startState(input: {
   format: ExportFormat;
   running: boolean;
   blocked: boolean;
+  /** #63: a menu export or Save as of this project runs (FR-EXP-33). */
+  menuBusy?: boolean;
 }): StartState {
   const label = input.plan?.exists ? 'Replace' : 'Export';
   const no = (reason: string | null): StartState => ({ enabled: false, label, reason });
@@ -217,6 +222,7 @@ export function startState(input: {
   if (input.noImage) return no('No image yet');
   if (input.readOnly) return no(READ_ONLY_TEXT[input.readOnly]);
   if (input.running) return no(null);
+  if (input.menuBusy) return { enabled: false, label: 'Busy', reason: MENU_BUSY };
   if (input.original.kind === 'loading') return no('Loading original…');
   if (input.original.kind === 'failed') return no(input.original.message);
   if (input.blocked || !input.plan) return no(null);

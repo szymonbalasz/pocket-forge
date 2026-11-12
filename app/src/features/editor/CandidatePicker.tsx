@@ -2,13 +2,26 @@
 // index, UI status and star. Click, 1–9 or ←/→ select a ready one (onSelect); Enter or Accept
 // accepts (onAccept); star and discard emit onStar / onDiscard. #56: X discards the selected
 // candidate, Delete or X the focused one, and the selection moves on; "Discard the rest" emits
-// onDiscardRest. It calls no core command.
-import { useEffect, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+// onDiscardRest. It calls no core command. #63: a ready item's context menu (EXP's) saves,
+// exports or reveals its file.
+import { useEffect, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from 'react';
 
 import { IconCheck, IconCompare, IconStar, IconTrash } from '../../shell/icons';
+import { FileMenu } from '../export';
 import { dispatchShortcut, noMouseFocus, type ShortcutMap } from './shortcuts';
 import { editorStore, useEditor, type PickerCandidate } from './store';
 import { Tip } from './Tip';
+
+/** #63: Save as…, Export as ▸ and Open in Explorer on a ready candidate with a file
+ *  (`edt-picker-menu`, FR-EXP-32). */
+function ItemMenu({ c, children }: { c: PickerCandidate; children: ReactElement }) {
+  if (!c.file || c.status !== 'ready') return children;
+  return (
+    <FileMenu testId="edt-picker-menu" path={c.file} image>
+      {children}
+    </FileMenu>
+  );
+}
 
 /** Selects candidate `id` if it is ready: updates the compare source and emits onSelect. */
 export function selectCandidate(id: string): void {
@@ -106,80 +119,81 @@ export function EditorPicker() {
       data-testid="edt-picker"
     >
       {candidates.map((c: PickerCandidate, i) => (
-        <div
-          key={c.id}
-          role="option"
-          aria-selected={c.id === selectedId}
-          className={`edt-picker-item edt-picker-${c.status}`}
-          data-testid="edt-picker-item"
-          data-record-id={c.id}
-          data-status={c.status}
-          data-accepted={c.accepted ? 'true' : undefined}
-          tabIndex={c.status === 'pending' ? -1 : 0}
-          onClick={() => selectCandidate(c.id)}
-          onKeyDown={(e) => onItemKey(e, c.id)}
-        >
-          <div className="edt-picker-thumb">
-            {c.status === 'ready' && c.thumbUrl ? (
-              <img src={c.thumbUrl} alt={`Candidate ${c.index}`} draggable={false} />
-            ) : (
-              <span className="muted">{c.status === 'pending' ? '…' : 'Invalid'}</span>
-            )}
-            {c.warning && (
-              <span
-                className="edt-picker-warning"
-                data-testid="edt-picker-warning"
-                role="img"
-                aria-label={c.warning}
-                title={c.warning}
-              >
-                !
+        <ItemMenu key={c.id} c={c}>
+          <div
+            role="option"
+            aria-selected={c.id === selectedId}
+            className={`edt-picker-item edt-picker-${c.status}`}
+            data-testid="edt-picker-item"
+            data-record-id={c.id}
+            data-status={c.status}
+            data-accepted={c.accepted ? 'true' : undefined}
+            tabIndex={c.status === 'pending' ? -1 : 0}
+            onClick={() => selectCandidate(c.id)}
+            onKeyDown={(e) => onItemKey(e, c.id)}
+          >
+            <div className="edt-picker-thumb">
+              {c.status === 'ready' && c.thumbUrl ? (
+                <img src={c.thumbUrl} alt={`Candidate ${c.index}`} draggable={false} />
+              ) : (
+                <span className="muted">{c.status === 'pending' ? '…' : 'Invalid'}</span>
+              )}
+              {c.warning && (
+                <span
+                  className="edt-picker-warning"
+                  data-testid="edt-picker-warning"
+                  role="img"
+                  aria-label={c.warning}
+                  title={c.warning}
+                >
+                  !
+                </span>
+              )}
+            </div>
+            <div className="edt-picker-meta">
+              <span className="tabular" title={i < 9 ? `Key ${i + 1}` : undefined}>
+                {c.index}
               </span>
-            )}
-          </div>
-          <div className="edt-picker-meta">
-            <span className="tabular" title={i < 9 ? `Key ${i + 1}` : undefined}>
-              {c.index}
-            </span>
-            <button
-              type="button"
-              className="edt-tool edt-picker-btn"
-              data-testid="edt-picker-star"
-              aria-pressed={c.starred}
-              aria-label={c.starred ? 'Unstar' : 'Star'}
-              disabled={c.status === 'pending'}
-              onClick={(e) => {
-                e.stopPropagation();
-                handlers.onStar?.(c.id, !c.starred);
-              }}
-            >
-              <IconStar size={14} fill={c.starred ? 'currentColor' : 'none'} />
-            </button>
-            {/* Walk owner-UX L4: a Radix tip, not a native title (ui-guidelines). */}
-            <Tip
-              side="top"
-              text={
-                c.accepted
-                  ? 'The accepted candidate can’t be discarded'
-                  : 'Discard: to the trash for 30 days (X, or Delete on a focused candidate)'
-              }
-            >
               <button
                 type="button"
                 className="edt-tool edt-picker-btn"
-                data-testid="edt-picker-discard"
-                aria-label="Discard"
-                disabled={c.status === 'pending' || c.accepted}
+                data-testid="edt-picker-star"
+                aria-pressed={c.starred}
+                aria-label={c.starred ? 'Unstar' : 'Star'}
+                disabled={c.status === 'pending'}
                 onClick={(e) => {
                   e.stopPropagation();
-                  discardCandidate(c.id);
+                  handlers.onStar?.(c.id, !c.starred);
                 }}
               >
-                <IconTrash size={14} />
+                <IconStar size={14} fill={c.starred ? 'currentColor' : 'none'} />
               </button>
-            </Tip>
+              {/* Walk owner-UX L4: a Radix tip, not a native title (ui-guidelines). */}
+              <Tip
+                side="top"
+                text={
+                  c.accepted
+                    ? 'The accepted candidate can’t be discarded'
+                    : 'Discard: to the trash for 30 days (X, or Delete on a focused candidate)'
+                }
+              >
+                <button
+                  type="button"
+                  className="edt-tool edt-picker-btn"
+                  data-testid="edt-picker-discard"
+                  aria-label="Discard"
+                  disabled={c.status === 'pending' || c.accepted}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    discardCandidate(c.id);
+                  }}
+                >
+                  <IconTrash size={14} />
+                </button>
+              </Tip>
+            </div>
           </div>
-        </div>
+        </ItemMenu>
       ))}
       <span className="pf-spacer" />
       {handlers.onDiscardRest && (

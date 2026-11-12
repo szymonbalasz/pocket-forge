@@ -58,6 +58,8 @@ export interface PickerCandidate {
   preview?: CompareSource | null;
   /** A warning badge on the item, e.g. RGN's aspect mismatch (FR-RGN-24); the text is its tooltip. */
   warning?: string | null;
+  /** The candidate's file (absolute), for the item's context menu (#63, `edt-picker-menu`). */
+  file?: string | null;
 }
 
 export interface PickerHandlers {

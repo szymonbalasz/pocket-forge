@@ -238,3 +238,24 @@
   display: block;
   overflow-wrap: anywhere;
 }
+
+/* #63: the menu exports' toast, over the window's bottom right (above the status bar). */
+.exp-menu-toast {
+  position: fixed;
+  right: var(--pf-space-3);
+  bottom: 40px;
+  width: 340px;
+  max-width: calc(100vw - 2 * var(--pf-space-3));
+  box-shadow: 0 4px 16px var(--pf-overlay);
+  z-index: 70;
+}
+
+.exp-menu-toast[data-phase='running'],
+.exp-menu-toast[data-phase='loading'],
+.exp-menu-toast[data-phase='exists'] {
+  border-left-color: var(--pf-accent);
+}
+
+.exp-menu-toast.exp-toast-failed {
+  border-left-color: var(--pf-danger);
+}

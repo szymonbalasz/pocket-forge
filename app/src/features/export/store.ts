@@ -59,6 +59,9 @@ export interface ExportState {
   /** What the question is asked for: a close, a rename of the open project ("Cancel the
    *  export and rename?", FR-PRJ-56, R111) or its delete ("… and delete?", FR-PRJ-57, R112). */
   closeWhy: LeaveReason;
+  /** A menu export or Save as of this project runs (#63, FR-EXP-33): Start reads busy, and a
+   *  close, rename or delete asks first as for the panel's own export. */
+  menuBusy: boolean;
 }
 
 const initial: ExportState = {
@@ -76,6 +79,7 @@ const initial: ExportState = {
   focusTick: 0,
   closeAsk: false,
   closeWhy: 'close',
+  menuBusy: false,
 };
 
 let state: ExportState = initial;
@@ -93,10 +97,12 @@ let runSeq = 0;
 /** Exports this panel no longer follows (a closed project's): their late events are ignored even
  *  while the next run doesn't know its own id yet. */
 const retired = new Set<string>();
+/** Cancels the running menu export (#63), set while one of this project's runs. */
+let menuCancel: (() => Promise<void>) | null = null;
 
 /** PRJ close guard: hold the close while an export runs and ask first (OQ-EXP-09). */
 function closeGuard(proceed: () => void, cancel: () => void, why: LeaveReason): boolean {
-  if (!state.run) return true;
+  if (!state.run && !state.menuBusy) return true;
   // A close that joins a rename's question (or the other way round) is asked as a close.
   const closeWhy = held.length > 0 && state.closeWhy !== why ? 'close' : why;
   held.push({ proceed, cancel });
@@ -115,8 +121,9 @@ function takeHeld(): { proceed: () => void; cancel: () => void }[] {
  *  question, so the banner goes and the close goes on (OQ-EXP-09). True if it let a close go
  *  on: the project is closing, so nothing re-plans (walk-night L4: no late `export_plan`). */
 function runEnded(patch: Partial<ExportState>): boolean {
-  const waiting = takeHeld();
-  set({ ...patch, run: null, closeAsk: false });
+  // A menu export still runs: the question stays for it (FR-EXP-33).
+  const waiting = state.menuBusy ? [] : takeHeld();
+  set({ ...patch, run: null, ...(state.menuBusy ? {} : { closeAsk: false }) });
   for (const w of waiting) w.proceed();
   return waiting.length > 0;
 }
@@ -174,6 +181,7 @@ export const exportStore = {
     retired.clear();
     prefetched = null;
     held = [];
+    menuCancel = null;
     set(initial);
   },
 
@@ -234,6 +242,7 @@ export const exportStore = {
       focusTick: state.focusTick,
       projectId,
     });
+    menuCancel = null;
     if (!projectId) return;
     if (state.expanded) void prefetch(projectId);
     try {
@@ -395,12 +404,40 @@ export const exportStore = {
     set({ done: null });
   },
 
+  /** #63: a menu export or Save as of the open project started (`cancel` stops it) or ended.
+   *  Ending lets a close the question held go on, as the panel's export ending does. */
+  setMenuRun(cancel: (() => Promise<void>) | null): void {
+    menuCancel = cancel;
+    if (cancel) {
+      set({ menuBusy: true });
+      return;
+    }
+    if (!state.menuBusy) return;
+    if (state.run) {
+      set({ menuBusy: false });
+      return;
+    }
+    const waiting = takeHeld();
+    set({ menuBusy: false, closeAsk: false });
+    for (const w of waiting) w.proceed();
+  },
+
+  /** #63: events of this export are a menu export's, never the panel's. */
+  ignore(exportId: string): void {
+    retired.add(exportId);
+  },
+
+  /** #63: asks for the decoded original now (the canvas menu opened, FR-EXP-30). */
+  prefetchOriginal(): void {
+    if (state.projectId) void prefetch(state.projectId);
+  },
+
   /** "Cancel the export and close": cancels, then lets the held close go on (the core's
    *  close hook cancels too, so this never waits for `export:canceled`). */
   async confirmClose(): Promise<void> {
     const waiting = takeHeld();
     set({ closeAsk: false });
-    await exportStore.cancel();
+    await Promise.all([exportStore.cancel(), menuCancel?.()]);
     for (const w of waiting) w.proceed();
   },
 

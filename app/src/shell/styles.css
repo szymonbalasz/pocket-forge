@@ -324,3 +324,44 @@ h2 {
   background: var(--pf-warn-soft);
   color: var(--pf-warn);
 }
+
+/* The shared context menu (#63, shared/ContextMenu.tsx). */
+.pf-menu {
+  min-width: 160px;
+  padding: var(--pf-space-1);
+  background: var(--pf-bg-2);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  box-shadow: 0 4px 16px var(--pf-overlay);
+  z-index: 60;
+}
+
+.pf-menu-item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--pf-space-3);
+  padding: 4px var(--pf-space-2);
+  border-radius: var(--pf-radius);
+  cursor: default;
+  outline: none;
+}
+
+.pf-menu-item[data-highlighted],
+.pf-menu-item[data-state='open'] {
+  background: var(--pf-accent-soft);
+}
+
+.pf-menu-item[data-disabled] {
+  color: var(--pf-text-dim);
+}
+
+.pf-menu-hint {
+  color: var(--pf-text-dim);
+  font-size: var(--pf-font-size-meta);
+}
+
+.pf-menu-sep {
+  height: 1px;
+  margin: var(--pf-space-1) 0;
+  background: var(--pf-border);
+}
