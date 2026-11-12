@@ -744,6 +744,29 @@ fn fr_prj_57_a_failed_delete_of_the_open_project_keeps_its_waiting_draft() {
         )
         .unwrap();
     assert!(export_waits(&lab));
+    // So does a mask write (R108).
+    let mask_waits = |lab: &Lab| {
+        lab.core
+            .state()
+            .project
+            .as_ref()
+            .unwrap()
+            .pending_mask
+            .clone()
+    };
+    let err = lab
+        .core
+        .dispatch(
+            "edt_mask_submit",
+            json!({
+                "project_id": before["project_id"],
+                "rect": {"x": 10, "y": 10, "w": 16, "h": 16},
+                "data_b64": crate::b64::encode(&[30; 256]),
+            }),
+        )
+        .unwrap_err();
+    assert_eq!(err.code, ErrorCode::Locked);
+    let mask = mask_waits(&lab).expect("the mask waits");
 
     let err = delete(&lab, &lab.project_dir).unwrap_err();
     assert_eq!(err.code, ErrorCode::Locked);
@@ -753,7 +776,7 @@ fn fr_prj_57_a_failed_delete_of_the_open_project_keeps_its_waiting_draft() {
         Some("waits"),
         "still waiting in memory"
     );
-    assert!(before["draft"]["mask_id"].is_string(), "there is a mask");
+    assert_eq!(mask_waits(&lab), Some(mask), "the mask still waits");
     assert_eq!(get(&lab)["draft"]["mask_id"], before["draft"]["mask_id"]);
     assert!(export_waits(&lab), "the export settings still wait");
     assert!(item_dirs(&lab).is_empty(), "the item is dropped");
@@ -767,6 +790,10 @@ fn fr_prj_57_a_failed_delete_of_the_open_project_keeps_its_waiting_draft() {
     assert!(!crate::project::has_unsaved(
         lab.core.state().project.as_ref().unwrap()
     ));
+    // The mask that waited is written, and the draft points at it.
+    assert_eq!(mask_waits(&lab), None);
+    let mask_id = lab.manifest()["draft"]["mask_id"].clone();
+    assert!(mask_id.is_string() && mask_id != before["draft"]["mask_id"]);
     // So are the export settings, with the save after it.
     assert!(export_waits(&lab));
     crate::export::flush_pending(&lab.core.ctx, &mut lab.core.state(), true).unwrap();
