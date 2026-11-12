@@ -253,7 +253,7 @@ Owner of the meaning: [prompt-helper](../specs/prompt-helper.md) (PRM, FR-PRM-22
 - The turn images live outside the project, in `<data-dir>/chat/<thread-id>/` (this turn's only; emptied at startup).
 
 ### 4.15 Library trash item
-Owner of the meaning: [asset-project](../specs/asset-project.md) (FR-PRJ-57, 58, #62). `<library-root>/.pforge/trash/<item-id>/item.json` = `{schema_version, id, kind: project, project_id, section, name, trashed_at, restored_at?}`, plus the project folder, whole, as `<item-id>/<name>/`. `item.json` is written first (temp → rename); the folder move is one rename and is rolled forward or dropped at startup. Purged 30 days after `trashed_at`; skipped while `restored_at` is set. Unknown fields are kept.
+Owner of the meaning: [asset-project](../specs/asset-project.md) (FR-PRJ-57, 58, #62). `<library-root>/.pforge/trash/<item-id>/item.json` = `{schema_version, id, kind: project, project_id, section, name, trashed_at, restored_at?, purging_at?}` (`project_id` is null when `project.json` couldn't be read; `section` = `maps|tokens|items`), plus the project folder, whole, as `<item-id>/<name>/`. `item.json` is written first (temp → rename); the folder move is one rename. An item without its folder (an interrupted delete, or a sync still under way) is kept, never listed, and startup never moves a project to match it (R111). Purged 30 days after `trashed_at`: `purging_at` is set first, then the files go, retried at the next startup; skipped while `restored_at` is set. Unknown fields are kept.
 
 ## 5. `settings.json` (R8)
 | Section | Fields | Owner of the meaning |
