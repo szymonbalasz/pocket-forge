@@ -2,6 +2,7 @@
 // items and disabled reasons, the toast (progress, Replace, Cancel, done), the save dialog through
 // the api seam, and a menu export counting as the project's running export.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { Tooltip } from 'radix-ui';
 import { afterEach, beforeEach, expect, test } from 'vitest';
 
 import type { ExportPlan } from '../../api';
@@ -10,6 +11,7 @@ import { installTestCore } from '../../api/mocks/testCore';
 import { projectStore } from '../../store/project';
 import { CanvasMenu, FileMenu, PackImageMenu, revealEntry } from './Menus';
 import { MenuToastView } from './Menus';
+import { ExportPanel } from './ExportPanel';
 import { menuExport } from './menu';
 import { exportStore } from './store';
 import { startState } from './view';
@@ -403,4 +405,63 @@ test('FR-PRJ-59 Open in Explorer entries reveal the folder; a refusal shows in t
   expect((await screen.findByTestId('exp-toast-error')).textContent).toBe(
     'The file is gone (moved or deleted?)',
   );
+});
+
+test('FR-EXP-33 walk-63 H1 closing, renaming or deleting while a menu export runs shows the question in the panel', async () => {
+  await setup();
+  render(
+    <Tooltip.Provider>
+      <ExportPanel />
+      <CanvasMenu>
+        <div data-testid="stage" />
+      </CanvasMenu>
+      <MenuToastView />
+    </Tooltip.Provider>,
+  );
+  openMenu('stage');
+  await exportAs('edt-canvas-menu', 'png');
+  await waitFor(() => expect(exportStore.get().menuBusy).toBe(true));
+  // The panel shows no run of its own; Start reads Busy.
+  expect(screen.queryByTestId('exp-panel-progress')).toBeNull();
+
+  const renaming = projectStore.rename('Vault');
+  expect((await screen.findByTestId('exp-panel-close-question')).textContent).toBe(
+    'Cancel the export and rename?',
+  );
+  fireEvent.click(screen.getByTestId('exp-panel-close-keep'));
+  await renaming;
+  await waitFor(() => expect(screen.queryByTestId('exp-panel-close-ask')).toBeNull());
+  expect(projectStore.get().project?.name).toBe('Crypt');
+
+  const closing = projectStore.close();
+  expect((await screen.findByTestId('exp-panel-close-question')).textContent).toBe(
+    'Cancel the export and close?',
+  );
+  expect(screen.getByTestId('exp-panel-close-confirm').textContent).toBe('Cancel export and close');
+  fireEvent.click(screen.getByTestId('exp-panel-close-confirm'));
+  await closing;
+  expect(core.names()).toContain('export_cancel');
+  await waitFor(() => expect(projectStore.get().project).toBeNull());
+});
+
+test('FR-EXP-33 walk-63 H1 the question goes, and the close goes on, when the menu export ends by itself', async () => {
+  await setup();
+  render(
+    <Tooltip.Provider>
+      <ExportPanel />
+      <CanvasMenu>
+        <div data-testid="stage" />
+      </CanvasMenu>
+    </Tooltip.Provider>,
+  );
+  openMenu('stage');
+  await exportAs('edt-canvas-menu', 'png');
+  await waitFor(() => expect(exportStore.get().menuBusy).toBe(true));
+  const closing = projectStore.close();
+  await screen.findByTestId('exp-panel-close-question');
+  await done('01JEXP00000000000000000001', `${CRYPT}/exports/Crypt.png`);
+  await closing;
+  await waitFor(() => expect(projectStore.get().project).toBeNull());
+  expect(screen.queryByTestId('exp-panel-close-ask')).toBeNull();
+  expect(core.names()).not.toContain('export_cancel');
 });

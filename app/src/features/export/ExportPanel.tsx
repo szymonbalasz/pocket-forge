@@ -362,7 +362,7 @@ export function ExportPanel() {
             </div>
           )}
 
-          {run && s.closeAsk && (
+          {(run || s.menuBusy) && s.closeAsk && (
             <div
               className="banner banner-warning small exp-close-ask"
               role="alert"
