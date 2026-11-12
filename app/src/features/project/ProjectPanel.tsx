@@ -20,6 +20,7 @@ import {
   type RevisionEntry,
   type TrashItem,
 } from '../../api';
+import { ConfirmAsk } from '../../shared/ConfirmAsk';
 import { IconPlus } from '../../shell/icons';
 import { DeleteProjectDialog } from '../library';
 import { dropNewImage, PATCHES_KEPT, useActiveJobId } from '../region-edit';
@@ -758,6 +759,8 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
   const [items, setItems] = useState<RgnIteration[]>([]);
   const [cands, setCands] = useState<CandidateRecord[]>([]);
   const [notice, setNotice] = useState<{ kind: 'info' | 'error'; text: string } | null>(null);
+  // #64: the iteration whose Discard all waits for its confirm.
+  const [asking, setAsking] = useState<{ it: RgnIteration; left: number } | null>(null);
   const trash = useProjectState().trashNotice;
   const load = useCallback(() => {
     // The active job before it has candidates has no number or folder yet: not a result.
@@ -787,8 +790,8 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
       },
       (e: unknown) => setNotice({ kind: 'error', text: sentence(errorOf(e).message) }),
     );
-  // #61: every kept result of the iteration to the trash (never the accepted one), no confirm;
-  // the notice offers Undo, which puts each back as it was (star included). walk-61 L2: "N
+  // #61: every kept result of the iteration to the trash (never the accepted one), after a
+  // confirm (#64); the notice offers Undo, which puts each back as it was (star included). walk-61 L2: "N
   // results restored." is the one trash notice too, so a later discard anywhere replaces it.
   const undoAll = (undoId: string) => {
     projectStore.setTrashNotice(null);
@@ -889,7 +892,7 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
                           ? 'The job is still running'
                           : 'Discard all: every result but the accepted one to the trash for 30 days'
                       }
-                      onClick={() => void discardAll(it)}
+                      onClick={() => setAsking({ it, left: discardable(it, kept) })}
                     >
                       Discard all
                     </button>
@@ -932,6 +935,23 @@ function Results({ revision, readOnly }: { revision: number; readOnly: boolean }
           })}
         </ul>
       )}
+      <ConfirmAsk
+        open={asking !== null}
+        testid="prj-results-discard-all-ask"
+        title={
+          asking
+            ? `Discard ${asking.left === 1 ? 'the 1 result' : `all ${asking.left} results`} of ${String(asking.it.n).padStart(3, '0')}?`
+            : ''
+        }
+        description={`${asking?.it.accepted_in_stack ? 'The accepted one stays. ' : ''}They go to the trash for 30 days.`}
+        confirmLabel="Discard all"
+        onCancel={() => setAsking(null)}
+        onConfirm={() => {
+          const it = asking?.it;
+          setAsking(null);
+          if (it) void discardAll(it);
+        }}
+      />
     </Section>
   );
 }

@@ -699,8 +699,16 @@ test('FR-RGN-46 #61 Results: Discard all bins the opened iteration but the accep
   await waitFor(() => expect(rows()).toEqual(['C1', 'C2', 'C3']));
   const all = () => screen.getByTestId('prj-results-discard-all') as HTMLButtonElement;
   expect(all().disabled).toBe(false);
+  // #64: it asks first; Cancel bins nothing.
   fireEvent.click(all());
-  // No confirm: one call, the accepted one stays.
+  expect(screen.getByTestId('prj-results-discard-all-ask').textContent).toMatch(
+    /Discard all 2 results of 001\?/,
+  );
+  fireEvent.click(screen.getByTestId('prj-results-discard-all-ask-cancel'));
+  expect(core.calls.filter((c) => c.cmd === 'rgn_iteration_discard_all')).toHaveLength(0);
+  fireEvent.click(all());
+  fireEvent.click(screen.getByTestId('prj-results-discard-all-ask-confirm'));
+  // One call, the accepted one stays.
   await waitFor(() => expect(rows()).toEqual(['C1']));
   expect(core.calls.filter((c) => c.cmd === 'rgn_iteration_discard_all')).toHaveLength(1);
   expect(core.calls.find((c) => c.cmd === 'rgn_iteration_discard_all')?.input).toEqual({

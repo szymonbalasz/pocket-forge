@@ -96,6 +96,7 @@ test('FR-RGN-21 R62 Retry is offered on the newest job once it is closed by an a
   const item = page.getByTestId('rgn-tracker-item');
   await expect(item).toHaveAttribute('data-state', 'closed');
   await item.getByTestId('rgn-job-retry').click();
+  await page.getByTestId('rgn-job-retry-ask-confirm').click();
   await expect.poll(async () => (await inputsOf(page, 'rgn_job_retry_draft')).length).toBe(1);
   await expect(page.getByTestId('prm-block-prompt')).toHaveValue('A stone well');
 });
