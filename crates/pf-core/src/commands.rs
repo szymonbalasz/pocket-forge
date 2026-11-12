@@ -355,7 +355,10 @@ impl Command for ProjectRename {
         let path = if is_open_project(&state, &path) {
             rename_open(core, &mut state, &input.name)?
         } else {
-            library::rename_project(&core.ctx, &state.settings, &path, &input.name)?
+            // R111: a job of the closed project would come back for a folder that is gone.
+            library::rename_project_if(&core.ctx, &state.settings, &path, &input.name, |dir| {
+                refuse_active_job_closed(core, &state, dir, "Rename")
+            })?
         };
         Ok(PathOutput { path })
     }
@@ -385,6 +388,25 @@ fn refuse_active_job_open(state: &crate::core::State, verb: &str) -> CoreResult<
         .find(|j| crate::region_edit::jobs::is_active(j.state))
         .map(|j| j.id)
         .or_else(|| state.rgn.runner.job_in(&p.dir));
+    match active {
+        Some(id) => Err(job_active(id, verb)),
+        None => Ok(()),
+    }
+}
+
+/// R97 for a closed project (FR-PRJ-45, 57): `job_active` while the runner still drives a job
+/// of the project in `dir`, or, after a restart, one of its job files says it is active.
+fn refuse_active_job_closed(
+    core: &Core,
+    state: &crate::core::State,
+    dir: &std::path::Path,
+    verb: &str,
+) -> CoreResult<()> {
+    let active = state
+        .rgn
+        .runner
+        .job_in(dir)
+        .or_else(|| library::trash::active_job_on_disk(&core.ctx, dir));
     match active {
         Some(id) => Err(job_active(id, verb)),
         None => Ok(()),
@@ -425,14 +447,17 @@ fn release_open(
     Some((p, decoded))
 }
 
-/// Opens `dir` again after [`release_open`] (FR-PRJ-56, 57): the same project, so the served
-/// keys stay. `decode` starts the original's decode again, as the UI asked for it once per
-/// project already.
+/// Opens `dir` again after [`release_open`] (FR-PRJ-56): the same project, so the served keys
+/// stay. `decode` starts the original's decode again, as the UI asked for it once per project
+/// already. `was` is the project as it was released: the open adds no job warning it didn't
+/// show (a fetched job reads as `resumable` at an open; the UI drops that when it loads the
+/// project, which it doesn't do here).
 fn reopen(
     core: &Core,
     state: &mut crate::core::State,
     dir: &std::path::Path,
     decode: bool,
+    was: &project::OpenProject,
 ) -> CoreResult<()> {
     let settings = state.settings.clone();
     let opened = project::open(&core.ctx, &settings, dir, Some(core.thumbs.clone()));
@@ -451,6 +476,10 @@ fn reopen(
         &mut state.rgn,
         &mut p,
     );
+    let shown = was.live_warnings();
+    p.warnings.retain(|w| {
+        !matches!(w.code, "resumable" | "lost") || shown.iter().any(|s| s.code == w.code)
+    });
     if decode {
         p.decoded.start(&core.ctx);
     }
@@ -471,16 +500,16 @@ fn rename_open(core: &Core, state: &mut crate::core::State, name: &str) -> CoreR
         return Ok(old);
     };
     refuse_active_job_open(state, "Rename")?;
-    refuse_unsaved(core, state)?;
-    let (_, decode) = release_open(core, state, true).ok_or_else(no_project)?;
+    refuse_unsaved(core, state, Leaving::Rename)?;
+    let (was, decode) = release_open(core, state, true).ok_or_else(no_project)?;
     match crate::fsx::move_dir(&core.ctx, &old, &target) {
         Ok(()) => {
             core.served().rebase(&old, &target);
-            reopen(core, state, &target, decode)?;
+            reopen(core, state, &target, decode, &was)?;
             Ok(target)
         }
         Err(e) => {
-            if let Err(again) = reopen(core, state, &old, decode) {
+            if let Err(again) = reopen(core, state, &old, decode, &was) {
                 tracing::warn!(error = %again, "the project didn't open again after a failed rename");
             }
             Err(e)
@@ -525,22 +554,17 @@ impl Command for ProjectDelete {
         let item_id = if is_open_project(&state, &loc.dir) {
             delete_open(core, &mut state, &loc)?
         } else {
-            let active = state
-                .rgn
-                .runner
-                .job_in(&loc.dir)
-                .or_else(|| library::trash::active_job_on_disk(&core.ctx, &loc.dir));
-            if let Some(id) = active {
-                return Err(job_active(id, "Delete"));
-            }
+            refuse_active_job_closed(core, &state, &loc.dir, "Delete")?;
             library::trash::delete_project(&core.ctx, &loc)?
         };
         Ok(ItemIdOutput { item_id })
     }
 }
 
-/// FR-PRJ-57 on the open project: closed as FR-PRJ-56 does, but a waiting save is tried once
-/// and then dropped (the UI asked). A move that fails opens the project again.
+/// FR-PRJ-57 on the open project: released as FR-PRJ-56 does; a waiting save is tried once and
+/// dropped only once the move has succeeded (the UI asked). A move that fails leaves the
+/// project open as it was, with its waiting changes still in memory (R111): it is put back,
+/// never read again from the folder.
 fn delete_open(
     core: &Core,
     state: &mut crate::core::State,
@@ -563,9 +587,12 @@ fn delete_open(
             Ok(id)
         }
         Err(e) => {
-            if let Err(again) = reopen(core, state, &loc.dir, decode) {
-                tracing::warn!(error = %again, "the project didn't open again after a failed delete");
+            if decode {
+                p.decoded.start(&core.ctx);
             }
+            core.chat
+                .notify_project(&core.ctx, Some(p.manifest.project_id));
+            state.project = Some(p);
             Err(e)
         }
     }
@@ -730,7 +757,7 @@ impl Command for ProjectOpen {
     fn run(core: &Core, input: Self::Input) -> CoreResult<ProjectSnapshot> {
         let mut state = core.state();
         // The open project's waiting save is never dropped by opening another (FR-PRJ-21).
-        refuse_unsaved(core, &mut state)?;
+        refuse_unsaved(core, &mut state, Leaving::Close)?;
         let settings = state.settings.clone();
         let mut p = project::open(
             &core.ctx,
@@ -755,10 +782,18 @@ impl Command for ProjectOpen {
     }
 }
 
+/// Why the open project's waiting save is asked about: the message offers to close anyway only
+/// for a close (`force`); a rename has no force and says so (FR-PRJ-56, R111).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Leaving {
+    Close,
+    Rename,
+}
+
 /// FR-PRJ-21: closing the open project (to close or to open another) must not lose what only
 /// lives in memory. One last try at the waiting draft and EXP's pending settings, then
 /// `unsaved` with the reason if something still waits.
-fn refuse_unsaved(core: &Core, state: &mut crate::core::State) -> CoreResult<()> {
+fn refuse_unsaved(core: &Core, state: &mut crate::core::State, why: Leaving) -> CoreResult<()> {
     let install_id = state.settings.install_id;
     if let Some(p) = state.project.as_mut() {
         // One last try. Spooled writes are on disk already (FR-PRJ-40); only an in-memory
@@ -773,22 +808,27 @@ fn refuse_unsaved(core: &Core, state: &mut crate::core::State) -> CoreResult<()>
     {
         // Says why, without paths (walkthrough D3).
         let moved = p.warnings.iter().any(|w| w.code == project::FOLDER_MOVED);
-        let (reason, message) = if moved {
+        let (reason, cause) = if moved {
             (
                 project::FOLDER_MOVED,
-                "Your latest changes aren't saved: the project folder was moved or renamed. Close anyway?",
+                "Your latest changes aren't saved: the project folder was moved or renamed.",
             )
         } else if p.conflict.is_some() {
             (
                 "conflict",
-                "Your latest changes aren't saved: this project was also changed on another machine. Close anyway?",
+                "Your latest changes aren't saved: this project was also changed on another machine.",
             )
         } else {
             (
                 "locked",
-                "Your latest changes aren't saved yet: the file is locked. Close anyway?",
+                "Your latest changes aren't saved yet: the file is locked.",
             )
         };
+        let then = match why {
+            Leaving::Close => "Close anyway?",
+            Leaving::Rename => "The name can't change until they are saved.",
+        };
+        let message = format!("{cause} {then}");
         return Err(CoreError::new(ErrorCode::Unsaved, message)
             .with_detail(serde_json::json!({ "reason": reason })));
     }
@@ -821,7 +861,7 @@ impl Command for ProjectClose {
         if input.force {
             crate::export::unsaved_on_close(&core.ctx, &mut state);
         } else {
-            refuse_unsaved(core, &mut state)?;
+            refuse_unsaved(core, &mut state, Leaving::Close)?;
         }
         if release_open(core, &mut state, false).is_some() {
             core.chat.notify_project(&core.ctx, None);

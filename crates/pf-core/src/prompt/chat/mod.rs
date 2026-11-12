@@ -232,27 +232,30 @@ impl ChatRuntime {
 
     /// The open project's folder is being renamed or moved (FR-PRJ-56, 57): as a close, its
     /// session ends and a running turn is stopped, since both write to the old folder. The
-    /// published contexts stay: the project is the same and the UI publishes them only when
-    /// they change, so the next turn still gets the prompt as it is.
+    /// project is the same one, so what the chat holds for it stays (R111): the published
+    /// contexts (the UI publishes them only when they change) and the memory thread, the only
+    /// copy of a read-only project's thread. The stopped turn ends in that thread; a writable
+    /// project's, which can't be written to the old folder any more, is kept in memory until
+    /// the next save.
     pub fn on_project_moving(&self, project_id: Ulid) {
         self.release_project(project_id, true);
     }
 
-    fn release_project(&self, project_id: Ulid, keep_contexts: bool) {
+    fn release_project(&self, project_id: Ulid, moving: bool) {
         let running = {
             let mut rt = lock(&self.rt);
-            if !keep_contexts {
+            if !moving {
                 rt.contexts.retain(|(p, _), _| *p != project_id);
-            }
-            if rt
-                .memory
-                .as_ref()
-                .is_some_and(|m| m.project_id == project_id)
-            {
-                rt.memory = None;
+                if rt
+                    .memory
+                    .as_ref()
+                    .is_some_and(|m| m.project_id == project_id)
+                {
+                    rt.memory = None;
+                }
             }
             if let Some(r) = rt.running.as_mut().filter(|r| r.project_id == project_id) {
-                r.project_closed = true;
+                r.project_closed = !moving;
                 r.cancel.cancel();
             }
             rt.running.as_ref().map(|r| r.project_id)

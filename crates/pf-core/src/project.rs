@@ -237,7 +237,7 @@ impl OpenProject {
     /// The warnings as of now. `resumable` (FR-PRJ-29) names only jobs found on open that are
     /// still running: a job this session started never counts, and the warning ends with the
     /// last of them (walk-p4r L1).
-    fn live_warnings(&self) -> Vec<Warning> {
+    pub(crate) fn live_warnings(&self) -> Vec<Warning> {
         let mut out = Vec::with_capacity(self.warnings.len());
         for w in &self.warnings {
             if w.code != "resumable" {

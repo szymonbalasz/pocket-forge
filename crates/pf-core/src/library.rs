@@ -418,12 +418,25 @@ pub fn rename_project(
     path: &Path,
     name: &str,
 ) -> CoreResult<PathBuf> {
+    rename_project_if(ctx, settings, path, name, |_| Ok(()))
+}
+
+/// [`rename_project`] with a last check of the project folder, run once the name is known to
+/// be valid, free and new, just before the folder is renamed (`job_active`, R111).
+pub fn rename_project_if(
+    ctx: &Context,
+    settings: &Settings,
+    path: &Path,
+    name: &str,
+    allowed: impl FnOnce(&Path) -> CoreResult<()>,
+) -> CoreResult<PathBuf> {
     let dir = require_project_folder(ctx, settings, path)?;
     if !dir.join(MANIFEST_FILE).is_file() {
         return Err(not_a_project(&dir));
     }
     match rename_target(&dir, name)? {
         Some(target) => {
+            allowed(&dir)?;
             fsx::move_dir(ctx, &dir, &target)?;
             Ok(target)
         }

@@ -1,10 +1,15 @@
 //! The library trash (FR-PRJ-57, 58, #62, schema §4.15):
 //! `<library-root>/.pforge/trash/<item-id>/item.json` plus the deleted project folder, whole, as
-//! `<item-id>/<name>/`. `item.json` is written first, then the folder moves in one rename; an
-//! interrupted delete (a kill) is rolled forward or dropped at startup, so a project is in its
-//! section or in the trash, never both or neither. A move that fails with an error is rolled
-//! back at once. Items older than 30 days (clock seam) are purged at startup. It mirrors the
-//! References trash (`references::trash`, §4.13).
+//! `<item-id>/<name>/`. `item.json` is written first, then the folder moves in one rename, so a
+//! project is in its section or in the trash, never both or neither. A move that fails with an
+//! error is rolled back at once. An interrupted delete (a kill) leaves the project in its
+//! section and an item without a folder.
+//!
+//! R111: startup never moves a project into or out of the trash and never drops an item
+//! because its folder is missing (a sync may still bring it, or the folder was taken back by
+//! hand). Such an item is never listed, its restore is `not_found`, and only the purge removes
+//! it, 30 days after `trashed_at` (clock seam). A purge marks the item (`purging_at`) before it
+//! deletes, so a half-purged project is never offered for Restore.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -54,6 +59,10 @@ pub struct TrashItem {
     /// instead of being listed again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restored_at: Option<Timestamp>,
+    /// Set first when the purge starts on the item (R111): it is never listed or restored
+    /// again, and a purge that couldn't finish is retried at the next startup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purging_at: Option<Timestamp>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -68,6 +77,14 @@ impl TrashItem {
     /// not listed).
     pub fn kind_of_section(&self) -> Option<Kind> {
         Kind::from_section_dir(&self.section)
+    }
+
+    /// True if the item can be restored (FR-PRJ-58): no restore or purge has begun on it and
+    /// its project folder is in the trash.
+    fn restorable(&self, item_dir: &Path) -> bool {
+        self.restored_at.is_none()
+            && self.purging_at.is_none()
+            && item_dir.join(&self.name).is_dir()
     }
 }
 
@@ -162,13 +179,13 @@ fn write_item(ctx: &Context, root: &Path, dir: &Path, item: &TrashItem) -> CoreR
 }
 
 /// Step one of a delete: the item, with its `item.json` on disk and the folder still in its
-/// section. A kill here is what the startup roll-forward finishes.
+/// section. A kill here leaves an item without a folder, which is never listed and ages out.
 pub(crate) fn begin_delete(ctx: &Context, loc: &ProjectLoc) -> CoreResult<(PathBuf, TrashItem)> {
     let item = TrashItem {
         schema_version: ITEM_SCHEMA_VERSION,
         id: ctx.new_id(),
         kind: TrashKind::Project,
-        // A cloud-only manifest is not downloaded for this: the id is only a roll-forward guard.
+        // A cloud-only manifest is not downloaded for this: the id only says which project it was.
         project_id: (!ctx.fs.is_cloud_only(&loc.dir.join(MANIFEST_FILE)))
             .then(|| project_id_of(&loc.dir))
             .flatten(),
@@ -176,6 +193,7 @@ pub(crate) fn begin_delete(ctx: &Context, loc: &ProjectLoc) -> CoreResult<(PathB
         name: loc.name.clone(),
         trashed_at: ctx.now(),
         restored_at: None,
+        purging_at: None,
         extra: Extra::new(),
     };
     let item_dir = trash_dir(&loc.root).join(item.id.to_string());
@@ -236,12 +254,13 @@ fn available_roots(ctx: &Context, settings: &Settings) -> Vec<PathBuf> {
 }
 
 /// `library_trash_list(section)` (FR-PRJ-58): the items of every root for that section, newest
-/// first. `library_unavailable` as the home grid.
+/// first; only those whose project folder is in the trash and whose purge hasn't begun.
+/// `library_unavailable` as the home grid.
 pub fn list(ctx: &Context, settings: &Settings, kind: Kind) -> CoreResult<Vec<TrashEntry>> {
     let mut out: Vec<TrashEntry> = require_available(ctx, settings)?
         .iter()
         .flat_map(|r| items_of(r))
-        .filter(|(_, i)| i.restored_at.is_none() && i.kind_of_section() == Some(kind))
+        .filter(|(d, i)| i.restorable(d) && i.kind_of_section() == Some(kind))
         .map(|(_, i)| TrashEntry {
             id: i.id,
             name: i.name,
@@ -256,12 +275,14 @@ pub fn list(ctx: &Context, settings: &Settings, kind: Kind) -> CoreResult<Vec<Tr
 
 /// `library_trash_restore` (FR-PRJ-58): moves the folder back to its section in the same root,
 /// with a ` (2)` suffix if the name is taken by then. Returns the project folder. A restore
-/// that fails part-way clears `restored_at`, so the item is listed again.
+/// that fails part-way clears `restored_at`, so the item is listed again. An item whose folder
+/// isn't in the trash is `not_found` and is kept (R111); one being restored or purged is
+/// `unknown_id`, as it is never listed.
 pub fn restore(ctx: &Context, settings: &Settings, id: Ulid) -> CoreResult<PathBuf> {
     let found = available_roots(ctx, settings).into_iter().find_map(|r| {
         items_of(&r)
             .into_iter()
-            .find(|(_, i)| i.id == id && i.restored_at.is_none())
+            .find(|(_, i)| i.id == id && i.restored_at.is_none() && i.purging_at.is_none())
             .map(|(d, i)| (r.clone(), d, i))
     });
     let unknown =
@@ -270,14 +291,26 @@ pub fn restore(ctx: &Context, settings: &Settings, id: Ulid) -> CoreResult<PathB
     if item.kind_of_section().is_none() {
         return Err(unknown());
     }
+    if !item.restorable(&item_dir) {
+        return Err(folder_missing(&item));
+    }
     item.restored_at = Some(ctx.now());
     write_item(ctx, &root, &item_dir, &item)?;
     finish_restore(ctx, &root, &item_dir, &item)
         .inspect_err(|_| reopen_item(ctx, &root, &item_dir, &item))
 }
 
-/// Moves the project folder back if it is still in the item folder, then removes the item
-/// folder. Also finishes an interrupted restore at startup.
+fn folder_missing(item: &TrashItem) -> CoreError {
+    CoreError::new(
+        ErrorCode::NotFound,
+        format!("{:?} is no longer in Recently deleted.", item.name),
+    )
+    .with_field("id")
+}
+
+/// Moves the project folder back to its section, then removes the item folder. Also finishes
+/// an interrupted restore at startup. `not_found` if the folder isn't in the item: the item is
+/// never removed for that (R111).
 fn finish_restore(
     ctx: &Context,
     root: &Path,
@@ -287,24 +320,24 @@ fn finish_restore(
     let kind = item
         .kind_of_section()
         .ok_or_else(|| CoreError::internal("a trash item of an unknown section"))?;
+    let src = item_dir.join(&item.name);
+    if !src.is_dir() {
+        return Err(folder_missing(item));
+    }
     let section = root.join(kind.section_dir());
     std::fs::create_dir_all(&section)
         .map_err(|e| CoreError::io(format!("creating {}", section.display()), &e))?;
-    let src = item_dir.join(&item.name);
-    let mut target = section.join(&item.name);
-    if src.is_dir() {
-        let taken = |c: &str| {
-            std::fs::read_dir(&section)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .any(|e| naming::same_name(&e.file_name().to_string_lossy(), c))
-        };
-        target = section.join(naming::first_free(&item.name, taken));
-        fsx::move_dir(ctx, &src, &target)?;
-    }
+    let taken = |c: &str| {
+        std::fs::read_dir(&section)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|e| naming::same_name(&e.file_name().to_string_lossy(), c))
+    };
+    let target = section.join(naming::first_free(&item.name, taken));
+    fsx::move_dir(ctx, &src, &target)?;
     if let Err(e) = std::fs::remove_dir_all(item_dir) {
-        // The project is back; the leftover folder (still `restored_at`) goes at startup.
+        // The project is back; the leftover item (no folder) is unlisted and ages out.
         tracing::warn!(item = %item.id, error = %e, "restored trash item folder not removed");
     }
     Ok(target)
@@ -321,55 +354,23 @@ fn reopen_item(ctx: &Context, root: &Path, item_dir: &Path, item: &TrashItem) {
 
 // ---------------------------------------------------------------- startup
 
-/// What the startup did with an interrupted delete.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Settled {
-    /// The folder is in the item (already, or moved now).
-    InTrash,
-    /// The folder isn't this item's to take: the item is removed.
-    Dropped,
-}
-
-/// Rolls interrupted deletes forward or drops them, and finishes interrupted restores (§4.15).
-/// The folder is moved only if it is still in its section, is the same project (`project_id`)
-/// and isn't in the item yet; otherwise an item without its folder is dropped.
-pub(crate) fn roll_forward(ctx: &Context, root: &Path) {
+/// Finishes interrupted restores (`restored_at` set) at startup. One that can't be finished
+/// (the move fails, or the folder isn't in the item) has its `restored_at` cleared and is kept.
+/// Returns the items cleared, which this startup's purge leaves alone. Nothing else is touched:
+/// startup never moves a project to match an item and never drops an item (R111).
+pub(crate) fn finish_restores(ctx: &Context, root: &Path) -> Vec<Ulid> {
+    let mut cleared = Vec::new();
     for (item_dir, item) in items_of(root) {
-        if item.restored_at.is_some() {
-            if let Err(e) = finish_restore(ctx, root, &item_dir, &item) {
-                tracing::warn!(item = %item.id, error = %e, "library trash restore not finished");
-                reopen_item(ctx, root, &item_dir, &item);
-            }
+        if item.restored_at.is_none() || item.purging_at.is_some() {
             continue;
         }
-        if finish_delete(ctx, root, &item_dir, &item) == Settled::Dropped {
-            tracing::warn!(item = %item.id, "library trash item without its folder dropped");
-            if let Err(e) = std::fs::remove_dir_all(&item_dir) {
-                tracing::warn!(item = %item.id, error = %e, "dropped trash item not removed");
-            }
+        if let Err(e) = finish_restore(ctx, root, &item_dir, &item) {
+            tracing::warn!(item = %item.id, error = %e, "library trash restore not finished");
+            reopen_item(ctx, root, &item_dir, &item);
+            cleared.push(item.id);
         }
     }
-}
-
-fn finish_delete(ctx: &Context, root: &Path, item_dir: &Path, item: &TrashItem) -> Settled {
-    let dst = item_dir.join(&item.name);
-    if std::fs::symlink_metadata(&dst).is_ok() {
-        return Settled::InTrash;
-    }
-    let Some(kind) = item.kind_of_section() else {
-        return Settled::Dropped;
-    };
-    let origin = root.join(kind.section_dir()).join(&item.name);
-    // The same project, not a later one that took the name.
-    let same = origin.is_dir()
-        && std::fs::symlink_metadata(origin.join(MANIFEST_FILE)).is_ok()
-        && (ctx.fs.is_cloud_only(&origin.join(MANIFEST_FILE))
-            || project_id_of(&origin) == item.project_id);
-    if same && fsx::move_dir(ctx, &origin, &dst).is_ok() {
-        Settled::InTrash
-    } else {
-        Settled::Dropped
-    }
+    cleared
 }
 
 fn dir_size(dir: &Path) -> u64 {
@@ -385,17 +386,30 @@ fn dir_size(dir: &Path) -> u64 {
         .sum()
 }
 
-/// Purges items whose `trashed_at` + 30 days is before now (clock seam). Returns
-/// `(count, bytes)`. An item is skipped while its `restored_at` is set. The project folder goes
-/// first and `item.json` last, so an item that can't be fully deleted stays listed and is tried
-/// again at the next startup. Items whose `item.json` can't be read are left alone.
-pub fn purge(ctx: &Context, settings: &Settings) -> (usize, u64) {
+/// Purges items whose `trashed_at` + 30 days is before now (clock seam), and items a purge
+/// already began on (`purging_at`). Returns `(count, bytes)`. An item is skipped while its
+/// `restored_at` is set, and when it is in `spared` (its interrupted restore was cleared in
+/// this startup). The item is marked first (`purging_at`, temp → rename), then the project
+/// folder goes and `item.json` last, so an item that can't be fully deleted is never listed or
+/// restored and is tried again at the next startup. Items whose `item.json` can't be read are
+/// left alone.
+pub fn purge(ctx: &Context, settings: &Settings, spared: &[Ulid]) -> (usize, u64) {
     let now = ctx.now();
     let (mut count, mut bytes) = (0, 0);
     for root in available_roots(ctx, settings) {
-        for (dir, item) in items_of(&root) {
-            if item.trashed_at.plus(TRASH_KEEP) >= now || item.restored_at.is_some() {
+        for (dir, mut item) in items_of(&root) {
+            if item.restored_at.is_some() {
                 continue;
+            }
+            if item.purging_at.is_none() {
+                if item.trashed_at.plus(TRASH_KEEP) >= now || spared.contains(&item.id) {
+                    continue;
+                }
+                item.purging_at = Some(now);
+                if let Err(e) = write_item(ctx, &root, &dir, &item) {
+                    tracing::warn!(item = %item.id, error = %e, "library trash purge not started");
+                    continue;
+                }
             }
             let size = dir_size(&dir);
             let content = dir.join(&item.name);
@@ -417,13 +431,14 @@ pub fn purge(ctx: &Context, settings: &Settings) -> (usize, u64) {
     (count, bytes)
 }
 
-/// The startup work for the library trash (FR-PRJ-57, 58): interrupted deletes and restores
-/// are settled, then items older than 30 days are purged (`trash:purged{count, bytes}`).
+/// The startup work for the library trash (FR-PRJ-58): interrupted restores are finished, then
+/// items older than 30 days are purged (`trash:purged{count, bytes}`).
 pub fn sweep_startup(ctx: &Context, settings: &Settings) {
+    let mut spared = Vec::new();
     for root in available_roots(ctx, settings) {
-        roll_forward(ctx, &root);
+        spared.extend(finish_restores(ctx, &root));
     }
-    let (count, bytes) = purge(ctx, settings);
+    let (count, bytes) = purge(ctx, settings, &spared);
     if count > 0 {
         ctx.emit(
             "trash:purged",

@@ -273,7 +273,7 @@ pub struct Faults {
         not(debug_assertions),
         expect(dead_code, reason = "`hit` compiles to nothing in release builds")
     )]
-    rule: Option<FaultRule>,
+    rules: Vec<FaultRule>,
 }
 
 impl Faults {
@@ -290,11 +290,11 @@ impl Faults {
                 .parse()
                 .map_err(|_| format!("PF_FAULT: after_level needs a level number, got {k:?}"))?;
             return Ok(Faults {
-                rule: Some(FaultRule {
+                rules: vec![FaultRule {
                     point: FaultPoint::AfterLevel(level),
                     file: None,
                     action,
-                }),
+                }],
             });
         }
         let (point, file) = match spec.trim().split_once(':') {
@@ -309,27 +309,33 @@ impl Faults {
             other => return Err(format!("PF_FAULT: unknown fault point {other:?}")),
         };
         Ok(Faults {
-            rule: Some(FaultRule {
+            rules: vec![FaultRule {
                 point,
                 file,
                 action,
-            }),
+            }],
         })
+    }
+
+    /// Both sets of faults at once (tests: a save that stays locked while a move fails too).
+    pub fn and(mut self, other: Faults) -> Self {
+        self.rules.extend(other.rules);
+        self
     }
 
     /// Called by the atomic writer at each point.
     #[cfg(debug_assertions)]
     pub fn hit(&self, point: FaultPoint, target: &Path) -> std::io::Result<()> {
-        let Some(rule) = &self.rule else {
+        let hit = self.rules.iter().find(|rule| {
+            rule.point == point
+                && rule
+                    .file
+                    .as_deref()
+                    .is_none_or(|f| target.file_name().is_some_and(|n| n == f))
+        });
+        let Some(rule) = hit else {
             return Ok(());
         };
-        let name_matches = rule
-            .file
-            .as_deref()
-            .is_none_or(|f| target.file_name().is_some_and(|n| n == f));
-        if rule.point != point || !name_matches {
-            return Ok(());
-        }
         match rule.action {
             FaultAction::Abort => {
                 tracing::warn!(?point, target = %target.display(), "PF_FAULT: aborting the process");
