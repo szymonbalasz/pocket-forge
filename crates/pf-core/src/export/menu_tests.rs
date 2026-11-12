@@ -361,6 +361,7 @@ fn fr_exp_32_candidate_names_exists_and_replace() {
     assert_eq!(e.code, ErrorCode::Exists);
     assert!(e.detail["bytes"].as_u64().unwrap() > 0);
     assert!(e.detail["mtime"].is_string() || e.detail["mtime"].is_number());
+    assert_eq!(e.detail["path"], "exports/Crypt_001-01.webp");
     t.export_file(&src, Some("webp"), "exports", true).unwrap();
     assert_eq!(t.events("export:done").len(), 2);
 }

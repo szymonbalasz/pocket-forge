@@ -152,6 +152,7 @@ export async function openExport(page: Page, seed: Partial<ExportSeed> = {}): Pr
         failsLeft: seed.failRunTimes,
         lastEmitted: undefined as undefined | string,
         starts: [] as Rec[],
+        lastSaveDir: null as string | null,
       };
       w.__pfExp = st;
       const fail = (code: string, message: string, extra: Rec = {}) =>
@@ -202,22 +203,48 @@ export async function openExport(page: Page, seed: Partial<ExportSeed> = {}): Pr
       };
       h.export_start = async (input) => {
         st.starts.push(input);
-        if (seed.readOnly) return fail('read_only', 'the project is read-only');
+        // #63: Save as (`dest`) writes nothing to the project, so it works read-only; Export as
+        // (`format_override`) is a one-off format that leaves the settings alone (FR-EXP-30, 31).
+        const dest = input.dest as string | undefined;
+        const override = input.format_override as string | undefined;
+        if (seed.readOnly && !dest) return fail('read_only', 'the project is read-only');
         if (st.running) return fail('busy', 'an export is already running');
         if (!st.originalReady)
           return fail('original_unavailable', 'the original is not decoded yet');
-        const settings = input.settings as Rec;
+        const extFormat = dest
+          ? /\.png$/i.test(dest)
+            ? 'png'
+            : /\.jpe?g$/i.test(dest)
+              ? 'jpeg'
+              : /\.webp$/i.test(dest)
+                ? 'webp'
+                : null
+          : null;
+        if (dest && !extFormat)
+          return fail('invalid_settings', 'the file name must end in .png, .jpg or .webp', {
+            field: 'dest',
+          });
+        const asked = input.settings as Rec;
+        const format = extFormat ?? override ?? (asked.format as string);
+        const settings = { ...asked, format };
         const r = await run(settings);
         if (!r.ok) return Promise.reject(r.error);
-        const plan = r.plan;
-        const fmt = plan.formats.find((f) => f.format === settings.format)!;
+        const plan: typeof r.plan = {
+          ...r.plan,
+          path: dest ?? r.plan.path,
+          exists: dest ? null : r.plan.exists,
+        };
+        const fmt = plan.formats.find((f) => f.format === format)!;
         if (!fmt.available)
           return fail('too_large', String(fmt.reason), {
-            detail: { format: settings.format, limit: 16383 },
+            detail: { format, limit: 16383 },
           });
         if (plan.exists && input.replace !== true)
-          return fail('exists', 'the file exists', { detail: plan.exists });
-        st.settings = settings;
+          return fail('exists', 'the file exists', {
+            detail: { ...(plan.exists as Rec), path: plan.path },
+          });
+        if (!dest && !override) st.settings = settings;
+        if (dest) st.lastSaveDir = dest.replace(/[\\/][^\\/]*$/, '');
         const id = `01JEXPORT${String(st.nextId++).padStart(17, '0')}`;
         const failCode = st.failsLeft > 0 ? seed.failRun : null;
         if (failCode) st.failsLeft--;
@@ -234,15 +261,15 @@ export async function openExport(page: Page, seed: Partial<ExportSeed> = {}): Pr
           if (i >= seed.steps) {
             st.running = null;
             const bytes = Math.round((Number(plan.width) * Number(plan.height) * 3) / 4);
-            st.existing[plan.path] = { bytes, mtime: new Date().toISOString() };
+            if (!dest) st.existing[plan.path] = { bytes, mtime: new Date().toISOString() };
             emit('export:done', {
               export_id: id,
-              path: `${projectDir}/${plan.path}`,
+              path: dest ?? `${projectDir}/${plan.path}`,
               width: plan.width,
               height: plan.height,
               bytes,
-              format: settings.format,
-              fallback: settings.format === 'webp' && seed.webpFallback ? 'lossless' : null,
+              format,
+              fallback: format === 'webp' && seed.webpFallback ? 'lossless' : null,
               record_saved: seed.recordSaved,
             });
             return;
@@ -260,6 +287,17 @@ export async function openExport(page: Page, seed: Partial<ExportSeed> = {}): Pr
         };
         st.running = { id, timer: window.setTimeout(tick, seed.stepMs) };
         return { export_id: id };
+      };
+      // #63: the save dialog's default path (the last Save as folder, else exports/).
+      h.export_save_default = async (input) => {
+        const s = (st.settings ?? {
+          grid: { mode: 'px', source_px_per_square: null },
+          target_px_per_square: null,
+          format: 'png',
+        }) as Rec;
+        const r = await run({ ...s, format: (input.format as string | undefined) ?? s.format });
+        const name = r.ok ? r.plan.path.replace(/^exports\//, '') : `${seed.name}.png`;
+        return { path: `${st.lastSaveDir ?? `${projectDir}/exports`}/${name}` };
       };
       h.export_cancel = (input) => {
         if (!st.running || st.running.id !== input.export_id)

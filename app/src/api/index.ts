@@ -4,7 +4,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
-import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 
 import type {
   ChatHostId,
@@ -17,6 +17,7 @@ import type {
   GenSize,
   Operation,
   ProjectKind,
+  ExportFormat,
   ExportSettingsInput,
   MaskBytes,
   ProjectFolder,
@@ -145,6 +146,42 @@ export async function pickPaths(opts: PickOptions): Promise<string[]> {
   }
 }
 
+export interface SavePickOptions {
+  title: string;
+  /** The dialog's starting file (folder + name), e.g. from `export_save_default`. */
+  defaultPath?: string;
+}
+
+/** The native save dialog (#63, FR-EXP-31): PNG, JPEG and WebP filters; the OS asks about
+ *  replacing. Resolves to the picked path, or null when canceled. Rejects with an `ApiError`
+ *  when no dialog is available (Vitest, Playwright mock it at `plugin:dialog|save`). */
+export async function pickSavePath(opts: SavePickOptions): Promise<string | null> {
+  try {
+    const picked = await saveDialog({
+      title: opts.title,
+      ...(opts.defaultPath ? { defaultPath: opts.defaultPath } : {}),
+      filters: [
+        { name: 'PNG', extensions: ['png'] },
+        { name: 'JPEG', extensions: ['jpg', 'jpeg'] },
+        { name: 'WebP', extensions: ['webp'] },
+      ],
+    });
+    return picked ?? null;
+  } catch (e) {
+    throw toApiError(e);
+  }
+}
+
+/** The format a Save as path's extension picks (FR-EXP-31), or null for any other extension
+ *  (the core then refuses it with `invalid_settings{field: dest}`). */
+export function formatOfPath(path: string): ExportFormat | null {
+  const ext = /\.([^./\\]+)$/.exec(path)?.[1]?.toLowerCase();
+  if (ext === 'png') return 'png';
+  if (ext === 'jpg' || ext === 'jpeg') return 'jpeg';
+  if (ext === 'webp') return 'webp';
+  return null;
+}
+
 /** Tells the app the UI has rendered (ends the process in `tauri:smoke` runs). In a debug smoke
  *  run with a tile step the app answers with the image to open next (R46); otherwise null. */
 export async function appReady(ok: boolean, detail: string): Promise<string | null> {
@@ -259,6 +296,8 @@ export const api = {
     relinkOriginal: (path: string) => call('project_relink_original', { path }),
     conflictGet: () => call('project_conflict_get', {}),
     resolveConflict: (keep: 'this' | 'other') => call('project_resolve_conflict', { keep }),
+    /** FR-PRJ-59: Open in Explorer. */
+    reveal: (path: string) => call('reveal_in_explorer', { path }),
   },
   editor: {
     imageOpen: (projectId: string, imageId: string, maxSide?: number) =>
@@ -280,6 +319,25 @@ export const api = {
     plan: (settings: ExportSettingsInput) => call('export_plan', { settings }),
     start: (settings: ExportSettingsInput, replace: boolean) =>
       call('export_start', { settings, replace }),
+    /** FR-EXP-30: Export as from the canvas menu (the settings don't change). */
+    startAs: (settings: ExportSettingsInput, format: ExportFormat, replace: boolean) =>
+      call('export_start', { settings, replace, format_override: format }),
+    /** FR-EXP-31: Save as from the canvas menu (writes nothing to the project). */
+    saveAs: (settings: ExportSettingsInput, dest: string) =>
+      call('export_start', { settings, replace: true, dest }),
+    /** FR-EXP-32: one image file; `dest` = `'exports'` or a Save as path. */
+    file: (source: string, dest: string, format: ExportFormat | null, replace = false) =>
+      call('export_file', {
+        source,
+        dest,
+        ...(format ? { format } : {}),
+        ...(replace ? { replace } : {}),
+      }),
+    saveDefault: (source?: string, format?: ExportFormat) =>
+      call('export_save_default', {
+        ...(source ? { source } : {}),
+        ...(format ? { format } : {}),
+      }),
     cancel: (exportId: string) => call('export_cancel', { export_id: exportId }),
     /** PRJ's command (FR-PRJ-42); EXP calls it when its panel opens (FR-EXP-28). */
     prefetchOriginal: () => call('project_prefetch_original', {}),

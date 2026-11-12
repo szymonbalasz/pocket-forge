@@ -116,8 +116,10 @@ fn busy(message: &str) -> CoreError {
     CoreError::new(ErrorCode::Busy, message)
 }
 
-fn exists_error(name: &str, existing: Value) -> CoreError {
-    CoreError::new(ErrorCode::Exists, format!("{name} exists")).with_detail(existing)
+/// `exists{bytes, mtime}`, plus the project-relative `path` so a menu's toast can name it.
+fn exists_error(rel_path: &str, mut existing: Value) -> CoreError {
+    existing["path"] = json!(rel_path);
+    CoreError::new(ErrorCode::Exists, format!("{rel_path} exists")).with_detail(existing)
 }
 
 /// Runs a job already pushed onto `exp.running` (the state lock is released): inline in tests,
