@@ -407,6 +407,109 @@ impl<T: EventSink + ?Sized> EventSink for std::sync::Arc<T> {
     }
 }
 
+// ---------------------------------------------------------------- shell
+
+/// The arguments `explorer.exe` gets (FR-PRJ-59): `/select,<path>` shows a file selected in its
+/// folder, `<path>` opens a folder.
+pub fn explorer_args(path: &Path, select: bool) -> Vec<String> {
+    let p = path.display().to_string();
+    if select {
+        vec![format!("/select,{p}")]
+    } else {
+        vec![p]
+    }
+}
+
+/// The shell seam (FR-PRJ-59): opens Explorer at a path. Only the app installs the real one;
+/// tests record the call, so no test ever spawns Explorer.
+pub trait Shell: Send + Sync {
+    /// Opens Explorer with [`explorer_args`]. Explorer's exit code is not a failure; only a
+    /// failed spawn is.
+    fn reveal(&self, path: &Path, select: bool) -> std::io::Result<()>;
+}
+
+/// The real shell: spawns `explorer.exe` and doesn't wait for it.
+#[derive(Debug, Default)]
+pub struct OsShell;
+
+impl Shell for OsShell {
+    #[cfg(windows)]
+    fn reveal(&self, path: &Path, select: bool) -> std::io::Result<()> {
+        use std::os::windows::process::CommandExt;
+        let mut cmd = std::process::Command::new("explorer.exe");
+        // Explorer parses its own command line: `/select,"<path>"`, with the quotes after the
+        // comma, is the form it reads for a path with spaces.
+        let quoted = format!("\"{}\"", path.display());
+        if select {
+            cmd.raw_arg(format!("/select,{quoted}"));
+        } else {
+            cmd.raw_arg(quoted);
+        }
+        cmd.spawn().map(drop)
+    }
+
+    #[cfg(not(windows))]
+    fn reveal(&self, path: &Path, select: bool) -> std::io::Result<()> {
+        let dir = if select {
+            path.parent().unwrap_or(path)
+        } else {
+            path
+        };
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
+        std::process::Command::new(opener)
+            .arg(dir)
+            .spawn()
+            .map(drop)
+    }
+}
+
+/// Records each reveal as its [`explorer_args`] (tests, and the default before the app installs
+/// the real shell).
+#[derive(Debug, Default)]
+pub struct RecordingShell(pub Mutex<Vec<Vec<String>>>);
+
+impl RecordingShell {
+    pub fn calls(&self) -> Vec<Vec<String>> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+impl Shell for RecordingShell {
+    fn reveal(&self, path: &Path, select: bool) -> std::io::Result<()> {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(explorer_args(path, select));
+        Ok(())
+    }
+}
+
+/// `PF_SHELL_LOG` (test builds only, walkthroughs): appends each reveal's arguments as one line
+/// to a file instead of starting Explorer.
+#[derive(Debug)]
+pub struct LogShell(pub PathBuf);
+
+impl Shell for LogShell {
+    fn reveal(&self, path: &Path, select: bool) -> std::io::Result<()> {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.0)?;
+        writeln!(f, "explorer.exe {}", explorer_args(path, select).join(" "))
+    }
+}
+
+impl<T: Shell + ?Sized> Shell for Arc<T> {
+    fn reveal(&self, path: &Path, select: bool) -> std::io::Result<()> {
+        (**self).reveal(path, select)
+    }
+}
+
 // ---------------------------------------------------------------- context
 
 /// Every seam, plus the per-run paths.
@@ -434,6 +537,8 @@ pub struct Context {
     pub chat: ChatSeams,
     /// Jobs this process is submitting right now (R102): never swept as `lost`.
     pub submitting: crate::job::Submitting,
+    /// Opens Explorer (FR-PRJ-59). A recording fake unless the app installs the real one.
+    pub shell: Arc<dyn Shell>,
 }
 
 // ---------------------------------------------------------------- prompt chat (PRM)
@@ -516,6 +621,7 @@ impl Context {
             inline_background: false,
             chat: ChatSeams::fake(Arc::new(pf_chat::clock::SystemClock::new())),
             submitting: crate::job::Submitting::default(),
+            shell: Arc::new(RecordingShell::default()),
         }
     }
 
@@ -539,7 +645,7 @@ impl Context {
 
     /// The app's context from the environment (AGENTS §9):
     /// `PF_DATA_DIR`, `PF_LIBRARY_DIR`, `PF_PROVIDER`, `PF_FAKE_CASE`; in test builds also
-    /// `PF_FAULT` and `PF_FAKE_NOW` (never read by release builds).
+    /// `PF_FAULT`, `PF_FAKE_NOW` and `PF_SHELL_LOG` (never read by release builds).
     pub fn from_env() -> Result<Self, String> {
         let var = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
         let data_dir = match var("PF_DATA_DIR") {
@@ -547,6 +653,7 @@ impl Context {
             None => default_data_dir()?,
         };
         let mut ctx = Context::new(data_dir);
+        ctx.shell = Arc::new(OsShell);
         ctx.library_override = var("PF_LIBRARY_DIR").map(PathBuf::from);
         ctx.provider = AnyProvider::for_mode(
             ProviderMode::from_env_value(var("PF_PROVIDER").as_deref())?,
@@ -575,6 +682,9 @@ impl Context {
             }
             if let Some(now) = var("PF_FAKE_NOW") {
                 ctx.clock = Box::new(OffsetClock::starting_at(parse_fake_now(&now)?));
+            }
+            if let Some(log) = var("PF_SHELL_LOG") {
+                ctx.shell = Arc::new(LogShell(PathBuf::from(log)));
             }
         }
         Ok(ctx)

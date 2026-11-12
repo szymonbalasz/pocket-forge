@@ -17,6 +17,7 @@ use crate::naming;
 use crate::settings::Settings;
 use crate::time::Timestamp;
 
+pub mod reveal;
 pub mod trash;
 
 /// Creation temp folders older than this are removed at startup (FR-PRJ-09, R35).

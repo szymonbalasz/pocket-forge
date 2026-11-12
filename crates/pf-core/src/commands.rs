@@ -643,6 +643,21 @@ impl Command for LibraryTrashRestore {
     }
 }
 
+pub struct RevealInExplorer;
+
+impl Command for RevealInExplorer {
+    const NAME: &'static str = "reveal_in_explorer";
+    type Input = PathInput;
+    type Output = Ok_;
+
+    /// FR-PRJ-59: Explorer at a path inside a library root, a file shown selected.
+    fn run(core: &Core, input: PathInput) -> CoreResult<Ok_> {
+        let settings = core.state().settings.clone();
+        library::reveal::reveal(&core.ctx, &settings, std::path::Path::new(&input.path))?;
+        Ok(Ok_ {})
+    }
+}
+
 // ---------------------------------------------------------------- Generate new (GEN)
 
 pub struct GenProjectCreate;
@@ -1618,6 +1633,7 @@ registry![
     LibraryTrashRestore,
     ExportFile,
     ExportSaveDefault,
+    RevealInExplorer,
 ];
 
 #[cfg(test)]
