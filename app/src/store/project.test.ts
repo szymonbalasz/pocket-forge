@@ -141,14 +141,15 @@ async function openWith(patch: Record<string, unknown>) {
 test('FR-PRJ-56 rename flushes through the guards first, then renames and takes the new snapshot: same project, no folder-moved state', async () => {
   const before = projectStore.get().project!;
   const order: string[] = [];
-  guard((proceed) => {
-    // The debounced draft is flushed before the rename is sent.
-    order.push(`guard:${cmds().includes('project_rename')}`);
+  guard((proceed, _cancel, why) => {
+    // The debounced draft is flushed before the rename is sent; the guard is told it is a
+    // rename, so a question is worded for it (R111: "Cancel the export and rename?").
+    order.push(`guard:${why}:${cmds().includes('project_rename')}`);
     queueMicrotask(proceed);
     return false;
   });
   expect(await projectStore.rename('  Vault ')).toBeNull();
-  expect(order).toEqual(['guard:false']);
+  expect(order).toEqual(['guard:rename:false']);
   expect(cmds()).toEqual(['project_rename', 'project_get']);
   expect(core.calls[0]!.input).toEqual({ path: CRYPT, name: 'Vault' });
   const after = projectStore.get();
@@ -203,20 +204,39 @@ test('FR-PRJ-56 if nothing is open after a failed rename, home shows', async () 
   expect(projectStore.get().project).toBeNull();
 });
 
-test('FR-PRJ-57 the guards are asked before the confirmation; remove deletes the open project and shows home', async () => {
-  let asked = 0;
-  guard(() => {
-    asked++;
-    return true;
+test('FR-PRJ-57 remove (after the confirmation) asks the guards as a close, then deletes the open project and shows home', async () => {
+  const order: string[] = [];
+  guard((proceed, _cancel, why) => {
+    order.push(`guard:${why}:${cmds().includes('project_delete')}`);
+    queueMicrotask(proceed);
+    return false;
   });
-  expect(await projectStore.beforeLeaving()).toBe(true);
-  expect(asked).toBe(1);
-  expect(cmds()).toEqual([]);
+  const gone: string[] = [];
+  offs.push(
+    projectStore.onDeleted((dir) => {
+      // Told before home shows: the project is still the open one here.
+      gone.push(`${dir}:${projectStore.get().project?.name}`);
+    }),
+  );
   expect(await projectStore.remove()).toBeNull();
-  expect(asked).toBe(1);
+  expect(order).toEqual(['guard:close:false']);
   expect(cmds()).toEqual(['project_delete']);
   expect(core.calls[0]!.input).toEqual({ path: CRYPT });
+  expect(gone).toEqual([`${CRYPT}:Crypt`]);
   expect(projectStore.get().project).toBeNull();
+});
+
+test('FR-PRJ-57 a guard that cancels after the confirmation deletes nothing', async () => {
+  guard((_proceed, cancel) => {
+    cancel(); // "Keep exporting"
+    return false;
+  });
+  const gone: string[] = [];
+  offs.push(projectStore.onDeleted((dir) => gone.push(dir)));
+  expect(await projectStore.remove()).toBeNull();
+  expect(cmds()).toEqual([]);
+  expect(gone).toEqual([]);
+  expect(projectStore.get().project?.name).toBe('Crypt');
 });
 
 test('FR-PRJ-57 a refused delete returns the error and the project stays open', async () => {

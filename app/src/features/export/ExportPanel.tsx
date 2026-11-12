@@ -365,13 +365,17 @@ export function ExportPanel() {
               role="alert"
               data-testid="exp-panel-close-ask"
             >
-              <span>Cancel the export and close?</span>
+              <span data-testid="exp-panel-close-question">
+                {s.closeWhy === 'rename'
+                  ? 'Cancel the export and rename?'
+                  : 'Cancel the export and close?'}
+              </span>
               <button
                 type="button"
                 data-testid="exp-panel-close-confirm"
                 onClick={() => void exportStore.confirmClose()}
               >
-                Cancel export and close
+                {s.closeWhy === 'rename' ? 'Cancel export and rename' : 'Cancel export and close'}
               </button>
               <button
                 type="button"

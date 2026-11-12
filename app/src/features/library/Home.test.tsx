@@ -547,15 +547,46 @@ test('FR-PRJ-58 a restore whose name is taken comes back with a suffix; a failed
   expect(trashNames()).toEqual(['Harbour']);
 });
 
-test('FR-PRJ-58 the library trash purge at startup reloads Recently deleted', async () => {
+test('FR-PRJ-58 R111 an item without its folder or with a purge begun is not listed; a restore that finds no folder says so', async () => {
   setup();
   await waitFor(() => expect(cards()).toHaveLength(2));
-  await act(() => libraryStore.remove(libraryStore.get().cards!.find((c) => c.name === 'Crypt')!));
+  for (const name of ['Crypt', 'Harbour'])
+    await act(() => libraryStore.remove(libraryStore.get().cards!.find((c) => c.name === name)!));
+  await waitFor(() => expect(trashNames()).toEqual(['Harbour', 'Crypt']));
+  // The folder left the trash between the listing and the click (taken back by hand).
+  mock.trash.find((t) => t.name === 'Crypt')!.folderMissing = true;
+  fireEvent.click(
+    within(
+      screen.getAllByTestId('prj-trash-item').find((i) => i.textContent?.includes('Crypt'))!,
+    ).getByTestId('prj-trash-restore'),
+  );
+  expect((await screen.findByTestId('prj-error')).dataset.code).toBe('not_found');
+  // The list is read again: the item is kept but never listed.
+  await waitFor(() => expect(trashNames()).toEqual(['Harbour']));
+  expect(mock.trash).toHaveLength(2);
+  mock.trash.find((t) => t.name === 'Harbour')!.purging = true;
+  await act(() => libraryStore.refresh());
+  expect(screen.queryByTestId('prj-trash-list')).toBeNull();
+});
+
+test('FR-PRJ-57 the card of a project deleted from the left panel is gone before home shows', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  const crypt = libraryStore.get().cards!.find((c) => c.name === 'Crypt')!;
+  await act(() => projectStore.open(crypt.path));
+  expect(cards()).toHaveLength(0);
+  // What home has to draw at the moment the project stops being open: never the deleted
+  // project's card (its thumbnail would be asked for from a folder that is gone).
+  const shown: string[][] = [];
+  const off = projectStore.subscribe(() => {
+    if (!projectStore.get().project && shown.length === 0)
+      shown.push(libraryStore.get().cards!.map((c) => c.name));
+  });
+  await act(async () => {
+    expect(await projectStore.remove()).toBeNull();
+  });
+  off();
+  expect(shown).toEqual([['Harbour']]);
+  await waitFor(() => expect(cardNames()).toEqual(['Harbour']));
   await waitFor(() => expect(trashNames()).toEqual(['Crypt']));
-  mock.trash.length = 0;
-  // A project's own purge (it names its project) is not the library's.
-  await act(async () => core.emit('trash:purged', { project_id: 'p1', count: 1, bytes: 10 }));
-  expect(trashNames()).toEqual(['Crypt']);
-  await act(async () => core.emit('trash:purged', { count: 1, bytes: 4096 }));
-  await waitFor(() => expect(screen.queryByTestId('prj-trash-list')).toBeNull());
 });

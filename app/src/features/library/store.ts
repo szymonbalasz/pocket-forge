@@ -66,12 +66,14 @@ function listen(): void {
   );
   // A background thumbnail landed (FR-PRJ-50): reload the grid.
   on(onEvent('project:thumb-updated', () => void libraryStore.refresh()));
-  // The library trash's 30-day purge (FR-PRJ-58); a project's own purge names its project.
-  on(
-    onEvent('trash:purged', (p) => {
-      if (!p.project_id) void libraryStore.refresh();
-    }),
-  );
+  // The library trash's 30-day purge (FR-PRJ-58) runs when the core starts, before this UI
+  // listens: the first listing is already the purged one, so `trash:purged` isn't heard here.
+  // The open project was deleted from the left panel (FR-PRJ-57): its card goes before home
+  // shows, so home never asks for the thumbnail of a folder that is gone.
+  projectStore.onDeleted((path) => {
+    if (state.cards?.some((c) => c.path === path))
+      set({ cards: state.cards.filter((c) => c.path !== path) });
+  });
 }
 
 /** Base64 of raw bytes, in chunks (pasted image data, FR-PRJ-10). */

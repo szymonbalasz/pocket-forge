@@ -15,7 +15,7 @@ const h = vi.hoisted(() => {
       cancel: vi.fn(),
       prefetchOriginal: vi.fn(),
     },
-    prj: { close: vi.fn(), open: vi.fn(), get: vi.fn() },
+    prj: { close: vi.fn(), open: vi.fn(), get: vi.fn(), rename: vi.fn() },
   };
 });
 
@@ -279,6 +279,47 @@ describe('export store', () => {
     expect(exportStore.get().closeAsk).toBe(false);
     expect(h.prj.close).toHaveBeenCalledTimes(2);
     expect(h.prj.close).toHaveBeenLastCalledWith(false);
+  });
+
+  test('FR-PRJ-56 R111 a rename during an export asks "Cancel the export and rename?"; a close still asks as a close', async () => {
+    const dir = 'C:/pf-mock/library/Maps/Crypt';
+    const snap = { project_id: 'p1', name: 'Crypt', project_dir: dir, warnings: [], revisions: [] };
+    h.prj.open.mockResolvedValue(snap);
+    h.prj.get.mockResolvedValue({ ...snap, name: 'Vault' });
+    h.prj.rename.mockReset();
+    h.prj.rename.mockResolvedValue({ path: 'C:/pf-mock/library/Maps/Vault' });
+    projectStore.reset();
+    await projectStore.open(dir);
+    try {
+      await bound();
+      await exportStore.start();
+      // "Keep exporting": the rename is dropped and nothing is sent.
+      const kept = projectStore.rename('Vault');
+      expect(exportStore.get()).toMatchObject({ closeAsk: true, closeWhy: 'rename' });
+      exportStore.keepExporting();
+      expect(await kept).toBeNull();
+      expect(h.prj.rename).not.toHaveBeenCalled();
+      expect(h.exp.cancel).not.toHaveBeenCalled();
+      // "Cancel export and rename": the export is cancelled, then the rename goes on.
+      const renaming = projectStore.rename('Vault');
+      expect(exportStore.get()).toMatchObject({ closeAsk: true, closeWhy: 'rename' });
+      await exportStore.confirmClose();
+      expect(await renaming).toBeNull();
+      expect(h.exp.cancel).toHaveBeenCalledWith('e1');
+      expect(h.prj.rename).toHaveBeenCalledWith(dir, 'Vault');
+      expect(projectStore.get().project?.name).toBe('Vault');
+      h.emit('export:canceled', { export_id: 'e1' });
+      // A close (and a delete, which closes) keeps its own wording.
+      h.exp.start.mockResolvedValueOnce({ export_id: 'e2' });
+      await exportStore.start();
+      const closing = projectStore.close();
+      expect(exportStore.get()).toMatchObject({ closeAsk: true, closeWhy: 'close' });
+      exportStore.keepExporting();
+      await closing;
+      h.emit('export:canceled', { export_id: 'e2' });
+    } finally {
+      projectStore.reset();
+    }
   });
 
   test('R110 OQ-EXP-09 the export question is a close question on screen until answered', async () => {

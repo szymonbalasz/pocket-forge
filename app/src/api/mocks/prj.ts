@@ -77,7 +77,9 @@ export interface PrjMockState {
   config: { configured: boolean; unavailable: boolean; root: string };
   projects: Map<string, Rec>;
   openPath: string | null;
-  /** The library trash (FR-PRJ-57, 58): `{ id, name, section, trashed_at, purge_at, project }`. */
+  /** The library trash (FR-PRJ-57, 58): `{ id, name, section, trashed_at, purge_at, project }`.
+   *  R111: an item with `folderMissing` (its folder isn't in the trash) or `purging` (a purge
+   *  began) is never listed; its restore is `not_found` / `unknown_id`. */
   trash: Rec[];
   /** Simulates a file dropped into a project folder in Explorer (FR-PRJ-48). */
   addUserFile(projectPath: string, folder: ProjectFolder, file: FolderFile): void;
@@ -383,15 +385,18 @@ export function prjMock(
       if (name === p.name) return { path };
       if (taken(String(p.section), name, path))
         return fail('name_taken', `“${name}” is taken`, { field: 'name' });
-      if (isOpen && p.jobActive)
+      // R97, R111: open or closed.
+      if (p.jobActive)
         return fail(
           'job_active',
           'A job is running in this project. Rename it when the job has finished.',
         );
       if (isOpen && p.pendingSave)
-        return fail('unsaved', 'Your latest changes aren’t saved yet: the file is locked.', {
-          detail: { reason: 'locked' },
-        });
+        return fail(
+          'unsaved',
+          'Your latest changes aren’t saved yet: the file is locked. The name can’t change until they are saved.',
+          { detail: { reason: 'locked' } },
+        );
       if (p.folderLocked) return fail('locked', 'The folder is in use by another program.');
       const next = projectPath(String(p.section), name);
       state.projects.delete(path);
@@ -431,7 +436,7 @@ export function prjMock(
     library_trash_list: (input) => {
       if (state.config.unavailable) return fail('library_unavailable', 'Library unavailable');
       return state.trash
-        .filter((t) => t.section === input.section)
+        .filter((t) => t.section === input.section && !t.folderMissing && !t.purging)
         .map(({ id, name, section, trashed_at, purge_at }) => ({
           id,
           name,
@@ -445,7 +450,12 @@ export function prjMock(
     library_trash_restore: (input) => {
       const i = state.trash.findIndex((t) => t.id === input.id);
       const item = state.trash[i];
-      if (!item) return fail('unknown_id', 'No such item in Recently deleted', { field: 'id' });
+      if (!item || item.purging)
+        return fail('unknown_id', 'No such item in Recently deleted', { field: 'id' });
+      if (item.folderMissing)
+        return fail('not_found', `“${String(item.name)}” is no longer in Recently deleted.`, {
+          field: 'id',
+        });
       const p = item.project as Rec;
       if (p.folderLocked) return fail('locked', 'The folder is in use by another program.');
       state.trash.splice(i, 1);

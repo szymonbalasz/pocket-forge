@@ -22,7 +22,7 @@ import {
 } from '../../api';
 import { IconPlus } from '../../shell/icons';
 import { DeleteProjectDialog } from '../library';
-import { dropNewImage, PATCHES_KEPT } from '../region-edit';
+import { dropNewImage, PATCHES_KEPT, useActiveJobId } from '../region-edit';
 import {
   errorOf,
   folderMoved,
@@ -199,6 +199,8 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
   const { revision, error } = useProjectState();
   const readOnly = project.read_only !== null;
   const [deleting, setDeleting] = useState(false);
+  // R97: a delete is refused while a job runs; say so on the button instead of after Confirm.
+  const jobRunning = useActiveJobId() !== null;
   const drop = usePanelDrop(readOnly);
   const dropProps = (id: DropSection) => ({
     dropOver: drop.over === id,
@@ -227,11 +229,13 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
             type="button"
             className="link"
             data-testid="prj-panel-delete"
-            title="Delete the project. It stays in Recently deleted for 30 days."
-            onClick={() =>
-              // The close guards first (a running export asks), then the confirmation.
-              void projectStore.beforeLeaving().then((ok) => ok && setDeleting(true))
+            disabled={jobRunning}
+            title={
+              jobRunning
+                ? 'A job is running in this project. Delete it when the job has finished.'
+                : 'Delete the project. It stays in Recently deleted for 30 days.'
             }
+            onClick={() => setDeleting(true)}
           >
             Delete
           </button>
@@ -242,7 +246,15 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
         open={deleting}
         name={project.name}
         onOpenChange={setDeleting}
-        confirm={() => projectStore.remove()}
+        confirm={async () => {
+          // The confirmation came first (R111). It is modal, so it goes before the close
+          // questions are asked (a running export asks in its own panel) and comes back only
+          // to say why a delete was refused.
+          setDeleting(false);
+          const refused = await projectStore.remove();
+          if (refused) setDeleting(true);
+          return refused;
+        }}
       />
       {error && (
         <div className="banner banner-error" data-testid="prj-error" data-code={error.code}>

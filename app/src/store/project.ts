@@ -51,11 +51,17 @@ const initial: ProjectState = {
 let state: ProjectState = initial;
 const listeners = new Set<() => void>();
 let listening = false;
+/** Why the close guards are asked: the project closes (also for a delete, FR-PRJ-57), or it is
+ *  renamed and stays open (FR-PRJ-56, R111: a question is worded for that). */
+export type LeaveReason = 'close' | 'rename';
 /** A feature's say before the open project closes, ahead of PRJ's own `unsaved` check (EXP's
  *  "Cancel the export and close?", EDT's last mask submit, R55). Returns true to allow it now;
  *  false to hold the close and later call `proceed` (once) or `cancel`. */
-export type CloseGuard = (proceed: () => void, cancel: () => void) => boolean;
+export type CloseGuard = (proceed: () => void, cancel: () => void, why: LeaveReason) => boolean;
 const closeGuards = new Set<CloseGuard>();
+/** Told the folder of the open project that was just deleted, before home shows (FR-PRJ-57). */
+export type DeletedListener = (projectDir: string) => void;
+const deletedListeners = new Set<DeletedListener>();
 /** R110: the features whose close question is on screen (EXP's "Cancel the export and close?"). */
 const closeQuestions = new Set<string>();
 
@@ -68,11 +74,11 @@ const resolvedListeners = new Set<ResolvedListener>();
 
 /** Asks the guards in turn; a held guard's `proceed` asks the ones after it. Runs `go` once all
  *  allowed it, `cancel` if one cancels. */
-function askGuards(go: () => void, cancel: () => void): void {
+function askGuards(go: () => void, cancel: () => void, why: LeaveReason = 'close'): void {
   const list = [...closeGuards];
   const from = (start: number): void => {
     for (const [i, guard] of list.entries()) {
-      if (i >= start && !guard(() => from(i + 1), cancel)) return;
+      if (i >= start && !guard(() => from(i + 1), cancel, why)) return;
     }
     go();
   };
@@ -213,11 +219,12 @@ async function openNow(path: string): Promise<boolean> {
 /** Asks the close guards before the open project is renamed or deleted (FR-PRJ-56, 57): the
  *  debounced drafts and the last mask are flushed, and a running export asks first. Resolves
  *  false if a guard cancelled. */
-function guardsAllow(): Promise<boolean> {
+function guardsAllow(why: LeaveReason): Promise<boolean> {
   return new Promise((resolve) =>
     askGuards(
       () => resolve(true),
       () => resolve(false),
+      why,
     ),
   );
 }
@@ -308,7 +315,7 @@ export const projectStore = {
     const p = state.project;
     const wanted = name.trim();
     if (!p || wanted === p.name) return null;
-    if (!(await guardsAllow()) || state.project?.project_id !== p.project_id) return null;
+    if (!(await guardsAllow('rename')) || state.project?.project_id !== p.project_id) return null;
     try {
       await api.project.rename(p.project_dir, wanted);
     } catch (e) {
@@ -320,24 +327,29 @@ export const projectStore = {
     return null;
   },
 
-  /** Asks the close guards without closing (FR-PRJ-57: before the delete confirmation shows, so
-   *  a feature's own question, EXP's "Cancel the export and close?", is never hidden behind
-   *  it). Resolves false if a guard cancelled. */
-  beforeLeaving(): Promise<boolean> {
-    return guardsAllow();
+  /** Registers a `DeletedListener`; returns its removal. */
+  onDeleted(listener: DeletedListener): () => void {
+    deletedListeners.add(listener);
+    return () => deletedListeners.delete(listener);
   },
 
-  /** FR-PRJ-57: deletes the open project (the UI asked first, after `beforeLeaving`). It moves
-   *  to Recently deleted and the home grid shows. Returns the error to show, or null. */
+  /** FR-PRJ-57: deletes the open project. The UI asked first ("Delete <name>?"), and only now,
+   *  after the user confirmed, the close guards run (the drafts are flushed, a running export
+   *  asks), so cancelling the confirmation changes nothing (R111). It moves to Recently deleted
+   *  and the home grid shows. Returns the error to show, or null (also when a guard cancelled:
+   *  the project stays open). */
   async remove(): Promise<{ code: string; message: string } | null> {
     const p = state.project;
     if (!p) return null;
+    if (!(await guardsAllow('close')) || state.project?.project_id !== p.project_id) return null;
     try {
       await api.project.delete(p.project_dir);
     } catch (e) {
       await resync();
       return errorOf(e);
     }
+    // Before home shows: nothing asks for an image of the deleted project again.
+    for (const l of deletedListeners) l(p.project_dir);
     set({ project: null, save: initial.save, error: null, trashNotice: null });
     bump();
     return null;

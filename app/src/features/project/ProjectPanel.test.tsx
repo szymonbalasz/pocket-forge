@@ -1,6 +1,6 @@
 // PRJ left panel and status segment against the mocked PRJ commands (api/mocks/prj.ts).
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 import {
   prjMock,
@@ -12,6 +12,13 @@ import { installTestCore } from '../../api/mocks/testCore';
 import { projectStore } from '../../store/project';
 import { ProjectPanel } from './ProjectPanel';
 import { ProjectStatus } from './ProjectStatus';
+
+// RGN's active job as the panel reads it (R97): null unless a test sets one.
+const rgnJob = vi.hoisted(() => ({ id: null as string | null }));
+vi.mock('../region-edit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../region-edit')>()),
+  useActiveJobId: () => rgnJob.id,
+}));
 
 const core = installTestCore();
 const LIB = 'C:/pf-mock/library';
@@ -39,7 +46,10 @@ async function openCrypt(patch: Partial<PrjMockProject> = {}) {
 const files = (folder: string) =>
   screen.queryAllByTestId(`prj-panel-${folder}-file`).map((f) => f.dataset.recordId);
 
-beforeEach(() => projectStore.reset());
+beforeEach(() => {
+  projectStore.reset();
+  rgnJob.id = null;
+});
 afterEach(cleanup);
 
 test('FR-PRJ-48 FR-PRJ-12 the panel lists Working and the user folders on open', async () => {
@@ -943,30 +953,77 @@ test('FR-PRJ-57 Delete in the panel asks first: Cancel keeps the project, confir
   expect(mock.trash.map((t) => t.name)).toEqual(['Crypt']);
 });
 
-test('FR-PRJ-57 a feature’s close question comes before the confirmation, never behind it', async () => {
+test('FR-PRJ-57 R111 the confirmation comes first: Cancel asks no guard and sends no command', async () => {
+  await openCrypt();
+  let asked = 0;
+  const off = projectStore.addCloseGuard(() => {
+    asked++;
+    return true;
+  });
+  try {
+    core.calls.length = 0;
+    fireEvent.click(screen.getByTestId('prj-panel-delete'));
+    await screen.findByTestId('prj-delete-dialog');
+    expect(asked).toBe(0);
+    fireEvent.click(screen.getByTestId('prj-delete-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('prj-delete-dialog')).toBeNull());
+    await act(async () => undefined);
+    // Nothing was asked (no export was cancelled) and nothing was sent.
+    expect(asked).toBe(0);
+    expect(core.names()).toEqual([]);
+    expect(projectStore.get().project?.name).toBe('Crypt');
+  } finally {
+    off();
+  }
+});
+
+test('FR-PRJ-57 R111 the close questions come only after Confirm, with the confirmation out of their way', async () => {
   await openCrypt();
   // EXP's "Cancel the export and close?" holds the close guard until it is answered.
-  let answer!: { proceed: () => void; cancel: () => void };
-  const off = projectStore.addCloseGuard((proceed, cancel) => {
+  let answer: { proceed: () => void; cancel: () => void } | null = null;
+  const reasons: string[] = [];
+  const off = projectStore.addCloseGuard((proceed, cancel, why) => {
     answer = { proceed, cancel };
+    reasons.push(why);
     return false;
   });
   try {
     fireEvent.click(screen.getByTestId('prj-panel-delete'));
-    await act(async () => undefined);
+    await screen.findByTestId('prj-delete-dialog');
+    expect(answer).toBeNull();
+    fireEvent.click(screen.getByTestId('prj-delete-confirm'));
+    await waitFor(() => expect(answer).not.toBeNull());
+    // The modal confirmation is gone, so the question in the export panel can be answered.
     expect(screen.queryByTestId('prj-delete-dialog')).toBeNull();
-    // "No": nothing is asked and nothing is deleted.
-    await act(async () => answer.cancel());
+    expect(core.names()).not.toContain('project_delete');
+    // "Keep exporting": nothing is deleted and the project stays open.
+    await act(async () => answer!.cancel());
+    expect(core.names()).not.toContain('project_delete');
     expect(screen.queryByTestId('prj-delete-dialog')).toBeNull();
+    expect(projectStore.get().project?.name).toBe('Crypt');
 
+    answer = null;
     fireEvent.click(screen.getByTestId('prj-panel-delete'));
-    await act(async () => answer.proceed());
     fireEvent.click(await screen.findByTestId('prj-delete-confirm'));
+    await waitFor(() => expect(answer).not.toBeNull());
+    await act(async () => answer!.proceed());
     await waitFor(() => expect(projectStore.get().project).toBeNull());
   } finally {
     off();
   }
+  expect(reasons).toEqual(['close', 'close']);
   expect(core.names()).toContain('project_delete');
+});
+
+test('FR-PRJ-57 R97 while a job runs Delete is disabled and says why, without opening the confirmation', async () => {
+  rgnJob.id = 'job-1';
+  await openCrypt({ jobActive: true });
+  const del = screen.getByTestId<HTMLButtonElement>('prj-panel-delete');
+  expect(del.disabled).toBe(true);
+  expect(del.title).toContain('A job is running');
+  fireEvent.click(del);
+  expect(screen.queryByTestId('prj-delete-dialog')).toBeNull();
+  expect(core.names()).not.toContain('project_delete');
 });
 
 test('FR-PRJ-57 a refused delete says why in the confirmation and the project stays open', async () => {
