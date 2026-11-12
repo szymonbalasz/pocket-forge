@@ -441,3 +441,121 @@ test('FR-GEN-01 Generate new… prefills New token / New item by section; Cancel
   expect((await screen.findByTestId<HTMLInputElement>('gen-new-name')).value).toBe('New item');
   expect(core.names()).not.toContain('gen_project_create');
 });
+
+// ── FR-PRJ-57, 58 (#62): delete from the card, Recently deleted, Restore ───────────────────
+
+const trashNames = () =>
+  screen
+    .queryAllByTestId('prj-trash-item')
+    .map((i) => within(i).getByTestId('prj-trash-name').textContent);
+const cardOf = (name: string) => cards().find((c) => c.dataset.path?.endsWith(`/${name}`))!;
+async function deleteFromCard(name: string) {
+  fireEvent.contextMenu(cardOf(name));
+  fireEvent.click(await screen.findByTestId('prj-home-card-delete'));
+  return screen.findByTestId('prj-delete-dialog');
+}
+
+test('FR-PRJ-57 Delete in the card’s context menu asks first; Cancel keeps the card, confirm moves it to Recently deleted', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  expect(screen.queryByTestId('prj-trash-list')).toBeNull();
+
+  let dialog = await deleteFromCard('Crypt');
+  expect(dialog.textContent).toContain('Delete Crypt?');
+  expect(dialog.textContent).toContain('It stays in Recently deleted for 30 days.');
+  fireEvent.click(screen.getByTestId('prj-delete-cancel'));
+  await waitFor(() => expect(screen.queryByTestId('prj-delete-dialog')).toBeNull());
+  expect(core.names()).not.toContain('project_delete');
+  expect(cardNames()).toEqual(['Harbour', 'Crypt']);
+
+  dialog = await deleteFromCard('Crypt');
+  fireEvent.click(within(dialog).getByTestId('prj-delete-confirm'));
+  await waitFor(() => expect(cardNames()).toEqual(['Harbour']));
+  expect(core.calls.find((c) => c.cmd === 'project_delete')?.input).toEqual({
+    path: `${LIB}/Maps/Crypt`,
+  });
+  await waitFor(() => expect(trashNames()).toEqual(['Crypt']));
+  expect(screen.queryByTestId('prj-delete-dialog')).toBeNull();
+});
+
+test('FR-PRJ-57 a refused delete shows the reason in the confirmation and the card stays', async () => {
+  const seed = samplePrjSeed(LIB);
+  seed.projects[0] = { ...seed.projects[0]!, jobActive: true };
+  setup({ projects: seed.projects });
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  const dialog = await deleteFromCard('Crypt');
+  fireEvent.click(within(dialog).getByTestId('prj-delete-confirm'));
+  expect((await screen.findByTestId('prj-delete-error')).textContent).toContain('A job is running');
+  expect(cardNames()).toEqual(['Harbour', 'Crypt']);
+  expect(mock.trash).toEqual([]);
+});
+
+test('FR-PRJ-58 Recently deleted lists the section’s deleted projects newest first with the purge date; Restore brings the card back', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  await act(() => libraryStore.remove(libraryStore.get().cards!.find((c) => c.name === 'Crypt')!));
+  await act(() =>
+    libraryStore.remove(libraryStore.get().cards!.find((c) => c.name === 'Harbour')!),
+  );
+  await waitFor(() => expect(trashNames()).toEqual(['Harbour', 'Crypt']));
+  expect(core.calls.filter((c) => c.cmd === 'library_trash_list').at(-1)?.input).toEqual({
+    section: 'maps',
+  });
+  // An empty section still shows them, under the empty hint.
+  expect(screen.getByTestId('prj-home-empty')).toBeTruthy();
+  const [harbour] = screen.getAllByTestId('prj-trash-item');
+  expect(harbour!.dataset.recordId).toBe(String(mock.trash[1]!.id));
+  // Deleted 8 Nov 2026 → purged 30 days later.
+  expect(within(harbour!).getByTestId('prj-trash-until').textContent).toMatch(/^until .*8/);
+
+  // Another section has its own list.
+  fireEvent.click(screen.getByTestId('prj-rail-tokens'));
+  await waitFor(() => expect(cardNames()).toEqual(['Goblin']));
+  expect(screen.queryByTestId('prj-trash-list')).toBeNull();
+  fireEvent.click(screen.getByTestId('prj-rail-maps'));
+  await waitFor(() => expect(trashNames()).toEqual(['Harbour', 'Crypt']));
+
+  const crypt = screen.getAllByTestId('prj-trash-item')[1]!;
+  fireEvent.click(within(crypt).getByTestId('prj-trash-restore'));
+  await waitFor(() => expect(cardNames()).toEqual(['Crypt']));
+  expect(trashNames()).toEqual(['Harbour']);
+  expect(core.calls.find((c) => c.cmd === 'library_trash_restore')?.input).toEqual({
+    id: crypt.dataset.recordId,
+  });
+  expect(mock.projects.has(`${LIB}/Maps/Crypt`)).toBe(true);
+});
+
+test('FR-PRJ-58 a restore whose name is taken comes back with a suffix; a failed one shows the error and stays listed', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  await act(() => libraryStore.remove(libraryStore.get().cards!.find((c) => c.name === 'Crypt')!));
+  await waitFor(() => expect(trashNames()).toEqual(['Crypt']));
+  // The name is taken by the time it is restored.
+  await drop(['D:/maps/Crypt.png']);
+  await waitFor(() => expect(cardNames()).toContain('Crypt'));
+  fireEvent.click(screen.getByTestId('prj-trash-restore'));
+  await waitFor(() => expect(cardNames()).toContain('Crypt (2)'));
+  expect(screen.queryByTestId('prj-trash-list')).toBeNull();
+
+  await act(() =>
+    libraryStore.remove(libraryStore.get().cards!.find((c) => c.name === 'Harbour')!),
+  );
+  await waitFor(() => expect(trashNames()).toEqual(['Harbour']));
+  (mock.trash[0]!.project as Record<string, unknown>).folderLocked = true;
+  fireEvent.click(screen.getByTestId('prj-trash-restore'));
+  expect((await screen.findByTestId('prj-error')).dataset.code).toBe('locked');
+  expect(trashNames()).toEqual(['Harbour']);
+});
+
+test('FR-PRJ-58 the library trash purge at startup reloads Recently deleted', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  await act(() => libraryStore.remove(libraryStore.get().cards!.find((c) => c.name === 'Crypt')!));
+  await waitFor(() => expect(trashNames()).toEqual(['Crypt']));
+  mock.trash.length = 0;
+  // A project's own purge (it names its project) is not the library's.
+  await act(async () => core.emit('trash:purged', { project_id: 'p1', count: 1, bytes: 10 }));
+  expect(trashNames()).toEqual(['Crypt']);
+  await act(async () => core.emit('trash:purged', { count: 1, bytes: 4096 }));
+  await waitFor(() => expect(screen.queryByTestId('prj-trash-list')).toBeNull());
+});

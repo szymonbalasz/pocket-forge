@@ -10,6 +10,7 @@ import {
   onEvent,
   type CreateItem,
   type LibraryConfig,
+  type LibraryTrashItem,
   type ProjectCard,
   type Section,
 } from '../../api';
@@ -20,6 +21,8 @@ export interface LibraryState {
   config: LibraryConfig | null;
   /** The section's cards, newest first (FR-PRJ-49); null until loaded. */
   cards: ProjectCard[] | null;
+  /** Recently deleted of the section, newest first (FR-PRJ-58); null until loaded. */
+  trash: LibraryTrashItem[] | null;
   /** `library_unavailable` or another listing error (FR-PRJ-02). */
   listError: { code: string; message: string } | null;
   /** Creation in progress (FR-PRJ-11): `import:progress` counts. */
@@ -34,6 +37,7 @@ const initial: LibraryState = {
   section: 'maps',
   config: null,
   cards: null,
+  trash: null,
   listError: null,
   creating: null,
   summary: null,
@@ -62,6 +66,12 @@ function listen(): void {
   );
   // A background thumbnail landed (FR-PRJ-50): reload the grid.
   on(onEvent('project:thumb-updated', () => void libraryStore.refresh()));
+  // The library trash's 30-day purge (FR-PRJ-58); a project's own purge names its project.
+  on(
+    onEvent('trash:purged', (p) => {
+      if (!p.project_id) void libraryStore.refresh();
+    }),
+  );
 }
 
 /** Base64 of raw bytes, in chunks (pasted image data, FR-PRJ-10). */
@@ -96,18 +106,22 @@ export const libraryStore = {
     }
   },
 
-  /** Reloads the selected section's cards (FR-PRJ-49). */
+  /** Reloads the selected section's cards (FR-PRJ-49) and its Recently deleted (FR-PRJ-58). */
   async refresh(): Promise<void> {
     const section = state.section;
     // The newest listing wins: a late one (a thumbnail refresh) never replaces a newer one.
     const seq = ++refreshSeq;
     const current = () => seq === refreshSeq && state.section === section;
+    // The grid never waits for, or fails with, the trash list.
+    const trash = api.library.trashList(section).catch(() => [] as LibraryTrashItem[]);
     try {
       const cards = await api.library.listProjects(section);
       if (current()) set({ cards, listError: null });
     } catch (e) {
       if (current()) set({ cards: [], listError: errorOf(e) });
     }
+    const items = await trash;
+    if (current()) set({ trash: items });
   },
 
   /** Rail: picks a section. With a project open, it closes first (back to the home grid). */
@@ -117,7 +131,7 @@ export const libraryStore = {
       if (projectStore.get().project) return; // close refused (`unsaved`)
     }
     if (section === state.section && state.cards) return;
-    set({ section, cards: null, listError: null, summary: null });
+    set({ section, cards: null, trash: null, listError: null, summary: null });
     await libraryStore.refresh();
   },
 
@@ -198,6 +212,28 @@ export const libraryStore = {
     } catch (e) {
       return errorOf(e);
     }
+  },
+
+  /** FR-PRJ-57: deletes a project from its card (the UI asked first). It moves to Recently
+   *  deleted. Returns the error to show, or null. */
+  async remove(card: ProjectCard): Promise<{ code: string; message: string } | null> {
+    try {
+      await api.project.delete(card.path);
+      await libraryStore.refresh();
+      return null;
+    } catch (e) {
+      return errorOf(e);
+    }
+  },
+
+  /** FR-PRJ-58: restores a Recently deleted project to its section. */
+  async restore(itemId: string): Promise<void> {
+    try {
+      await api.library.trashRestore(itemId);
+    } catch (e) {
+      projectStore.setError(errorOf(e));
+    }
+    await libraryStore.refresh();
   },
 };
 

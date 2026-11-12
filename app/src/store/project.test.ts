@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest';
 
 import { prjMock, samplePrjSeed } from '../api/mocks/prj';
 import { installTestCore } from '../api/mocks/testCore';
-import { projectStore, type CloseGuard } from './project';
+import { folderMoved, projectStore, type CloseGuard } from './project';
 
 const core = installTestCore();
 const LIB = 'C:/pf-mock/library';
@@ -125,4 +125,102 @@ test('FR-PRJ-21 opening another project never drops this one’s waiting save', 
   expect(projectStore.get().project?.name).toBe('Crypt');
   expect(projectStore.get().error?.code).toBe('unsaved');
   expect(projectStore.get()).toMatchObject({ busy: false, opening: null });
+});
+
+// ── FR-PRJ-56, 57 (#62): rename and delete of the open project ─────────────────────────────
+
+async function openWith(patch: Record<string, unknown>) {
+  const seed = samplePrjSeed(LIB);
+  seed.projects[0] = { ...seed.projects[0]!, ...patch };
+  core.useHandlers(prjMock(seed, { emit: core.emit }).handlers);
+  projectStore.reset();
+  await projectStore.open(CRYPT);
+  core.calls.length = 0;
+}
+
+test('FR-PRJ-56 rename flushes through the guards first, then renames and takes the new snapshot: same project, no folder-moved state', async () => {
+  const before = projectStore.get().project!;
+  const order: string[] = [];
+  guard((proceed) => {
+    // The debounced draft is flushed before the rename is sent.
+    order.push(`guard:${cmds().includes('project_rename')}`);
+    queueMicrotask(proceed);
+    return false;
+  });
+  expect(await projectStore.rename('  Vault ')).toBeNull();
+  expect(order).toEqual(['guard:false']);
+  expect(cmds()).toEqual(['project_rename', 'project_get']);
+  expect(core.calls[0]!.input).toEqual({ path: CRYPT, name: 'Vault' });
+  const after = projectStore.get();
+  expect(after.project).toMatchObject({
+    name: 'Vault',
+    project_dir: `${LIB}/Maps/Vault`,
+    project_id: before.project_id,
+    head_revision: before.head_revision,
+  });
+  expect(folderMoved(after)).toBe(false);
+  expect(after.save.kind).toBe('saved');
+  expect(after.error).toBeNull();
+});
+
+test('FR-PRJ-56 the same name sends nothing; a guard that cancels renames nothing', async () => {
+  expect(await projectStore.rename('Crypt')).toBeNull();
+  expect(cmds()).toEqual([]);
+  guard((_proceed, cancel) => {
+    cancel();
+    return false;
+  });
+  expect(await projectStore.rename('Vault')).toBeNull();
+  expect(cmds()).toEqual([]);
+  expect(projectStore.get().project?.name).toBe('Crypt');
+});
+
+test('FR-PRJ-56 a refused rename returns the error and leaves the project open under its old name', async () => {
+  expect((await projectStore.rename('harbour'))?.code).toBe('name_taken');
+  expect(projectStore.get().project?.name).toBe('Crypt');
+  for (const [patch, code] of [
+    [{ jobActive: true }, 'job_active'],
+    [{ pendingSave: true }, 'unsaved'],
+    [{ folderLocked: true }, 'locked'],
+    [{ warnings: [{ code: 'folder_moved', message: 'moved' }] }, 'not_found'],
+  ] as const) {
+    await openWith(patch);
+    expect((await projectStore.rename('Vault'))?.code, code).toBe(code);
+    expect(projectStore.get().project).toMatchObject({ name: 'Crypt', project_dir: CRYPT });
+    // The banner is for closing only: a refused rename shows under the name.
+    expect(projectStore.get().error).toBeNull();
+  }
+});
+
+test('FR-PRJ-56 if nothing is open after a failed rename, home shows', async () => {
+  const base = core.handlersSnapshot();
+  core.useHandlers({
+    ...base,
+    project_rename: () => Promise.reject({ code: 'io', message: 'the folder is gone' }),
+    project_get: () => null,
+  });
+  expect((await projectStore.rename('Vault'))?.code).toBe('io');
+  expect(projectStore.get().project).toBeNull();
+});
+
+test('FR-PRJ-57 remove asks the guards, deletes the open project and shows home', async () => {
+  let asked = 0;
+  guard(() => {
+    asked++;
+    return true;
+  });
+  expect(await projectStore.remove()).toBeNull();
+  expect(asked).toBe(1);
+  expect(cmds()).toEqual(['project_delete']);
+  expect(core.calls[0]!.input).toEqual({ path: CRYPT });
+  expect(projectStore.get().project).toBeNull();
+});
+
+test('FR-PRJ-57 a refused delete returns the error and the project stays open', async () => {
+  await openWith({ jobActive: true });
+  expect((await projectStore.remove())?.code).toBe('job_active');
+  expect(projectStore.get().project?.name).toBe('Crypt');
+  await openWith({ folderLocked: true });
+  expect((await projectStore.remove())?.code).toBe('locked');
+  expect(projectStore.get().project?.project_dir).toBe(CRYPT);
 });

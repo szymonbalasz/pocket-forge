@@ -210,6 +210,32 @@ async function openNow(path: string): Promise<boolean> {
   }
 }
 
+/** Asks the close guards before the open project is renamed or deleted (FR-PRJ-56, 57): the
+ *  debounced drafts and the last mask are flushed, and a running export asks first. Resolves
+ *  false if a guard cancelled. */
+function guardsAllow(): Promise<boolean> {
+  return new Promise((resolve) =>
+    askGuards(
+      () => resolve(true),
+      () => resolve(false),
+    ),
+  );
+}
+
+/** Takes the core's snapshot after a rename or a refused delete (FR-PRJ-56, 57). The project is
+ *  the same one, so features keep their state (mask, prompt, view). If nothing is open any more
+ *  (the reopen failed), home shows. */
+async function resync(): Promise<void> {
+  try {
+    const project = await api.project.get();
+    if (project) set({ project });
+    else set({ project: null, save: initial.save, trashNotice: null });
+  } catch (e) {
+    set({ error: errorOf(e) });
+  }
+  bump();
+}
+
 /** `close` once the guards allowed it. */
 async function closeNow(force: boolean): Promise<void> {
   try {
@@ -273,6 +299,42 @@ export const projectStore = {
    *  whether a project is still open). */
   async close(force = false): Promise<void> {
     return new Promise((resolve) => askGuards(() => void closeNow(force).then(resolve), resolve));
+  },
+
+  /** FR-PRJ-56: renames the open project from the left panel. The project stays open under
+   *  its new name with its history; no folder-moved banner, and the mask, prompt and view stay.
+   *  Returns the error to show under the name, or null (also when nothing changed). */
+  async rename(name: string): Promise<{ code: string; message: string } | null> {
+    const p = state.project;
+    const wanted = name.trim();
+    if (!p || wanted === p.name) return null;
+    if (!(await guardsAllow()) || state.project?.project_id !== p.project_id) return null;
+    try {
+      await api.project.rename(p.project_dir, wanted);
+    } catch (e) {
+      // All or nothing: it is still open under its old name (or, if that failed too, closed).
+      await resync();
+      return errorOf(e);
+    }
+    await resync();
+    return null;
+  },
+
+  /** FR-PRJ-57: deletes the open project (the UI asked first). It moves to Recently deleted
+   *  and the home grid shows. Returns the error to show, or null. */
+  async remove(): Promise<{ code: string; message: string } | null> {
+    const p = state.project;
+    if (!p) return null;
+    if (!(await guardsAllow()) || state.project?.project_id !== p.project_id) return null;
+    try {
+      await api.project.delete(p.project_dir);
+    } catch (e) {
+      await resync();
+      return errorOf(e);
+    }
+    set({ project: null, save: initial.save, error: null, trashNotice: null });
+    bump();
+    return null;
   },
 
   /** Re-reads the open project (after a restore, relink, …). */

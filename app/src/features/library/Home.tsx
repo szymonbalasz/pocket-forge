@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { DropdownMenu, Popover } from 'radix-ui';
 
 import { onFileDrop, pickPaths, type Section } from '../../api';
+import { dateLabel } from '../../shared/dates';
 import { useHomeView } from '../../shared/home';
 import { IconPlus } from '../../shell/icons';
 import { projectStore, useProjectState } from '../../store/project';
@@ -160,6 +161,7 @@ function HomeView() {
           ))}
         </ul>
       )}
+      <TrashList />
       {busy && opening && (
         <div className="prj-toast" data-testid="prj-home-opening" role="status">
           Opening {fileName(opening)}… (cloud files download first)
@@ -172,6 +174,42 @@ function HomeView() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Recently deleted (FR-PRJ-58): the section's projects in the library trash, with Restore.
+ *  Shown under the grid only while there are any. */
+function TrashList() {
+  const { trash } = useLibraryState();
+  if (!trash?.length) return null;
+  return (
+    <section className="prj-trash">
+      <h2>Recently deleted</h2>
+      <ul data-testid="prj-trash-list">
+        {trash.map((t) => (
+          <li key={t.id} data-testid="prj-trash-item" data-record-id={t.id}>
+            <span className="prj-trash-name" data-testid="prj-trash-name">
+              {t.name}
+            </span>
+            <span
+              className="muted small tabular"
+              data-testid="prj-trash-until"
+              title={`Deleted ${dateLabel(t.trashed_at)}`}
+            >
+              until {dateLabel(t.purge_at)}
+            </span>
+            <button
+              type="button"
+              className="link"
+              data-testid="prj-trash-restore"
+              onClick={() => void libraryStore.restore(t.id)}
+            >
+              Restore
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

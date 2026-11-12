@@ -3,7 +3,7 @@
 // User-owned folders list what's on disk on open, on window focus and on Refresh (FR-PRJ-48).
 // Files dragged from Explorer onto Working, References, Structure or Parts are taken in there
 // (FR-PRJ-55, #61); a drop anywhere else in an open project does nothing.
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Popover } from 'radix-ui';
 
 import {
@@ -21,6 +21,7 @@ import {
   type TrashItem,
 } from '../../api';
 import { IconPlus } from '../../shell/icons';
+import { DeleteProjectDialog } from '../library';
 import { dropNewImage, PATCHES_KEPT } from '../region-edit';
 import {
   errorOf,
@@ -197,6 +198,7 @@ function usePanelDrop(readOnly: boolean): {
 function OpenProject({ project }: { project: ProjectSnapshot }) {
   const { revision, error } = useProjectState();
   const readOnly = project.read_only !== null;
+  const [deleting, setDeleting] = useState(false);
   const drop = usePanelDrop(readOnly);
   const dropProps = (id: DropSection) => ({
     dropOver: drop.over === id,
@@ -210,19 +212,35 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
       data-dragging={drop.dragging ? 'true' : undefined}
     >
       <header className="prj-panel-header">
-        <button
-          type="button"
-          className="link"
-          data-testid="prj-panel-close"
-          title="Close the project and go back to the home grid"
-          onClick={() => void projectStore.close()}
-        >
-          ← Home
-        </button>
-        <h2 className="prj-panel-name" data-testid="prj-panel-name" title={project.project_dir}>
-          {project.name}
-        </h2>
+        <div className="row">
+          <button
+            type="button"
+            className="link"
+            data-testid="prj-panel-close"
+            title="Close the project and go back to the home grid"
+            onClick={() => void projectStore.close()}
+          >
+            ← Home
+          </button>
+          <span className="pf-spacer" />
+          <button
+            type="button"
+            className="link"
+            data-testid="prj-panel-delete"
+            title="Delete the project. It stays in Recently deleted for 30 days."
+            onClick={() => setDeleting(true)}
+          >
+            Delete
+          </button>
+        </div>
+        <ProjectName project={project} />
       </header>
+      <DeleteProjectDialog
+        open={deleting}
+        name={project.name}
+        onOpenChange={setDeleting}
+        confirm={() => projectStore.remove()}
+      />
       {error && (
         <div className="banner banner-error" data-testid="prj-error" data-code={error.code}>
           {error.message}{' '}
@@ -264,6 +282,90 @@ function OpenProject({ project }: { project: ProjectSnapshot }) {
       <History project={project} revision={revision} />
       <Storage revision={revision} readOnly={readOnly} />
     </div>
+  );
+}
+
+/** The project's name, edited in place (FR-PRJ-56): click it, Enter commits, Esc cancels. The
+ *  project stays open under its new name; a refusal (`name_taken`, `job_active`, …) shows under
+ *  the field and nothing changes. */
+function ProjectName({ project }: { project: ProjectSnapshot }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(project.name);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+    input.current?.focus();
+    input.current?.select();
+  }, [editing]);
+
+  if (!editing) {
+    return (
+      <h2 className="prj-panel-name">
+        <button
+          type="button"
+          className="prj-panel-name-button"
+          data-testid="prj-panel-name"
+          title={`${project.project_dir}\nClick to rename`}
+          onClick={() => {
+            setValue(project.name);
+            setError(null);
+            setEditing(true);
+          }}
+        >
+          {project.name}
+        </button>
+      </h2>
+    );
+  }
+
+  const commit = async () => {
+    if (busy) return;
+    setBusy(true);
+    const err = await projectStore.rename(value);
+    setBusy(false);
+    if (err) setError(err.message);
+    else setEditing(false);
+  };
+
+  return (
+    <form
+      className="prj-panel-rename"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void commit();
+      }}
+    >
+      <input
+        ref={input}
+        data-testid="prj-panel-name-input"
+        aria-label="Project name"
+        aria-invalid={error ? true : undefined}
+        value={value}
+        maxLength={64}
+        disabled={busy}
+        onChange={(e) => {
+          setValue(e.target.value);
+          setError(null);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            setEditing(false);
+          }
+        }}
+        onBlur={() => {
+          if (!error && !busy) setEditing(false);
+        }}
+      />
+      {error && (
+        <span className="error small" data-testid="prj-panel-name-error" role="alert">
+          {error}
+        </span>
+      )}
+    </form>
   );
 }
 
