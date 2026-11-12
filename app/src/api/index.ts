@@ -230,6 +230,8 @@ export const api = {
     getConfig: () => call('library_get_config', {}),
     setRoots: (roots: string[]) => call('library_set_roots', { roots }),
     listProjects: (section: Section) => call('library_list_projects', { section }),
+    trashList: (section: Section) => call('library_trash_list', { section }),
+    trashRestore: (itemId: string) => call('library_trash_restore', { id: itemId }),
   },
   project: {
     open: (path: string) => call('project_open', { path }),
@@ -246,6 +248,7 @@ export const api = {
     createFromClipboard: (section: Section, dataB64: string) =>
       call('project_create_from_clipboard', { section, data_b64: dataB64 }),
     rename: (path: string, name: string) => call('project_rename', { path, name }),
+    delete: (path: string) => call('project_delete', { path }),
     folderList: (folder: ProjectFolder) => call('project_folder_list', { folder }),
     folderAdd: (folder: ProjectFolder, paths: string[]) =>
       call('project_folder_add', { folder, paths }),

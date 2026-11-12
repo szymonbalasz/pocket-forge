@@ -144,6 +144,9 @@ tauri_commands! {
     rgn_iteration_discard_all_undo => c::RgnIterationDiscardAllUndo,
     project_base_from_file => c::ProjectBaseFromFile,
     prm_chat_thread_new => c::PrmChatThreadNew,
+    project_delete => c::ProjectDelete,
+    library_trash_list => c::LibraryTrashList,
+    library_trash_restore => c::LibraryTrashRestore,
 }
 
 #[cfg(test)]

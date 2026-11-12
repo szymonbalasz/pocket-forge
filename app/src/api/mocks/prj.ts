@@ -40,8 +40,12 @@ export interface PrjMockProject {
   pendingSave?: boolean;
   /** A sync conflict (FR-PRJ-36): `project_conflict_get` returns it; add a `conflict` warning. */
   conflict?: ConflictView;
-  /** A job is running (R97): `project_base_from_file` answers `job_active` (FR-PRJ-55). */
+  /** A job is running (R97): `project_base_from_file`, a rename of the open project and
+   *  `project_delete` answer `job_active` (FR-PRJ-55, 56, 57). */
   jobActive?: boolean;
+  /** The folder can't be renamed or moved: `project_rename` and `project_delete` answer
+   *  `locked` and nothing changes (FR-PRJ-56, 57). */
+  folderLocked?: boolean;
 }
 
 export interface PrjMockSeed {
@@ -73,6 +77,8 @@ export interface PrjMockState {
   config: { configured: boolean; unavailable: boolean; root: string };
   projects: Map<string, Rec>;
   openPath: string | null;
+  /** The library trash (FR-PRJ-57, 58): `{ id, name, section, trashed_at, purge_at, project }`. */
+  trash: Rec[];
   /** Simulates a file dropped into a project folder in Explorer (FR-PRJ-48). */
   addUserFile(projectPath: string, folder: ProjectFolder, file: FolderFile): void;
   /** Makes the root (un)available, as a disconnected drive would (FR-PRJ-02). */
@@ -109,6 +115,7 @@ export function prjMock(
     config: { configured: seed.configured, unavailable: !!seed.unavailable, root: seed.library },
     projects: new Map(),
     openPath: null,
+    trash: [],
     addUserFile(projectPath, folder, file) {
       const p = state.projects.get(projectPath);
       if (!p) return;
@@ -175,6 +182,7 @@ export function prjMock(
       dirty: false,
       seq: 1,
       jobActive: !!p.jobActive,
+      folderLocked: !!p.folderLocked,
       /** FR-PRJ-55: the base image dropped on Working (`working/<name>`), else null. */
       base: null,
       /** Revision id → the bottom image it holds, so a restore (undo) brings it back. */
@@ -363,17 +371,88 @@ export function prjMock(
       const path = String(input.path);
       const p = state.projects.get(path);
       if (!p) return fail('not_found', 'Project not found');
-      if (state.openPath === path) return fail('project_open', 'Close the project to rename it');
+      const isOpen = state.openPath === path;
+      // FR-PRJ-56: the open project's folder was moved already.
+      if (isOpen && (p.warnings as Rec[]).some((w) => w.code === 'folder_moved'))
+        return fail('not_found', 'The project folder was moved or renamed.', {
+          detail: { reason: 'folder_moved' },
+        });
       const raw = String(input.name).trim();
-      if (!raw) return fail('invalid_name', 'Enter a name');
+      if (!raw) return fail('invalid_name', 'Enter a name', { field: 'name' });
       const name = sanitize(raw);
-      if (taken(String(p.section), name, path)) return fail('name_taken', `“${name}” is taken`);
+      if (name === p.name) return { path };
+      if (taken(String(p.section), name, path))
+        return fail('name_taken', `“${name}” is taken`, { field: 'name' });
+      if (isOpen && p.jobActive)
+        return fail(
+          'job_active',
+          'A job is running in this project. Rename it when the job has finished.',
+        );
+      if (isOpen && p.pendingSave)
+        return fail('unsaved', 'Your latest changes aren’t saved yet: the file is locked.', {
+          detail: { reason: 'locked' },
+        });
+      if (p.folderLocked) return fail('locked', 'The folder is in use by another program.');
       const next = projectPath(String(p.section), name);
       state.projects.delete(path);
       p.name = name;
       p.path = next;
       state.projects.set(next, p);
+      // FR-PRJ-56: the open project stays open under its new name.
+      if (isOpen) state.openPath = next;
       return { path: next };
+    },
+    // FR-PRJ-57: to the library trash; the open project is closed first.
+    project_delete: (input) => {
+      const path = String(input.path);
+      const p = state.projects.get(path);
+      if (!p) return fail('not_found', 'Project not found');
+      if (p.jobActive)
+        return fail(
+          'job_active',
+          'A job is running in this project. Delete it when the job has finished.',
+        );
+      if (p.folderLocked) return fail('locked', 'The folder is in use by another program.');
+      state.projects.delete(path);
+      if (state.openPath === path) state.openPath = null;
+      const at = Date.parse(seed.now) + state.trash.length * 1000;
+      const item: Rec = {
+        id: nextId(),
+        name: p.name,
+        section: p.section,
+        trashed_at: new Date(at).toISOString(),
+        purge_at: new Date(at + 30 * 86_400_000).toISOString(),
+        project: p,
+      };
+      state.trash.push(item);
+      return { item_id: item.id };
+    },
+    // FR-PRJ-58: Recently deleted of one section, newest first.
+    library_trash_list: (input) => {
+      if (state.config.unavailable) return fail('library_unavailable', 'Library unavailable');
+      return state.trash
+        .filter((t) => t.section === input.section)
+        .map(({ id, name, section, trashed_at, purge_at }) => ({
+          id,
+          name,
+          section,
+          trashed_at,
+          purge_at,
+        }))
+        .sort((a, b) => String(b.trashed_at).localeCompare(String(a.trashed_at)));
+    },
+    // FR-PRJ-58: back to its section, with a ` (2)` suffix if the name is taken by then.
+    library_trash_restore: (input) => {
+      const i = state.trash.findIndex((t) => t.id === input.id);
+      const item = state.trash[i];
+      if (!item) return fail('unknown_id', 'No such item in Recently deleted', { field: 'id' });
+      const p = item.project as Rec;
+      if (p.folderLocked) return fail('locked', 'The folder is in use by another program.');
+      state.trash.splice(i, 1);
+      p.name = freeName(String(p.section), String(p.name));
+      p.path = projectPath(String(p.section), String(p.name));
+      state.projects.set(String(p.path), p);
+      return { path: p.path };
     },
     project_open: (input) => {
       const path = String(input.path);

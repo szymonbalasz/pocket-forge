@@ -1554,6 +1554,9 @@ registry![
     RgnIterationDiscardAllUndo,
     ProjectBaseFromFile,
     PrmChatThreadNew,
+    ProjectDelete,
+    LibraryTrashList,
+    LibraryTrashRestore,
 ];
 
 #[cfg(test)]
