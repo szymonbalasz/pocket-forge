@@ -12,7 +12,7 @@ import { projectStore } from '../../store/project';
 import { CanvasMenu, FileMenu, PackImageMenu, revealEntry } from './Menus';
 import { MenuToastView } from './Menus';
 import { ExportPanel } from './ExportPanel';
-import { menuExport } from './menu';
+import { BUSY_NOTICE, menuExport } from './menu';
 import { exportStore } from './store';
 import { startState } from './view';
 import { ContextMenu } from '../../shared/ContextMenu';
@@ -464,4 +464,58 @@ test('FR-EXP-33 walk-63 H1 the question goes, and the close goes on, when the me
   await waitFor(() => expect(projectStore.get().project).toBeNull());
   expect(screen.queryByTestId('exp-panel-close-ask')).toBeNull();
   expect(core.names()).not.toContain('export_cancel');
+});
+
+test('FR-EXP-33 walk-63 M1 a second Export as while one runs keeps the running toast and says it is busy', async () => {
+  await setup({ 'plugin:dialog|save': () => 'D:/out/x.png' });
+  render(
+    <>
+      <CanvasMenu>
+        <div data-testid="stage" />
+      </CanvasMenu>
+      <MenuToastView />
+    </>,
+  );
+  openMenu('stage');
+  await exportAs('edt-canvas-menu', 'png');
+  const cancel = await screen.findByTestId('exp-toast-cancel');
+  await waitFor(() => expect((cancel as HTMLButtonElement).disabled).toBe(false));
+  openMenu('stage');
+  await exportAs('edt-canvas-menu', 'jpeg');
+  expect((await screen.findByTestId('exp-toast-notice')).textContent).toBe(BUSY_NOTICE);
+  openMenu('stage');
+  fireEvent.click(await screen.findByTestId('edt-canvas-menu-save-as'));
+  // Neither reached the core, nor opened the dialog; the first export's toast is intact.
+  expect(core.names().filter((n) => n === 'export_start')).toHaveLength(1);
+  expect(core.names()).not.toContain('plugin:dialog|save');
+  expect(screen.getByTestId('exp-toast').dataset.phase).toBe('running');
+  expect(screen.getByTestId('exp-toast-label').textContent).toBe('Exporting as PNG…');
+  expect(screen.getByTestId('exp-toast-progress')).toBeTruthy();
+  await done('01JEXP00000000000000000001', `${CRYPT}/exports/Crypt.png`);
+  await waitFor(() =>
+    expect(screen.getByTestId('exp-toast-path').textContent).toBe(`${CRYPT}/exports/Crypt.png`),
+  );
+});
+
+test('walk-63 L1 a failed Save as says it failed, not "Saving…"', async () => {
+  await setup({
+    'plugin:dialog|save': () => 'D:/out/vault.bmp',
+    export_start: () =>
+      Promise.reject({ code: 'invalid_settings', message: 'bad extension', field: 'dest' }),
+  });
+  render(
+    <>
+      <CanvasMenu>
+        <div data-testid="stage" />
+      </CanvasMenu>
+      <MenuToastView />
+    </>,
+  );
+  openMenu('stage');
+  fireEvent.click(await screen.findByTestId('edt-canvas-menu-save-as'));
+  expect((await screen.findByTestId('exp-toast-error')).textContent).toBe(
+    'Pick a .png, .jpg or .webp file name',
+  );
+  expect(screen.getByTestId('exp-toast').textContent).toContain("Couldn't save vault.bmp");
+  expect(screen.getByTestId('exp-toast').textContent).not.toContain('Saving');
 });

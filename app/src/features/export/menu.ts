@@ -36,8 +36,14 @@ export interface MenuToast {
   exists: { name: string; bytes: number; mtime: string } | null;
   done: Events['export:done'] | null;
   error: string | null;
+  /** A second menu export was asked for while this one runs (walk-63 M1): said here, and this
+   *  toast keeps its progress and Cancel. */
+  notice: string | null;
   job: MenuJob | null;
 }
+
+/** walk-63 M1: one menu export at a time in the toast. */
+export const BUSY_NOTICE = 'An export is already running. Wait for it, or cancel it first.';
 
 let toast: MenuToast | null = null;
 let seq = 0;
@@ -113,7 +119,11 @@ function apply(name: string, payload: unknown): void {
     patch(mine, { phase: 'done', done: payload as Events['export:done'], fraction: 1 });
   else if (name === 'export:failed') {
     const f = payload as Events['export:failed'];
-    patch(mine, { phase: 'failed', error: errorText(f.code) });
+    patch(mine, {
+      phase: 'failed',
+      label: failedLabel(toast?.job ?? null),
+      error: errorText(f.code),
+    });
   } else if (name === 'export:canceled' && toast?.seq === mine) set(null);
 }
 
@@ -169,6 +179,28 @@ function labelOf(job: MenuJob): string {
   return `Saving ${fileNameOf(job.dest)}…`;
 }
 
+/** walk-63 L1: a failed export's title says it failed, not "Saving…". */
+function failedLabel(job: MenuJob | null): string {
+  if (!job) return "Couldn't export";
+  if (job.kind === 'canvas') return `Couldn't export as ${FORMAT_LABEL[job.format]}`;
+  if (job.kind === 'file' && job.dest === 'exports')
+    return `Couldn't export ${fileNameOf(job.source)}`;
+  return `Couldn't save ${fileNameOf(job.dest)}`;
+}
+
+/** A menu export runs (or waits for the original) in the toast. */
+function active(): boolean {
+  return !!toast && (toast.phase === 'running' || toast.phase === 'loading');
+}
+
+/** walk-63 M1: a second menu export while one runs is refused here; the running toast stays
+ *  and says why. True if it was refused. */
+function refuseWhileActive(): boolean {
+  if (!active() || !toast) return false;
+  patch(toast.seq, { notice: BUSY_NOTICE });
+  return true;
+}
+
 /** True if the job belongs to the open project (a pack image's Save as doesn't). */
 function isProjectJob(job: MenuJob): boolean {
   if (job.kind !== 'file') return true;
@@ -178,7 +210,9 @@ function isProjectJob(job: MenuJob): boolean {
   return norm(job.source).startsWith(`${norm(dir)}/`);
 }
 
-async function run(job: MenuJob, replace = false): Promise<void> {
+async function run(job: MenuJob, replace = false, again = false): Promise<void> {
+  // `again`: this toast's own retry once the original is decoded.
+  if (!again && refuseWhileActive()) return;
   await listen();
   const at = ++seq;
   early.clear();
@@ -192,6 +226,7 @@ async function run(job: MenuJob, replace = false): Promise<void> {
     exists: null,
     done: null,
     error: null,
+    notice: null,
     job,
   });
   if (job.kind !== 'file' && exportStore.get().original.kind !== 'ready') {
@@ -201,7 +236,11 @@ async function run(job: MenuJob, replace = false): Promise<void> {
     if (toast?.seq !== at) return;
     if (!ready) {
       const o = exportStore.get().original;
-      patch(at, { phase: 'failed', error: o.kind === 'failed' ? o.message : errorText('io') });
+      patch(at, {
+        phase: 'failed',
+        label: failedLabel(job),
+        error: o.kind === 'failed' ? o.message : errorText('io'),
+      });
       return;
     }
     patch(at, { phase: 'running', label: labelOf(job) });
@@ -220,7 +259,7 @@ async function run(job: MenuJob, replace = false): Promise<void> {
     if (m.code === 'original_unavailable' && job.kind !== 'file') {
       // Decoded meanwhile, or not after all: wait for it again, then start (FR-EXP-30).
       patch(at, { phase: 'loading', label: 'Loading original…' });
-      if ((await originalReady()) && toast?.seq === at) return run(job, replace);
+      if ((await originalReady()) && toast?.seq === at) return run(job, replace, true);
       if (toast?.seq !== at) return;
     }
     if (m.code === 'exists') {
@@ -235,7 +274,7 @@ async function run(job: MenuJob, replace = false): Promise<void> {
       });
       return;
     }
-    patch(at, { phase: 'failed', error: m.text });
+    patch(at, { phase: 'failed', label: failedLabel(job), error: m.text });
     return;
   }
   exportStore.ignore(exportId);
@@ -280,6 +319,7 @@ async function pickDest(source?: string, format?: ExportFormat): Promise<string 
       exists: null,
       done: null,
       error: messageOf(e).text,
+      notice: null,
       job: null,
     });
     return null;
@@ -305,6 +345,7 @@ export const menuExport = {
 
   /** FR-EXP-31: Save as… on the canvas. Cancel in the dialog does nothing. */
   async canvasSaveAs(): Promise<void> {
+    if (refuseWhileActive()) return;
     const dest = await pickDest(undefined, exportStore.get().settings?.format);
     if (dest) await run({ kind: 'canvas-save', dest });
   },
@@ -315,6 +356,7 @@ export const menuExport = {
 
   /** FR-EXP-32: Save as… on a file (a pack image too). */
   async fileSaveAs(source: string): Promise<void> {
+    if (refuseWhileActive()) return;
     const dest = await pickDest(source);
     if (dest) await run({ kind: 'file', source, dest, format: null });
   },
@@ -352,6 +394,7 @@ export const menuExport = {
         exists: null,
         done: null,
         error: messageOf(e).text,
+        notice: null,
         job: null,
       });
     }

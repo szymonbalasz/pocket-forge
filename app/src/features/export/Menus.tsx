@@ -208,6 +208,11 @@ export function MenuToastView() {
         <span className="exp-toast-title" data-testid="exp-toast-label">
           {t.canceling ? 'Canceling…' : t.label}
         </span>
+        {t.notice && (
+          <span className="small warning" data-testid="exp-toast-notice" role="alert">
+            {t.notice}
+          </span>
+        )}
         <div
           className="exp-progress"
           role="progressbar"
