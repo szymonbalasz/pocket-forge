@@ -84,6 +84,7 @@ test('FR-RGN-41 FR-RGN-42 FR-RGN-45 FR-REF-26 references go with the job and com
     m.projectRefs[0]!.hash = 'mood-a repainted';
   });
   await page.getByTestId('rgn-job-retry').click();
+  await page.getByTestId('rgn-job-retry-ask-confirm').click();
   await expect(check(page, 'project:mood-a.png')).toBeChecked();
   await expect(check(page, 'project:mood-b.png')).not.toBeChecked();
   await expect(item(page, 'project:mood-a.png').getByTestId('ref-block-item-badge')).toHaveText(

@@ -5,6 +5,7 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { Tooltip } from 'radix-ui';
 
+import { ConfirmAsk } from '../../shared/ConfirmAsk';
 import { IconCheck } from '../../shell/icons';
 import { projectStore, useProjectState } from '../../store/project';
 import {
@@ -43,34 +44,84 @@ export function useNow(on: boolean): number {
   return now;
 }
 
-/** #61: "Discard all" of a result set: every kept result to the trash (never the accepted one),
- *  no confirm; the toast offers Undo. Disabled while its job runs or nothing is left. */
+/** #61: "Discard all" of a result set: every kept result to the trash (never the accepted one);
+ *  the toast offers Undo. #63: asks first. Disabled while its job runs or nothing is left. */
 function DiscardAll({ row, state }: { row: RgnIteration; state: RgnIteration['state'] }) {
   const readOnly = (useProjectState().project?.read_only ?? null) !== null;
+  const [asking, setAsking] = useState(false);
   if (row.n === null) return null;
   const left = row.discardable ?? 0;
   const running = isActive(state);
+  const notAccepted = row.accepted_in_stack || row.kept > left;
   return (
-    <button
-      type="button"
-      className="small"
-      data-testid="rgn-tracker-discard-all"
-      data-record-id={row.job_id}
-      disabled={readOnly || running || left === 0}
-      title={
-        running
-          ? 'The job is still running'
-          : left === 0
-            ? 'Nothing left to discard'
-            : `Discard ${left === 1 ? 'the 1 result' : `all ${left} results`}${row.accepted_in_stack || row.kept > left ? ' (not the accepted one)' : ''}: to the trash for 30 days`
-      }
-      onClick={(e) => {
-        e.stopPropagation();
-        void rgn.discardAll(row.job_id);
-      }}
-    >
-      Discard all
-    </button>
+    <>
+      <button
+        type="button"
+        className="small"
+        data-testid="rgn-tracker-discard-all"
+        data-record-id={row.job_id}
+        disabled={readOnly || running || left === 0}
+        title={
+          running
+            ? 'The job is still running'
+            : left === 0
+              ? 'Nothing left to discard'
+              : `Discard ${left === 1 ? 'the 1 result' : `all ${left} results`}${notAccepted ? ' (not the accepted one)' : ''}: to the trash for 30 days`
+        }
+        onClick={(e) => {
+          e.stopPropagation();
+          setAsking(true);
+        }}
+      >
+        Discard all
+      </button>
+      <ConfirmAsk
+        open={asking}
+        testid="rgn-tracker-discard-all-ask"
+        title={`Discard ${left === 1 ? 'the 1 result' : `all ${left} results`} of ${iterationNumber(row.n)}?`}
+        description={`${notAccepted ? 'The accepted one stays. ' : ''}They go to the trash for 30 days.`}
+        confirmLabel="Discard all"
+        onCancel={() => setAsking(false)}
+        onConfirm={() => {
+          setAsking(false);
+          void rgn.discardAll(row.job_id);
+        }}
+      />
+    </>
+  );
+}
+
+/** FR-RGN-21: Retry pre-fills the panel from the job. #63: it asks first, since it replaces
+ *  what the panel holds now. */
+function RetryButton({ row, className }: { row: RgnIteration; className?: string }) {
+  const [asking, setAsking] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className={className}
+        data-testid="rgn-job-retry"
+        data-record-id={row.job_id}
+        onClick={(e) => {
+          e.stopPropagation();
+          setAsking(true);
+        }}
+      >
+        Retry
+      </button>
+      <ConfirmAsk
+        open={asking}
+        testid="rgn-job-retry-ask"
+        title={row.n === null ? 'Retry this job?' : `Retry ${iterationNumber(row.n)}?`}
+        description="The panel is filled from this job and what is in it now is replaced. Nothing is sent until you submit."
+        confirmLabel="Retry"
+        onCancel={() => setAsking(false)}
+        onConfirm={() => {
+          setAsking(false);
+          void rgn.retry(row.job_id);
+        }}
+      />
+    </>
   );
 }
 
@@ -156,15 +207,7 @@ function JobStrip({ row, live }: { row: RgnIteration; live: LiveJob | undefined 
             Fetch again
           </button>
         )}
-        {canRetry(state) && (
-          <button
-            type="button"
-            data-testid="rgn-job-retry"
-            onClick={stop(() => void rgn.retry(row.job_id))}
-          >
-            Retry
-          </button>
-        )}
+        {canRetry(state) && <RetryButton row={row} />}
         {/* R108: Retry stays on a lost job (a pre-fill plus a new confirm), with the
             possible-charge hint next to it. */}
         {state === 'lost' && (
@@ -338,20 +381,7 @@ export function IterationTracker() {
                     </span>
                   )}
                   <span>{costLabel(r.cost)}</span>
-                  {offersRetry(rows, r) && (
-                    <button
-                      type="button"
-                      className="small"
-                      data-testid="rgn-job-retry"
-                      data-record-id={r.job_id}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void rgn.retry(r.job_id);
-                      }}
-                    >
-                      Retry
-                    </button>
-                  )}
+                  {offersRetry(rows, r) && <RetryButton row={r} className="small" />}
                   <DiscardAll row={r} state={state} />
                   {state === 'lost' && offersRetry(rows, r) && (
                     <span

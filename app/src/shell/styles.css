@@ -324,3 +324,41 @@ h2 {
   background: var(--pf-warn-soft);
   color: var(--pf-warn);
 }
+
+/* Modal dialogs (the project delete, shared/ConfirmAsk). */
+.prj-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--pf-overlay);
+  z-index: 40;
+}
+
+.prj-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(360px, calc(100vw - 2 * var(--pf-space-4)));
+  padding: var(--pf-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pf-space-2);
+  background: var(--pf-bg-2);
+  border: 1px solid var(--pf-border);
+  border-radius: var(--pf-radius);
+  box-shadow: 0 4px 16px var(--pf-overlay);
+  z-index: 50;
+}
+
+.prj-dialog h2 {
+  margin: 0;
+  font-size: 14px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--pf-text);
+  overflow-wrap: anywhere;
+}
+
+.prj-dialog p {
+  margin: 0;
+}
