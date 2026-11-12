@@ -51,16 +51,18 @@ const initial: ProjectState = {
 let state: ProjectState = initial;
 const listeners = new Set<() => void>();
 let listening = false;
-/** Why the close guards are asked: the project closes (also for a delete, FR-PRJ-57), or it is
- *  renamed and stays open (FR-PRJ-56, R111: a question is worded for that). */
-export type LeaveReason = 'close' | 'rename';
+/** Why the close guards are asked: the project closes, it is renamed and stays open
+ *  (FR-PRJ-56), or it is deleted (FR-PRJ-57). A question is worded for each (R111, R112);
+ *  apart from the wording a delete is a close. */
+export type LeaveReason = 'close' | 'rename' | 'delete';
 /** A feature's say before the open project closes, ahead of PRJ's own `unsaved` check (EXP's
  *  "Cancel the export and close?", EDT's last mask submit, R55). Returns true to allow it now;
  *  false to hold the close and later call `proceed` (once) or `cancel`. */
 export type CloseGuard = (proceed: () => void, cancel: () => void, why: LeaveReason) => boolean;
 const closeGuards = new Set<CloseGuard>();
-/** Told the folder of the open project that was just deleted, before home shows (FR-PRJ-57). */
-export type DeletedListener = (projectDir: string) => void;
+/** Told the folder and the id of the open project that was just deleted, before home shows
+ *  (FR-PRJ-57). The id is what identifies it: a path kept from before a rename is out of date. */
+export type DeletedListener = (projectDir: string, projectId: string) => void;
 const deletedListeners = new Set<DeletedListener>();
 /** R110: the features whose close question is on screen (EXP's "Cancel the export and close?"). */
 const closeQuestions = new Set<string>();
@@ -341,7 +343,7 @@ export const projectStore = {
   async remove(): Promise<{ code: string; message: string } | null> {
     const p = state.project;
     if (!p) return null;
-    if (!(await guardsAllow('close')) || state.project?.project_id !== p.project_id) return null;
+    if (!(await guardsAllow('delete')) || state.project?.project_id !== p.project_id) return null;
     try {
       await api.project.delete(p.project_dir);
     } catch (e) {
@@ -349,7 +351,7 @@ export const projectStore = {
       return errorOf(e);
     }
     // Before home shows: nothing asks for an image of the deleted project again.
-    for (const l of deletedListeners) l(p.project_dir);
+    for (const l of deletedListeners) l(p.project_dir, p.project_id);
     set({ project: null, save: initial.save, error: null, trashNotice: null });
     bump();
     return null;

@@ -1014,7 +1014,8 @@ test('FR-PRJ-57 R111 the close questions come only after Confirm, with the confi
   } finally {
     off();
   }
-  expect(reasons).toEqual(['close', 'close']);
+  // R112: the guards are told it is a delete, so EXP words its question for one.
+  expect(reasons).toEqual(['delete', 'delete']);
   expect(core.names()).toContain('project_delete');
 });
 

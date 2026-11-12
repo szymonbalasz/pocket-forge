@@ -608,3 +608,53 @@ test('FR-PRJ-57 the card of a project deleted from the left panel is gone before
   await waitFor(() => expect(cardNames()).toEqual(['Harbour']));
   await waitFor(() => expect(trashNames()).toEqual(['Crypt']));
 });
+
+test('FR-PRJ-56 FR-PRJ-57 R112 walk D3 a project renamed in the panel, then deleted: its card follows the rename and is gone before home shows', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  const crypt = libraryStore.get().cards!.find((c) => c.name === 'Crypt')!;
+  await act(() => projectStore.open(crypt.path));
+  await act(async () => {
+    expect(await projectStore.rename('Vault')).toBeNull();
+  });
+  // The card home kept from before the open follows the rename: home never draws the old
+  // name, and never asks for a thumbnail in the folder as it was named.
+  const renamed = libraryStore.get().cards!.find((c) => c.id === crypt.id)!;
+  expect(renamed).toMatchObject({ name: 'Vault', path: `${LIB}/Maps/Vault` });
+  expect(libraryStore.get().cards!.map((c) => c.name)).not.toContain('Crypt');
+  const shown: string[][] = [];
+  const off = projectStore.subscribe(() => {
+    if (!projectStore.get().project && shown.length === 0)
+      shown.push(libraryStore.get().cards!.map((c) => c.name));
+  });
+  await act(async () => {
+    expect(await projectStore.remove()).toBeNull();
+  });
+  off();
+  expect(shown).toEqual([['Harbour']]);
+  await waitFor(() => expect(cardNames()).toEqual(['Harbour']));
+  await waitFor(() => expect(trashNames()).toEqual(['Vault']));
+});
+
+test('FR-PRJ-57 R112 walk D3 the deleted project’s card is dropped by project id, whatever path the cached card has', async () => {
+  setup();
+  await waitFor(() => expect(cards()).toHaveLength(2));
+  const crypt = libraryStore.get().cards!.find((c) => c.name === 'Crypt')!;
+  await act(() => projectStore.open(crypt.path));
+  // The cached card is out of date (the folder as it was named before).
+  act(() =>
+    libraryStore.patchCardsForTest((c) =>
+      c.id === crypt.id ? { ...c, path: `${LIB}/Maps/Old name` } : c,
+    ),
+  );
+  const shown: string[][] = [];
+  const off = projectStore.subscribe(() => {
+    if (!projectStore.get().project && shown.length === 0)
+      shown.push(libraryStore.get().cards!.map((c) => c.name));
+  });
+  await act(async () => {
+    expect(await projectStore.remove()).toBeNull();
+  });
+  off();
+  expect(shown).toEqual([['Harbour']]);
+});

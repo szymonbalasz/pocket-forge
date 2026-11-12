@@ -110,6 +110,12 @@ export function ChatPanel({
   const pid = project?.project_id ?? null;
   const pidRef = useRef(pid);
   pidRef.current = pid;
+  /** The visible tab as last heard or loaded, so a `prm:chat-context` that changes neither the
+   *  project nor the tab is recognised: the project was renamed (FR-PRJ-56). */
+  const hostRef = useRef<string | null>(null);
+  useEffect(() => {
+    hostRef.current = view?.current_host ?? null;
+  }, [view]);
 
   const loadStatus = useCallback(async (refresh: boolean) => {
     try {
@@ -139,8 +145,13 @@ export function ChatPanel({
   const loadProject = useCallback(async () => {
     try {
       const p = await api.project.get();
+      // The name too: a rename keeps the project and changes only that (FR-PRJ-56).
       setProject((old) =>
-        old?.project_id === p?.project_id && old?.read_only === p?.read_only ? old : p,
+        old?.project_id === p?.project_id &&
+        old?.read_only === p?.read_only &&
+        old?.name === p?.name
+          ? old
+          : p,
       );
     } catch {
       setProject(null);
@@ -240,7 +251,13 @@ export function ChatPanel({
           pidRef.current = null;
           setProject(null);
         } else if (c.project_id !== pidRef.current) void loadProject();
-        else void loadThread(c.project_id);
+        else {
+          // The same project and the same tab: it was renamed (FR-PRJ-56), so the header's
+          // name is read again. A tab change reads nothing of the project (BL-41).
+          if (c.host === hostRef.current) void loadProject();
+          hostRef.current = c.host;
+          void loadThread(c.project_id);
+        }
       }),
     ];
     return () =>
@@ -331,7 +348,9 @@ export function ChatPanel({
           ×
         </button>
       )}
-      <span className="prm-chat-title">{project?.name ?? 'Prompt chat'}</span>
+      <span className="prm-chat-title" data-testid="prm-chat-title">
+        {project?.name ?? 'Prompt chat'}
+      </span>
       {view?.current_host && <span className="prm-chat-tag">{HOST_LABEL[view.current_host]}</span>}
       <span
         className={`prm-chat-chip${status.backend.state === 'error' ? ' is-error' : ''}`}

@@ -15,7 +15,7 @@ const h = vi.hoisted(() => {
       cancel: vi.fn(),
       prefetchOriginal: vi.fn(),
     },
-    prj: { close: vi.fn(), open: vi.fn(), get: vi.fn(), rename: vi.fn() },
+    prj: { close: vi.fn(), open: vi.fn(), get: vi.fn(), rename: vi.fn(), delete: vi.fn() },
   };
 });
 
@@ -281,7 +281,7 @@ describe('export store', () => {
     expect(h.prj.close).toHaveBeenLastCalledWith(false);
   });
 
-  test('FR-PRJ-56 R111 a rename during an export asks "Cancel the export and rename?"; a close still asks as a close', async () => {
+  test('FR-PRJ-56 R111 a rename during an export asks "Cancel the export and rename?", a delete as a delete; a close still asks as a close', async () => {
     const dir = 'C:/pf-mock/library/Maps/Crypt';
     const snap = { project_id: 'p1', name: 'Crypt', project_dir: dir, warnings: [], revisions: [] };
     h.prj.open.mockResolvedValue(snap);
@@ -309,13 +309,23 @@ describe('export store', () => {
       expect(h.prj.rename).toHaveBeenCalledWith(dir, 'Vault');
       expect(projectStore.get().project?.name).toBe('Vault');
       h.emit('export:canceled', { export_id: 'e1' });
-      // A close (and a delete, which closes) keeps its own wording.
+      // A close keeps its own wording.
       h.exp.start.mockResolvedValueOnce({ export_id: 'e2' });
       await exportStore.start();
       const closing = projectStore.close();
       expect(exportStore.get()).toMatchObject({ closeAsk: true, closeWhy: 'close' });
       exportStore.keepExporting();
       await closing;
+      // R112 walk D5: a delete (after its confirmation) is asked about as a delete.
+      const deleting = projectStore.remove();
+      expect(exportStore.get()).toMatchObject({ closeAsk: true, closeWhy: 'delete' });
+      // A close that joins it is asked as a close.
+      const joined = projectStore.close();
+      expect(exportStore.get()).toMatchObject({ closeAsk: true, closeWhy: 'close' });
+      exportStore.keepExporting();
+      expect(await deleting).toBeNull();
+      await joined;
+      expect(h.prj.delete).not.toHaveBeenCalled();
       h.emit('export:canceled', { export_id: 'e2' });
     } finally {
       projectStore.reset();

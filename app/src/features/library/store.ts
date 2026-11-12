@@ -70,9 +70,24 @@ function listen(): void {
   // listens: the first listing is already the purged one, so `trash:purged` isn't heard here.
   // The open project was deleted from the left panel (FR-PRJ-57): its card goes before home
   // shows, so home never asks for the thumbnail of a folder that is gone.
-  projectStore.onDeleted((path) => {
-    if (state.cards?.some((c) => c.path === path))
-      set({ cards: state.cards.filter((c) => c.path !== path) });
+  // By project id: the card kept from before the open may still have the folder as it was
+  // named then (R112 walk D3).
+  projectStore.onDeleted((path, projectId) => {
+    const gone = (c: ProjectCard) => c.id === projectId || c.path === path;
+    if (state.cards?.some(gone)) set({ cards: state.cards.filter((c) => !gone(c)) });
+  });
+  // The open project was renamed from the left panel (FR-PRJ-56): its card follows, so home
+  // never shows the old name or asks for a thumbnail in the folder as it was named.
+  projectStore.subscribe(() => {
+    const p = projectStore.get().project;
+    const stale = (c: ProjectCard) =>
+      !!p && c.id === p.project_id && (c.path !== p.project_dir || c.name !== p.name);
+    if (p && state.cards?.some(stale))
+      set({
+        cards: state.cards.map((c) =>
+          stale(c) ? { ...c, path: p.project_dir, name: p.name } : c,
+        ),
+      });
   });
 }
 
@@ -95,6 +110,10 @@ export const libraryStore = {
   /** Test helper. */
   reset(): void {
     set(initial);
+  },
+  /** Test helper: rewrites the cached cards (a listing that is out of date). */
+  patchCardsForTest(patch: (card: ProjectCard) => ProjectCard): void {
+    if (state.cards) set({ cards: state.cards.map(patch) });
   },
 
   /** Loads the config, then the selected section's cards. */

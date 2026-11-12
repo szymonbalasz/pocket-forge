@@ -56,8 +56,8 @@ export interface ExportState {
   focusTick: number;
   /** The project is closing while an export runs: "Cancel the export and close?" (EXP §7). */
   closeAsk: boolean;
-  /** What the question is asked for: a close, or a rename of the open project ("Cancel the
-   *  export and rename?", FR-PRJ-56, R111). */
+  /** What the question is asked for: a close, a rename of the open project ("Cancel the
+   *  export and rename?", FR-PRJ-56, R111) or its delete ("… and delete?", FR-PRJ-57, R112). */
   closeWhy: LeaveReason;
 }
 

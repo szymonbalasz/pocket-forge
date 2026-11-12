@@ -204,7 +204,7 @@ test('FR-PRJ-56 if nothing is open after a failed rename, home shows', async () 
   expect(projectStore.get().project).toBeNull();
 });
 
-test('FR-PRJ-57 remove (after the confirmation) asks the guards as a close, then deletes the open project and shows home', async () => {
+test('FR-PRJ-57 remove (after the confirmation) asks the guards as a delete, then deletes the open project and shows home', async () => {
   const order: string[] = [];
   guard((proceed, _cancel, why) => {
     order.push(`guard:${why}:${cmds().includes('project_delete')}`);
@@ -213,13 +213,14 @@ test('FR-PRJ-57 remove (after the confirmation) asks the guards as a close, then
   });
   const gone: string[] = [];
   offs.push(
-    projectStore.onDeleted((dir) => {
+    projectStore.onDeleted((dir, projectId) => {
       // Told before home shows: the project is still the open one here.
       gone.push(`${dir}:${projectStore.get().project?.name}`);
+      expect(projectId).toBe(projectStore.get().project?.project_id);
     }),
   );
   expect(await projectStore.remove()).toBeNull();
-  expect(order).toEqual(['guard:close:false']);
+  expect(order).toEqual(['guard:delete:false']);
   expect(cmds()).toEqual(['project_delete']);
   expect(core.calls[0]!.input).toEqual({ path: CRYPT });
   expect(gone).toEqual([`${CRYPT}:Crypt`]);
