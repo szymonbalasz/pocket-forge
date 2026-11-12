@@ -76,11 +76,12 @@ pub struct Core {
 
 impl Core {
     /// Loads settings (creating them on first run), prepares the library override and runs the
-    /// startup sweep (FR-PRJ-09, R35).
+    /// startup sweep (FR-PRJ-09, R35) and the library trash's (FR-PRJ-57, 58).
     pub fn new(ctx: Context) -> CoreResult<Self> {
         let (settings, settings_warnings) = settings::load_or_init(&ctx)?;
         crate::library::prepare_override(&ctx)?;
         crate::library::sweep_startup(&ctx, &settings);
+        crate::library::trash::sweep_startup(&ctx, &settings);
         crate::references::sweep_startup(&ctx, &settings);
         crate::prompt::chat::sweep_startup(&ctx);
         ctx.provider.set_account(settings.provider.account());

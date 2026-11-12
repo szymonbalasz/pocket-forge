@@ -17,6 +17,8 @@ use crate::naming;
 use crate::settings::Settings;
 use crate::time::Timestamp;
 
+pub mod trash;
+
 /// Creation temp folders older than this are removed at startup (FR-PRJ-09, R35).
 pub const STALE_TEMP_DIR_AGE: Duration = Duration::from_secs(3600);
 

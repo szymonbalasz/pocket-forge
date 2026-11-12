@@ -477,6 +477,127 @@ fn rename_open(core: &Core, state: &mut crate::core::State, name: &str) -> CoreR
     }
 }
 
+// ---------------------------------------------------------------- delete, library trash (#62)
+
+pub struct ProjectDelete;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectDeleteInput {
+    /// The project folder.
+    pub path: String,
+}
+
+impl Validate for ProjectDeleteInput {
+    fn validate(&self) -> CoreResult<()> {
+        check_path("path", &self.path)
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ItemIdOutput {
+    /// The library trash item (`library_trash_restore` takes it).
+    pub item_id: Ulid,
+}
+
+impl Command for ProjectDelete {
+    const NAME: &'static str = "project_delete";
+    type Input = ProjectDeleteInput;
+    type Output = ItemIdOutput;
+
+    /// FR-PRJ-57: the folder moves, whole, to the library trash. The open project is closed
+    /// first; `job_active` while it has an active job (R97), open or closed.
+    fn run(core: &Core, input: Self::Input) -> CoreResult<ItemIdOutput> {
+        let mut state = core.state();
+        let settings = state.settings.clone();
+        let loc = library::trash::locate(&core.ctx, &settings, &PathBuf::from(&input.path))?;
+        let item_id = if is_open_project(&state, &loc.dir) {
+            delete_open(core, &mut state, &loc)?
+        } else {
+            let active = state
+                .rgn
+                .runner
+                .job_in(&loc.dir)
+                .or_else(|| library::trash::active_job_on_disk(&core.ctx, &loc.dir));
+            if let Some(id) = active {
+                return Err(job_active(id, "Delete"));
+            }
+            library::trash::delete_project(&core.ctx, &loc)?
+        };
+        Ok(ItemIdOutput { item_id })
+    }
+}
+
+/// FR-PRJ-57 on the open project: closed as FR-PRJ-56 does, but a waiting save is tried once
+/// and then dropped (the UI asked). A move that fails opens the project again.
+fn delete_open(
+    core: &Core,
+    state: &mut crate::core::State,
+    loc: &library::trash::ProjectLoc,
+) -> CoreResult<Ulid> {
+    refuse_active_job_open(state, "Delete")?;
+    let install_id = state.settings.install_id;
+    if let Some(p) = state.project.as_mut() {
+        project::retry_pending(&core.ctx, install_id, p);
+    }
+    crate::export::unsaved_on_close(&core.ctx, state);
+    let (_, decode) = release_open(core, state).ok_or_else(no_project)?;
+    match library::trash::delete_project(&core.ctx, loc) {
+        Ok(id) => {
+            core.served().reset(None);
+            core.chat.notify_project(&core.ctx, None);
+            Ok(id)
+        }
+        Err(e) => {
+            if let Err(again) = reopen(core, state, &loc.dir, decode) {
+                tracing::warn!(error = %again, "the project didn't open again after a failed delete");
+            }
+            Err(e)
+        }
+    }
+}
+
+pub struct LibraryTrashList;
+
+impl Command for LibraryTrashList {
+    const NAME: &'static str = "library_trash_list";
+    type Input = SectionOnly;
+    type Output = Vec<library::trash::TrashEntry>;
+
+    /// FR-PRJ-58: Recently deleted of one section, newest first.
+    fn run(core: &Core, input: SectionOnly) -> CoreResult<Self::Output> {
+        let settings = core.state().settings.clone();
+        library::trash::list(&core.ctx, &settings, input.section.into())
+    }
+}
+
+pub struct LibraryTrashRestore;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LibraryTrashRestoreInput {
+    /// The library trash item.
+    pub id: Ulid,
+}
+
+impl Validate for LibraryTrashRestoreInput {}
+
+impl Command for LibraryTrashRestore {
+    const NAME: &'static str = "library_trash_restore";
+    type Input = LibraryTrashRestoreInput;
+    type Output = PathOutput;
+
+    /// FR-PRJ-58: back to its section in the same root; the restored project folder.
+    fn run(core: &Core, input: Self::Input) -> CoreResult<PathOutput> {
+        // Like a creation: one at a time, so two never race for a name, and without the state
+        // lock (the same lock order as `project_create`).
+        let _one_at_a_time = core.create_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let settings = core.state().settings.clone();
+        let path = library::trash::restore(&core.ctx, &settings, input.id)?;
+        Ok(PathOutput { path })
+    }
+}
+
 // ---------------------------------------------------------------- Generate new (GEN)
 
 pub struct GenProjectCreate;
