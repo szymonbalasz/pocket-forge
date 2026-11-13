@@ -236,3 +236,46 @@ test('BL-40 GEN §12 home → confirmed job in ≤ 4 clicks plus the name and th
   await page.keyboard.press('Enter');
   await expect.poll(async () => (await inputsOf(page, 'gen_job_submit')).length).toBe(2);
 });
+
+test('#63 FR-EXP-32 a real right-click on the no-image canvas with a selected candidate opens its file menu', async ({
+  page,
+}) => {
+  await newProject(page, 'Crypt');
+  // "No image yet" alone: no menu of ours (and no browser menu, owner 2026-11-13).
+  await page.getByTestId('edt-canvas-no-image').click({ button: 'right' });
+  await expect(page.getByTestId('edt-preview-menu')).toHaveCount(0);
+  await generate(page, 'flooded crypt');
+  await page.getByTestId('edt-picker-item').nth(1).click();
+  await expect(page.getByTestId('edt-preview-alone')).toBeVisible();
+  // A real mouse right-click (not a dispatched event), over the preview and beside it.
+  const box = (await page.getByTestId('edt-canvas-no-image').boundingBox())!;
+  for (const [x, y] of [
+    [box.x + box.width / 2, box.y + box.height / 2],
+    [box.x + 4, box.y + 4],
+  ] as const) {
+    await page.mouse.click(x, y, { button: 'right' });
+    const menu = page.getByTestId('edt-preview-menu');
+    await expect(menu).toBeVisible();
+    for (const id of ['save-as', 'export', 'reveal'])
+      await expect(page.getByTestId(`edt-preview-menu-${id}`)).toBeEnabled();
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+  }
+  // Open in Explorer reveals the selected candidate's file, as the picker item's menu does.
+  await page.getByTestId('edt-canvas-no-image').click({ button: 'right' });
+  await page.getByTestId('edt-preview-menu-reveal').click();
+  await page.getByTestId('edt-picker-item').nth(1).click({ button: 'right' });
+  await page.getByTestId('edt-picker-menu-reveal').click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => (window as unknown as { __pfPrjMock: { reveals: string[] } }).__pfPrjMock.reveals,
+      ),
+    )
+    .toHaveLength(2);
+  const [fromCanvas, fromPicker] = await page.evaluate(
+    () => (window as unknown as { __pfPrjMock: { reveals: string[] } }).__pfPrjMock.reveals,
+  );
+  expect(fromCanvas).toBe(fromPicker);
+  expect(fromCanvas).toMatch(/\.(png|webp|jpe?g)$/i);
+});
