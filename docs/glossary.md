@@ -62,6 +62,8 @@
 | **Mask convention** | How a given model reads a mask (e.g. white = edit, black = edit, transparent = edit). The app converts from its canonical mask. |
 | **Model overlay** | The hand-maintained per-model table for facts the provider doesn't expose (e.g. mask convention). |
 | **Model capabilities** | The settings and inputs a provider model actually supports. They drive which controls are shown. |
+| **Model limit** | The largest output a width/height model takes on a side (`max`). A larger asked size is lowered to fit, with a notice (FR-GEN-08). |
+| **Model minimum** | The smallest output area a width/height model takes (`min_pixels`), where the provider has one. A smaller asked size is scaled up to fit, with a notice (FR-GEN-08, FR-GEN-10, #65). |
 | **Cost** | The provider-reported charge for a job, in provider units (Scenario: Compute Units). |
 | **Tile pyramid** | Multi-resolution 512 px tiles of an image, used for display. A rebuildable cache. |
 | **View** | The editor's current zoom and pan. |
