@@ -2,7 +2,9 @@
 //! ratio with a long side, fitted to the model's `output_size`. Pure: no I/O, no provider call.
 //!
 //! - **wh models**: pps is lowered at the model limit (notice `model_limit`), each side is then
-//!   rounded down to `step` and kept within `min`–`max`.
+//!   rounded down to `step` and kept within `min`–`max`. Under the model's `min_pixels` area,
+//!   both sides are scaled up by the same factor and rounded up to `step` (notice
+//!   `model_minimum`; a grid's pps follows the sent size).
 //! - **aspect models**: the allowed ratio nearest to the asked one (smallest |ln a − ln t|);
 //!   a grid more than 1 % off gets the notice `cells_not_square`.
 
@@ -83,7 +85,7 @@ pub fn ratio_value(s: &str) -> Option<f64> {
     (a.is_finite() && b.is_finite() && a > 0.0 && b > 0.0).then_some(a / b)
 }
 
-/// A Size block notice (`model_limit`, `cells_not_square`).
+/// A Size block notice (`model_limit`, `model_minimum`, `cells_not_square`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct GenNotice {
     pub code: &'static str,
@@ -161,12 +163,17 @@ impl GenSizeFit {
 /// FR-GEN-08/09/10: fits `size` to the model's `output_size`. `size` must be valid.
 pub fn fit(output: &OutputSize, size: &GenSize) -> CoreResult<GenSizeFit> {
     match output {
-        OutputSize::Wh { min, max, step, .. } => Ok(fit_wh(*min, *max, *step, size)),
+        OutputSize::Wh {
+            min,
+            max,
+            step,
+            min_pixels,
+        } => Ok(fit_wh(*min, *max, *step, *min_pixels, size)),
         OutputSize::Aspect { allowed } => fit_aspect(allowed, size),
     }
 }
 
-fn fit_wh(min: u32, max: u32, step: u32, size: &GenSize) -> GenSizeFit {
+fn fit_wh(min: u32, max: u32, step: u32, min_pixels: Option<u64>, size: &GenSize) -> GenSizeFit {
     let step = step.max(1);
     let max = max.max(1);
     let min = min.min(max);
@@ -189,10 +196,16 @@ fn fit_wh(min: u32, max: u32, step: u32, size: &GenSize) -> GenSizeFit {
                     message: format!("Model limit: {pps} px per square (at most {max} px a side)."),
                 });
             }
+            let (mut w, mut h) = (side(f64::from(*cols * pps)), side(f64::from(*rows * pps)));
+            if let Some((sw, sh)) = scale_to_area(w, h, size.target(), step, top, min_pixels) {
+                (w, h) = (sw, sh);
+                pps = (w / *cols).min(h / *rows).max(1);
+                notices.push(minimum_notice(w, h, min_pixels));
+            }
             GenSizeFit {
                 mode: "wh",
-                w: Some(side(f64::from(*cols * pps))),
-                h: Some(side(f64::from(*rows * pps))),
+                w: Some(w),
+                h: Some(h),
                 aspect: None,
                 pps: Some(pps),
                 notices,
@@ -206,16 +219,78 @@ fn fit_wh(min: u32, max: u32, step: u32, size: &GenSize) -> GenSizeFit {
             } else {
                 (long * r, long)
             };
+            let (mut w, mut h) = (side(w), side(h));
+            if let Some((sw, sh)) = scale_to_area(w, h, r, step, top, min_pixels) {
+                (w, h) = (sw, sh);
+                notices.push(minimum_notice(w, h, min_pixels));
+            }
             GenSizeFit {
                 mode: "wh",
-                w: Some(side(w)),
-                h: Some(side(h)),
+                w: Some(w),
+                h: Some(h),
                 aspect: None,
                 pps: None,
                 notices,
             }
         }
     }
+}
+
+/// Under `min_pixels`: both sides scaled up by the same factor (from the asked ratio `r`),
+/// each rounded up to `step` and kept within `top`; a side held at `top` leaves the other to
+/// grow. `None` when `w` × `h` is already enough (or there is no minimum).
+fn scale_to_area(
+    w: u32,
+    h: u32,
+    r: f64,
+    step: u32,
+    top: u32,
+    min_pixels: Option<u64>,
+) -> Option<(u32, u32)> {
+    let m = min_pixels?;
+    let area = |w: u32, h: u32| u64::from(w) * u64::from(h);
+    if area(w, h) >= m {
+        return None;
+    }
+    let up = |v: f64| {
+        let v = v.max(1.0).ceil() as u64;
+        let snapped = v.div_ceil(u64::from(step)) * u64::from(step);
+        snapped.min(u64::from(top)) as u32
+    };
+    let ideal_h = (m as f64 / r).sqrt();
+    let (mut w, mut h) = (up(ideal_h * r).max(w), up(ideal_h).max(h));
+    // Float rounding or a side held at `top`: grow the other side a step at a time.
+    while area(w, h) < m && (w < top || h < top) {
+        if h >= top || (w < top && area(w + step, h) <= area(w, h + step)) {
+            w = (w + step).min(top);
+        } else {
+            h = (h + step).min(top);
+        }
+    }
+    Some((w, h))
+}
+
+fn minimum_notice(w: u32, h: u32, min_pixels: Option<u64>) -> GenNotice {
+    GenNotice {
+        code: "model_minimum",
+        message: format!(
+            "Model minimum: sent {w} × {h} (at least {} px in all).",
+            group(min_pixels.unwrap_or(0))
+        ),
+    }
+}
+
+/// 3981312 → "3 981 312".
+fn group(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(' ');
+        }
+        out.push(c);
+    }
+    out
 }
 
 fn fit_aspect(allowed: &[String], size: &GenSize) -> CoreResult<GenSizeFit> {

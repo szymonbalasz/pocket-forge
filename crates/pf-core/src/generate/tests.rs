@@ -29,6 +29,16 @@ fn wh() -> OutputSize {
     }
 }
 
+/// Seedream 5.0 Lite's output size: sides 1024–6240 step 16, at least 3 981 312 px in all.
+fn seedream() -> OutputSize {
+    OutputSize::Wh {
+        min: 1024,
+        max: 6240,
+        step: 16,
+        min_pixels: Some(3_981_312),
+    }
+}
+
 fn aspect() -> OutputSize {
     OutputSize::Aspect {
         allowed: ["1:1", "3:4", "4:3", "2:3"].map(String::from).to_vec(),
@@ -112,6 +122,77 @@ fn fr_gen_10_ratio_and_long_side_on_wh_models() {
     );
     let f = fit(&wh(), &ratio("2:3", 9000)).unwrap();
     assert_eq!((f.w, f.h), (Some(1360), Some(2048)), "long side within max");
+}
+
+#[test]
+fn fr_gen_10_wh_ratio_under_the_model_minimum_scales_up() {
+    // 1:1 at 1024 → ceil(sqrt(3 981 312)) = 1996 → rounded up to the step: 2000 × 2000.
+    let f = fit(&seedream(), &ratio("1:1", 1024)).unwrap();
+    assert_eq!((f.w, f.h, f.pps), (Some(2000), Some(2000), None));
+    assert_eq!(f.notices.len(), 1);
+    assert_eq!(f.notices[0].code, "model_minimum");
+    assert!(
+        f.notices[0].message.contains("3 981 312"),
+        "{:?}",
+        f.notices
+    );
+    // A wide ratio stays (about) the same shape, above the minimum and within max.
+    let f = fit(&seedream(), &ratio("21:9", 1024)).unwrap();
+    let (w, h) = (f.w.unwrap(), f.h.unwrap());
+    assert!(u64::from(w) * u64::from(h) >= 3_981_312, "{w} × {h}");
+    assert!(w <= 6240 && h <= 6240 && w % 16 == 0 && h % 16 == 0);
+    assert!(
+        (f64::from(w) / f64::from(h) - 21.0 / 9.0).abs() < 0.02,
+        "{w} × {h}"
+    );
+    assert_eq!(f.notices[0].code, "model_minimum");
+    // Already large enough: unchanged, no notice.
+    let f = fit(&seedream(), &ratio("16:9", 4096)).unwrap();
+    assert_eq!((f.w, f.h), (Some(4096), Some(2304)));
+    assert!(f.notices.is_empty());
+    // Every offered ratio at a few long sides: area ≥ min, step multiples, within max; the
+    // notice only when scaled.
+    for a in super::size::WH_RATIOS
+        .iter()
+        .chain(&["21:9", "1:4", "200:1"])
+    {
+        for long in [1, 1024, 1500, 2048, 2560, 6240, 16_384] {
+            let f = fit(&seedream(), &ratio(a, long)).unwrap();
+            let (w, h) = (f.w.unwrap(), f.h.unwrap());
+            assert!(
+                u64::from(w) * u64::from(h) >= 3_981_312,
+                "{a} {long}: {w} × {h}"
+            );
+            assert!((1024..=6240).contains(&w) && (1024..=6240).contains(&h));
+            assert!(w % 16 == 0 && h % 16 == 0, "{a} {long}: {w} × {h}");
+            let scaled = f.notices.iter().any(|n| n.code == "model_minimum");
+            let unscaled = fit(
+                &OutputSize::Wh {
+                    min: 1024,
+                    max: 6240,
+                    step: 16,
+                    min_pixels: None,
+                },
+                &ratio(a, long),
+            )
+            .unwrap();
+            assert_eq!(scaled, (unscaled.w, unscaled.h) != (f.w, f.h), "{a} {long}");
+        }
+    }
+}
+
+#[test]
+fn fr_gen_08_wh_grid_under_the_model_minimum_scales_up() {
+    // 30 × 40 at 70 = 2100 × 2800, snapped to 2096 × 2800 as today (5 868 800 px): above the
+    // minimum, no notice.
+    let f = fit(&seedream(), &grid(30, 40, 70)).unwrap();
+    assert_eq!((f.w, f.h, f.pps), (Some(2096), Some(2800), Some(70)));
+    assert!(f.notices.is_empty());
+    // 10 × 10 at 70 = 700 → 1024 a side (side min) → 2000 × 2000; pps follows the sent size.
+    let f = fit(&seedream(), &grid(10, 10, 70)).unwrap();
+    assert_eq!((f.w, f.h, f.pps), (Some(2000), Some(2000), Some(200)));
+    assert_eq!(f.notices.len(), 1);
+    assert_eq!(f.notices[0].code, "model_minimum");
 }
 
 #[test]
