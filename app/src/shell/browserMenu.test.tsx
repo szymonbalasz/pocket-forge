@@ -27,18 +27,22 @@ test('#63 owner 2026-11-13: a right-click on a plain area shows no browser menu'
   expect(browserMenuShows(document.body)).toBe(false);
 });
 
-test('#63 owner 2026-11-13: inputs, textareas and content-editable keep the native menu', () => {
+test('#63 owner 2026-11-13: text inputs, textareas and content-editable keep the native menu; a checkbox does not', () => {
   render(
     <div>
       <input data-testid="input" />
+      <input data-testid="search" type="search" />
+      <input data-testid="checkbox" type="checkbox" />
       <textarea data-testid="textarea" />
       <div data-testid="editable" contentEditable suppressContentEditableWarning>
         <span data-testid="editable-child">x</span>
       </div>
     </div>,
   );
-  for (const id of ['input', 'textarea'])
+  for (const id of ['input', 'search', 'textarea'])
     expect(browserMenuShows(screen.getByTestId(id))).toBe(true);
+  // Integrator ruling: only text-entry fields; a checkbox has nothing to copy or paste.
+  expect(browserMenuShows(screen.getByTestId('checkbox'))).toBe(false);
   expect(browserMenuShows(screen.getByTestId('editable-child'))).toBe(true);
 });
 
