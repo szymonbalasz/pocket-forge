@@ -25,6 +25,7 @@ fn wh() -> OutputSize {
         min: 64,
         max: 2048,
         step: 16,
+        min_pixels: None,
     }
 }
 

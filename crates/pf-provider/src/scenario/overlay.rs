@@ -57,6 +57,10 @@ pub struct OverlayRow {
     /// `generate`: the reference slot that takes the structural sketch (FR-GEN-15). `None` on
     /// every real model until a paid check confirms one (OQ-GEN-05).
     pub structure_slot: Option<&'static str>,
+    /// `generate`, `wh` only: the smallest output area (width × height, px) the model takes,
+    /// where its schema doesn't publish one (Seedream's presets start at 2K). `None` = no
+    /// minimum beyond each side's `min`.
+    pub min_pixels: Option<u64>,
     pub doc_url: &'static str,
     pub checked: &'static str,
 }
@@ -148,6 +152,7 @@ pub(crate) const fn gpt(model_id: &'static str) -> OverlayRow {
         ignored: GPT_IGNORED,
         drop_values: &[],
         structure_slot: None,
+        min_pixels: None,
         doc_url: OPENAI_DOC,
         checked: CHECKED,
     }
@@ -177,6 +182,7 @@ const fn ideogram(model_id: &'static str, convention: MaskConvention, max: u32) 
         ignored: &[],
         drop_values: &[],
         structure_slot: None,
+        min_pixels: None,
         doc_url: IDEOGRAM_DOC,
         checked: CHECKED,
     }
@@ -242,6 +248,7 @@ const fn generate(edit: OverlayRow) -> OverlayRow {
         size_inputs: None,
         aspect_input: None,
         structure_slot: None,
+        min_pixels: None,
         ..edit
     }
 }
@@ -274,6 +281,7 @@ const fn generate_only(
         ignored: &[],
         drop_values: &[],
         structure_slot: None,
+        min_pixels: None,
         doc_url: THIRD_PARTY_DOC,
         checked: CHECKED_11,
     }
@@ -446,8 +454,11 @@ pub static SCENARIO_ROWS: [OverlayRow; 24] = [
         ..aspect_only("model_google-gemini-nano-banana-2-1", COUNT_ROLES)
     },
     // Seedream: exact `width` × `height`; its sequential multi-image mode is not offered.
+    // Scenario fails a job under 2K that the schema allows (owner, 2026-11-13): the minimum
+    // area is the smallest 2K preset, 2304 × 1728, until a paid call confirms the real one.
     OverlayRow {
         size_inputs: Some(("width", "height")),
+        min_pixels: Some(3_981_312),
         ignored: &["sequentialImageGeneration", "maxImages"],
         input_px: InputPx {
             min: 1024,
@@ -524,6 +535,7 @@ const fn fake(model_id: &'static str, convention: MaskConvention, soft: SoftRule
         ignored: &[],
         drop_values: &[],
         structure_slot: None,
+        min_pixels: None,
         doc_url: "docs/specs/provider.md#appendix-d-fake-cases",
         checked: CHECKED,
     }

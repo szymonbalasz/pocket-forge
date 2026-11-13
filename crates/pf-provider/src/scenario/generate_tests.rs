@@ -157,6 +157,7 @@ fn fr_gen_06_generate_capabilities_per_recorded_row() {
         min: 16,
         max: 3840,
         step: 16,
+        min_pixels: None,
     });
     let table: [(&str, Option<u32>, Option<bool>, Slots); 17] = [
         // model, count max, transparent offered (None = no background control), slots
@@ -295,14 +296,22 @@ fn fr_gen_06_generate_capabilities_per_recorded_row() {
         assert_eq!(r.len(), n, "{model}: {r:?}");
         assert!(r.iter().all(|x| is_ratio(x)), "{model}");
     }
+    // Seedream's minimum area is set by its overlay row (the schema publishes only sides).
     assert_eq!(
         generate_caps(SEEDREAM).output_size,
         Some(OutputSize::Wh {
             min: 1024,
             max: 6240,
-            step: 16
+            step: 16,
+            min_pixels: Some(3_981_312),
         })
     );
+    // Every other wh model has no minimum area.
+    for model in GENERATE_IDS.into_iter().filter(|m| *m != SEEDREAM) {
+        if let Some(OutputSize::Wh { min_pixels, .. }) = generate_caps(model).output_size {
+            assert_eq!(min_pixels, None, "{model}");
+        }
+    }
 }
 
 /// Named sizes (integrator ruling 2026-11-11): Krea 3, Ideogram V4 (and Tiling) and Recraft
@@ -554,6 +563,9 @@ fn fr_gen_08_output_backstop_with_zero_network_calls() {
         ),
         (V3B, Some(OutputRequest::Wh { w: 1024, h: 1024 })),
         (V3B, None),
+        // Each side within 1024–6240, but under Seedream's minimum area (3 981 312 px).
+        (SEEDREAM, Some(OutputRequest::Wh { w: 1024, h: 1024 })),
+        (SEEDREAM, Some(OutputRequest::Wh { w: 2304, h: 1712 })),
     ];
     for (model, output) in cases {
         // Only the capabilities call is recorded; any other request would panic the replay.

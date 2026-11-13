@@ -161,7 +161,7 @@ impl GenSizeFit {
 /// FR-GEN-08/09/10: fits `size` to the model's `output_size`. `size` must be valid.
 pub fn fit(output: &OutputSize, size: &GenSize) -> CoreResult<GenSizeFit> {
     match output {
-        OutputSize::Wh { min, max, step } => Ok(fit_wh(*min, *max, *step, size)),
+        OutputSize::Wh { min, max, step, .. } => Ok(fit_wh(*min, *max, *step, size)),
         OutputSize::Aspect { allowed } => fit_aspect(allowed, size),
     }
 }

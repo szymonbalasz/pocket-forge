@@ -207,8 +207,15 @@ pub struct Capabilities {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum OutputSize {
-    /// Each side within `min`–`max`, a multiple of `step`.
-    Wh { min: u32, max: u32, step: u32 },
+    /// Each side within `min`–`max`, a multiple of `step`; with `min_pixels`, width × height
+    /// is at least that many px (a minimum area the model's schema doesn't publish; Seedream).
+    Wh {
+        min: u32,
+        max: u32,
+        step: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min_pixels: Option<u64>,
+    },
     /// One of these `w:h` ratios (non-ratio values such as `auto` are left out).
     Aspect { allowed: Vec<String> },
 }
@@ -399,6 +406,36 @@ pub enum Balance {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fr_gen_08_wh_min_pixels_is_add_only() {
+        // Capabilities serialised before `min_pixels` existed still load (no minimum).
+        let old: OutputSize =
+            serde_json::from_str(r#"{"mode":"wh","min":1024,"max":6240,"step":16}"#).unwrap();
+        assert_eq!(
+            old,
+            OutputSize::Wh {
+                min: 1024,
+                max: 6240,
+                step: 16,
+                min_pixels: None
+            }
+        );
+        // No minimum → the field is left out, so older readers see the same JSON.
+        assert_eq!(
+            serde_json::to_string(&old).unwrap(),
+            r#"{"mode":"wh","min":1024,"max":6240,"step":16}"#
+        );
+        let seedream = OutputSize::Wh {
+            min: 1024,
+            max: 6240,
+            step: 16,
+            min_pixels: Some(3_981_312),
+        };
+        let text = serde_json::to_string(&seedream).unwrap();
+        assert!(text.contains(r#""min_pixels":3981312"#), "{text}");
+        assert_eq!(serde_json::from_str::<OutputSize>(&text).unwrap(), seedream);
+    }
 
     #[test]
     fn cost_amount_serialises_as_number_or_unknown() {

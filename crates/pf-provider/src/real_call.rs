@@ -99,12 +99,22 @@ pub fn test_request(caps: &Capabilities) -> Result<JobRequest, String> {
 }
 
 /// The output a `generate` check asks for: 1024 × 1024 within the model's limits (snapped to
-/// its step), or ratio `1:1` if allowed, else the first allowed ratio.
+/// its step; raised to the smallest square of at least `min_pixels`), or ratio `1:1` if
+/// allowed, else the first allowed ratio.
 pub fn test_output(caps: &Capabilities) -> Option<OutputRequest> {
     match caps.output_size.as_ref()? {
-        OutputSize::Wh { min, max, step } => {
+        OutputSize::Wh {
+            min,
+            max,
+            step,
+            min_pixels,
+        } => {
             let step = (*step).max(1);
-            let side = (1024u32.clamp(*min, (*max).max(*min)) / step).max(1) * step;
+            let top = ((*max).max(*min) / step).max(1) * step;
+            let mut side = (1024u32.clamp(*min, (*max).max(*min)) / step).max(1) * step;
+            while min_pixels.is_some_and(|m| u64::from(side) * u64::from(side) < m) && side < top {
+                side = (side + step).min(top);
+            }
             Some(OutputRequest::Wh { w: side, h: side })
         }
         OutputSize::Aspect { allowed } => {
@@ -551,6 +561,7 @@ mod tests {
             min: 16,
             max: 512,
             step: 16,
+            min_pixels: None,
         };
         let caps = crate::Capabilities {
             output_size: Some(wide),
@@ -560,6 +571,20 @@ mod tests {
             test_output(&caps),
             Some(OutputRequest::Wh { w: 512, h: 512 }),
             "clamped to the model's max"
+        );
+        // Seedream's minimum area (3 981 312 px): the smallest step-16 square above it.
+        let seedream = crate::Capabilities {
+            output_size: Some(OutputSize::Wh {
+                min: 1024,
+                max: 6240,
+                step: 16,
+                min_pixels: Some(3_981_312),
+            }),
+            ..caps
+        };
+        assert_eq!(
+            test_output(&seedream),
+            Some(OutputRequest::Wh { w: 2000, h: 2000 })
         );
     }
 
