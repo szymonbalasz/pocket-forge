@@ -6,6 +6,7 @@ import { Tooltip } from 'radix-ui';
 
 import { api, type AppInfo } from '../api';
 import { installAppClose } from './appClose';
+import { installBrowserMenuBlock } from './browserMenu';
 import { features } from './features';
 import { Layout } from './Layout';
 
@@ -16,6 +17,8 @@ export function App() {
   }, []);
   // R101: the window X closes the project through its guards before the app exits.
   useEffect(() => installAppClose(), []);
+  // No WebView2 browser menu: right-click only opens our menus, and the native one in text fields.
+  useEffect(() => installBrowserMenuBlock(), []);
 
   return (
     <Tooltip.Provider delayDuration={400}>
