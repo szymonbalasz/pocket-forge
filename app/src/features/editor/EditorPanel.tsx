@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 
 import { projectHasImage } from '../../shared/generateTabs';
+import { FileMenu } from '../export';
 import { useProjectState } from '../../store/project';
 import { bindActions } from './actions';
 import { EditorCanvas } from './EditorCanvas';
@@ -60,20 +61,36 @@ function useSessionUndo(projectId: string | null): void {
 }
 
 /** FR-GEN-03: the empty-project canvas state. A selected generate candidate shows here alone
- *  (FR-GEN-26: no working image to compare with). */
+ *  (FR-GEN-26: no working image to compare with). #63: while it shows, right-click gives that
+ *  candidate's file menu (`edt-preview-menu`, as `edt-picker-menu`); the plain "No image yet"
+ *  text has none. */
 function NoImage() {
   const compare = useEditor((s) => s.compare);
+  // The compare source has no file: take it from the picker's selection, as the picker does.
+  const file = useEditor((s) => {
+    const c = s.picker?.candidates.find((x) => x.id === s.picker?.selectedId);
+    return c?.status === 'ready' ? (c.file ?? null) : null;
+  });
+  const canvas = (
+    <div className="editor-canvas editor-no-image" data-testid="edt-canvas-no-image">
+      {compare ? (
+        <PreviewAlone url={compare.url} />
+      ) : (
+        <p className="muted" role="status">
+          No image yet. Generate one in New image.
+        </p>
+      )}
+    </div>
+  );
   return (
     <div className="editor">
-      <div className="editor-canvas editor-no-image" data-testid="edt-canvas-no-image">
-        {compare ? (
-          <PreviewAlone url={compare.url} />
-        ) : (
-          <p className="muted" role="status">
-            No image yet. Generate one in New image.
-          </p>
-        )}
-      </div>
+      {compare && file ? (
+        <FileMenu testId="edt-preview-menu" path={file} image>
+          {canvas}
+        </FileMenu>
+      ) : (
+        canvas
+      )}
     </div>
   );
 }
