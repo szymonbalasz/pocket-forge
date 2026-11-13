@@ -11,8 +11,8 @@ use crate::{Capabilities, ModelSummary, Operation};
 
 /// 2: `slots[]` carry `min/max/cost_affecting` (FR-PRV-31). 3: capabilities per operation
 /// (keys from [`key`]) and `models[].operations` lists every offered operation (GEN). An older
-/// file is dropped and refetched.
-const CACHE_VERSION: u32 = 3;
+/// file is dropped and refetched. 4: a `wh` output size may carry `min_pixels` (Seedream).
+const CACHE_VERSION: u32 = 4;
 
 /// The `capabilities` key of a model and operation: the model id for `edit_masked`,
 /// `<model>@<operation>` otherwise.

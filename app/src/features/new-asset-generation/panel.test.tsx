@@ -186,6 +186,28 @@ test('FR-GEN-07 FR-GEN-08 Maps: 30 × 40 at 70 by default; the model limit lower
   await waitFor(() => expect(gen.get().size).toMatchObject({ cols: 200 }));
 });
 
+test('FR-GEN-08 FR-GEN-10 under the model minimum area the size is scaled up, with "model minimum"', async () => {
+  const minWh = {
+    ...GEN_WH,
+    output_size: { mode: 'wh' as const, min: 64, max: 2048, step: 16, min_pixels: 2_000_000 },
+  };
+  await setup({ gen: { capabilities: { 'fake-gen-wh': minWh, 'fake-gen-aspect': GEN_ASPECT } } });
+  // 1520 × 2032 (model limit) is above the minimum: no "model minimum".
+  let notices = screen.getByTestId('gen-size-notices');
+  expect(within(notices).queryByText(/Model minimum/)).toBeNull();
+  // 30 × 40 at 32 = 960 × 1280 is under 2 000 000 px: both sides scale up to the step.
+  setInt('gen-size-pps', 32);
+  await waitFor(() =>
+    expect(screen.getByTestId('gen-size-result').textContent).toBe(
+      'sent 1232 × 1648 · 41.1 × 41.2 px per square',
+    ),
+  );
+  notices = screen.getByTestId('gen-size-notices');
+  const n = within(notices).getByText(/Model minimum/);
+  expect(n.dataset.code).toBe('model_minimum');
+  expect(n.textContent).toContain('2 000 000 px');
+});
+
 test('FR-GEN-09 aspect models: the nearest ratio, with "cells won’t be square" when off by > 1 %', async () => {
   await setup();
   await pickModel('Fake gen (aspect)');

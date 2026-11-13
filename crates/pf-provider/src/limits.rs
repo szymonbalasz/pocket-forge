@@ -34,13 +34,23 @@ pub fn check(caps: &Capabilities, request: &JobRequest) -> ProviderResult<(u32, 
 }
 
 /// The `generate` backstop (GEN OQ-GEN-01): the output asked for matches the model's
-/// `output_size`: `wh` within `min`–`max` and a multiple of `step` on both sides, `aspect` one
-/// of the allowed ratios. Anything else (or none) → `invalid_request(output)`.
+/// `output_size`: `wh` within `min`–`max` and a multiple of `step` on both sides and at least
+/// `min_pixels` in area, `aspect` one of the allowed ratios. Anything else (or none) →
+/// `invalid_request(output)`.
 pub fn check_output(caps: &Capabilities, request: &JobRequest) -> ProviderResult<()> {
     let ok = match (&caps.output_size, &request.output) {
-        (Some(OutputSize::Wh { min, max, step }), Some(OutputRequest::Wh { w, h })) => {
+        (
+            Some(OutputSize::Wh {
+                min,
+                max,
+                step,
+                min_pixels,
+            }),
+            Some(OutputRequest::Wh { w, h }),
+        ) => {
             let fits = |s: u32| s >= *min && s <= *max && s.is_multiple_of((*step).max(1));
-            fits(*w) && fits(*h)
+            let area = u64::from(*w) * u64::from(*h);
+            fits(*w) && fits(*h) && min_pixels.is_none_or(|m| area >= m)
         }
         (Some(OutputSize::Aspect { allowed }), Some(OutputRequest::Aspect { aspect })) => {
             allowed.contains(aspect)

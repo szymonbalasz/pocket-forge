@@ -342,9 +342,11 @@ export interface Capabilities {
   structure?: { slot: string } | null;
 }
 
-/** A generate model's output size (FR-GEN-08/09): exact width × height, or a ratio list. */
+/** A generate model's output size (FR-GEN-08/09): exact width × height, or a ratio list.
+ *  `min_pixels`: the smallest width × height the model takes (Seedream); absent = none. */
 export type OutputSize =
-  { mode: 'wh'; min: number; max: number; step: number } | { mode: 'aspect'; allowed: string[] };
+  | { mode: 'wh'; min: number; max: number; step: number; min_pixels?: number | null }
+  | { mode: 'aspect'; allowed: string[] };
 
 /** A reference image input of a model (FR-PRV-31, R49). `min` is 1 for a required input;
  *  `array` = the input takes a list (`file_array`) rather than one file. */
@@ -1280,8 +1282,9 @@ export type GenSize =
   | { mode: 'grid'; cols: number; rows: number; pps: number }
   | { mode: 'ratio'; aspect: string; long_side: number };
 
-/** `gen_size_fit` notice codes: `model_limit` (pps lowered, FR-GEN-08), `cells_not_square`
- *  (nearest ratio off by > 1 %, FR-GEN-09). */
+/** `gen_size_fit` notice codes: `model_limit` (pps lowered, FR-GEN-08), `model_minimum` (scaled
+ *  up to the model's minimum area, FR-GEN-08/10), `cells_not_square` (nearest ratio off by > 1 %,
+ *  FR-GEN-09). */
 export interface GenNotice {
   code: string;
   message: string;

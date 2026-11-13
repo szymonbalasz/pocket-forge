@@ -93,7 +93,8 @@ fn fr_gen_06_fake_generate_capabilities() {
         Some(OutputSize::Wh {
             min: 64,
             max: 2048,
-            step: 16
+            step: 16,
+            min_pixels: None
         })
     );
     assert_eq!(

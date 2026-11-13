@@ -54,7 +54,13 @@ export function installGenMock(seed: GenMockSeed): void {
     return a! / b!;
   };
   const sizeFit = (c: Capabilities, size: Size) => {
-    const o = c.output_size ?? { mode: 'wh' as const, min: 16, max: 4096, step: 16 };
+    const o = c.output_size ?? {
+      mode: 'wh' as const,
+      min: 16,
+      max: 4096,
+      step: 16,
+      min_pixels: null,
+    };
     const notices: { code: string; message: string }[] = [];
     if (o.mode === 'aspect') {
       const target =
@@ -76,6 +82,25 @@ export function installGenMock(seed: GenMockSeed): void {
       return { mode: 'aspect', aspect: best, pps: size.mode === 'grid' ? size.pps : null, notices };
     }
     const fit = (v: number) => Math.max(o.min, Math.floor(v / o.step) * o.step);
+    // Under `min_pixels`: both sides scaled up from the ratio, rounded up to the step, within max.
+    const minArea = (w: number, h: number, r: number): [number, number, boolean] => {
+      const m = o.min_pixels;
+      if (!m || w * h >= m) return [w, h, false];
+      const top = Math.max(o.min, Math.floor(o.max / o.step) * o.step);
+      const up = (v: number) => Math.min(top, Math.ceil(Math.ceil(v) / o.step) * o.step);
+      const ih = Math.sqrt(m / r);
+      let [sw, sh] = [Math.max(w, up(ih * r)), Math.max(h, up(ih))];
+      while (sw * sh < m && (sw < top || sh < top)) {
+        if (sh >= top || (sw < top && (sw + o.step) * sh <= sw * (sh + o.step)))
+          sw = Math.min(top, sw + o.step);
+        else sh = Math.min(top, sh + o.step);
+      }
+      notices.push({
+        code: 'model_minimum',
+        message: `Model minimum: sent ${sw} × ${sh} (at least ${String(m).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} px in all).`,
+      });
+      return [sw, sh, true];
+    };
     if (size.mode === 'grid') {
       let pps = size.pps;
       const longest = Math.max(size.cols, size.rows);
@@ -86,12 +111,19 @@ export function installGenMock(seed: GenMockSeed): void {
           message: `Model limit: ${pps} px per square (at most ${o.max} px a side).`,
         });
       }
-      return { mode: 'wh', w: fit(size.cols * pps), h: fit(size.rows * pps), pps, notices };
+      const [w, h, scaled] = minArea(
+        fit(size.cols * pps),
+        fit(size.rows * pps),
+        size.cols / size.rows,
+      );
+      if (scaled) pps = Math.max(1, Math.min(Math.floor(w / size.cols), Math.floor(h / size.rows)));
+      return { mode: 'wh', w, h, pps, notices };
     }
     const r = isRatio(size.aspect) ? ratioOf(size.aspect) : 1;
     const long = Math.min(o.max, size.long_side);
     const [ww, hh] = r >= 1 ? [long, long / r] : [long * r, long];
-    return { mode: 'wh', w: fit(ww), h: fit(hh), pps: null, notices };
+    const [w, h] = minArea(fit(ww), fit(hh), r);
+    return { mode: 'wh', w, h, pps: null, notices };
   };
   const sizeOf = (c: Capabilities, size: Size) => {
     const f = sizeFit(c, size) as Rec & { w?: number; h?: number; aspect?: string };

@@ -184,6 +184,7 @@ fn size_fact(caps: Option<&Capabilities>, s: &GenSize) -> String {
     notes.extend(fit.notices.iter().map(|n| {
         match n.code {
             "model_limit" => "model limit",
+            "model_minimum" => "model minimum",
             "cells_not_square" => "cells won't be square",
             other => other,
         }

@@ -545,7 +545,12 @@ fn output_size_of(
             warnings.push("the output size limits leave no valid size".into());
             return None;
         }
-        return Some(OutputSize::Wh { min, max, step });
+        return Some(OutputSize::Wh {
+            min,
+            max,
+            step,
+            min_pixels: row.min_pixels,
+        });
     }
     if let Some(a) = row.aspect_input {
         let values: Vec<&str> = input(a)
